@@ -3,11 +3,14 @@ package orchestrator
 import (
 	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"ai-playbook/driver"
+	"ai-playbook/mux"
 )
 
 // newTestDriver spawns a controlled-rc zsh (a minimal .zshrc — no p10k/mise), the
@@ -116,10 +119,157 @@ func TestCopyPlayRecorded(t *testing.T) {
 
 func TestDeferredKindsNotImplemented(t *testing.T) {
 	o := New(newTestDriver(t), &recMux{})
-	for _, k := range []Kind{KindViewDiff, KindApplyDiff, KindUndoDiff, KindRegenerate, KindFollowup, KindWrapup} {
+	// apply-diff / undo-diff / view-diff are implemented as of stage 4c-i; only
+	// regenerate / followup / wrapup remain deferred.
+	for _, k := range []Kind{KindRegenerate, KindFollowup, KindWrapup} {
 		if _, err := o.Do(Action{Kind: k}); !errors.Is(err, ErrNotImplemented) {
 			t.Errorf("%s → err=%v (want ErrNotImplemented)", k, err)
 		}
+	}
+}
+
+// newTestDriverIn spawns a controlled-rc zsh whose session cwd is dir, so a
+// git-apply run executes inside the temp repo.
+func newTestDriverIn(t *testing.T, dir string) *driver.Driver {
+	t.Helper()
+	zdot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	d, err := driver.Open(driver.Options{
+		Env: append(os.Environ(), "ZDOTDIR="+zdot),
+		Cwd: dir,
+	})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+	return d
+}
+
+// sh runs a shell command in dir, failing the test on a non-zero exit.
+func sh(t *testing.T, dir, command string) {
+	t.Helper()
+	cmd := exec.Command("sh", "-c", command)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("sh %q: %v\n%s", command, err, out)
+	}
+}
+
+// recFloat records SpawnFloat calls (the view-diff float mux double).
+type recFloat struct {
+	spawned []mux.SpawnOptions
+	err     error
+}
+
+func (f *recFloat) DumpScreen(string) (string, error) { return "", nil }
+func (f *recFloat) SpawnFloat(o mux.SpawnOptions) error {
+	f.spawned = append(f.spawned, o)
+	return f.err
+}
+func (f *recFloat) SpawnPane(mux.SpawnOptions) error { return nil }
+
+// apply-diff changes the file (Exit 0), undo-diff reverts it; the driver runs git
+// apply inside the temp repo (Cwd).
+func TestApplyUndoDiff(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo := t.TempDir()
+	sh(t, repo, "git init -q && git config user.email t@t && git config user.name t")
+	target := filepath.Join(repo, "hello.txt")
+	if err := os.WriteFile(target, []byte("one\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	sh(t, repo, "git add hello.txt && git commit -q -m init")
+
+	// A real unified diff that changes "one" → "two".
+	patch := "" +
+		"diff --git a/hello.txt b/hello.txt\n" +
+		"--- a/hello.txt\n" +
+		"+++ b/hello.txt\n" +
+		"@@ -1 +1 @@\n" +
+		"-one\n" +
+		"+two\n"
+
+	o := New(newTestDriverIn(t, repo), &recMux{})
+
+	r, err := o.Do(Action{Kind: KindApplyDiff, ID: "fix", Payload: patch})
+	if err != nil {
+		t.Fatalf("apply err=%v", err)
+	}
+	if r.Exit != 0 {
+		t.Fatalf("apply Exit=%d (want 0) stderr=%q", r.Exit, r.Err)
+	}
+	if b, _ := os.ReadFile(target); string(b) != "two\n" {
+		t.Fatalf("apply did not change file → %q", b)
+	}
+
+	r, err = o.Do(Action{Kind: KindUndoDiff, ID: "fix", Payload: patch})
+	if err != nil {
+		t.Fatalf("undo err=%v", err)
+	}
+	if r.Exit != 0 {
+		t.Fatalf("undo Exit=%d (want 0) stderr=%q", r.Exit, r.Err)
+	}
+	if b, _ := os.ReadFile(target); string(b) != "one\n" {
+		t.Fatalf("undo did not revert file → %q", b)
+	}
+}
+
+// A malformed patch → non-zero Exit (failure feedback), no error.
+func TestApplyDiffMalformed(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	repo := t.TempDir()
+	sh(t, repo, "git init -q")
+	o := New(newTestDriverIn(t, repo), &recMux{})
+	r, err := o.Do(Action{Kind: KindApplyDiff, ID: "x", Payload: "this is not a patch\n"})
+	if err != nil {
+		t.Fatalf("malformed apply returned error (want non-zero Exit): %v", err)
+	}
+	if r.Exit == 0 {
+		t.Fatalf("malformed patch Exit=0 (want non-zero); stderr=%q", r.Err)
+	}
+}
+
+// view-diff opens a float with the patch + a viewer command, anchored to the
+// session cwd. With no Float mux it is a graceful no-op.
+func TestViewDiff(t *testing.T) {
+	repo := t.TempDir()
+	d := newTestDriverIn(t, repo)
+
+	// No Float wired → no-op success.
+	o := New(d, &recMux{})
+	if _, err := o.Do(Action{Kind: KindViewDiff, ID: "fix", Payload: "diff --git a/f b/f\n"}); err != nil {
+		t.Fatalf("view-diff with nil Float should be no-op, got %v", err)
+	}
+
+	// With a Float mux → SpawnFloat called with a diff:<id> name, repo cwd, and a
+	// viewer command whose last arg is the temp patch file.
+	rf := &recFloat{}
+	o = New(d, &recMux{}).WithFloat(rf)
+	if _, err := o.Do(Action{Kind: KindViewDiff, ID: "fix", Payload: "diff --git a/f b/f\n"}); err != nil {
+		t.Fatalf("view-diff err=%v", err)
+	}
+	if len(rf.spawned) != 1 {
+		t.Fatalf("SpawnFloat calls = %d, want 1", len(rf.spawned))
+	}
+	opt := rf.spawned[0]
+	if opt.Name != "diff:fix" {
+		t.Errorf("float name = %q, want diff:fix", opt.Name)
+	}
+	if opt.Cwd != repo {
+		t.Errorf("float cwd = %q, want %q", opt.Cwd, repo)
+	}
+	if len(opt.Cmd) == 0 {
+		t.Fatal("float Cmd empty")
+	}
+	last := opt.Cmd[len(opt.Cmd)-1]
+	if !strings.HasSuffix(last, ".patch") {
+		t.Errorf("viewer's last arg = %q, want a .patch temp file", last)
 	}
 }
 

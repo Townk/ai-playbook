@@ -6,6 +6,7 @@ import (
 	"os/exec"
 
 	"ai-playbook/capture"
+	"ai-playbook/kb"
 )
 
 // Agent runs the capable agent with the given system prompt and user message and
@@ -14,16 +15,17 @@ import (
 // substitute a deterministic fake (no live claude).
 type Agent func(systemPrompt, userMessage string) (io.ReadCloser, error)
 
-// KB is the knowledge base folded into the system prompt. Empty for now — see the
-// KnowledgeBase type doc; the KB store/lookup port lands with a later stage.
-var KB KnowledgeBase = ""
-
 // Author is the producer's LLM half: it assembles the standing system prompt and
 // the per-request user message from req, then runs the agent and returns its
 // stdout stream. The agent is injected (ClaudeAgent in production; a fake in
 // tests) so this function is deterministic to unit-test.
+//
+// The per-project knowledge base is loaded from disk (kb.Load) keyed on
+// req.ProjectRoot and folded into the system prompt's "## What we already know
+// about this project" section, exactly as assist::system_prompt did with the
+// $kb_path file. (The KB WRITE/remember path is deferred — see package kb.)
 func Author(req capture.Request, agent Agent) (io.ReadCloser, error) {
-	sys := SystemPrompt(req, KB)
+	sys := SystemPrompt(req, KnowledgeBase(kb.Load(req.ProjectRoot)))
 	user := BuildUserMessage(req)
 	return agent(sys, user)
 }

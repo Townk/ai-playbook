@@ -12,6 +12,7 @@ import (
 	"errors"
 	"os"
 	"os/exec"
+	"strconv"
 )
 
 // ErrNotImplemented marks a Mux method modeled but deferred to a later stage.
@@ -36,7 +37,7 @@ type Mux interface {
 	// DumpScreen returns the current viewport text of pane (a mux-specific pane
 	// id, e.g. "terminal_3"; empty means the focused pane).
 	DumpScreen(pane string) (string, error)
-	// SpawnFloat opens a floating pane running opts.Cmd. Deferred.
+	// SpawnFloat opens a floating pane running opts.Cmd (e.g. the diff viewer).
 	SpawnFloat(opts SpawnOptions) error
 	// SpawnPane opens a tiled pane running opts.Cmd. Deferred.
 	SpawnPane(opts SpawnOptions) error
@@ -101,8 +102,57 @@ func (z *Zellij) DumpScreen(pane string) (string, error) {
 	return out.String(), nil
 }
 
-// SpawnFloat is deferred to a later migration stage.
-func (z *Zellij) SpawnFloat(opts SpawnOptions) error { return ErrNotImplemented }
+// floatArgs builds the `zellij action new-pane --floating …` argument vector for
+// opts, ported from the shell broker's broker::open_diff invocation:
+//
+//	zellij action new-pane --floating --width 90% --height 90% --close-on-exit \
+//	  --cwd <root> --name <name> -- <cmd...>
+//
+// Width/Height default to 90% (the broker's literal) when opts leaves them 0;
+// --cwd and --name are emitted only when set. opts.Cmd follows the `--` separator
+// so its own flags are never parsed by zellij. Exposed (lower-case, package-local)
+// so a test can assert the constructed command without a real zellij.
+func (z *Zellij) floatArgs(opts SpawnOptions) []string {
+	width := "90%"
+	if opts.Width > 0 {
+		width = itoaPercent(opts.Width)
+	}
+	height := "90%"
+	if opts.Height > 0 {
+		height = itoaPercent(opts.Height)
+	}
+	args := []string{"action", "new-pane", "--floating",
+		"--width", width, "--height", height, "--close-on-exit"}
+	if opts.Cwd != "" {
+		args = append(args, "--cwd", opts.Cwd)
+	}
+	if opts.Name != "" {
+		args = append(args, "--name", opts.Name)
+	}
+	args = append(args, "--")
+	args = append(args, opts.Cmd...)
+	return args
+}
+
+// SpawnFloat opens a floating zellij pane running opts.Cmd, mirroring the shell
+// broker's broker::open_diff. Per the broker's best-effort pattern, the spawned
+// `zellij action` process's own stdout/stderr are redirected to /dev/null so a
+// chatty/failed spawn can never corrupt the docked UI pane (the broker used
+// `2>/dev/null || true`). A spawn error is returned but is non-fatal to callers.
+func (z *Zellij) SpawnFloat(opts SpawnOptions) error {
+	if len(opts.Cmd) == 0 {
+		return errors.New("mux: SpawnFloat needs a command")
+	}
+	cmd := exec.Command(z.Bin, z.floatArgs(opts)...)
+	// Detach the float-spawn's stdio so it cannot write into our pane.
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
+	return cmd.Run()
+}
 
 // SpawnPane is deferred to a later migration stage.
 func (z *Zellij) SpawnPane(opts SpawnOptions) error { return ErrNotImplemented }
+
+// itoaPercent renders n as a "<n>%" zellij size string.
+func itoaPercent(n int) string { return strconv.Itoa(n) + "%" }

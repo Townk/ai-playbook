@@ -12,6 +12,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"ai-playbook/driver"
+	"ai-playbook/mux"
 	"ai-playbook/orchestrator"
 )
 
@@ -88,7 +89,7 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 		fmt.Fprintf(os.Stderr, "ai-playbook: driver.Open failed (%v); falling back to render-only\n", derr)
 	} else {
 		defer d.Close()
-		orch = orchestrator.New(d, &cliMux{})
+		orch = orchestrator.New(d, &cliMux{}).WithFloat(mux.NewZellij())
 	}
 
 	m := newModel(harness, "")

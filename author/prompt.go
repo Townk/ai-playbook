@@ -26,12 +26,13 @@ import (
 )
 
 // KnowledgeBase is the per-project distilled-facts block the shell interpolates
-// as "## What we already know about this project". The KB store/lookup is not yet
-// ported (it lands with the remember/KB stage); for now it is empty. When wired,
-// set it on Options.KnowledgeBase and SystemPrompt will fold it in verbatim,
-// exactly like assist::system_prompt did with $kb_path.
+// as "## What we already know about this project". Author loads it from disk via
+// kb.Load (the Go port of assist::kb_path/kb_ensure) keyed on req.ProjectRoot;
+// SystemPrompt folds it in verbatim, exactly like assist::system_prompt did with
+// $kb_path. The package kb type and this one carry the same text.
 //
-// NOTE(stage 4b): KB is intentionally left empty — structure ported, content TBD.
+// NOTE(stage 4c-i): only the KB READ path is wired. The KB WRITE/remember path
+// (ai-assist-remember appending a distilled fact) is DEFERRED to a later stage.
 type KnowledgeBase string
 
 // SystemPrompt assembles the standing literate-playbook authoring prompt for the

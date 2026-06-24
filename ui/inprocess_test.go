@@ -119,10 +119,10 @@ func TestInProcessCopyPlayNoResult(t *testing.T) {
 	}
 }
 
-// Deferred kinds resolve to a statusMsg, never a crash, in in-process mode.
+// Still-deferred kinds resolve to a statusMsg, never a crash, in in-process mode.
 func TestInProcessDeferredKindStatus(t *testing.T) {
 	m := newInProcModel(t)
-	for _, kind := range []string{"view-diff", "apply-diff", "undo-diff", "regenerate", "followup", "wrapup"} {
+	for _, kind := range []string{"regenerate", "followup", "wrapup"} {
 		cmd := m.emitAction(Button{Kind: kind, BlockID: "x"})
 		if cmd == nil {
 			t.Fatalf("%s: nil cmd", kind)
@@ -131,6 +131,44 @@ func TestInProcessDeferredKindStatus(t *testing.T) {
 		if _, ok := msg.(statusMsg); !ok {
 			t.Errorf("%s → %T, want statusMsg", kind, msg)
 		}
+	}
+}
+
+// apply-diff / undo-diff now drive the orchestrator and yield a resultMsg (the
+// model's resultMsg handler flips the apply⇄undo toggle off st.Action + Exit).
+// Here the payload is not a valid patch and the cwd is not a repo, so the run
+// fails — what matters is the bridge produces a resultMsg, not a statusMsg.
+func TestInProcessApplyUndoYieldResultMsg(t *testing.T) {
+	m := newInProcModel(t)
+	for _, kind := range []string{"apply-diff", "undo-diff"} {
+		cmd := m.emitAction(Button{Kind: kind, BlockID: "fix", Payload: "not a patch\n"})
+		if cmd == nil {
+			t.Fatalf("%s: nil cmd", kind)
+		}
+		msg := cmd()
+		res, ok := msg.(resultMsg)
+		if !ok {
+			t.Fatalf("%s → %T, want resultMsg", kind, msg)
+		}
+		if res.ID != "fix" {
+			t.Errorf("%s id = %q, want fix", kind, res.ID)
+		}
+		if res.Logpath != "" {
+			_ = os.Remove(res.Logpath)
+		}
+	}
+}
+
+// view-diff is fire-and-forget: with no Float mux wired it is a graceful no-op
+// returning a nil message (never a statusMsg / crash).
+func TestInProcessViewDiffNoResult(t *testing.T) {
+	m := newInProcModel(t)
+	cmd := m.emitAction(Button{Kind: "view-diff", BlockID: "fix", Payload: "diff --git a/f b/f\n"})
+	if cmd == nil {
+		t.Fatal("view-diff: nil cmd")
+	}
+	if msg := cmd(); msg != nil {
+		t.Errorf("view-diff msg = %T, want nil", msg)
 	}
 }
 

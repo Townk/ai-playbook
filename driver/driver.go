@@ -42,12 +42,19 @@ type Driver struct {
 	re       *regexp.Regexp
 	shellPid int
 
+	cwd string // the cwd entered at Open (Options.Cwd), for callers that need it
+
 	mu       sync.Mutex
 	buf      []byte
 	lastSeen time.Time
 
 	runMu sync.Mutex // serializes Run (one foreground command at a time)
 }
+
+// Cwd returns the working directory the driver was opened in (Options.Cwd),
+// empty if none was given. Note: this is the INITIAL cwd; a subsequent `cd` in
+// the session is not tracked here.
+func (d *Driver) Cwd() string { return d.cwd }
 
 // Open spawns `zsh -il` under a pty and drives it ready.
 func Open(opts Options) (*Driver, error) {
@@ -76,6 +83,7 @@ func Open(opts Options) (*Driver, error) {
 	}
 	d.run("stty -echo 2>/dev/null", 5*time.Second) // cosmetic: trim echo noise
 	if opts.Cwd != "" {
+		d.cwd = opts.Cwd
 		d.run("builtin cd -- "+shquote(opts.Cwd)+" 2>/dev/null", 10*time.Second)
 	}
 	return d, nil

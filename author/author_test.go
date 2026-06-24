@@ -2,10 +2,13 @@ package author
 
 import (
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"ai-playbook/capture"
+	"ai-playbook/kb"
 )
 
 // sampleFailure is a representative failed-command request.
@@ -78,6 +81,9 @@ func (f *fakeAgent) agent(systemPrompt, userMessage string) (io.ReadCloser, erro
 }
 
 func TestAuthor_UsesEmbeddedPromptAndAssembledMessage(t *testing.T) {
+	// Point the KB data dir at an empty temp dir so kb.Load (called inside Author)
+	// returns no KB and the system prompt is deterministic for this assertion.
+	t.Setenv("AI_ASSIST_DATA_DIR", t.TempDir())
 	req := sampleFailure()
 	fa := &fakeAgent{canned: "# Fix your build\n\n```bash {id=fix}\nmake clean\n```\n"}
 
@@ -98,13 +104,45 @@ func TestAuthor_UsesEmbeddedPromptAndAssembledMessage(t *testing.T) {
 	}
 
 	// It was called with the embedded system prompt + the assembled user message.
-	wantSys := SystemPrompt(req, KB)
+	// With no KB file present, the folded-in KB is empty.
+	wantSys := SystemPrompt(req, "")
 	if fa.gotSystem != wantSys {
 		t.Errorf("agent system prompt did not match SystemPrompt(req)\n--- got ---\n%s", fa.gotSystem)
 	}
 	wantUser := BuildUserMessage(req)
 	if fa.gotUser != wantUser {
 		t.Errorf("agent user message did not match BuildUserMessage(req)\n--- got ---\n%s", fa.gotUser)
+	}
+}
+
+// TestAuthor_FoldsInOnDiskKB exercises the kb.Load wiring end-to-end: a KB file
+// written under the data dir for the request's project root is folded into the
+// system prompt Author hands the agent (the "## What we already know" section).
+func TestAuthor_FoldsInOnDiskKB(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AI_ASSIST_DATA_DIR", root)
+	req := sampleFailure()
+	const facts = "deploys via fly.io, not docker"
+	p := kb.Path(root, req.ProjectRoot)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, []byte(facts), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	fa := &fakeAgent{canned: "ok\n"}
+	r, err := Author(req, fa.agent)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+
+	if !strings.Contains(fa.gotSystem, "## What we already know about this project") {
+		t.Errorf("Author system prompt missing KB header\n%s", fa.gotSystem)
+	}
+	if !strings.Contains(fa.gotSystem, facts) {
+		t.Errorf("Author system prompt missing on-disk KB content %q", facts)
 	}
 }
 

@@ -1,0 +1,76 @@
+// Package kb is the Go port of the shell knowledge-base reader
+// (assist::kb_path / assist::kb_ensure in assist-agent-common.zsh): a per-project
+// file of distilled facts the producer folds into the system prompt as the
+// "## What we already know about this project" section.
+//
+// The on-disk layout mirrors the shell exactly so a Go reader and the legacy
+// shell writer (the deferred `remember` tool) agree on the path:
+//
+//	$root/projects/<project_key>/knowledge.md
+//
+// where project_key = SHA-1 (lowercase hex) of the project-root path string
+// (shell: `print -rn -- "$1" | shasum -a 1`) and $root is the same data dir the
+// cache uses: AI_ASSIST_DATA_DIR, else ${XDG_DATA_HOME:-$HOME/.local/share}/ai-assist.
+//
+// NOTE(stage 4c-i): only the READ path is ported. The KB WRITE path (the
+// `ai-assist-remember` / remember tool that appends a distilled fact) is
+// DEFERRED to a later stage — this package intentionally has no Append/Write.
+package kb
+
+import (
+	"crypto/sha1"
+	"encoding/hex"
+	"os"
+	"path/filepath"
+)
+
+// KnowledgeBase is the per-project distilled-facts text, verbatim from the KB
+// file. Empty when the project has no KB file or the file is empty.
+type KnowledgeBase string
+
+// DefaultRoot resolves the data-dir root exactly as the shell ASSIST_DATA_DIR:
+// AI_ASSIST_DATA_DIR, else ${XDG_DATA_HOME:-$HOME/.local/share}/ai-assist. It
+// matches cache.DefaultRoot so the cache and KB live under the same tree.
+func DefaultRoot() string {
+	if v := os.Getenv("AI_ASSIST_DATA_DIR"); v != "" {
+		return v
+	}
+	xdg := os.Getenv("XDG_DATA_HOME")
+	if xdg == "" {
+		home, _ := os.UserHomeDir()
+		xdg = filepath.Join(home, ".local", "share")
+	}
+	return filepath.Join(xdg, "ai-assist")
+}
+
+// projectKey reproduces assist::project_key: the lowercase hex SHA-1 of the
+// project-root path string (no trailing newline — `print -rn`).
+func projectKey(projectRoot string) string {
+	sum := sha1.Sum([]byte(projectRoot))
+	return hex.EncodeToString(sum[:])
+}
+
+// Path returns the KB file path for projectRoot under the given root, mirroring
+// assist::kb_path: $root/projects/<project_key>/knowledge.md.
+func Path(root, projectRoot string) string {
+	return filepath.Join(root, "projects", projectKey(projectRoot), "knowledge.md")
+}
+
+// Load reads the per-project KB for projectRoot from the default data dir and
+// returns its contents. Missing or empty file → "" (the shell only folds the KB
+// block in when the file is non-empty: `[[ -s "$kb_path" ]]`). Unreadable file
+// is treated as empty (best-effort, never fatal — matches the shell never
+// crashing on a missing KB). A trailing newline is preserved verbatim, as the
+// shell's `cat` would emit it.
+func Load(projectRoot string) KnowledgeBase {
+	return LoadFrom(DefaultRoot(), projectRoot)
+}
+
+// LoadFrom is Load against an explicit root (for tests / non-default data dirs).
+func LoadFrom(root, projectRoot string) KnowledgeBase {
+	b, err := os.ReadFile(Path(root, projectRoot))
+	if err != nil {
+		return ""
+	}
+	return KnowledgeBase(b)
+}
