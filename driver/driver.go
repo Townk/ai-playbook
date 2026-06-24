@@ -83,11 +83,34 @@ func Open(opts Options) (*Driver, error) {
 
 // Run executes cmd in the shell's MAIN context (cd fires chpwd/precmd → auto-env),
 // captures stdout/stderr/exit, and on timeout kills the running command's process
-// group. Safe to call serially.
+// group. Safe to call serially. Equivalent to RunID("", cmd, timeout).
 func (d *Driver) Run(cmd string, timeout time.Duration) Result {
+	return d.RunID("", cmd, timeout)
+}
+
+// RunID is Run with value-passing. In the hosted shell's main context — AFTER the
+// command's exit code is captured and BEFORE the sentinel is printed — it exports
+// LAST_EXCODE / LAST_STDOUT / LAST_STDERR (and, when id != "", AAS_OUT_<key> /
+// AAS_ERR_<key> / AAS_EXIT_<key>, key = id with [^A-Za-z0-9_]→_) so a later block
+// can reference the prior block's output. Because the job is sourced in the main
+// context (not a subshell), these exports persist across Runs.
+func (d *Driver) RunID(id, cmd string, timeout time.Duration) Result {
 	d.runMu.Lock()
 	defer d.runMu.Unlock()
-	return d.run(cmd, timeout)
+	return d.runID(id, cmd, timeout)
+}
+
+// Stop kills the currently-running command's foreground process group (TERM then
+// KILL). Safe to call from another goroutine while a Run is in flight: it only
+// signals — the in-flight Run observes the sentinel/EOF and returns on its own.
+// A no-op when the shell is idle (foreground pgrp == the shell itself).
+func (d *Driver) Stop() {
+	pg := d.Pgrp()
+	if pg > 0 && pg != d.shellPid {
+		_ = unix.Kill(-pg, unix.SIGTERM)
+		time.Sleep(300 * time.Millisecond)
+		_ = unix.Kill(-pg, unix.SIGKILL)
+	}
 }
 
 // Pgrp returns the pty's foreground process group — the running command's group
@@ -168,7 +191,13 @@ func (d *Driver) ready() error {
 	return fmt.Errorf("driver: shell never became drivable")
 }
 
+// run executes cmdline with no value-passing (id=""). Used by ready/stty and as
+// the Run path; routes through runID with an empty id.
 func (d *Driver) run(cmdline string, timeout time.Duration) Result {
+	return d.runID("", cmdline, timeout)
+}
+
+func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
 	dir, err := os.MkdirTemp("", "aapb")
 	if err != nil {
 		return Result{Exit: -1}
@@ -178,10 +207,31 @@ func (d *Driver) run(cmdline string, timeout time.Duration) Result {
 	e := filepath.Join(dir, "e")
 	job := filepath.Join(dir, "job.zsh")
 	// Main context (`{ }`, sourced — not a subshell): cd/exports persist, hooks
-	// fire. Own sentinel carries $? (the group's exit). stdin /dev/null.
+	// fire. Own sentinel carries $? (the group's exit). stdin /dev/null. We
+	// capture $? immediately, map SIGPIPE (141)→0 (a producer killed by a
+	// downstream `| head`/`| grep -q` is not a failure), then — BEFORE the
+	// sentinel print — export the value-passing vars read from the per-job out/err
+	// files (still present here; the driver removes the temp dir only after the
+	// sentinel returns). ${(q)…} keeps multi-line values intact.
+	qo := shquote(o)
+	qe := shquote(e)
+	vp := "" +
+		"export LAST_EXCODE=${(q)__aapb_rc}\n" +
+		"export LAST_STDOUT=${(q)\"$(<" + qo + ")\"}\n" +
+		"export LAST_STDERR=${(q)\"$(<" + qe + ")\"}\n"
+	if id != "" {
+		key := sanitizeKey(id)
+		vp += "" +
+			"export AAS_OUT_" + key + "=${(q)\"$(<" + qo + ")\"}\n" +
+			"export AAS_ERR_" + key + "=${(q)\"$(<" + qe + ")\"}\n" +
+			"export AAS_EXIT_" + key + "=${(q)__aapb_rc}\n"
+	}
 	_ = os.WriteFile(job, []byte(
 		"{ "+cmdline+" } </dev/null >"+o+" 2>"+e+"\n"+
-			"print -r -- "+sentinel+"$?"+sentinel+"\n"), 0644)
+			"__aapb_rc=$?\n"+
+			"[[ $__aapb_rc -eq 141 ]] && __aapb_rc=0\n"+
+			vp+
+			"print -r -- "+sentinel+"${__aapb_rc}"+sentinel+"\n"), 0644)
 	d.clearBuf()
 	d.send("source " + job)
 
@@ -208,3 +258,14 @@ func (d *Driver) run(cmdline string, timeout time.Duration) Result {
 }
 
 func shquote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// sanitizeKey mirrors the broker convention: id with [^A-Za-z0-9_] → _.
+func sanitizeKey(id string) string {
+	b := []byte(id)
+	for i, c := range b {
+		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_') {
+			b[i] = '_'
+		}
+	}
+	return string(b)
+}
