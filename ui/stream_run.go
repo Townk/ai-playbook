@@ -22,9 +22,10 @@ import (
 // the stream is parsed incrementally, rendered, and its run blocks are driven by
 // the in-process orchestrator against the user's real shell.
 type StreamOptions struct {
-	Harness string    // header label (default "agent")
-	Cwd     string    // working dir for the in-process driver (default $PWD)
-	Tee     io.Writer // if non-nil, every byte read from Src is mirrored here
+	Harness  string                 // header label (default "agent")
+	Cwd      string                 // working dir for the in-process driver (default $PWD)
+	Tee      io.Writer              // if non-nil, every byte read from Src is mirrored here
+	Reengage *orchestrator.Reengage // re-engagement context (regenerate/followup/wrapup); nil disables those kinds
 }
 
 // RunStream renders + drives a playbook from a live input stream in-process. It
@@ -90,6 +91,9 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 	} else {
 		defer d.Close()
 		orch = orchestrator.New(d, &cliMux{}).WithFloat(mux.NewZellij())
+		if opts.Reengage != nil {
+			orch.WithReengage(opts.Reengage)
+		}
 	}
 
 	m := newModel(harness, "")

@@ -10,13 +10,19 @@ package orchestrator
 
 import (
 	"errors"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"ai-playbook/author"
+	"ai-playbook/cache"
+	"ai-playbook/capture"
 	"ai-playbook/driver"
+	"ai-playbook/kb"
 	"ai-playbook/mux"
 )
 
@@ -99,7 +105,52 @@ type Orchestrator struct {
 	Drv   *driver.Driver
 	Mux   Mux
 	Float mux.Mux
+
+	// Reengage carries everything the regenerate / followup / wrapup kinds need to
+	// re-invoke the author in-process: the original request, the injected capable
+	// agent, and (for regenerate's re-store) the cache + the original decision keys.
+	// It is set via WithReengage by the troubleshoot path; nil in tests/callers that
+	// don't exercise re-engagement (those kinds then return ErrNotImplemented, the
+	// pre-4c-ii behavior).
+	Reengage *Reengage
 }
+
+// Reengage bundles the re-engagement context. Req is the original captured
+// request; Agent is the injected author.Agent (author.ClaudeAgent in production,
+// a fake in tests). Cache/CtxHash/ReqHash/RequestJSON drive regenerate's fresh
+// re-store of the produced playbook (followup/wrapup do NOT re-store the main
+// playbook). DataRoot is the data dir for the wrap-up solution artifact and the KB
+// append (defaults to cache.DefaultRoot when empty).
+type Reengage struct {
+	Req         capture.Request
+	Agent       author.Agent
+	Cache       *cache.Cache
+	CtxHash     string
+	ReqHash     string
+	RequestJSON string
+	DataRoot    string
+}
+
+// dataRoot resolves the data dir for wrap-up side effects: the explicit DataRoot,
+// else cache.DefaultRoot (AI_ASSIST_DATA_DIR / XDG), matching the shell's $DATA.
+func (re *Reengage) dataRoot() string {
+	if re.DataRoot != "" {
+		return re.DataRoot
+	}
+	return cache.DefaultRoot()
+}
+
+// StreamMode tells the ui how to splice a re-engagement stream into the rendered
+// playbook: Replace clears the rendered content first (regenerate); Append streams
+// the new section below the existing playbook (followup, wrapup).
+type StreamMode int
+
+const (
+	// ModeReplace resets the rendered playbook and streams a fresh one (regenerate).
+	ModeReplace StreamMode = iota
+	// ModeAppend streams a new section below the existing playbook (followup/wrapup).
+	ModeAppend
+)
 
 // New builds an Orchestrator over the given driver and mux. The Float mux (for
 // view-diff) is set separately via WithFloat so existing two-arg callers/tests
@@ -113,6 +164,15 @@ func New(d *driver.Driver, m Mux) *Orchestrator {
 // nil makes view-diff a graceful no-op.
 func (o *Orchestrator) WithFloat(f mux.Mux) *Orchestrator {
 	o.Float = f
+	return o
+}
+
+// WithReengage sets the re-engagement context (request + agent + cache keys) used
+// by the regenerate / followup / wrapup kinds and returns the orchestrator
+// (chainable). Optional — leaving it nil keeps those kinds returning
+// ErrNotImplemented.
+func (o *Orchestrator) WithReengage(re *Reengage) *Orchestrator {
+	o.Reengage = re
 	return o
 }
 
@@ -145,19 +205,146 @@ func (o *Orchestrator) Do(a Action) (driver.Result, error) {
 		// git-apply --reverse the patch (apply⇄undo toggle); Exit 0 → reverted.
 		return o.applyDiff(a.Payload, true), nil
 
-	// ---- modeled but deferred to later stages ----
-	case KindRegenerate:
-		// Will re-run the original request and stream a fresh result into the pane.
-		return driver.Result{}, ErrNotImplemented
-	case KindFollowup:
-		// Will re-engage the agent with a "previous fix did not work" prompt.
-		return driver.Result{}, ErrNotImplemented
-	case KindWrapup:
-		// Will build a session summary and stream it into the pane.
+	// ---- re-engagement kinds (stage 4c-ii) ----
+	// These re-invoke the author and yield a NEW stream that must SWAP the ui's
+	// rendered playbook — that doesn't fit Do's (Result, error) shape, so the ui
+	// drives them through the dedicated Regenerate/Followup/Wrapup methods (which
+	// return io.ReadCloser + a StreamMode) instead of Do. Reaching them here means
+	// the caller used the wrong seam; surface ErrNotImplemented rather than
+	// silently doing nothing.
+	case KindRegenerate, KindFollowup, KindWrapup:
 		return driver.Result{}, ErrNotImplemented
 	default:
 		return driver.Result{}, ErrNotImplemented
 	}
+}
+
+// Regenerate re-authors the ORIGINAL request with the cache bypassed and returns
+// the fresh playbook stream (ModeReplace — the ui resets the rendered content and
+// streams the new playbook). It re-stores the fresh playbook so a later identical
+// request hits the refreshed entry, matching ai-assist-regenerate
+// (AI_ASSIST_NO_CACHE=1 for the lookup, then `cache store` the new body).
+//
+// Because the body is consumed by the ui (rendered incrementally), the re-store
+// tees the stream into a buffer and persists it when the stream is fully read and
+// closed — the same tee-on-completion pattern authorPlaybook uses. Re-store is
+// best-effort and only fires when the cache + keys are present (it is skipped when
+// the original entry was unkeyed).
+func (o *Orchestrator) Regenerate() (io.ReadCloser, StreamMode, error) {
+	if o.Reengage == nil || o.Reengage.Agent == nil {
+		return nil, ModeReplace, ErrNotImplemented
+	}
+	re := o.Reengage
+	stream, err := author.Author(re.Req, re.Agent)
+	if err != nil {
+		return nil, ModeReplace, err
+	}
+	// Re-store the fresh playbook on completion (best-effort), matching the shell's
+	// regenerate re-store. followup/wrapup do NOT re-store the main playbook.
+	if re.Cache != nil && re.CtxHash != "" && re.ReqHash != "" {
+		stream = newStoreOnClose(stream, func(body string) {
+			if strings.TrimSpace(body) == "" {
+				return
+			}
+			_, _ = re.Cache.Store(re.CtxHash, re.ReqHash, "playbook", body, nil, re.RequestJSON)
+		})
+	}
+	return stream, ModeReplace, nil
+}
+
+// Followup re-engages the agent with the "your fix didn't work" prompt built from
+// the original request + the failed command's captured output, and returns the
+// revised-fix stream (ModeAppend — the ui appends the new section below the
+// existing playbook). It does NOT re-store the main playbook (matching
+// ai-assist-followup, which streams without persisting an artifact).
+func (o *Orchestrator) Followup(failedOutput string) (io.ReadCloser, StreamMode, error) {
+	if o.Reengage == nil || o.Reengage.Agent == nil {
+		return nil, ModeAppend, ErrNotImplemented
+	}
+	re := o.Reengage
+	stream, err := author.Followup(re.Req, failedOutput, re.Agent)
+	if err != nil {
+		return nil, ModeAppend, err
+	}
+	return stream, ModeAppend, nil
+}
+
+// Wrapup runs the wrap-up pass (verify + `## Solution` summary) and returns the
+// summary stream (ModeAppend — the ui appends the `## Solution` section below the
+// existing playbook). It performs the two side effects of ai-assist-wrapup:
+//
+//  1. writes the solution artifact to $DATA/ai-assist/solutions/<ctx>-<ts>.md with
+//     the same front matter, tee'ing the streamed body into it as the ui consumes
+//     it; and
+//  2. appends a distilled fact to the project KB (kb.Append) — the WRITE path
+//     deferred in 4c-i, landed here.
+//
+// The artifact captures the model's verbatim `## Solution` output; the KB append
+// records one durable fact derived from the request so a future session benefits
+// even when the headless agent can't shell out to ai-assist-remember itself.
+func (o *Orchestrator) Wrapup(runlog string) (io.ReadCloser, StreamMode, error) {
+	if o.Reengage == nil || o.Reengage.Agent == nil {
+		return nil, ModeAppend, ErrNotImplemented
+	}
+	re := o.Reengage
+	stream, err := author.Wrapup(re.Req, runlog, re.Agent)
+	if err != nil {
+		return nil, ModeAppend, err
+	}
+
+	// (1) Solution artifact: $DATA/solutions/<ctx>-<ts>.md, front matter then body.
+	if artifact := o.openSolutionArtifact(); artifact != nil {
+		stream = &teeCloser{ReadCloser: stream, w: artifact, extra: artifact}
+	}
+
+	// (2) KB append — best-effort. The headless wrap-up agent can't reliably shell
+	// out to ai-assist-remember from this in-process path, so we record one durable
+	// fact derived from the original request (the project's failing command and the
+	// resolution the wrap-up is summarizing). Skipped when there's nothing to say.
+	if fact := wrapupKBFact(re.Req); fact != "" {
+		_ = kb.AppendTo(re.dataRoot(), re.Req.ProjectRoot, fact)
+	}
+
+	return stream, ModeAppend, nil
+}
+
+// openSolutionArtifact creates $DATA/solutions/<ctx>-<ts>.md, writes the front
+// matter (request / project_root / created_at), and returns the open file for the
+// streamed body to be tee'd into. Returns nil on any error (best-effort — the
+// shell tolerated a failed artifact and streamed anyway).
+func (o *Orchestrator) openSolutionArtifact() *os.File {
+	re := o.Reengage
+	dir := filepath.Join(re.dataRoot(), "solutions")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return nil
+	}
+	ts := time.Now().UTC().Format("20060102T150405Z")
+	ctx := re.CtxHash
+	if ctx == "" {
+		ctx = "session"
+	}
+	f, err := os.Create(filepath.Join(dir, ctx+"-"+ts+".md"))
+	if err != nil {
+		return nil
+	}
+	created := time.Now().UTC().Format("2006-01-02T15:04:05Z")
+	fmt.Fprintf(f, "---\nrequest: %s\nproject_root: %s\ncreated_at: %s\n---\n\n",
+		re.Req.UserRequest, re.Req.ProjectRoot, created)
+	return f
+}
+
+// wrapupKBFact derives one durable, reusable fact from the request for the KB
+// append. For a failure it records the failing command; otherwise "" (nothing
+// durable to distill from a general question). Never includes secrets/env dumps —
+// only the command text, which the user already typed.
+func wrapupKBFact(req capture.Request) string {
+	if req.Command == "" {
+		return ""
+	}
+	if req.Exit != "" && req.Exit != "0" {
+		return fmt.Sprintf("`%s` was troubleshooted here (exit %s); see the solution artifact.", req.Command, req.Exit)
+	}
+	return ""
 }
 
 // applyTimeout bounds a `git apply` run (small, local — far under the run default).

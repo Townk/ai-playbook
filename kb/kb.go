@@ -12,9 +12,9 @@
 // (shell: `print -rn -- "$1" | shasum -a 1`) and $root is the same data dir the
 // cache uses: AI_ASSIST_DATA_DIR, else ${XDG_DATA_HOME:-$HOME/.local/share}/ai-assist.
 //
-// NOTE(stage 4c-i): only the READ path is ported. The KB WRITE path (the
-// `ai-assist-remember` / remember tool that appends a distilled fact) is
-// DEFERRED to a later stage — this package intentionally has no Append/Write.
+// Stage 4c-ii lands the WRITE path: Append ports `ai-assist-remember`, appending
+// a distilled "- <fact>" line to the per-project knowledge.md (the wrap-up flow's
+// KB distillation).
 package kb
 
 import (
@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // KnowledgeBase is the per-project distilled-facts text, verbatim from the KB
@@ -73,4 +74,35 @@ func LoadFrom(root, projectRoot string) KnowledgeBase {
 		return ""
 	}
 	return KnowledgeBase(b)
+}
+
+// Append ports `ai-assist-remember`: it appends a distilled fact to the
+// per-project knowledge base under the default data dir, as a "- <fact>" bullet
+// line, creating the projects/<key>/ directory as needed. An empty (after-trim)
+// fact is a no-op success (the shell rejected an empty fact; here the wrap-up
+// distillation is best-effort, so a blank fact is simply skipped rather than an
+// error). The fact's own newlines are flattened to spaces so one fact stays one
+// bullet line.
+func Append(projectRoot, fact string) error {
+	return AppendTo(DefaultRoot(), projectRoot, fact)
+}
+
+// AppendTo is Append against an explicit root (for tests / non-default data dirs).
+func AppendTo(root, projectRoot, fact string) error {
+	fact = strings.TrimSpace(fact)
+	if fact == "" {
+		return nil
+	}
+	fact = strings.ReplaceAll(fact, "\n", " ")
+	p := Path(root, projectRoot)
+	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString("- " + fact + "\n")
+	return err
 }

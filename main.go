@@ -24,6 +24,7 @@ import (
 	"ai-playbook/driver"
 	"ai-playbook/input"
 	"ai-playbook/mux"
+	"ai-playbook/orchestrator"
 	"ai-playbook/triage"
 	"ai-playbook/ui"
 
@@ -183,13 +184,30 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		cwd = req.CWD
 	}
 
+	// Re-engagement context (stage 4c-ii): the in-process regenerate / followup /
+	// wrapup kinds re-invoke the author. regenerate re-stores the fresh playbook
+	// (cache + keys), so it gets them; followup/wrapup only need the request +
+	// agent. When the cache is disabled/bypassed the keys are empty and regenerate
+	// authors-without-re-storing (matching the shell's cache-bypassed re-run).
+	reengage := &orchestrator.Reengage{
+		Req:         req,
+		Agent:       author.ClaudeAgent,
+		Cache:       c,
+		RequestJSON: requestJSON(req),
+	}
+	if !d.Disabled && !noCache {
+		reengage.CtxHash = d.CtxHash
+		reengage.ReqHash = d.ReqHash
+	}
+
 	// Tee the produced playbook into a buffer as the ui consumes it, so we can
 	// persist it on completion.
 	var body bytes.Buffer
 	code := ui.RunStream(stream, ui.StreamOptions{
-		Harness: "Claude Code",
-		Cwd:     cwd,
-		Tee:     &body,
+		Harness:  "Claude Code",
+		Cwd:      cwd,
+		Tee:      &body,
+		Reengage: reengage,
 	})
 
 	// Cache-store on completion — only when the cache wasn't disabled/bypassed and
@@ -279,6 +297,20 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request) int {
 	if cwd == "" {
 		cwd = req.CWD
 	}
+
+	// Re-engagement context for the cached replay (stage 4c-ii): the cached pill's
+	// regenerate button (and the w-key wrap-up / verify follow-up) re-author the
+	// ORIGINAL request in-process. regenerate re-stores the fresh playbook under the
+	// SAME keys so the next identical request hits the refreshed entry — matching
+	// ai-assist-regenerate. Stashed for ui.Main to attach to the orchestrator.
+	ui.SetReengage(&orchestrator.Reengage{
+		Req:         req,
+		Agent:       author.ClaudeAgent,
+		Cache:       cache.Open(),
+		CtxHash:     d.CtxHash,
+		ReqHash:     d.ReqHash,
+		RequestJSON: requestJSON(req),
+	})
 
 	// Reuse the `run` subcommand entrypoint in-process by shaping os.Args the way
 	// ui.Main() parses them (os.Args[1]="run", flags from os.Args[2:]).

@@ -71,3 +71,58 @@ func TestLoad_DefaultRootRoundTrip(t *testing.T) {
 		t.Fatalf("Load = %q, want %q", got, "fact one")
 	}
 }
+
+func TestAppendTo_WritesBullet(t *testing.T) {
+	root := t.TempDir()
+	const project = "/Users/me/proj"
+	if err := AppendTo(root, project, "PGPASSWORD=test is required"); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(Path(root, project))
+	if err != nil {
+		t.Fatalf("read kb: %v", err)
+	}
+	if got := string(b); got != "- PGPASSWORD=test is required\n" {
+		t.Fatalf("kb = %q, want a single bullet line", got)
+	}
+}
+
+func TestAppendTo_AppendsAndFlattensNewlines(t *testing.T) {
+	root := t.TempDir()
+	const project = "/p"
+	if err := AppendTo(root, project, "first"); err != nil {
+		t.Fatal(err)
+	}
+	if err := AppendTo(root, project, "second\nwith newline"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(Path(root, project))
+	want := "- first\n- second with newline\n"
+	if string(b) != want {
+		t.Fatalf("kb = %q, want %q", b, want)
+	}
+}
+
+func TestAppendTo_EmptyFactIsNoop(t *testing.T) {
+	root := t.TempDir()
+	const project = "/p"
+	if err := AppendTo(root, project, "   \n"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(Path(root, project)); !os.IsNotExist(err) {
+		t.Fatalf("empty fact should not create a kb file (err=%v)", err)
+	}
+}
+
+// Append round-trips with Load: an appended fact is read back by the loader.
+func TestAppend_LoadRoundTrip(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AI_ASSIST_DATA_DIR", root)
+	const project = "/Users/me/widget"
+	if err := Append(project, "deploys via fly.io"); err != nil {
+		t.Fatal(err)
+	}
+	if got := Load(project); string(got) != "- deploys via fly.io\n" {
+		t.Fatalf("Load after Append = %q", got)
+	}
+}

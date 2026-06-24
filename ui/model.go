@@ -133,6 +133,13 @@ type model struct {
 	// status is a transient one-line message shown in the status bar (e.g. when
 	// an in-process action is not yet implemented). Cleared on the next key/click.
 	status string
+
+	// reengageStream is the live re-engagement stream (regenerate/followup/wrapup)
+	// swapped in via the in-process re-arm. It is closed on EOF so the agent
+	// process is reaped and the orchestrator's tee-on-close side effects fire
+	// (regenerate's cache re-store, wrap-up's solution-artifact close). nil when no
+	// in-process re-engagement stream is active.
+	reengageStream io.Closer
 }
 
 // emitAction performs a button's action. In FIFO mode (m.orch == nil) it appends
@@ -312,6 +319,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flushRender() // render whatever's pending immediately
 			m.streaming = false
 			m.thinking = false
+			// Close a live in-process re-engagement stream so the agent process is
+			// reaped and the orchestrator's on-close side effects fire (regenerate's
+			// cache re-store, wrap-up's artifact close). No-op in FIFO mode (nil).
+			if m.reengageStream != nil {
+				_ = m.reengageStream.Close()
+				m.reengageStream = nil
+			}
 			return m, nil
 		}
 		cmds := []tea.Cmd{readStream(m.reader, m.parser)}
@@ -406,6 +420,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if b.Kind == "regenerate" {
 					m.flashKey = "cached:regenerate"
+					// In-process: re-author via the orchestrator and re-arm the parser
+					// (REPLACE). FIFO: re-open the input FIFO. Else flash-only.
+					if cmd := m.beginRegenerate(); cmd != nil {
+						return m, tea.Batch(m.flashCmd(), cmd)
+					}
 					ac := m.emitAction(b)
 					if m.inputFifoPath != "" {
 						m.md = ""
@@ -546,6 +565,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					if b.Kind == "regenerate" {
 						m.flashKey = "cached:regenerate"
+						if cmd := m.beginRegenerate(); cmd != nil {
+							return m, tea.Batch(m.flashCmd(), cmd)
+						}
 						ac := m.emitAction(b)
 						if m.inputFifoPath != "" {
 							m.md = ""
@@ -610,6 +632,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Wrap-up: only when settled (not streaming).
 			if !m.streaming {
 				dbg("emit %s id=%s", "wrapup", "")
+				// In-process: run the wrap-up pass via the orchestrator and re-arm the
+				// parser with the `## Solution` summary stream (APPEND). The orchestrator
+				// writes the solution artifact + appends the KB fact.
+				if cmd := m.beginWrapupInProc(m.runLog()); cmd != nil {
+					return m, cmd
+				}
 				ac := m.emitAction(Button{Kind: "wrapup"})
 				if m.inputFifoPath != "" {
 					m.md += "\n\n---\n\n"
@@ -765,6 +793,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.reflow()
 			return m, nil
 		}
+		m.reader = bufio.NewReader(msg.reader)
+		m.parser = &streamParser{}
+		return m, readStream(m.reader, m.parser)
+	case reArmStreamMsg:
+		// In-process re-arm: swap the parser to the fresh re-engagement stream
+		// (regenerate/followup/wrapup). The orchestrator already produced the stream
+		// off the event loop; here we point the reader at it and resume streaming.
+		// The stream's Closer is held so EOF reaps the agent + fires the
+		// orchestrator's on-close side effects.
+		dbg("re-arm (in-process): reader ready err=%v", msg.err)
+		if msg.err != nil {
+			m.thinking = false
+			m.md += fmt.Sprintf("\n\n_re-engage error: %v_\n", msg.err)
+			m.reflow()
+			return m, nil
+		}
+		if m.reengageStream != nil {
+			_ = m.reengageStream.Close()
+		}
+		m.reengageStream = msg.reader
 		m.reader = bufio.NewReader(msg.reader)
 		m.parser = &streamParser{}
 		return m, readStream(m.reader, m.parser)
@@ -1296,10 +1344,19 @@ func (m model) blockCommand(id string) string {
 // auto-fire path and the `↻ try another fix` button.
 func (m *model) beginFollowupStream(blockID, command string) tea.Cmd {
 	dbg("emit %s id=%s", "followup", blockID)
+	// In-process: re-engage the agent via the orchestrator and re-arm the parser
+	// with the revised-fix stream (APPEND). The failed command's output is read
+	// from the block's run logfile (capped, like the shell's tail -c 4000).
+	if m.orch != nil && m.orch.Reengage != nil {
+		failedOut := m.failedOutput(blockID)
+		if cmd := m.beginFollowupInProc(failedOut); cmd != nil {
+			return cmd
+		}
+	}
 	ac := m.emitAction(Button{Kind: "followup", BlockID: blockID, Payload: command})
 	if m.inputFifoPath == "" {
-		// In-process mode: no input FIFO to re-arm; surface whatever the action
-		// produced (a deferred-status cmd for followup) so it isn't dropped.
+		// No input FIFO to re-arm (standalone/sample, or in-process without reengage):
+		// surface whatever the action produced so it isn't dropped.
 		return ac
 	}
 	m.md += "\n\n---\n\n"
@@ -1310,6 +1367,49 @@ func (m *model) beginFollowupStream(blockID, command string) tea.Cmd {
 	m.follow = true
 	m.reflow()
 	return tea.Batch(m.startTick(), m.reArmReaderCmd())
+}
+
+// followupCap bounds the failed-command output fed to the follow-up prompt,
+// mirroring ai-assist-followup's `tail -c 4000`.
+const followupCap = 4000
+
+// failedOutput reads the captured output of the failed block (its run logfile,
+// written by writeRunLog) and returns the LAST followupCap bytes — the same cap
+// the shell applied. Empty when there is no logfile / it can't be read.
+func (m model) failedOutput(blockID string) string {
+	st, ok := m.blockStates[blockID]
+	if !ok || st.Logpath == "" {
+		return ""
+	}
+	b, err := os.ReadFile(st.Logpath)
+	if err != nil {
+		return ""
+	}
+	if len(b) > followupCap {
+		b = b[len(b)-followupCap:]
+	}
+	return string(b)
+}
+
+// runLog assembles a compact run log of the blocks the user ran in this session
+// (id + exit code) for the wrap-up prompt, mirroring the shell's $run_dir/
+// runlog.jsonl (which the shell catted into the wrap-up prompt). Only blocks that
+// actually ran (have a settled status) are included; order follows the rendered
+// blocks so it reads top-to-bottom. Empty when nothing was run (the wrap-up prompt
+// then says "No blocks were run").
+func (m model) runLog() string {
+	var b strings.Builder
+	for _, blk := range m.blocks {
+		st, ok := m.blockStates[blk.ID]
+		if !ok {
+			continue
+		}
+		switch st.Status {
+		case "ok", "failed", "stopped":
+			fmt.Fprintf(&b, "{\"id\":%q,\"exit\":%d}\n", blk.ID, st.Exit)
+		}
+	}
+	return b.String()
 }
 
 // handleToggle flips the Expanded state of the given block and reflows.

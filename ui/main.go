@@ -19,6 +19,18 @@ import (
 	"ai-playbook/orchestrator"
 )
 
+// pendingReengage is the re-engagement context consumed by the next Main() call,
+// set by SetReengage. The cached-replay path (serveCachedPlaybook) reuses ui.Main
+// via os.Args reshaping and can't pass a struct through that seam, so it stashes
+// the Reengage here; Main attaches it to the orchestrator and clears it. nil
+// disables the regenerate/followup/wrapup kinds (their pre-4c-ii behavior).
+var pendingReengage *orchestrator.Reengage
+
+// SetReengage stashes the re-engagement context for the next ui.Main() invocation
+// (used by the troubleshoot cached-replay path so the regenerate/followup/wrapup
+// kinds can re-author in-process). It is consumed (and cleared) by Main.
+func SetReengage(re *orchestrator.Reengage) { pendingReengage = re }
+
 // Main is the entrypoint for the `ai-playbook run` subcommand. It parses flags
 // from os.Args[2:] (os.Args[1] is the "run" subcommand) and returns an exit
 // code; the caller is responsible for os.Exit.
@@ -141,9 +153,13 @@ func Main() int {
 			} else {
 				defer d.Close()
 				orch = orchestrator.New(d, &cliMux{}).WithFloat(mux.NewZellij())
+				if pendingReengage != nil {
+					orch.WithReengage(pendingReengage)
+				}
 			}
 		}
 	}
+	pendingReengage = nil // consume once, regardless of whether an orch was built
 
 	// Force TrueColor: zellij's alt-screen pane underreports the color profile
 	// during bubbletea's auto-detection, causing colors to be downsampled.

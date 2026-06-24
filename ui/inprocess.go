@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"io"
 	"os"
 	"os/exec"
 	"runtime"
@@ -86,6 +87,92 @@ func (m model) orchCmd(b Button) tea.Cmd {
 			return nil
 		}
 	}
+}
+
+// reArmStreamMsg carries a fresh in-process re-engagement stream into the model
+// once the orchestrator has produced it (off the event loop). It mirrors the
+// FIFO-era reArmedMsg, but the reader is the agent's stdout STREAM (not a re-opened
+// FIFO) and the closer lets the model reap the process + fire the orchestrator's
+// on-close side effects when the stream EOFs.
+type reArmStreamMsg struct {
+	reader io.ReadCloser
+	err    error
+}
+
+// beginRegenerate (in-process) re-authors the original request cache-bypassed and
+// re-arms the parser with the fresh stream in REPLACE mode: the rendered playbook
+// is reset and the new one streams in. Mirrors the FIFO-era regenerate's pane
+// reset (m.md=""), but the new stream comes from the orchestrator, not a re-opened
+// input FIFO. Returns nil when the orchestrator can't re-engage (no Reengage
+// wired) so the caller falls back to a flash-only no-op.
+func (m *model) beginRegenerate() tea.Cmd {
+	orch := m.orch
+	if orch == nil || orch.Reengage == nil {
+		return nil
+	}
+	// REPLACE: reset the rendered content + thinking state, exactly like the
+	// FIFO-era regenerate did before re-opening the input FIFO.
+	m.md = ""
+	m.isCached = false
+	m.thinking = true
+	m.spinFrame = 0
+	m.spinTicks = 0
+	m.streaming = true
+	m.follow = false
+	m.reflow()
+	return tea.Batch(m.startTick(), func() tea.Msg {
+		stream, _, err := orch.Regenerate()
+		return reArmStreamMsg{reader: stream, err: err}
+	})
+}
+
+// beginFollowupInProc (in-process) re-engages the agent with the "fix didn't work"
+// prompt and re-arms the parser with the revised-fix stream in APPEND mode: a
+// separator + spinner are appended below the existing playbook and the new section
+// streams in. failedOutput is the captured output of the failed command (read from
+// the block's run log, capped). Returns nil when re-engagement isn't wired.
+func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
+	orch := m.orch
+	if orch == nil || orch.Reengage == nil {
+		return nil
+	}
+	// APPEND: keep the existing playbook, add a separator + spinner below it.
+	m.md += "\n\n---\n\n"
+	m.thinking = true
+	m.spinFrame = 0
+	m.spinTicks = 0
+	m.streaming = true
+	m.follow = true
+	m.reflow()
+	return tea.Batch(m.startTick(), func() tea.Msg {
+		stream, _, err := orch.Followup(failedOutput)
+		return reArmStreamMsg{reader: stream, err: err}
+	})
+}
+
+// beginWrapupInProc (in-process) runs the wrap-up pass and re-arms the parser with
+// the `## Solution` summary stream in APPEND mode (the summary streams below the
+// playbook). The orchestrator performs the side effects (solution artifact + KB
+// append). runlog is the run log to feed the wrap-up prompt (empty here — the
+// in-process run log is the model's block states; a richer run log is a later
+// refinement). Returns nil when re-engagement isn't wired.
+func (m *model) beginWrapupInProc(runlog string) tea.Cmd {
+	orch := m.orch
+	if orch == nil || orch.Reengage == nil {
+		return nil
+	}
+	// APPEND: keep the playbook, add a separator + spinner below it.
+	m.md += "\n\n---\n\n"
+	m.thinking = true
+	m.spinFrame = 0
+	m.spinTicks = 0
+	m.streaming = true
+	m.follow = true
+	m.reflow()
+	return tea.Batch(m.startTick(), func() tea.Msg {
+		stream, _, err := orch.Wrapup(runlog)
+		return reArmStreamMsg{reader: stream, err: err}
+	})
 }
 
 // writeRunLog writes a run's captured stdout then stderr to a temp file and
