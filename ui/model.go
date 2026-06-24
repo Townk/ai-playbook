@@ -11,6 +11,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"ai-playbook/orchestrator"
 )
 
 // spinTickMsg drives the spinner animation/timer while thinking.
@@ -121,25 +123,44 @@ type model struct {
 	// shown in the header line to tell the user this result is a cache replay.
 	isCached bool
 	cachedAt time.Time
+
+	// orch is the in-process orchestrator. When non-nil the model talks to the
+	// shell driver directly (in-process mode) instead of writing the actions
+	// FIFO; nil selects the legacy FIFO/broker path. Set by Main when no
+	// --actions-fifo is given.
+	orch *orchestrator.Orchestrator
+
+	// status is a transient one-line message shown in the status bar (e.g. when
+	// an in-process action is not yet implemented). Cleared on the next key/click.
+	status string
 }
 
-// emitAction appends a record framed as "<kind>US<payload>RS" to the actions
-// FIFO, where US (0x1f, Unit Separator) separates kind from payload and RS
-// (0x1e, Record Separator) terminates the record. Payload is written byte-exact
-// (no encoding). No-op when no FIFO is set (standalone/sample). O_APPEND|O_CREATE
-// so a regular file works in tests and a real FIFO opened by a reader also works.
-// O_NONBLOCK prevents blocking the bubbletea event loop when no reader is attached
-// to the FIFO (returns ENXIO).
-func (m model) emitAction(b Button) {
+// emitAction performs a button's action. In FIFO mode (m.orch == nil) it appends
+// a record framed as "<kind>US<id>US<payload>RS" to the actions FIFO, where US
+// (0x1f, Unit Separator) separates fields and RS (0x1e, Record Separator)
+// terminates the record. Payload is written byte-exact (no encoding). No-op when
+// no FIFO is set (standalone/sample). O_APPEND|O_CREATE so a regular file works
+// in tests and a real FIFO opened by a reader also works. O_NONBLOCK prevents
+// blocking the bubbletea event loop when no reader is attached (returns ENXIO).
+//
+// In in-process mode (m.orch != nil) it returns a tea.Cmd that drives the
+// orchestrator directly (off the event loop) and feeds a resultMsg back; the
+// FIFO is never touched. The returned Cmd is nil in FIFO mode (or when there is
+// nothing to feed back), so callers can unconditionally batch it.
+func (m model) emitAction(b Button) tea.Cmd {
+	if m.orch != nil {
+		return m.orchCmd(b)
+	}
 	if m.fifoPath == "" {
-		return
+		return nil
 	}
 	f, err := os.OpenFile(m.fifoPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE|syscall.O_NONBLOCK, 0o600)
 	if err != nil {
-		return
+		return nil
 	}
 	defer f.Close()
 	_, _ = f.WriteString(b.Kind + "\x1f" + b.BlockID + "\x1f" + b.Payload + "\x1e")
+	return nil
 }
 
 func newModel(harness, md string) model {
@@ -342,6 +363,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.MouseClickMsg:
 		m.flashKey = ""
+		m.status = ""
 		if msg.Button == tea.MouseLeft {
 			if b, ok := buttonAt(m.buttons, msg.X, msg.Y, m.yOff, m.bodyTop()); ok {
 				m.flashKey = b.BlockID + ":" + b.Kind
@@ -351,16 +373,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if b.Kind == "run" {
 					m = m.markRunning(b.BlockID)
-					m.emitAction(b)
+					ac := m.emitAction(b)
 					m.reflow()
-					return m, tea.Batch(m.startTick(), m.flashCmd())
+					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 				}
 				if b.Kind == "stop" {
 					m.flashKey = b.BlockID + ":" + b.Kind
 					m.markStopped(b.BlockID)
-					m.emitAction(b)
+					ac := m.emitAction(b)
 					m.reflow()
-					return m, m.flashCmd()
+					return m, tea.Batch(m.flashCmd(), ac)
 				}
 				if b.Kind == "apply-diff" {
 					st := m.blockStates[b.BlockID]
@@ -368,9 +390,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					st.Action = "apply"
 					st.SpinFrame = 0
 					m.blockStates[b.BlockID] = st
-					m.emitAction(b)
+					ac := m.emitAction(b)
 					m.reflow()
-					return m, tea.Batch(m.startTick(), m.flashCmd())
+					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 				}
 				if b.Kind == "undo-diff" {
 					st := m.blockStates[b.BlockID]
@@ -378,13 +400,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					st.Action = "undo"
 					st.SpinFrame = 0
 					m.blockStates[b.BlockID] = st
-					m.emitAction(b)
+					ac := m.emitAction(b)
 					m.reflow()
-					return m, tea.Batch(m.startTick(), m.flashCmd())
+					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 				}
 				if b.Kind == "regenerate" {
 					m.flashKey = "cached:regenerate"
-					m.emitAction(b)
+					ac := m.emitAction(b)
 					if m.inputFifoPath != "" {
 						m.md = ""
 						m.isCached = false
@@ -394,10 +416,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.streaming = true
 						m.follow = false
 						m.reflow()
-						return m, tea.Batch(m.flashCmd(), m.startTick(), m.reArmReaderCmd())
+						return m, tea.Batch(m.flashCmd(), m.startTick(), m.reArmReaderCmd(), ac)
 					}
 					m.reflow()
-					return m, m.flashCmd()
+					return m, tea.Batch(m.flashCmd(), ac)
 				}
 				if b.Kind == "followup" {
 					if cmd := m.beginFollowupStream(b.BlockID, b.Payload); cmd != nil {
@@ -406,9 +428,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reflow()
 					return m, m.flashCmd()
 				}
-				m.emitAction(b)
+				ac := m.emitAction(b)
 				m.reflow()
-				return m, m.flashCmd()
+				return m, tea.Batch(m.flashCmd(), ac)
 			}
 		}
 		return m, nil
@@ -436,6 +458,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case tea.KeyPressMsg:
 		m.flashKey = ""
+		m.status = ""
 		// Help overlay: resolve before hint/normal handling.
 		if m.helpMode {
 			switch msg.String() {
@@ -490,16 +513,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					if b.Kind == "run" {
 						m = m.markRunning(b.BlockID)
-						m.emitAction(b)
+						ac := m.emitAction(b)
 						m.reflow()
-						return m, tea.Batch(m.startTick(), m.flashCmd())
+						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 					}
 					if b.Kind == "stop" {
 						m.flashKey = b.BlockID + ":" + b.Kind
 						m.markStopped(b.BlockID)
-						m.emitAction(b)
+						ac := m.emitAction(b)
 						m.reflow()
-						return m, m.flashCmd()
+						return m, tea.Batch(m.flashCmd(), ac)
 					}
 					if b.Kind == "apply-diff" {
 						st := m.blockStates[b.BlockID]
@@ -507,9 +530,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						st.Action = "apply"
 						st.SpinFrame = 0
 						m.blockStates[b.BlockID] = st
-						m.emitAction(b)
+						ac := m.emitAction(b)
 						m.reflow()
-						return m, tea.Batch(m.startTick(), m.flashCmd())
+						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 					}
 					if b.Kind == "undo-diff" {
 						st := m.blockStates[b.BlockID]
@@ -517,13 +540,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						st.Action = "undo"
 						st.SpinFrame = 0
 						m.blockStates[b.BlockID] = st
-						m.emitAction(b)
+						ac := m.emitAction(b)
 						m.reflow()
-						return m, tea.Batch(m.startTick(), m.flashCmd())
+						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 					}
 					if b.Kind == "regenerate" {
 						m.flashKey = "cached:regenerate"
-						m.emitAction(b)
+						ac := m.emitAction(b)
 						if m.inputFifoPath != "" {
 							m.md = ""
 							m.isCached = false
@@ -533,10 +556,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.streaming = true
 							m.follow = false
 							m.reflow()
-							return m, tea.Batch(m.flashCmd(), m.startTick(), m.reArmReaderCmd())
+							return m, tea.Batch(m.flashCmd(), m.startTick(), m.reArmReaderCmd(), ac)
 						}
 						m.reflow()
-						return m, m.flashCmd()
+						return m, tea.Batch(m.flashCmd(), ac)
 					}
 					if b.Kind == "followup" {
 						if cmd := m.beginFollowupStream(b.BlockID, b.Payload); cmd != nil {
@@ -545,9 +568,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.reflow()
 						return m, m.flashCmd()
 					}
-					m.emitAction(b)
+					ac := m.emitAction(b)
 					m.reflow()
-					return m, m.flashCmd()
+					return m, tea.Batch(m.flashCmd(), ac)
 				}
 				m.hintMode = false
 				m.hintLabels = nil
@@ -587,7 +610,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Wrap-up: only when settled (not streaming).
 			if !m.streaming {
 				dbg("emit %s id=%s", "wrapup", "")
-				m.emitAction(Button{Kind: "wrapup"})
+				ac := m.emitAction(Button{Kind: "wrapup"})
 				if m.inputFifoPath != "" {
 					m.md += "\n\n---\n\n"
 					m.thinking = true
@@ -596,7 +619,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.streaming = true
 					m.follow = true
 					m.reflow()
-					return m, tea.Batch(m.startTick(), m.reArmReaderCmd())
+					return m, tea.Batch(m.startTick(), m.reArmReaderCmd(), ac)
+				}
+				if ac != nil {
+					return m, ac
 				}
 			}
 			return m, nil
@@ -724,6 +750,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		return m, nil
+	case statusMsg:
+		// Transient one-line note (e.g. a deferred in-process action). Shown in the
+		// status bar until the next key/click clears it. Never crashes the UI.
+		dbg("status: %s", msg.text)
+		m.status = msg.text
 		return m, nil
 	case reArmedMsg:
 		dbg("re-arm: reader ready err=%v", msg.err)
@@ -956,6 +988,9 @@ func (m *model) clampHelpScroll() {
 // statusBar is the slim, mode-aware bottom hint.
 func (m model) statusBar() string {
 	st := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
+	if m.status != "" && !m.hintMode && !m.helpMode {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render(m.status)
+	}
 	if m.hintMode || m.helpMode {
 		return st.Render("\U000F12B7: cancel")
 	}
@@ -1246,9 +1281,11 @@ func (m model) blockCommand(id string) string {
 // auto-fire path and the `↻ try another fix` button.
 func (m *model) beginFollowupStream(blockID, command string) tea.Cmd {
 	dbg("emit %s id=%s", "followup", blockID)
-	m.emitAction(Button{Kind: "followup", BlockID: blockID, Payload: command})
+	ac := m.emitAction(Button{Kind: "followup", BlockID: blockID, Payload: command})
 	if m.inputFifoPath == "" {
-		return nil
+		// In-process mode: no input FIFO to re-arm; surface whatever the action
+		// produced (a deferred-status cmd for followup) so it isn't dropped.
+		return ac
 	}
 	m.md += "\n\n---\n\n"
 	m.thinking = true

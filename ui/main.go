@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/mattn/go-runewidth"
+
+	"ai-playbook/driver"
+	"ai-playbook/orchestrator"
 )
 
 // Main is the entrypoint for the `ai-playbook run` subcommand. It parses flags
@@ -40,6 +44,8 @@ func Main() int {
 	fs.StringVar(&resultsFifo, "results-fifo", "", "FIFO of run-result records (consumed in Stage 2b; drained here)")
 	var cachedStr string
 	fs.StringVar(&cachedStr, "cached", "", "ISO-8601 timestamp: when set, show a 'cached' badge pill in the header (cache replay)")
+	var cwd string
+	fs.StringVar(&cwd, "cwd", "", "working dir for the in-process shell driver (default: dir of <file.md>, else $PWD)")
 	// os.Args[1] is the "run" subcommand (dispatched from the root main); flags
 	// start at os.Args[2:]. Guard for direct/odd invocations.
 	argv := os.Args[2:]
@@ -110,12 +116,41 @@ func Main() int {
 	}
 	defer tty.Close()
 
+	// In-process mode: when no --actions-fifo is given AND we have a playbook file
+	// to run, drive the real shell directly via the orchestrator instead of the
+	// FIFO/broker. The driver's working dir is --cwd, else the dir of <file.md>,
+	// else $PWD. A failed driver.Open falls back to the legacy (no-orch) behavior
+	// with a logged note rather than crashing. Done only on the interactive path
+	// (after a real TTY) so render-only invocations never spawn a shell.
+	var orch *orchestrator.Orchestrator
+	if fifoPath == "" && inputFifo == "" {
+		if file := fs.Arg(0); file != "" {
+			runCwd := cwd
+			if runCwd == "" {
+				if abs, aerr := filepath.Abs(file); aerr == nil {
+					runCwd = filepath.Dir(abs)
+				}
+			}
+			if runCwd == "" {
+				runCwd, _ = os.Getwd()
+			}
+			d, derr := driver.Open(driver.Options{Cwd: runCwd})
+			if derr != nil {
+				fmt.Fprintf(os.Stderr, "ai-playbook run: driver.Open failed (%v); falling back to render-only\n", derr)
+			} else {
+				defer d.Close()
+				orch = orchestrator.New(d, &cliMux{})
+			}
+		}
+	}
+
 	// Force TrueColor: zellij's alt-screen pane underreports the color profile
 	// during bubbletea's auto-detection, causing colors to be downsampled.
 	// The UI targets a truecolor Catppuccin terminal, so we pin it explicitly.
 	m := newModel(harness, "")
 	m.fifoPath = fifoPath
 	m.inputFifoPath = inputFifo
+	m.orch = orch
 	m.defaultLabel = thinkingLabel
 	m.thinkLabel = thinkingLabel
 	m.isCached = isCached
