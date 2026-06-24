@@ -7,9 +7,9 @@ type Line struct {
 	Text string // styled (ANSI), ready to print
 	Wide bool
 	Bg   string // optional background ANSI seq; when set on a Wide line, the
-	            // viewport paints it as a fixed full-width backdrop behind the
-	            // horizontally-scrolling text (code blocks).
-	HBar int  // >0 ⇒ render as a horizontal scrollbar for a code block of this
-	          //      content width; Text is an empty placeholder.
+	// viewport paints it as a fixed full-width backdrop behind the
+	// horizontally-scrolling text (code blocks).
+	HBar int // >0 ⇒ render as a horizontal scrollbar for a code block of this
+	//      content width; Text is an empty placeholder.
 	Code bool // belongs to a code block (tab, body, bottom bar, or HBar row)
 }

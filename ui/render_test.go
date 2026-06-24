@@ -463,7 +463,6 @@ func TestRenderCodeBlockBottomBar(t *testing.T) {
 	}
 }
 
-
 func TestCodeBlockButtonsShell(t *testing.T) {
 	_, btns, _ := Render("```sh\nmake all\n```", 40, nil, "")
 	var runB, play, copyB *Button

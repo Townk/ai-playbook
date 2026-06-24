@@ -9,7 +9,11 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-type resultMsg struct{ ID string; Exit int; Logpath string }
+type resultMsg struct {
+	ID      string
+	Exit    int
+	Logpath string
+}
 
 type blockRunState struct {
 	Status    string // "running" | "ok" | "failed" | "stopped"

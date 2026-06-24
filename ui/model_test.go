@@ -752,7 +752,7 @@ func TestStartTickSingleLoop(t *testing.T) {
 func TestStartTickContinuePathKeepsRunning(t *testing.T) {
 	m := newModel("T", "```bash {id=verify}\nmake build\n```\n")
 	m.width, m.height = 80, 24
-	m.startTick()    // arm the single loop
+	m.startTick()     // arm the single loop
 	m.thinking = true // still thinking -> CONTINUE path
 
 	m2, cmd := m.Update(spinTickMsg{})

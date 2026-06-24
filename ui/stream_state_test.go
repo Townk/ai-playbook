@@ -80,8 +80,8 @@ func TestSpinTickAdvancesOnlyWhileThinking(t *testing.T) {
 func TestRunClickMarksRunningAndTicks(t *testing.T) {
 	m := newModel("T", "")
 	m.width, m.height = 80, 24
-	m.fifoPath = "" // emitAction no-ops without a fifo; we only assert state here
-	m = m.markRunning("a")            // helper invoked by the action path
+	m.fifoPath = ""        // emitAction no-ops without a fifo; we only assert state here
+	m = m.markRunning("a") // helper invoked by the action path
 	if m.blockStates["a"].Status != "running" {
 		t.Fatalf("run must mark running")
 	}

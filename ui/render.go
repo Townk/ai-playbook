@@ -353,7 +353,6 @@ func band(content string, bg string, width int) string {
 	return s + "\x1b[0m"
 }
 
-
 const (
 	glyphSep      = "❘"          // U+2758 buttons separator
 	glyphRun      = "\U0000EACF" // U+EACF nf-md-run — execute block in agent shell

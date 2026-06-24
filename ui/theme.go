@@ -55,7 +55,7 @@ const (
 	colSubtext0 = "#a6adc8" // Catppuccin Mocha Subtext0 — MiniIconsGrey
 	colSapphire = "#74c7ec" // Catppuccin Mocha Sapphire  — MiniIconsAzure
 	colRun      = "#6495ED" // cornflower blue — run button glyph
-	colStop     = colRed   // stop button glyph — same red as Catppuccin Mocha #f38ba8
+	colStop     = colRed    // stop button glyph — same red as Catppuccin Mocha #f38ba8
 
 	// Hint-mode label colors (flash.nvim style): bright red on dark red.
 	colHintLabelFg = "#ff5555"
@@ -83,8 +83,8 @@ const codeFgANSI = "\x1b[38;2;40;44;65m"
 
 // diffAddBgANSI / diffDelBgANSI are the per-line background sequences for
 // hunk-style diff rendering (added / deleted lines respectively).
-const diffAddBgANSI = "\x1b[48;2;42;59;46m"  // #2a3b2e — dark green tint
-const diffDelBgANSI = "\x1b[48;2;59;42;46m"  // #3b2a2e — dark red tint
+const diffAddBgANSI = "\x1b[48;2;42;59;46m" // #2a3b2e — dark green tint
+const diffDelBgANSI = "\x1b[48;2;59;42;46m" // #3b2a2e — dark red tint
 
 // codeStyle is a chroma style built from the Catppuccin token colors (the same
 // map the glow theme uses), so code highlighting matches the rest of the UI

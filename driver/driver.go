@@ -160,8 +160,8 @@ func (d *Driver) read() {
 	}
 }
 
-func (d *Driver) send(s string)   { _, _ = d.ptmx.Write([]byte(s + "\r")) }
-func (d *Driver) clearBuf()       { d.mu.Lock(); d.buf = d.buf[:0]; d.mu.Unlock() }
+func (d *Driver) send(s string) { _, _ = d.ptmx.Write([]byte(s + "\r")) }
+func (d *Driver) clearBuf()     { d.mu.Lock(); d.buf = d.buf[:0]; d.mu.Unlock() }
 func (d *Driver) idleFor() time.Duration {
 	d.mu.Lock()
 	defer d.mu.Unlock()

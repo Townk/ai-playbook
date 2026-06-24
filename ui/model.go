@@ -80,23 +80,23 @@ func (m model) reArmReaderCmd() tea.Cmd {
 }
 
 type model struct {
-	harness    string
-	md         string
-	lines      []Line
-	buttons    []Button
-	blocks     []Block
+	harness     string
+	md          string
+	lines       []Line
+	buttons     []Button
+	blocks      []Block
 	blockStates map[string]blockRunState
-	width      int
-	height     int
-	xOff       int
-	yOff       int
-	fifoPath   string
-	hintMode   bool
-	hintLabels map[string]Button
-	helpMode   bool
-	helpLines  []Line
-	helpYOff   int
-	helpXOff   int
+	width       int
+	height      int
+	xOff        int
+	yOff        int
+	fifoPath    string
+	hintMode    bool
+	hintLabels  map[string]Button
+	helpMode    bool
+	helpLines   []Line
+	helpYOff    int
+	helpXOff    int
 
 	inputFifoPath string // --input-fifo path; used to re-open the FIFO on regenerate
 
@@ -999,9 +999,24 @@ func (m model) statusBar() string {
 
 func helpInnerH(m model) int { _, h, _, _ := m.helpTextDims(); return h }
 func helpInnerW(m model) int { w, _, _, _ := m.helpTextDims(); return w }
-func helpHalf(m model) int   { if h := helpInnerH(m) / 2; h > 1 { return h }; return 1 }
-func helpPage(m model) int   { if h := helpInnerH(m); h > 1 { return h }; return 1 }
-func helpHalfW(m model) int  { if w := helpInnerW(m) / 2; w > 1 { return w }; return 1 }
+func helpHalf(m model) int {
+	if h := helpInnerH(m) / 2; h > 1 {
+		return h
+	}
+	return 1
+}
+func helpPage(m model) int {
+	if h := helpInnerH(m); h > 1 {
+		return h
+	}
+	return 1
+}
+func helpHalfW(m model) int {
+	if w := helpInnerW(m) / 2; w > 1 {
+		return w
+	}
+	return 1
+}
 
 // mantleBg is the ANSI truecolor background sequence for colMantle, used to
 // band each interior row so the modal background is uniform throughout.
@@ -1189,14 +1204,14 @@ func (m model) normalLines() []string {
 	pos, size := vthumb(len(m.lines), m.body(), m.yOff)
 	pad := func(s string) string { return padTo(s, m.width) }
 	out := make([]string, 0, m.height)
-	out = append(out, pad(""))                         // leading blank
-	out = append(out, pad(m.titleLine(m.width)))       // title
+	out = append(out, pad(""))                   // leading blank
+	out = append(out, pad(m.titleLine(m.width))) // title
 	if m.isCached {
-		out = append(out, pad(""))                     // blank above pill
-		out = append(out, pad(m.cachedBadgeRow()))     // cached pill (left-aligned)
-		out = append(out, pad(""))                     // blank below pill
+		out = append(out, pad(""))                 // blank above pill
+		out = append(out, pad(m.cachedBadgeRow())) // cached pill (left-aligned)
+		out = append(out, pad(""))                 // blank below pill
 	} else {
-		out = append(out, pad(""))                     // top-pad (single blank)
+		out = append(out, pad("")) // top-pad (single blank)
 	}
 	spinRow := -1
 	if m.thinking {
@@ -1226,7 +1241,7 @@ func (m model) normalLines() []string {
 			out = append(out, pad(""))
 		}
 	}
-	out = append(out, pad(""))                // bottom pad
+	out = append(out, pad(""))                 // bottom pad
 	out = append(out, pad("  "+m.statusBar())) // status bar
 	return out
 }
@@ -1324,9 +1339,9 @@ func (m model) staticRender() string {
 	var sb strings.Builder
 	sb.WriteString(m.titleLine(m.width) + "\n")
 	if m.isCached {
-		sb.WriteString("\n")                       // blank above pill
+		sb.WriteString("\n")                      // blank above pill
 		sb.WriteString(m.cachedBadgeRow() + "\n") // cached pill (left-aligned)
-		sb.WriteString("\n")                       // blank below pill
+		sb.WriteString("\n")                      // blank below pill
 	} else {
 		sb.WriteString("\n") // top-pad (single blank)
 	}

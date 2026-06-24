@@ -432,8 +432,8 @@ func TestHelpModalScrollbarUsesMantle(t *testing.T) {
 
 	out := m.helpModal()
 
-	const mantleBgParams = "48;2;24;24;37"  // colMantle #181825
-	const codeBgParams   = "48;2;40;44;65"  // colCodeBg #282C41
+	const mantleBgParams = "48;2;24;24;37" // colMantle #181825
+	const codeBgParams = "48;2;40;44;65"   // colCodeBg #282C41
 	if !strings.Contains(out, mantleBgParams) {
 		t.Fatalf("help modal scrollbar row must use colMantle bg (%s), but sequence not found in output", mantleBgParams)
 	}

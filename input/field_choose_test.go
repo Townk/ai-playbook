@@ -12,7 +12,7 @@ func key(r rune) tea.KeyPressMsg { return tea.KeyPressMsg{Code: r, Text: string(
 
 func TestChooseSingleSelect(t *testing.T) {
 	f := field(newChooseField(defaultTheme(), "default", []string{"alpha", "beta", "gamma"}, false, ""))
-	f, _, _ = f.handle(key('j'))               // move to beta
+	f, _, _ = f.handle(key('j')) // move to beta
 	f2, act, _ := f.handle(tea.KeyPressMsg{Code: tea.KeyEnter})
 	if act != fieldDone || f2.value() != "beta" {
 		t.Fatalf("j then Enter must select beta: act=%d val=%q", act, f2.value())

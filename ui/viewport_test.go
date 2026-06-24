@@ -70,4 +70,3 @@ func TestWindowBgBackdropFillsWhenScrolledPastText(t *testing.T) {
 		t.Fatalf("missing closing reset")
 	}
 }
-

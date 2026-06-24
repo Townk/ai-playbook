@@ -41,16 +41,16 @@ type streamEvent interface{ streamEvent() }
 
 type textEvent struct{ text string }   // markdown bytes to append + render
 type thinkEvent struct{ label string } // start/replace thinking; "" → default label
-type quitEvent struct{}               // \x10q\x10 — shell signals the pager to quit
+type quitEvent struct{}                // \x10q\x10 — shell signals the pager to quit
 
 func (textEvent) streamEvent()  {}
 func (thinkEvent) streamEvent() {}
 func (quitEvent) streamEvent()  {}
 
 const (
-	psText = iota // default: bytes are markdown text
-	psCmd         // just saw DLE: this byte is the command
-	psLabel       // inside a record: accumulate payload until the closing DLE
+	psText  = iota // default: bytes are markdown text
+	psCmd          // just saw DLE: this byte is the command
+	psLabel        // inside a record: accumulate payload until the closing DLE
 )
 
 // streamParser turns a byte stream (delivered in arbitrary chunks) into ordered
