@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"ai-playbook/author"
 	"ai-playbook/cache"
 	"ai-playbook/capture"
 	"ai-playbook/driver"
@@ -25,6 +26,9 @@ import (
 	"ai-playbook/mux"
 	"ai-playbook/triage"
 	"ai-playbook/ui"
+
+	"bytes"
+	"encoding/json"
 )
 
 func main() {
@@ -116,11 +120,11 @@ func selftest() int {
 	return 1
 }
 
-// troubleshoot is the AI producer's LLM-FREE front half (stage 4a): gather the
-// bounded request context (capture), route it (triage). On a cache HIT, render +
-// drive the cached playbook via the existing in-process `run` path. On a MISS,
-// the authoring step (the agent) is stage 4b — print an honest, obviously-partial
-// notice and exit non-zero. The agent is NOT faked.
+// troubleshoot is the AI producer: gather the bounded request context (capture),
+// route it (triage). On a cache HIT, render + drive the cached playbook via the
+// existing in-process `run` path. On a MISS, author a fresh playbook with the
+// capable agent (stage 4b), stream it into the same render+drive path, and cache
+// it on completion.
 //
 // The user's request text comes from the args after `troubleshoot`, else
 // $AI_ASSIST_USER_REQUEST — the live float-submit path lands with stage 4b/5.
@@ -151,9 +155,94 @@ func troubleshoot() int {
 	case triage.Hit:
 		return serveCachedPlaybook(d, req)
 	default:
-		fmt.Fprintln(os.Stderr, "ai-playbook troubleshoot: authoring not yet implemented (stage 4b)")
+		return authorPlaybook(req, d, c, noCache)
+	}
+}
+
+// authorPlaybook handles a cache MISS (stage 4b): run the capable agent to author
+// a fresh playbook, stream it into the ui's in-process render+drive path (the same
+// path `run <file.md>` uses), and — when the cache wasn't disabled — persist the
+// produced playbook on completion.
+//
+// The agent's stdout STREAM is fed to ui.RunStream as the input source so the ui
+// renders it incrementally and drives its run blocks against the user's real
+// shell. The stream is teed to a buffer so that after the ui returns we store the
+// captured body via cache.Store(ctxHash, reqHash, "playbook", body, …) alongside
+// the original request.json sidecar. Storing respects triage's decision: skipped
+// when the cache was disabled (unreliable key) or bypassed (no-cache).
+func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool) int {
+	stream, err := author.Author(req, author.ClaudeAgent)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: author: %v\n", err)
 		return 1
 	}
+	defer stream.Close()
+
+	cwd := req.ProjectRoot
+	if cwd == "" {
+		cwd = req.CWD
+	}
+
+	// Tee the produced playbook into a buffer as the ui consumes it, so we can
+	// persist it on completion.
+	var body bytes.Buffer
+	code := ui.RunStream(stream, ui.StreamOptions{
+		Harness: "Claude Code",
+		Cwd:     cwd,
+		Tee:     &body,
+	})
+
+	// Cache-store on completion — only when the cache wasn't disabled/bypassed and
+	// the keys are valid. The disabled guard (failure with empty scrollback) and
+	// the no-cache bypass both leave the entry unstored, matching the shell.
+	if !d.Disabled && !noCache && d.CtxHash != "" && d.ReqHash != "" && body.Len() > 0 {
+		if _, serr := c.Store(d.CtxHash, d.ReqHash, "playbook", body.String(), nil, requestJSON(req)); serr != nil {
+			fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: cache store: %v\n", serr)
+		}
+	}
+	return code
+}
+
+// requestJSON serializes the captured Request into the request.json shape the
+// shell wrote, for the cache sidecar (faithful regenerate context). It mirrors
+// assist::build_request's JSON object.
+func requestJSON(req capture.Request) string {
+	type origin struct {
+		PaneID      string `json:"pane_id,omitempty"`
+		CWD         string `json:"cwd,omitempty"`
+		ProjectRoot string `json:"project_root,omitempty"`
+	}
+	type command struct {
+		Text       string `json:"text,omitempty"`
+		Exit       string `json:"exit,omitempty"`
+		DurationMs string `json:"duration_ms,omitempty"`
+	}
+	type project struct {
+		Name   string `json:"name,omitempty"`
+		Branch string `json:"branch,omitempty"`
+	}
+	doc := struct {
+		Version     int     `json:"version"`
+		Kind        string  `json:"kind"`
+		Origin      origin  `json:"origin"`
+		Command     command `json:"command"`
+		Scrollback  string  `json:"scrollback,omitempty"`
+		UserRequest string  `json:"user_request,omitempty"`
+		Project     project `json:"project"`
+	}{
+		Version:     1,
+		Kind:        req.Kind,
+		Origin:      origin{PaneID: req.PaneID, CWD: req.CWD, ProjectRoot: req.ProjectRoot},
+		Command:     command{Text: req.Command, Exit: req.Exit, DurationMs: req.DurationMs},
+		Scrollback:  req.Scrollback,
+		UserRequest: req.UserRequest,
+		Project:     project{Name: req.Project.Name, Branch: req.Project.Branch},
+	}
+	b, err := json.Marshal(doc)
+	if err != nil {
+		return ""
+	}
+	return string(b)
 }
 
 // serveCachedPlaybook renders the cached entry through the existing in-process
