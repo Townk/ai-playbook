@@ -1,10 +1,11 @@
 // ai-playbook — unified terminal AI-assist / playbook binary.
 //
 // Subcommands (git-style; the binary self-spawns for floats/panes):
-//   troubleshoot   AI producer: capture → triage → author a playbook → drive it
-//   run <file.md>  playbook runtime: render + orchestrate a playbook artifact
-//   input          the multi-line input widget
-//   selftest       drive the user's real shell and report (validates the driver)
+//
+//	troubleshoot   AI producer: capture → triage → author a playbook → drive it
+//	run <file.md>  playbook runtime: render + orchestrate a playbook artifact
+//	input          the multi-line input widget
+//	selftest       drive the user's real shell and report (validates the driver)
 //
 // Stage 1 ships the driver core + selftest; the rest are stubs filled in by the
 // strangler migration (see docs/superpowers/specs/2026-06-24-ai-playbook-unification-design.md).
@@ -17,8 +18,12 @@ import (
 	"strings"
 	"time"
 
+	"ai-playbook/cache"
+	"ai-playbook/capture"
 	"ai-playbook/driver"
 	"ai-playbook/input"
+	"ai-playbook/mux"
+	"ai-playbook/triage"
 	"ai-playbook/ui"
 )
 
@@ -31,8 +36,7 @@ func main() {
 	case "selftest":
 		os.Exit(selftest())
 	case "troubleshoot":
-		fmt.Fprintln(os.Stderr, "ai-playbook troubleshoot: not yet implemented (migration stage 4)")
-		os.Exit(1)
+		os.Exit(troubleshoot())
 	case "run":
 		os.Exit(ui.Main())
 	case "input":
@@ -110,6 +114,95 @@ func selftest() int {
 	}
 	say("RESULT: %d FAILED", fails)
 	return 1
+}
+
+// troubleshoot is the AI producer's LLM-FREE front half (stage 4a): gather the
+// bounded request context (capture), route it (triage). On a cache HIT, render +
+// drive the cached playbook via the existing in-process `run` path. On a MISS,
+// the authoring step (the agent) is stage 4b — print an honest, obviously-partial
+// notice and exit non-zero. The agent is NOT faked.
+//
+// The user's request text comes from the args after `troubleshoot`, else
+// $AI_ASSIST_USER_REQUEST — the live float-submit path lands with stage 4b/5.
+func troubleshoot() int {
+	userRequest := strings.TrimSpace(strings.Join(os.Args[2:], " "))
+	if userRequest == "" {
+		userRequest = os.Getenv("AI_ASSIST_USER_REQUEST")
+	}
+
+	// pane id from env (mirrors the shell's ZELLIJ_PANE_ID → terminal_<id>).
+	paneID := ""
+	if p := os.Getenv("ZELLIJ_PANE_ID"); p != "" {
+		paneID = "terminal_" + p
+	}
+
+	req := capture.Capture(capture.Options{
+		Mux:         mux.NewZellij(),
+		Atuin:       capture.NewAtuin(),
+		PaneID:      paneID,
+		UserRequest: userRequest,
+	})
+
+	c := cache.Open()
+	noCache := os.Getenv("AI_ASSIST_NO_CACHE") != ""
+	d := triage.Route(req, c, noCache)
+
+	switch d.Outcome {
+	case triage.Hit:
+		return serveCachedPlaybook(d, req)
+	default:
+		fmt.Fprintln(os.Stderr, "ai-playbook troubleshoot: authoring not yet implemented (stage 4b)")
+		return 1
+	}
+}
+
+// serveCachedPlaybook renders the cached entry through the existing in-process
+// `run` path. The entry on disk carries YAML front matter; we strip it to the
+// body, write it to a temp file, and reuse ui.Main() (which spins up the driver +
+// orchestrator and drives the playbook in-process), passing --cached for the
+// header badge and --cwd so runs execute in the request's project root.
+func serveCachedPlaybook(d triage.Decision, req capture.Request) int {
+	raw, err := os.ReadFile(d.Path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: read cache entry: %v\n", err)
+		return 1
+	}
+	content := string(raw)
+	body := cache.Body(content)
+	created, _ := cache.Field(content, "created_at")
+
+	f, err := os.CreateTemp("", "aapb-cached-*.md")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
+		return 1
+	}
+	tmp := f.Name()
+	if _, err := f.WriteString(body); err != nil {
+		f.Close()
+		os.Remove(tmp)
+		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
+		return 1
+	}
+	f.Close()
+	defer os.Remove(tmp)
+
+	cwd := req.ProjectRoot
+	if cwd == "" {
+		cwd = req.CWD
+	}
+
+	// Reuse the `run` subcommand entrypoint in-process by shaping os.Args the way
+	// ui.Main() parses them (os.Args[1]="run", flags from os.Args[2:]).
+	argv := []string{os.Args[0], "run"}
+	if created != "" {
+		argv = append(argv, "--cached", created)
+	}
+	if cwd != "" {
+		argv = append(argv, "--cwd", cwd)
+	}
+	argv = append(argv, tmp)
+	os.Args = argv
+	return ui.Main()
 }
 
 func dirExists(p string) bool { fi, err := os.Stat(p); return err == nil && fi.IsDir() }
