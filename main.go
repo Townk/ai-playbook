@@ -19,6 +19,7 @@ import (
 
 	"ai-playbook/driver"
 	"ai-playbook/input"
+	"ai-playbook/ui"
 )
 
 func main() {
@@ -33,8 +34,7 @@ func main() {
 		fmt.Fprintln(os.Stderr, "ai-playbook troubleshoot: not yet implemented (migration stage 4)")
 		os.Exit(1)
 	case "run":
-		fmt.Fprintln(os.Stderr, "ai-playbook run: not yet implemented (migration stage 3)")
-		os.Exit(1)
+		os.Exit(ui.Main())
 	case "input":
 		os.Exit(input.Main())
 	case "-h", "--help", "help":

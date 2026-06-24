@@ -1,0 +1,1300 @@
+package ui
+
+import (
+	"bufio"
+	"fmt"
+	"io"
+	"os"
+	"strings"
+	"syscall"
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
+)
+
+// spinTickMsg drives the spinner animation/timer while thinking.
+type spinTickMsg struct{}
+
+func (m model) tickCmd() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return spinTickMsg{} })
+}
+
+// startTick returns the single spinner tick loop, or nil if a loop is already
+// live. External entry points (Init, thinkEvent, click handlers, regenerate,
+// wrap-up, follow-up) call this instead of tickCmd directly so that at most one
+// 100ms loop ever exists — overlapping loops would advance spinTicks multiple
+// times per tick and race the seconds counter. The loop's own continuation (the
+// spinTickMsg CONTINUE path) re-issues tickCmd directly; the STOP path clears
+// tickRunning.
+func (m *model) startTick() tea.Cmd {
+	if m.tickRunning {
+		return nil
+	}
+	m.tickRunning = true
+	return m.tickCmd()
+}
+
+// renderInterval bounds how often streamed text is re-rendered. A stream can
+// deliver many small chunks per second; rather than reflow (parse + highlight
+// the whole accumulated buffer) and repaint on every chunk — which saturates
+// the event loop and stutters — chunks are appended cheaply and a single
+// reflow is coalesced per interval (~30fps).
+const renderInterval = 33 * time.Millisecond
+
+// renderTickMsg flushes any pending streamed text into a reflow.
+type renderTickMsg struct{}
+
+func (m model) renderTickCmd() tea.Cmd {
+	return tea.Tick(renderInterval, func(time.Time) tea.Msg { return renderTickMsg{} })
+}
+
+// flashCmd returns a command that fires flashTickMsg after ~140ms, clearing
+// the active flash highlight.
+func (m model) flashCmd() tea.Cmd {
+	return tea.Tick(140*time.Millisecond, func(time.Time) tea.Msg { return flashTickMsg{} })
+}
+
+// flashTickMsg clears the active flash highlight after ~140ms.
+type flashTickMsg struct{}
+
+// reArmedMsg is returned by reArmReaderCmd once the input FIFO has been
+// re-opened (or failed to open) for a fresh stream after a regenerate.
+type reArmedMsg struct {
+	reader io.Reader
+	err    error
+}
+
+// reArmReaderCmd opens m.inputFifoPath for reading and returns a reArmedMsg.
+// The open blocks until the helper opens the write end, which is fine because
+// it runs inside the tea.Cmd goroutine (not the event loop).
+func (m model) reArmReaderCmd() tea.Cmd {
+	path := m.inputFifoPath
+	return func() tea.Msg {
+		dbg("re-arm: opening input fifo %q", path)
+		f, err := os.OpenFile(path, os.O_RDONLY, 0)
+		return reArmedMsg{reader: f, err: err}
+	}
+}
+
+type model struct {
+	harness    string
+	md         string
+	lines      []Line
+	buttons    []Button
+	blocks     []Block
+	blockStates map[string]blockRunState
+	width      int
+	height     int
+	xOff       int
+	yOff       int
+	fifoPath   string
+	hintMode   bool
+	hintLabels map[string]Button
+	helpMode   bool
+	helpLines  []Line
+	helpYOff   int
+	helpXOff   int
+
+	inputFifoPath string // --input-fifo path; used to re-open the FIFO on regenerate
+
+	// streaming + thinking
+	thinking     bool
+	thinkLabel   string
+	defaultLabel string
+	spinFrame    int
+	spinTicks    int // 100ms ticks within the current thinking session (seconds = /10)
+	streaming    bool
+	follow       bool      // auto-scroll to bottom while streaming
+	reader       io.Reader // input stream source (set by main); nil in tests/static
+	parser       *streamParser
+
+	dirty           bool // streamed text appended since the last reflow
+	renderScheduled bool // a coalesced render tick is already pending
+	tickRunning     bool // a single 100ms spinner tick loop is live
+
+	// flash: non-empty while a button is briefly highlighted after activation.
+	// Identity key is "<blockID>:<kind>"; cleared by flashTickMsg after ~140ms.
+	flashKey string
+
+	// cached replay: set when --cached <ISO-8601> is passed; the badge pill is
+	// shown in the header line to tell the user this result is a cache replay.
+	isCached bool
+	cachedAt time.Time
+}
+
+// emitAction appends a record framed as "<kind>US<payload>RS" to the actions
+// FIFO, where US (0x1f, Unit Separator) separates kind from payload and RS
+// (0x1e, Record Separator) terminates the record. Payload is written byte-exact
+// (no encoding). No-op when no FIFO is set (standalone/sample). O_APPEND|O_CREATE
+// so a regular file works in tests and a real FIFO opened by a reader also works.
+// O_NONBLOCK prevents blocking the bubbletea event loop when no reader is attached
+// to the FIFO (returns ENXIO).
+func (m model) emitAction(b Button) {
+	if m.fifoPath == "" {
+		return
+	}
+	f, err := os.OpenFile(m.fifoPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE|syscall.O_NONBLOCK, 0o600)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	_, _ = f.WriteString(b.Kind + "\x1f" + b.BlockID + "\x1f" + b.Payload + "\x1e")
+}
+
+func newModel(harness, md string) model {
+	return model{
+		harness:      harness,
+		md:           md,
+		width:        80,
+		height:       24,
+		helpLines:    buildHelpLines(),
+		defaultLabel: "Working…",
+		follow:       false, // start at the top on load; only append (wrap-up) re-enables follow
+		blockStates:  map[string]blockRunState{},
+	}
+}
+
+func (m model) Init() tea.Cmd {
+	if m.reader == nil {
+		return nil
+	}
+	cmds := []tea.Cmd{readStream(m.reader, m.parser)}
+	if m.thinking {
+		cmds = append(cmds, m.startTick())
+	}
+	return tea.Batch(cmds...)
+}
+
+// headerRows is the height the header takes (title only; top padding provides
+// the gap between header and body).
+const headerRows = 1
+
+// hintRows is the height the bottom key-hint takes.
+const hintRows = 1
+
+// contentWidth returns the render/scroll width: full width minus 2-col left
+// and 2-col right margins (floored at 1).
+func (m *model) contentWidth() int {
+	w := m.width - 4
+	if w < 1 {
+		w = 1
+	}
+	return w
+}
+
+// body returns the number of visible body rows.
+// Non-cached layout: leading(1) + header(1) + top-pad(1) + body + bot-pad(1) + hint(1) = H → body = H-5.
+// Cached layout:     leading(1) + header(1) + blank(1) + pill(1) + blank(1) + body + bot-pad(1) + hint(1) = H → body = H-7.
+func (m *model) body() int {
+	h := m.height - headerRows - hintRows - 3 - m.cachedRows() // subtract leading blank + top/bottom pads + cached extra rows
+	if h < 1 {
+		h = 1
+	}
+	return h
+}
+
+func (m *model) reflow() {
+	m.lines, m.buttons, m.blocks = Render(m.md, m.contentWidth(), m.blockStates, m.flashKey)
+	m.appendCachedButton()
+	m.clampScroll()
+}
+
+// flushRender re-renders the accumulated stream buffer if any text is pending,
+// pinning the view to the bottom while following. No-op when nothing is dirty,
+// so it's cheap to call from the render tick and on EOF.
+func (m *model) flushRender() {
+	if !m.dirty {
+		return
+	}
+	m.reflow()
+	if m.follow {
+		m.yOff = len(m.lines) // clampScroll caps to the bottom
+		m.clampScroll()
+	}
+	m.dirty = false
+}
+
+func (m *model) clampScroll() {
+	maxY := len(m.lines) - m.body()
+	if maxY < 0 {
+		maxY = 0
+	}
+	if m.yOff > maxY {
+		m.yOff = maxY
+	}
+	if m.yOff < 0 {
+		m.yOff = 0
+	}
+	maxX := MaxWideWidth(m.lines) - m.contentWidth()
+	if maxX < 0 {
+		maxX = 0
+	}
+	if m.xOff > maxX {
+		m.xOff = maxX
+	}
+	if m.xOff < 0 {
+		m.xOff = 0
+	}
+}
+
+// cachedRows returns the number of extra header rows inserted when showing a
+// cached-replay badge: 2 (blank above the pill + blank below the pill) when
+// isCached, 0 otherwise. This is the single source of truth for the layout
+// delta between cached and non-cached views.
+func (m *model) cachedRows() int {
+	if m.isCached {
+		return 2
+	}
+	return 0
+}
+
+// bodyTop returns the screen row (0-based) of the first body line.
+// Non-cached layout: leading blank(1) + header(1) + top-pad(1) = row 3.
+// Cached layout:     leading blank(1) + header(1) + blank(1) + pill(1) + blank(1) = row 5.
+func (m *model) bodyTop() int {
+	return 1 + headerRows + 1 + m.cachedRows()
+}
+
+func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case streamEventsMsg:
+		startedThinking := false
+		quit := false
+		for _, ev := range msg.events {
+			switch e := ev.(type) {
+			case textEvent:
+				m.md += e.text // cheap append; reflow is coalesced (renderTickMsg)
+				m.dirty = true
+				m.thinking = false
+			case thinkEvent:
+				label := e.label
+				if label == "" {
+					label = m.defaultLabel
+				}
+				if !m.thinking { // new thinking session: reset the timer
+					m.thinking = true
+					m.spinFrame = 0
+					m.spinTicks = 0
+					startedThinking = true
+				}
+				m.thinkLabel = label
+			case quitEvent:
+				quit = true
+			}
+		}
+		if quit {
+			dbg("quitEvent received -> tea.Quit")
+			return m, tea.Quit
+		}
+		if msg.eof {
+			m.flushRender() // render whatever's pending immediately
+			m.streaming = false
+			m.thinking = false
+			return m, nil
+		}
+		cmds := []tea.Cmd{readStream(m.reader, m.parser)}
+		if startedThinking {
+			cmds = append(cmds, m.startTick())
+		}
+		// Coalesce the (expensive) whole-buffer reflow to renderInterval instead
+		// of reflowing on every chunk. Schedule at most one tick at a time.
+		if m.dirty && !m.renderScheduled {
+			m.renderScheduled = true
+			cmds = append(cmds, m.renderTickCmd())
+		}
+		return m, tea.Batch(cmds...)
+	case renderTickMsg:
+		m.renderScheduled = false
+		m.flushRender()
+		return m, nil
+	case flashTickMsg:
+		m.flashKey = ""
+		m.reflow()
+		return m, nil
+	case spinTickMsg:
+		running := false
+		for id, st := range m.blockStates {
+			if st.Status == "running" {
+				st.SpinFrame++
+				m.blockStates[id] = st
+				running = true
+			}
+		}
+		if m.thinking {
+			m.spinFrame++
+			m.spinTicks++
+		}
+		if !m.thinking && !running {
+			m.tickRunning = false
+			return m, nil
+		}
+		if running {
+			m.reflow()
+		}
+		return m, m.tickCmd()
+	case tea.WindowSizeMsg:
+		m.flashKey = ""
+		m.width = msg.Width
+		m.height = msg.Height
+		m.reflow()
+		m.clampHelpScroll()
+		return m, nil
+	case tea.MouseClickMsg:
+		m.flashKey = ""
+		if msg.Button == tea.MouseLeft {
+			if b, ok := buttonAt(m.buttons, msg.X, msg.Y, m.yOff, m.bodyTop()); ok {
+				m.flashKey = b.BlockID + ":" + b.Kind
+				if b.Kind == "toggle" {
+					m = m.handleToggle(b.BlockID) // handleToggle already calls reflow
+					return m, m.flashCmd()
+				}
+				if b.Kind == "run" {
+					m = m.markRunning(b.BlockID)
+					m.emitAction(b)
+					m.reflow()
+					return m, tea.Batch(m.startTick(), m.flashCmd())
+				}
+				if b.Kind == "stop" {
+					m.flashKey = b.BlockID + ":" + b.Kind
+					m.markStopped(b.BlockID)
+					m.emitAction(b)
+					m.reflow()
+					return m, m.flashCmd()
+				}
+				if b.Kind == "apply-diff" {
+					st := m.blockStates[b.BlockID]
+					st.Status = "running"
+					st.Action = "apply"
+					st.SpinFrame = 0
+					m.blockStates[b.BlockID] = st
+					m.emitAction(b)
+					m.reflow()
+					return m, tea.Batch(m.startTick(), m.flashCmd())
+				}
+				if b.Kind == "undo-diff" {
+					st := m.blockStates[b.BlockID]
+					st.Status = "running"
+					st.Action = "undo"
+					st.SpinFrame = 0
+					m.blockStates[b.BlockID] = st
+					m.emitAction(b)
+					m.reflow()
+					return m, tea.Batch(m.startTick(), m.flashCmd())
+				}
+				if b.Kind == "regenerate" {
+					m.flashKey = "cached:regenerate"
+					m.emitAction(b)
+					if m.inputFifoPath != "" {
+						m.md = ""
+						m.isCached = false
+						m.thinking = true
+						m.spinFrame = 0
+						m.spinTicks = 0
+						m.streaming = true
+						m.follow = false
+						m.reflow()
+						return m, tea.Batch(m.flashCmd(), m.startTick(), m.reArmReaderCmd())
+					}
+					m.reflow()
+					return m, m.flashCmd()
+				}
+				if b.Kind == "followup" {
+					if cmd := m.beginFollowupStream(b.BlockID, b.Payload); cmd != nil {
+						return m, tea.Batch(m.flashCmd(), cmd)
+					}
+					m.reflow()
+					return m, m.flashCmd()
+				}
+				m.emitAction(b)
+				m.reflow()
+				return m, m.flashCmd()
+			}
+		}
+		return m, nil
+	case tea.MouseWheelMsg:
+		// The wheel scrolls the help modal when it's open, otherwise the document
+		// (a few lines per notch). Ignored in hint mode (a transient selection).
+		// Vertical only — terminals don't reliably deliver horizontal-wheel events.
+		const wheelStep = 3
+		var delta int
+		switch msg.Button {
+		case tea.MouseWheelUp:
+			delta = -wheelStep
+		case tea.MouseWheelDown:
+			delta = wheelStep
+		default:
+			return m, nil
+		}
+		if m.helpMode {
+			m.helpYOff += delta
+			m.clampHelpScroll()
+		} else if !m.hintMode {
+			m.yOff += delta
+			m.clampScroll()
+		}
+		return m, nil
+	case tea.KeyPressMsg:
+		m.flashKey = ""
+		// Help overlay: resolve before hint/normal handling.
+		if m.helpMode {
+			switch msg.String() {
+			case "esc", "q", "?":
+				m.helpMode = false
+			case "down", "j":
+				m.helpYOff++
+			case "up", "k":
+				m.helpYOff--
+			case "ctrl+d":
+				m.helpYOff += helpHalf(m)
+			case "ctrl+u":
+				m.helpYOff -= helpHalf(m)
+			case "ctrl+f", "pgdown":
+				m.helpYOff += helpPage(m)
+			case "ctrl+b", "pgup":
+				m.helpYOff -= helpPage(m)
+			case "g", "home":
+				m.helpYOff = 0
+			case "G", "end":
+				m.helpYOff = len(m.helpLines)
+			case "right", "l":
+				m.helpXOff++
+			case "left", "h":
+				m.helpXOff--
+			case "L":
+				m.helpXOff += helpHalfW(m)
+			case "H":
+				m.helpXOff -= helpHalfW(m)
+			case "0", "^":
+				m.helpXOff = 0
+			case "$":
+				m.helpXOff = MaxWideWidth(m.helpLines)
+			}
+			m.clampHelpScroll()
+			return m, nil
+		}
+		// Hint mode: resolve the pending label before any normal nav.
+		if m.hintMode {
+			switch msg.String() {
+			case "esc":
+				m.hintMode = false
+				m.hintLabels = nil
+			default:
+				if b, ok := m.hintLabels[msg.String()]; ok {
+					m.flashKey = b.BlockID + ":" + b.Kind
+					m.hintMode = false
+					m.hintLabels = nil
+					if b.Kind == "toggle" {
+						m = m.handleToggle(b.BlockID) // handleToggle already calls reflow
+						return m, m.flashCmd()
+					}
+					if b.Kind == "run" {
+						m = m.markRunning(b.BlockID)
+						m.emitAction(b)
+						m.reflow()
+						return m, tea.Batch(m.startTick(), m.flashCmd())
+					}
+					if b.Kind == "stop" {
+						m.flashKey = b.BlockID + ":" + b.Kind
+						m.markStopped(b.BlockID)
+						m.emitAction(b)
+						m.reflow()
+						return m, m.flashCmd()
+					}
+					if b.Kind == "apply-diff" {
+						st := m.blockStates[b.BlockID]
+						st.Status = "running"
+						st.Action = "apply"
+						st.SpinFrame = 0
+						m.blockStates[b.BlockID] = st
+						m.emitAction(b)
+						m.reflow()
+						return m, tea.Batch(m.startTick(), m.flashCmd())
+					}
+					if b.Kind == "undo-diff" {
+						st := m.blockStates[b.BlockID]
+						st.Status = "running"
+						st.Action = "undo"
+						st.SpinFrame = 0
+						m.blockStates[b.BlockID] = st
+						m.emitAction(b)
+						m.reflow()
+						return m, tea.Batch(m.startTick(), m.flashCmd())
+					}
+					if b.Kind == "regenerate" {
+						m.flashKey = "cached:regenerate"
+						m.emitAction(b)
+						if m.inputFifoPath != "" {
+							m.md = ""
+							m.isCached = false
+							m.thinking = true
+							m.spinFrame = 0
+							m.spinTicks = 0
+							m.streaming = true
+							m.follow = false
+							m.reflow()
+							return m, tea.Batch(m.flashCmd(), m.startTick(), m.reArmReaderCmd())
+						}
+						m.reflow()
+						return m, m.flashCmd()
+					}
+					if b.Kind == "followup" {
+						if cmd := m.beginFollowupStream(b.BlockID, b.Payload); cmd != nil {
+							return m, tea.Batch(m.flashCmd(), cmd)
+						}
+						m.reflow()
+						return m, m.flashCmd()
+					}
+					m.emitAction(b)
+					m.reflow()
+					return m, m.flashCmd()
+				}
+				m.hintMode = false
+				m.hintLabels = nil
+			}
+			return m, nil
+		}
+		// Leader: Space enters hint mode over the visible buttons. bubbletea v2
+		// (ultraviolet) reports the space key as "space", not " ".
+		if s := msg.String(); s == "space" || s == " " {
+			var visible []Button
+			for _, b := range m.buttons {
+				if b.Screen {
+					// Screen-fixed buttons are always "visible" (they're in the
+					// fixed header, not the scrollable body).
+					visible = append(visible, b)
+					continue
+				}
+				if b.Line >= m.yOff && b.Line < m.yOff+m.body() {
+					visible = append(visible, b)
+				}
+			}
+			if len(visible) > 0 {
+				m.hintLabels = assignHintLabels(visible)
+				m.hintMode = true
+			}
+			return m, nil
+		}
+		switch msg.String() {
+		case "?":
+			m.helpMode = true
+			m.helpYOff = 0
+			m.helpXOff = 0
+			return m, nil
+		case "q", "esc", "ctrl+c":
+			return m, tea.Quit
+		case "w":
+			// Wrap-up: only when settled (not streaming).
+			if !m.streaming {
+				dbg("emit %s id=%s", "wrapup", "")
+				m.emitAction(Button{Kind: "wrapup"})
+				if m.inputFifoPath != "" {
+					m.md += "\n\n---\n\n"
+					m.thinking = true
+					m.spinFrame = 0
+					m.spinTicks = 0
+					m.streaming = true
+					m.follow = true
+					m.reflow()
+					return m, tea.Batch(m.startTick(), m.reArmReaderCmd())
+				}
+			}
+			return m, nil
+		// Vertical: line
+		case "down", "j":
+			m.yOff++
+		case "up", "k":
+			m.yOff--
+		// Vertical: half-page
+		case "ctrl+d":
+			half := m.body() / 2
+			if half < 1 {
+				half = 1
+			}
+			m.yOff += half
+		case "ctrl+u":
+			half := m.body() / 2
+			if half < 1 {
+				half = 1
+			}
+			m.yOff -= half
+		// Vertical: full-page
+		case "ctrl+f", "pgdown":
+			m.yOff += m.body()
+		case "ctrl+b", "pgup":
+			m.yOff -= m.body()
+		// Vertical: top/bottom
+		case "g", "home":
+			m.yOff = 0
+		case "G", "end":
+			m.yOff = len(m.lines)
+		// Horizontal: 1-col
+		case "right", "l":
+			m.xOff++
+		case "left", "h":
+			m.xOff--
+		// Horizontal: half-width jump
+		case "L":
+			hstep := m.contentWidth() / 2
+			if hstep < 1 {
+				hstep = 1
+			}
+			m.xOff += hstep
+		case "H":
+			hstep := m.contentWidth() / 2
+			if hstep < 1 {
+				hstep = 1
+			}
+			m.xOff -= hstep
+		// Horizontal: home/end
+		case "0", "^":
+			m.xOff = 0
+		case "$":
+			m.xOff = MaxWideWidth(m.lines) // clampScroll will cap it
+		}
+		m.clampScroll()
+		return m, nil
+	case resultMsg:
+		st := m.blockStates[msg.ID]
+		prevStatus := st.Status
+		prevAction := st.Action
+		st.Logpath = msg.Logpath
+		st.Exit = msg.Exit
+		// A result for a block the user deliberately stopped is NOT a failed fix.
+		// Resolve to the neutral "stopped" state, clear the flag, and never auto-fire
+		// the follow-up — regardless of the (typically 143/SIGTERM) exit code.
+		if st.Stopped {
+			st.Status = "stopped"
+			st.Action = ""
+			st.Stopped = false
+			m.blockStates[msg.ID] = st
+			dbg("result id=%s exit=%d STOPPED — no auto-followup", msg.ID, msg.Exit)
+			m.reflow()
+			return m, nil
+		}
+		switch {
+		case msg.Exit == 0 && st.Action == "undo":
+			// Successful undo: patch is no longer applied; clear status so dependents re-lock.
+			st.Status = ""
+			st.Action = ""
+		case msg.Exit != 0 && st.Action == "undo":
+			// Failed undo: patch is still applied (graceful — surface error, keep button as undo).
+			st.Status = "ok"
+			// keep st.Action="" so the error region shows normally
+			st.Action = ""
+		case msg.Exit == 0:
+			// Successful apply or run.
+			st.Status = "ok"
+			st.Action = ""
+		default:
+			// Failed apply or run.
+			st.Status = "failed"
+			st.Action = ""
+		}
+		m.blockStates[msg.ID] = st
+		dbg("result id=%s exit=%d action=%s status->%s", msg.ID, msg.Exit, prevAction, st.Status)
+		m.reflow()
+		// Auto-fire a follow-up when the VERIFY re-run fails: a non-zero exit on a
+		// RUN result (not an apply/undo) for block id "verify" is the unambiguous
+		// "the fix didn't work" signal. Gate to fire once — only on the transition
+		// INTO the failed state (prevStatus != "failed"), so a repeated result for
+		// the same already-failed verify block doesn't re-fire.
+		if msg.ID == "verify" && msg.Exit != 0 &&
+			prevAction != "apply" && prevAction != "undo" {
+			switch {
+			case prevStatus == "failed":
+				dbg("auto-followup SUPPRESSED: already fired (id=%s exit=%d)", msg.ID, msg.Exit)
+			case msg.Exit > 128:
+				// Signal-killed (e.g. 143=SIGTERM, 130=SIGINT): a deliberate kill is
+				// not a fix failure — do NOT auto-fire. Ordinary non-zero exits
+				// (1/2/…) still escalate to a follow-up below.
+				dbg("auto-followup SUPPRESSED: signal-killed exit>128 (id=%s exit=%d)", msg.ID, msg.Exit)
+			case msg.Exit == 127:
+				// "command not found": the verify command itself couldn't run (e.g. the
+				// original command is a shell alias/function absent from the agent's
+				// non-interactive shell), NOT that the fix failed — do NOT auto-fire.
+				// The manual "try another fix" button still appears (unchanged).
+				dbg("auto-followup SUPPRESSED: exit 127 (command not found) id=%s", msg.ID)
+			case m.inputFifoPath == "":
+				dbg("auto-followup SUPPRESSED: inputFifoPath empty (id=%s exit=%d)", msg.ID, msg.Exit)
+			default:
+				dbg("auto-followup fire: id=%s exit=%d", msg.ID, msg.Exit)
+				if cmd := m.beginFollowupStream("verify", m.blockCommand("verify")); cmd != nil {
+					return m, cmd
+				}
+			}
+		}
+		return m, nil
+	case reArmedMsg:
+		dbg("re-arm: reader ready err=%v", msg.err)
+		if msg.err != nil {
+			m.thinking = false
+			m.md += fmt.Sprintf("\n\n_regenerate error: %v_\n", msg.err)
+			m.reflow()
+			return m, nil
+		}
+		m.reader = bufio.NewReader(msg.reader)
+		m.parser = &streamParser{}
+		return m, readStream(m.reader, m.parser)
+	}
+	return m, nil
+}
+
+func (m model) header() string {
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve)).Bold(true).
+		Render(strings.Repeat("▓", 3) + " ai-assist — " + m.harness)
+}
+
+// relativeAge formats the age of cachedAt relative to now as a short string:
+// "just now" (<60s), "<N>m ago" (<60m), "<N>h ago" (<24h), else "<N>d ago".
+func relativeAge(cachedAt time.Time) string {
+	d := time.Since(cachedAt)
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < 60*time.Second:
+		return "just now"
+	case d < 60*time.Minute:
+		return itoa(int(d/time.Minute)) + "m ago"
+	case d < 24*time.Hour:
+		return itoa(int(d/time.Hour)) + "h ago"
+	default:
+		return itoa(int(d/(24*time.Hour))) + "d ago"
+	}
+}
+
+// cachedBadge returns the styled powerline pill string for a cached-replay
+// result, followed by exactly 1 trailing space. The pill is composed of:
+//
+//	capL (U+E0B6, fg=colPeach, no bg) +
+//	body (bg=colPeach, fg=colBase: db-icon U+F1C0, " cached · <age> ", reload-icon U+10F1DA) +
+//	capR (U+E0B4, fg=colPeach, no bg) +
+//	" " (trailing space)
+//
+// The caps use only a foreground colour (colPeach) so their background is the
+// terminal's pane background, creating the classic powerline blended-end look.
+// The entire body (including both icons) uses one continuous colPeach background
+// to avoid the PUA-glyph background-mismatch shift-down bug.
+//
+// When m.flashKey == "cached:regenerate" (the pill was clicked) the WHOLE pill
+// highlights: caps + body switch to the bright flash colour (colFlashOn) as the
+// background with dark bold text, so the entire button lights up. The background
+// stays continuous across the whole body (both glyphs included), so there's no
+// per-glyph background-mismatch row-shift.
+func (m model) cachedBadge() string {
+	if !m.isCached {
+		return ""
+	}
+	capFg, bodyBg, bold := colPeach, colPeach, false
+	if m.flashKey == "cached:regenerate" {
+		capFg, bodyBg, bold = colFlashOn, colFlashOn, true
+	}
+	capStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(capFg))
+	bodyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(colBase)).
+		Background(lipgloss.Color(bodyBg)).
+		Bold(bold)
+
+	const reloadIcon = "\U0010F1DA"
+	prefix := "\U0000F1C0 cached · " + relativeAge(m.cachedAt) + " "
+	capL := capStyle.Render("\U0000E0B6")
+	body := bodyStyle.Render(prefix + reloadIcon)
+	capR := capStyle.Render("\U0000E0B4")
+	return capL + body + capR + " "
+}
+
+// appendCachedButton adds the screen-fixed regenerate button to m.buttons when
+// isCached is true. The ENTIRE pill is the click target; the flash highlight
+// anchors only to the reload glyph (handled in cachedBadge). Line is the pill's
+// absolute screen row (bodyTop()-2 in the cached header layout). Col is 0 — the
+// left cap, once buttonAt strips the 2-col left margin (the pill row's "  "
+// indent IS that margin). Width is the pill's visible width minus the trailing
+// space. Screen=true so buttonAt resolves it by absolute Y, not content line.
+func (m *model) appendCachedButton() {
+	if !m.isCached {
+		return
+	}
+	pillRow := m.bodyTop() - 2
+	pillW := lipgloss.Width(m.cachedBadge()) - 1 // drop the trailing space
+	if pillW < 1 {
+		pillW = 1
+	}
+	m.buttons = append(m.buttons, Button{
+		Line:    pillRow,
+		Col:     0,
+		Width:   pillW,
+		Kind:    "regenerate",
+		BlockID: "cached",
+		Screen:  true,
+	})
+}
+
+// reloadIconScreenCol returns the absolute screen column of the reload glyph in
+// the cached pill: 2-col indent + left cap (1) + the pill prefix width (db icon
+// + " cached · <age> "). Used to anchor the regenerate hint label above the glyph.
+func (m model) reloadIconScreenCol() int {
+	prefix := "\U0000F1C0 cached · " + relativeAge(m.cachedAt) + " "
+	return 2 + 1 + lipgloss.Width(prefix)
+}
+
+// regenLabel returns the hint label assigned to the regenerate (cached pill)
+// button in the current hint session, or "" if none is assigned.
+func (m model) regenLabel() string {
+	for lbl, b := range m.hintLabels {
+		if b.Kind == "regenerate" {
+			return lbl
+		}
+	}
+	return ""
+}
+
+// titleLine builds the full header line string for the given available width.
+// When isCached, the powerline pill is right-aligned with exactly 1 trailing
+// space (last cell sits one column from the right edge). The pill is never
+// dropped — the title is truncated if necessary to make room. If the budget
+// for the title falls below 2 columns the pane is too narrow and the pill is
+// omitted rather than overflowing.
+func (m model) titleLine(_ int) string {
+	return "  " + m.header()
+}
+
+// cachedBadgeRow returns the header row shown directly BELOW the title (reusing
+// the top-pad row): the left-aligned powerline pill on a cached replay, else ""
+// (the normal blank top-pad).
+func (m model) cachedBadgeRow() string {
+	if !m.isCached {
+		return ""
+	}
+	return "  " + m.cachedBadge()
+}
+
+func bi(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// helpTextDims returns the modal's visible help-text area (cols x rows) and
+// whether each scrollbar is shown. The title now scrolls with the content
+// (m.helpLines includes it), so the modal area (m.height-4) holds, top to
+// bottom: border(1) + padTop(1) + text rows + padBottom(1) + border(1) = text+4.
+// Horizontally the box is capped to width-8 — the modal is centered in the full
+// pane width with a 4-col margin on each side (mirroring the vertical) — and laid
+// out as border(1) + leftPad(2) + text + gap(2) + vbar(needV?1:0) + border(1):
+// the bar sits flush against the right border with a 2-col gap from the text, so
+// the text budget is width-14, minus one more column when the vbar is shown. The
+// horizontal bar (when needH) takes one text row. All dims floored at 1.
+func (m model) helpTextDims() (textW, textH int, needV, needH bool) {
+	contentMaxW := MaxWideWidth(m.helpLines)
+	maxRows := m.height - 8
+	if maxRows < 1 {
+		maxRows = 1
+	}
+	// Two passes resolve the interaction between the bars: reserving the hbar row
+	// can tip vertical overflow, and showing the vbar narrows the text budget.
+	for pass := 0; pass < 2; pass++ {
+		available := maxRows - bi(needH) // rows left for text after the hbar
+		if available < 1 {
+			available = 1
+		}
+		needV = len(m.helpLines) > available
+		maxTextW := m.width - 14 - bi(needV)
+		if maxTextW < 1 {
+			maxTextW = 1
+		}
+		needH = contentMaxW > maxTextW
+	}
+	// At a tiny pane there may be no room for the hbar row; drop it so the box
+	// still fits the area (one text row beats a scrollbar that overflows it).
+	if maxRows-bi(needH) < 1 {
+		needH = false
+	}
+	// Visible dims: content-sized, capped to the available area.
+	textH = maxRows - bi(needH)
+	if textH > len(m.helpLines) {
+		textH = len(m.helpLines)
+	}
+	if textH < 1 {
+		textH = 1
+	}
+	textW = m.width - 14 - bi(needV)
+	if textW > contentMaxW {
+		textW = contentMaxW
+	}
+	if textW < 1 {
+		textW = 1
+	}
+	return textW, textH, needV, needH
+}
+
+func (m *model) clampHelpScroll() {
+	textW, textH, _, _ := m.helpTextDims()
+	maxY := len(m.helpLines) - textH
+	if maxY < 0 {
+		maxY = 0
+	}
+	if m.helpYOff > maxY {
+		m.helpYOff = maxY
+	}
+	if m.helpYOff < 0 {
+		m.helpYOff = 0
+	}
+	maxX := MaxWideWidth(m.helpLines) - textW
+	if maxX < 0 {
+		maxX = 0
+	}
+	if m.helpXOff > maxX {
+		m.helpXOff = maxX
+	}
+	if m.helpXOff < 0 {
+		m.helpXOff = 0
+	}
+}
+
+// statusBar is the slim, mode-aware bottom hint.
+func (m model) statusBar() string {
+	st := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
+	if m.hintMode || m.helpMode {
+		return st.Render("\U000F12B7: cancel")
+	}
+	return st.Render("\U000F1050: action • \U000F12B7: close • ?: keys")
+}
+
+func helpInnerH(m model) int { _, h, _, _ := m.helpTextDims(); return h }
+func helpInnerW(m model) int { w, _, _, _ := m.helpTextDims(); return w }
+func helpHalf(m model) int   { if h := helpInnerH(m) / 2; h > 1 { return h }; return 1 }
+func helpPage(m model) int   { if h := helpInnerH(m); h > 1 { return h }; return 1 }
+func helpHalfW(m model) int  { if w := helpInnerW(m) / 2; w > 1 { return w }; return 1 }
+
+// mantleBg is the ANSI truecolor background sequence for colMantle, used to
+// band each interior row so the modal background is uniform throughout.
+const mantleBg = "\x1b[48;2;24;24;37m" // #181825 = R24 G24 B37
+
+// helpModal builds the bordered keybinding box (content-sized, capped to width-8
+// wide × (m.height-4) tall by helpTextDims). It is NOT placed: the View overlays
+// it onto the live document view so the markdown keeps rendering behind it.
+func (m model) helpModal() string {
+	textW, textH, needV, needH := m.helpTextDims()
+	contentW := MaxWideWidth(m.helpLines)
+
+	// All padding is applied manually (the box uses Padding(0,0)) so both
+	// scrollbars run flush to their borders. Each row is leftPad(2) + text +
+	// gap(2) + vbar(1 when needV). Rows top to bottom: top pad, text rows, bottom
+	// pad, then the hbar (when needH) flush against the bottom border with the
+	// bottom pad as its gap above. The vbar occupies the rightmost column on every
+	// row, so it runs from the top border to the bottom border.
+	windowed := Window(m.helpLines, m.helpXOff, m.helpYOff, textW, textH)
+	// The vbar track spans top pad + text rows + bottom pad (NOT the hbar row), so
+	// when both bars show the vbar ends one cell above the hbar — they don't
+	// collide at the corner. With only the vbar, this is every inner row, so it
+	// still runs flush from the top border to the bottom border.
+	trackH := textH + 2
+	vpos, vsize := thumbTrack(len(m.helpLines), textH, trackH, m.helpYOff)
+	vbar := func(trackRow int) string {
+		if !needV {
+			return ""
+		}
+		glyph, col := "│", colSurface0
+		if trackRow >= vpos && trackRow < vpos+vsize {
+			glyph, col = "┃", colOverlay1
+		}
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(col)).Render(glyph)
+	}
+	// band re-injects the modal bg after every inner color reset so plain gaps and
+	// reset segments keep the modal background instead of the terminal's.
+	blank := strings.Repeat(" ", textW)
+	row := func(text string, trackRow int) string {
+		return band("  "+text+"  "+vbar(trackRow), mantleBg, 0)
+	}
+	var body []string
+	tr := 0
+	body = append(body, row(blank, tr)) // top pad row
+	tr++
+	for _, w := range windowed {
+		body = append(body, row(padTo(w, textW), tr))
+		tr++
+	}
+	body = append(body, row(blank, tr)) // bottom pad (gap above the hbar; vbar runs through it)
+	if needH {
+		// Horizontal bar: a row flush to the bottom border, spanning the full inner
+		// width. hscrollbarRow always renders 1 leading + 1 trailing space, so the
+		// bar floats just inside the left/right borders regardless of the vbar. When
+		// the vbar is shown, the trailing space lands in the vbar column (which the
+		// vbar vacates on this row), so the two bars never collide at the corner.
+		body = append(body, band(hscrollbarRow(contentW, m.helpXOff, textW+4+bi(needV), colMantle), mantleBg, 0))
+	}
+
+	content := strings.Join(body, "\n")
+
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color(colSurface1)).
+		BorderBackground(lipgloss.Color(colMantle)).
+		Background(lipgloss.Color(colMantle)).
+		Padding(0, 0).
+		Render(content)
+}
+
+// viewString assembles the full rendered frame as a plain string. View wraps
+// this in tea.NewView so that tests can call viewString() directly without
+// needing to extract Content from a tea.View.
+func (m model) viewString() string {
+	cw := m.contentWidth()
+	var sb strings.Builder
+
+	if m.hintMode {
+		// Labels float on the line above each button (or below when the line
+		// above is scrolled off the top). Screen-fixed buttons (e.g. the cached
+		// pill reload icon) are skipped here — they live in the header, not the
+		// scrollable body; their label is floated on the blank line above the pill
+		// in the cached-header block below (anchored to the reload-icon column).
+		labelsByRow := map[int]map[int]string{}
+		for label, b := range m.hintLabels {
+			if b.Screen {
+				continue // handled separately in the header region
+			}
+			row := b.Line - 1
+			if row < m.yOff {
+				row = b.Line + 1
+			}
+			if labelsByRow[row] == nil {
+				labelsByRow[row] = map[int]string{}
+			}
+			labelsByRow[row][b.Col] = label
+		}
+		dim := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
+		lab := lipgloss.NewStyle().Bold(true).
+			Foreground(lipgloss.Color(colHintLabelFg)).
+			Background(lipgloss.Color(colHintLabelBg))
+
+		// Button glyph columns per tab line — given the hint-label dark-red bg.
+		// Only body buttons (not Screen-fixed) are tracked for code-row highlighting.
+		buttonColsByRow := map[int]map[int]bool{}
+		for _, b := range m.buttons {
+			if b.Screen {
+				continue
+			}
+			if buttonColsByRow[b.Line] == nil {
+				buttonColsByRow[b.Line] = map[int]bool{}
+			}
+			buttonColsByRow[b.Line][b.Col] = true
+		}
+
+		rows := Window(m.lines, m.xOff, m.yOff, cw, m.body())
+		pos, size := vthumb(len(m.lines), m.body(), m.yOff)
+		sb.WriteString("\n")
+		sb.WriteString(m.titleLine(m.width) + "\n")
+		if m.isCached {
+			// Float the regenerate button's hint label on the blank line above the
+			// pill, anchored to the reload-icon column (the flash anchor) — mirroring
+			// how body buttons float their label on the line above the glyph.
+			above := padTo("", m.width)
+			if lbl := m.regenLabel(); lbl != "" {
+				above = spliceOver(above, lab.Render(lbl), m.reloadIconScreenCol())
+			}
+			sb.WriteString(above + "\n")              // blank above pill (+ hint label)
+			sb.WriteString(m.cachedBadgeRow() + "\n") // cached pill (left-aligned)
+			sb.WriteString("\n")                      // blank below pill
+		} else {
+			sb.WriteString("\n") // top-pad (single blank)
+		}
+		for i, row := range rows {
+			idx := m.yOff + i
+			var base string
+			if idx >= 0 && idx < len(m.lines) && m.lines[idx].Code {
+				base = hintCodeRow(row, cw, buttonColsByRow[idx]) // fill + dark-red button cells
+			} else {
+				base = dim.Render(padTo(strip(row), cw))
+			}
+			base = overlayLabels(base, labelsByRow[idx], lab)
+			sb.WriteString("  " + base + vscrollCell(i, pos, size) + "\n")
+		}
+		sb.WriteString("\n")
+		sb.WriteString("  " + m.statusBar())
+	} else if m.helpMode {
+		// The modal is an overlay: render the live document, then composite the
+		// keybinding box over it (centered), so the markdown keeps showing and
+		// updating behind the modal while help is open.
+		base := m.normalLines()
+		box := strings.Split(m.helpModal(), "\n")
+		boxH := len(box)
+		boxW := 0
+		if boxH > 0 {
+			boxW = lipgloss.Width(box[0])
+		}
+		left := (m.width - boxW) / 2
+		if left < 0 {
+			left = 0
+		}
+		top := 2 + (m.height-4-boxH)/2 // centered in the body region (below the 2 top rows)
+		if top < 2 {
+			top = 2
+		}
+		for i, bl := range box {
+			if r := top + i; r >= 0 && r < len(base) {
+				base[r] = spliceOver(base[r], bl, left)
+			}
+		}
+		sb.WriteString(strings.Join(base, "\n"))
+	} else {
+		sb.WriteString(strings.Join(m.normalLines(), "\n"))
+	}
+
+	return sb.String()
+}
+
+// normalLines renders the standard document view as m.height lines, each padded
+// to the full pane width. It is the base layer both for normal mode and for the
+// help overlay (which composites the modal box over these lines).
+func (m model) normalLines() []string {
+	cw := m.contentWidth()
+	rows := Window(m.lines, m.xOff, m.yOff, cw, m.body())
+	pos, size := vthumb(len(m.lines), m.body(), m.yOff)
+	pad := func(s string) string { return padTo(s, m.width) }
+	out := make([]string, 0, m.height)
+	out = append(out, pad(""))                         // leading blank
+	out = append(out, pad(m.titleLine(m.width)))       // title
+	if m.isCached {
+		out = append(out, pad(""))                     // blank above pill
+		out = append(out, pad(m.cachedBadgeRow()))     // cached pill (left-aligned)
+		out = append(out, pad(""))                     // blank below pill
+	} else {
+		out = append(out, pad(""))                     // top-pad (single blank)
+	}
+	spinRow := -1
+	if m.thinking {
+		// Spinner sits just below the last real content line visible from the top
+		// of the body (or the first body row when empty), within the body region.
+		spinRow = len(m.lines) - m.yOff
+		if spinRow < 0 {
+			spinRow = 0
+		}
+		if spinRow > m.body()-1 {
+			spinRow = m.body() - 1
+		}
+	}
+	for i := 0; i < m.body(); i++ {
+		if i == spinRow {
+			out = append(out, pad("  "+padTo(spinnerLine(m.spinFrame, m.thinkLabel, m.spinTicks/10), cw)+vscrollCell(spinRow, pos, size)))
+			continue
+		}
+		if i < len(rows) {
+			row := rows[i]
+			idx := m.yOff + i
+			if idx >= 0 && idx < len(m.lines) && m.lines[idx].HBar > 0 {
+				row = hscrollbarRow(m.lines[idx].HBar, m.xOff, cw, colCodeBg)
+			}
+			out = append(out, pad("  "+padTo(row, cw)+vscrollCell(i, pos, size)))
+		} else {
+			out = append(out, pad(""))
+		}
+	}
+	out = append(out, pad(""))                // bottom pad
+	out = append(out, pad("  "+m.statusBar())) // status bar
+	return out
+}
+
+// markReviewing sets the given block's status to "reviewing". Called by the
+// review-diff action trigger so the block body shows a "Reviewing…" indicator
+// immediately, without waiting for a resultMsg.
+func (m model) markReviewing(id string) model {
+	st := m.blockStates[id]
+	st.Status = "reviewing"
+	m.blockStates[id] = st
+	return m
+}
+
+// markRunning sets the given block's status to "running" and resets its
+// SpinFrame to 0. Called by the action-trigger paths before emitAction so the
+// spinner appears immediately, without waiting for a resultMsg.
+func (m model) markRunning(id string) model {
+	st := m.blockStates[id]
+	st.Status = "running"
+	st.SpinFrame = 0
+	m.blockStates[id] = st
+	return m
+}
+
+// markStopped records that the user deliberately stopped (killed) a running
+// block. The flag is consumed by the resultMsg handler: a result arriving for a
+// Stopped block resolves to Status "stopped" (not "failed") and suppresses the
+// auto-followup. A deliberate stop is not a failed fix.
+func (m model) markStopped(id string) {
+	st := m.blockStates[id]
+	st.Stopped = true
+	m.blockStates[id] = st
+}
+
+// blockCommand returns the raw fenced command text (Block.Payload) of the block
+// with the given id, or "" if no such block is currently rendered.
+func (m model) blockCommand(id string) string {
+	for _, b := range m.blocks {
+		if b.ID == id {
+			return b.Payload
+		}
+	}
+	return ""
+}
+
+// beginFollowupStream emits a `followup` action (block id + the failed command
+// text) and starts the wrap-up-style append + re-arm: a separator + spinner are
+// appended below the playbook and the input FIFO is re-armed so the agent's
+// revised fix streams in. Returns the cmd batch to run, or nil when no input
+// FIFO is configured (standalone/sample — emit only). Shared by the verify
+// auto-fire path and the `↻ try another fix` button.
+func (m *model) beginFollowupStream(blockID, command string) tea.Cmd {
+	dbg("emit %s id=%s", "followup", blockID)
+	m.emitAction(Button{Kind: "followup", BlockID: blockID, Payload: command})
+	if m.inputFifoPath == "" {
+		return nil
+	}
+	m.md += "\n\n---\n\n"
+	m.thinking = true
+	m.spinFrame = 0
+	m.spinTicks = 0
+	m.streaming = true
+	m.follow = true
+	m.reflow()
+	return tea.Batch(m.startTick(), m.reArmReaderCmd())
+}
+
+// handleToggle flips the Expanded state of the given block and reflows.
+// Toggle is pager-local: it never calls emitAction.
+func (m model) handleToggle(id string) model {
+	st := m.blockStates[id]
+	st.Expanded = !st.Expanded
+	m.blockStates[id] = st
+	m.reflow()
+	return m
+}
+
+func (m model) View() tea.View {
+	v := tea.NewView(m.viewString())
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	return v
+}
+
+// staticRender returns the full rendered content (no scroll chrome) for
+// printing to the pane on exit, so the docked pane parks showing the reply.
+// Content is wrapped at contentWidth and left-padded with 2 spaces to match
+// the interactive View().
+func (m model) staticRender() string {
+	cw := m.contentWidth()
+	lines, _, _ := Render(m.md, cw, m.blockStates, "")
+	var sb strings.Builder
+	sb.WriteString(m.titleLine(m.width) + "\n")
+	if m.isCached {
+		sb.WriteString("\n")                       // blank above pill
+		sb.WriteString(m.cachedBadgeRow() + "\n") // cached pill (left-aligned)
+		sb.WriteString("\n")                       // blank below pill
+	} else {
+		sb.WriteString("\n") // top-pad (single blank)
+	}
+	for _, l := range lines {
+		sb.WriteString("  " + l.Text + "\n")
+	}
+	return sb.String()
+}
