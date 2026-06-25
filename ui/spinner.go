@@ -12,6 +12,51 @@ import (
 // frames the shell launcher used before the pager owned the spinner.
 var spinnerFrames = []rune{'⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'}
 
+// workingPhrases is the ordered progression of "working…" labels shown over a
+// long authoring/follow-up wait, easing anxiety as the wait grows. The list is
+// advanced one step every workingStepSec seconds and HOLDS the last phrase
+// thereafter (authoring has no hard timeout — it runs until claude returns), so
+// the user always sees a live, escalating-then-steady reassurance. Tweak the list
+// or the cadence here.
+var workingPhrases = []string{
+	"Working…",
+	"Still working…",
+	"Thinking this through…",
+	"Working through the details…",
+	"Still on it…",
+	"This needs a closer look…",
+	"Getting there…",
+	"Taking a bit longer than expected…",
+	"Still digging in — hang tight…",
+	"Trickier than it looked…",
+	"Appreciate your patience…",
+	"Still working on it…",
+	"This is a stubborn one…",
+	"Almost there, I think…",
+	"Thanks for waiting…",
+	"Still going — nearly there…",
+}
+
+// workingStepSec is the cadence (in seconds) at which workingLabel advances to the
+// next phrase. Every workingStepSec the label steps forward one entry, capped at
+// the last (held) phrase.
+const workingStepSec = 15
+
+// workingLabel returns the working-progression phrase for an elapsed wait of
+// elapsedSec seconds: index = min(elapsedSec/workingStepSec, len-1) into
+// workingPhrases — it escalates one step per workingStepSec then HOLDS the tail.
+// Negative elapsed clamps to the first phrase.
+func workingLabel(elapsedSec int) string {
+	if elapsedSec < 0 {
+		elapsedSec = 0
+	}
+	i := elapsedSec / workingStepSec
+	if i >= len(workingPhrases) {
+		i = len(workingPhrases) - 1
+	}
+	return workingPhrases[i]
+}
+
 // spinnerLine renders one indicator row: "<frame> <label> <seconds>s", the frame
 // and seconds in colBlue, the label in colSubtext. frame is taken modulo the
 // frame count (tolerates negative/large values).

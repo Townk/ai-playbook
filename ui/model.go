@@ -911,6 +911,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			default:
 				m.followups++
 				dbg("auto-followup fire: id=%s exit=%d attempt=%d/%d", msg.ID, msg.Exit, m.followups, m.maxFollowups)
+				// Issue #1+#2: announce this AUTO follow-up in the agent's voice ABOVE the
+				// new attempt and scroll once so it becomes the top visible row. Only the
+				// AUTO path narrates; the manual "try another fix" button does not.
+				m.announceFollowup(m.followups)
 				if cmd := m.beginFollowupStream("verify", m.blockCommand("verify")); cmd != nil {
 					return m, cmd
 				}
@@ -1495,7 +1499,15 @@ func (m model) normalLines() []string {
 		m.thinking, spinRow, actRow, m.spinFrame, m.width, m.body(), len(m.lines), cw, collapseLine(m.activityLine))
 	for i := 0; i < m.body(); i++ {
 		if i == spinRow {
-			out = append(out, pad("  "+padTo(spinnerLine(m.spinFrame, m.thinkLabel, m.spinTicks/10), cw)+vscrollCell(spinRow, pos, size)))
+			// Issue #3: use the dynamic working-progression label (workingLabel),
+			// computed from the elapsed wait (spinTicks/10 seconds), INSTEAD of the
+			// static m.thinkLabel. spinTicks resets per thinking session, so each
+			// authoring/follow-up wait restarts at "Working…" and escalates on a 15s
+			// cadence, holding the tail. The progression is the desired behavior even
+			// when a non-default --thinking-label is configured — for the live wait we
+			// intentionally prefer the escalating reassurance over a static custom label.
+			elapsed := m.spinTicks / 10
+			out = append(out, pad("  "+padTo(spinnerLine(m.spinFrame, workingLabel(elapsed), elapsed), cw)+vscrollCell(spinRow, pos, size)))
 			continue
 		}
 		if i == actRow {
@@ -1558,6 +1570,53 @@ func (m model) blockCommand(id string) string {
 		}
 	}
 	return ""
+}
+
+// followupAnnouncements are the agent-voice narration lines inserted above each
+// AUTO follow-up attempt (issue #1). They vary by attempt number so successive
+// rounds don't read identically — index = (attempt-1), clamped to the last entry
+// for any round at/beyond the list length (e.g. a higher $AI_ASSIST_MAX_FOLLOWUPS).
+// Rendered as a dim/italic markdown paragraph so it reads as narration, separate
+// from playbook content. Tweak the phrasing here.
+var followupAnnouncements = []string{
+	"That didn't work — let me try a different approach.",
+	"Still not resolved. Let me try another angle.",
+	"Hmm, that didn't do it either. One more idea.",
+}
+
+// followupAnnouncement returns the agent-voice narration for the given auto
+// follow-up attempt (1-based: the value of m.followups after it was incremented
+// for this fire). It clamps to the last phrase for attempts beyond the list.
+func followupAnnouncement(attempt int) string {
+	i := attempt - 1
+	if i < 0 {
+		i = 0
+	}
+	if i >= len(followupAnnouncements) {
+		i = len(followupAnnouncements) - 1
+	}
+	return followupAnnouncements[i]
+}
+
+// announceFollowup inserts the agent-voice narration line for an AUTO follow-up
+// (issue #1) into the rendered doc ABOVE the new attempt, then scrolls the
+// viewport ONCE so that line becomes the first visible body row (issue #2),
+// giving each new attempt a clean "fresh start" frame. attempt is the 1-based
+// auto-follow-up count (m.followups after increment). It reflows so the line
+// index is accurate, sets m.yOff to the announcement's starting line (clamped),
+// and leaves follow=false so subsequent streamed content does not scroll.
+func (m *model) announceFollowup(attempt int) {
+	// The announcement begins on the line just after the current rendered content.
+	// Reflow first so len(m.lines) reflects exactly what's on screen now; that count
+	// is the announcement's starting body-line index after the append + reflow.
+	m.reflow()
+	startLine := len(m.lines)
+	m.md += "\n\n_" + followupAnnouncement(attempt) + "_\n\n"
+	m.reflow()
+	// One-time scroll: make the announcement the FIRST visible body row.
+	m.yOff = startLine
+	m.follow = false // subsequent streamed content must NOT scroll
+	m.clampScroll()
 }
 
 // beginFollowupStream emits a `followup` action (block id + the failed command

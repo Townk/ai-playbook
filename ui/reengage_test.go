@@ -741,3 +741,135 @@ func TestInProcessFollowupReArmsAppend(t *testing.T) {
 		t.Errorf("followup did not append the revised fix → %q", m.md)
 	}
 }
+
+// Issue #1: an AUTO follow-up (the verify-fail auto-fire) must insert an
+// agent-voice narration line ABOVE the new attempt, and the phrasing must vary by
+// attempt number across successive rounds.
+func TestAutoFollowupAnnouncesInAgentVoice(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "", "# fix\n")
+	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
+	m.width, m.height = 80, 24
+	m.inputFifoPath = ""
+	m.maxFollowups = 5
+	m.reflow()
+	if !m.canReengageInProc() {
+		t.Fatal("setup: expected in-process re-engagement")
+	}
+
+	// Round 1: the first announcement appears in the rendered doc.
+	nm, cmd := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: ""})
+	m = nm.(model)
+	if cmd == nil {
+		t.Fatal("round 1: verify-fail did not auto-fire")
+	}
+	want1 := followupAnnouncement(1)
+	if !strings.Contains(m.md, want1) {
+		t.Errorf("round 1 announcement %q not inserted into md:\n%s", want1, m.md)
+	}
+	// Rendered as a dim/italic narration paragraph (underscore-wrapped markdown).
+	if !strings.Contains(m.md, "_"+want1+"_") {
+		t.Errorf("round 1 announcement must be italic-wrapped narration, got:\n%s", m.md)
+	}
+
+	// Drive the round to EOF so a fresh thinking session can begin for round 2.
+	nmEOF, _ := m.Update(streamEventsMsg{eof: true})
+	m = nmEOF.(model)
+	m.reflow()
+
+	// Round 2: a DIFFERENT announcement (varies by attempt number).
+	nm2, cmd2 := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: ""})
+	m = nm2.(model)
+	if cmd2 == nil {
+		t.Fatal("round 2: verify-fail did not auto-fire")
+	}
+	want2 := followupAnnouncement(2)
+	if want1 == want2 {
+		t.Fatal("attempt-1 and attempt-2 announcements must differ")
+	}
+	if !strings.Contains(m.md, want2) {
+		t.Errorf("round 2 announcement %q not inserted into md:\n%s", want2, m.md)
+	}
+}
+
+// followupAnnouncement must vary per attempt and clamp to the last phrase past
+// the list (e.g. a higher $AI_ASSIST_MAX_FOLLOWUPS).
+func TestFollowupAnnouncementVariesAndClamps(t *testing.T) {
+	a1, a2, a3 := followupAnnouncement(1), followupAnnouncement(2), followupAnnouncement(3)
+	if a1 == a2 || a2 == a3 || a1 == a3 {
+		t.Errorf("announcements must differ across attempts: %q %q %q", a1, a2, a3)
+	}
+	last := followupAnnouncements[len(followupAnnouncements)-1]
+	if got := followupAnnouncement(99); got != last {
+		t.Errorf("attempt past the list = %q, want held tail %q", got, last)
+	}
+	if got := followupAnnouncement(0); got != followupAnnouncements[0] {
+		t.Errorf("attempt 0 = %q, want first phrase", got)
+	}
+}
+
+// Issue #2: the one-time auto-follow-up scroll sets m.yOff to the announcement's
+// starting line so it becomes the TOP visible body row, and subsequent streamed
+// content does NOT move it (follow stays false).
+func TestAutoFollowupOneTimeScrollThenNoMovement(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "", "# fix\n")
+	// A long playbook the user has scrolled into; the verify block is at the end.
+	var sb strings.Builder
+	sb.WriteString("# Playbook\n\n")
+	for i := 0; i < 80; i++ {
+		fmt.Fprintf(&sb, "line %d of the original playbook\n", i)
+	}
+	sb.WriteString("\n```bash {id=verify}\nmake build\n```\n")
+	m.md = sb.String()
+	m.width, m.height = 80, 24
+	m.inputFifoPath = ""
+	m.maxFollowups = 5
+	m.reflow()
+	m.yOff = 3 // user reading near the top
+
+	startYOff := m.yOff
+
+	nm, cmd := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: ""})
+	m = nm.(model)
+	if cmd == nil {
+		t.Fatal("verify-fail did not auto-fire")
+	}
+	if m.follow {
+		t.Fatal("auto-follow-up must keep follow=false")
+	}
+	// The one-time scroll jumped the viewport DOWN to the announcement (away from the
+	// user's top position) so the new attempt gets a clean "fresh start" frame.
+	if m.yOff <= startYOff {
+		t.Fatalf("one-time scroll must move yOff down to the announcement: %d -> %d", startYOff, m.yOff)
+	}
+	// The announcement is now visible within the body window (it is the top row, or
+	// pulled up by clampScroll when it sits at the very end of the doc).
+	want := followupAnnouncement(1)
+	var annIdx int = -1
+	for i := m.yOff; i < len(m.lines) && i < m.yOff+m.body(); i++ {
+		if strings.Contains(m.lines[i].Text, want) {
+			annIdx = i
+			break
+		}
+	}
+	if annIdx < 0 {
+		t.Fatalf("announcement %q must be visible in the body window [%d,%d); lines=%d", want, m.yOff, m.yOff+m.body(), len(m.lines))
+	}
+
+	// Apply the re-arm + stream content; yOff must NOT move further.
+	var rearm reArmStreamMsg
+	for _, msg := range collectMsgs(cmd) {
+		if rs, ok := msg.(reArmStreamMsg); ok {
+			rearm = rs
+			break
+		}
+	}
+	pinned := m.yOff
+	nm2, _ := m.Update(rearm)
+	m = nm2.(model)
+	m2, _ := m.Update(streamEventsMsg{events: []streamEvent{textEvent{text: "## Revised\nmore content here\n"}}})
+	m = m2.(model)
+	m.flushRender()
+	if m.yOff != pinned {
+		t.Errorf("streamed content moved the viewport after the one-time scroll: yOff %d -> %d", pinned, m.yOff)
+	}
+}
