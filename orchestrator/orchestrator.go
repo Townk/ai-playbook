@@ -384,6 +384,11 @@ func (o *Orchestrator) CommitPlaybook(body string) (string, error) {
 	}
 	re := o.Reengage
 
+	// Strip any preamble prose above the playbook's H1 title so the SAVED + CACHED
+	// asset begins at the heading. Idempotent: a body already starting at the H1 is
+	// unchanged; a body with no H1 is left untouched.
+	body = stripPreamble(body)
+
 	// (1) Cache-REPLACE — best-effort, skipped when keys/cache absent (no entry to
 	// replace). Mirrors Regenerate's restore: same keys + kind + request sidecar.
 	if re.Cache != nil && re.CtxHash != "" && re.ReqHash != "" {
@@ -413,6 +418,21 @@ var firstHeading = regexp.MustCompile(`(?m)^#\s+(.+?)\s*$`)
 
 // slugNonWord collapses any run of non-alphanumeric characters to a single dash.
 var slugNonWord = regexp.MustCompile(`[^a-z0-9]+`)
+
+// stripPreamble removes any prose ABOVE the first markdown H1 (`# <title>`) so a
+// finalized playbook begins at its title. With no H1 the body is returned
+// unchanged (a transcript, not a playbook). Idempotent: a body already starting
+// at the H1 is unchanged.
+//
+// Limitation: the scan is a simple first-`^# ` match and does not skip `#` inside
+// fenced code blocks; a finalized playbook leads with its H1 before any fence, so
+// in practice the title is matched first.
+func stripPreamble(body string) string {
+	if loc := firstHeading.FindStringIndex(body); loc != nil {
+		return body[loc[0]:]
+	}
+	return body
+}
 
 // playbookSlug derives a filesystem-safe slug from the playbook body: the title in
 // the `# Playbook — <title>` heading (else the first H1), lowercased with non-word

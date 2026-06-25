@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"syscall"
@@ -109,7 +110,13 @@ func (m model) reArmReaderCmd() tea.Cmd {
 }
 
 type model struct {
-	harness     string
+	harness string
+	// title is the finalized-playbook title shown in the pager header (▓▓▓ <title>)
+	// in place of the default "ai-assist — <harness>". Set from the playbook's first
+	// H1 (playbookHeading) when rendering a FINALIZED playbook (run-from-file,
+	// cached-serve, or an accepted final draft). Empty for a troubleshoot/authoring
+	// transcript, which keeps the default header.
+	title       string
 	md          string
 	lines       []Line
 	buttons     []Button
@@ -486,6 +493,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// it narrated/applied instead of WRITING {id=fix}/{id=verify} blocks (a
 			// prompt-compliance gap), vs blocks>0 not visible (a render gap).
 			dbg("stream EOF: md=%dB blocks=%d head=%q", len(m.md), len(m.blocks), collapseLine(m.md))
+			// Finalized-playbook draft: strip any preamble above the H1 title and set
+			// the pager header to the playbook title. Gated on finalDraft so a
+			// troubleshoot transcript (non-finalDraft EOF) is left untouched (default
+			// "ai-assist — <harness>" header, no stripping).
+			if m.finalDraft {
+				if title, body := playbookHeading(m.md); title != "" {
+					m.md = body
+					m.title = title
+					m.reflow()
+				}
+			}
 			// Close a live in-process re-engagement stream so the agent process is
 			// reaped and the orchestrator's on-close side effects fire (regenerate's
 			// cache re-store, wrap-up's artifact close). No-op in FIFO mode (nil).
@@ -1221,9 +1239,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// h1Heading matches the first markdown H1 line `# <title>` (one or more spaces or
+// tabs after the hash), capturing the trimmed title text.
+var h1Heading = regexp.MustCompile(`(?m)^#[ \t]+(.+?)[ \t]*$`)
+
+// playbookHeading splits a finalized-playbook markdown body at its first H1 title.
+// It returns the heading text (e.g. "Playbook — Compiling an Android Application")
+// and the body from that H1 line onward, with any preamble prose ABOVE the title
+// removed. When md has no H1, title is "" and body is md unchanged (a transcript,
+// not a playbook — do NOT strip).
+//
+// Limitation: the scan is a simple first-`^# ` match and does NOT skip `#` lines
+// inside fenced code blocks. A finalized playbook leads with its H1 title before
+// any fence, so in practice the title is matched first; a leading fenced `# foo`
+// would be a false positive, but that doesn't occur for our generated playbooks.
+func playbookHeading(md string) (title, body string) {
+	loc := h1Heading.FindStringSubmatchIndex(md)
+	if loc == nil {
+		return "", md
+	}
+	title = strings.TrimSpace(md[loc[2]:loc[3]])
+	body = md[loc[0]:]
+	return title, body
+}
+
 func (m model) header() string {
+	label := "ai-assist — " + m.harness
+	if m.title != "" {
+		label = m.title
+	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve)).Bold(true).
-		Render(strings.Repeat("▓", 3) + " ai-assist — " + m.harness)
+		Render(strings.Repeat("▓", 3) + " " + label)
 }
 
 // relativeAge formats the age of cachedAt relative to now as a short string:

@@ -276,6 +276,63 @@ func TestCommitPlaybook_EmptyAndNoReengage(t *testing.T) {
 	}
 }
 
+// CommitPlaybook strips any preamble above the H1 before saving + caching, and is
+// idempotent on a body that already starts at the H1.
+func TestCommitPlaybook_StripsPreambleIdempotent(t *testing.T) {
+	clean := "# Playbook — Compile an Android Project\n\nSet up the SDK.\n"
+
+	commit := func(t *testing.T, body string) (savedPath, root string) {
+		t.Helper()
+		root = t.TempDir()
+		t.Setenv("AI_ASSIST_DATA_DIR", root)
+		c := cache.Open()
+		o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+			Req:         sampleReq(),
+			Cache:       c,
+			CtxHash:     "ctxhash",
+			ReqHash:     "reqhash",
+			RequestJSON: `{"command":"make build"}`,
+			DataRoot:    root,
+		})
+		p, err := o.CommitPlaybook(body)
+		if err != nil {
+			t.Fatalf("CommitPlaybook: %v", err)
+		}
+		return p, root
+	}
+
+	// (a) Preamble above the H1 is stripped from both the saved file and the cache.
+	withPreamble := "preamble prose above the title\nmore preamble\n\n" + clean
+	path, root := commit(t, withPreamble)
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(saved) != clean {
+		t.Errorf("saved body not stripped to the H1:\n got %q\nwant %q", saved, clean)
+	}
+	if strings.Contains(string(saved), "preamble prose") {
+		t.Errorf("saved body still has preamble:\n%s", saved)
+	}
+	entry, err := os.ReadFile(filepath.Join(root, "cache", "ctxhash", "reqhash.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(entry), "preamble prose") {
+		t.Errorf("cached body still has preamble:\n%s", entry)
+	}
+
+	// (b) Idempotent: a body that already starts at the H1 is unchanged.
+	path2, _ := commit(t, clean)
+	saved2, err := os.ReadFile(path2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(saved2) != clean {
+		t.Errorf("already-clean body should be unchanged:\n got %q\nwant %q", saved2, clean)
+	}
+}
+
 // Without a Reengage wired the re-engagement methods return ErrNotImplemented.
 func TestReengageMethods_NoReengage(t *testing.T) {
 	o := New(newTestDriver(t), &recMux{})

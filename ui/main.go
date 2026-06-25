@@ -81,6 +81,19 @@ var pendingAsker AskFunc
 // Consumed (and cleared) by Main.
 func SetAsker(a AskFunc) { pendingAsker = a }
 
+// loadPlaybookSource reads a finalized-playbook file (run-from-file / cached-serve),
+// strips any preamble above the first H1 title, and returns a reader over the
+// stripped body plus the playbook title (for the pager header). A file with no H1 is
+// returned unchanged with an empty title (it's a transcript, not a playbook).
+func loadPlaybookSource(file string) (io.Reader, string, error) {
+	raw, err := os.ReadFile(file)
+	if err != nil {
+		return nil, "", err
+	}
+	title, body := playbookHeading(string(raw))
+	return strings.NewReader(body), title, nil
+}
+
 // Main is the entrypoint for the `ai-playbook run` subcommand. It parses flags
 // from os.Args[2:] (os.Args[1] is the "run" subcommand) and returns an exit
 // code; the caller is responsible for os.Exit.
@@ -130,6 +143,11 @@ func Main() int {
 	// connects), an optional positional <file.md> argument, or stdin. Content
 	// streams in; keys come from /dev/tty.
 	var src io.Reader = os.Stdin
+	// playbookTitle is the finalized-playbook title for the pager header (▓▓▓
+	// <title>), set when the input is a saved playbook file (run-from-file /
+	// cached-serve). Empty for FIFO/stdin streams (an authoring transcript keeps the
+	// default "ai-assist — <harness>" header).
+	playbookTitle := ""
 	if inputFifo != "" {
 		f, err := os.OpenFile(inputFifo, os.O_RDONLY, 0)
 		if err != nil {
@@ -139,15 +157,19 @@ func Main() int {
 		defer f.Close()
 		src = f
 	} else if file := fs.Arg(0); file != "" {
-		// `ai-playbook run <file.md>` — render a playbook artifact from a file.
-		// The file is used as the same input stream a FIFO/stdin would provide.
-		f, err := os.Open(file)
+		// `ai-playbook run <file.md>` — render a finalized playbook artifact from a
+		// file (also the cached-serve path). Read it fully, strip any preamble above
+		// the H1 title, and use the playbook title as the pager header. The stripped
+		// body is the document stream (saved playbooks are plain markdown, no control
+		// records). Stripping here also cleans EXISTING saved files that still carry
+		// preamble. A file with no H1 is left unchanged (title stays empty).
+		r, title, err := loadPlaybookSource(file)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", err)
 			return 1
 		}
-		defer f.Close()
-		src = f
+		playbookTitle = title
+		src = r
 	}
 	parser := &streamParser{}
 
@@ -174,6 +196,7 @@ func Main() int {
 		m.fifoPath = fifoPath
 		m.isCached = isCached
 		m.cachedAt = cachedAt
+		m.title = playbookTitle
 		fmt.Print(m.staticRender())
 		return 0
 	}
@@ -233,6 +256,7 @@ func Main() int {
 	// during bubbletea's auto-detection, causing colors to be downsampled.
 	// The UI targets a truecolor Catppuccin terminal, so we pin it explicitly.
 	m := newModel(harness, "")
+	m.title = playbookTitle
 	m.fifoPath = fifoPath
 	m.inputFifoPath = inputFifo
 	m.orch = orch
