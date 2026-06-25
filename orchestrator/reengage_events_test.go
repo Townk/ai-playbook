@@ -58,10 +58,10 @@ func drainAct(ch <-chan string) []string {
 	}
 }
 
-func wantActivity(t *testing.T, ch <-chan string) {
+func wantActivity(t *testing.T, ch <-chan string, wantDelta string) {
 	t.Helper()
 	got := drainAct(ch)
-	var sawReason, sawTool bool
+	var sawReason, sawTool, sawDelta bool
 	for _, s := range got {
 		if s == "diagnosing the failure" {
 			sawReason = true
@@ -69,9 +69,15 @@ func wantActivity(t *testing.T, ch <-chan string) {
 		if s == "run: make test" {
 			sawTool = true
 		}
+		if s == wantDelta {
+			sawDelta = true
+		}
 	}
 	if !sawReason || !sawTool {
 		t.Errorf("activity feed = %v, want both the reasoning and tool lines", got)
+	}
+	if !sawDelta {
+		t.Errorf("activity feed = %v, want the streamed delta %q (transient narration)", got, wantDelta)
 	}
 }
 
@@ -103,12 +109,13 @@ func TestRegenerate_EventPath_StreamsActivityAndReStores(t *testing.T) {
 	}
 	actCh := make(chan []string, 1)
 	go func() {
-		var sawR, sawT bool
+		var sawR, sawT, sawD bool
 		for _, s := range drainAct(activity) {
 			sawR = sawR || s == "diagnosing the failure"
 			sawT = sawT || s == "run: make test"
+			sawD = sawD || s == "# Fresh\n" // streamed delta → activity (transient)
 		}
-		if !sawR || !sawT {
+		if !sawR || !sawT || !sawD {
 			actCh <- nil
 		} else {
 			actCh <- []string{"ok"}
@@ -116,8 +123,8 @@ func TestRegenerate_EventPath_StreamsActivityAndReStores(t *testing.T) {
 	}()
 
 	got, _ := io.ReadAll(stream)
-	if string(got) != "# Fresh\n" {
-		t.Errorf("playbook reader = %q, want the streamed delta", got)
+	if string(got) != "# Fresh regenerated body\n" {
+		t.Errorf("playbook reader = %q, want the authoritative Final text", got)
 	}
 	if err := stream.Close(); err != nil {
 		t.Fatal(err)
@@ -126,7 +133,7 @@ func TestRegenerate_EventPath_StreamsActivityAndReStores(t *testing.T) {
 		t.Errorf("Events called %d times, kind=%v; want 1 regenerate", fe.calls, fe.gotKind)
 	}
 	if res := <-actCh; res == nil {
-		t.Error("activity feed missing reasoning and/or tool line")
+		t.Error("activity feed missing reasoning, tool, and/or streamed-delta line")
 	}
 
 	// Re-store fired on close with the Final-authoritative body.
@@ -160,12 +167,12 @@ func TestFollowup_EventPath_StreamsActivity(t *testing.T) {
 	if activity == nil {
 		t.Fatal("event path must return a non-nil activity channel")
 	}
-	go wantActivity(t, activity)
+	go wantActivity(t, activity, "# Revised\n")
 
 	got, _ := io.ReadAll(stream)
 	_ = stream.Close()
-	if string(got) != "# Revised\n" {
-		t.Errorf("playbook reader = %q, want the streamed delta", got)
+	if string(got) != "# Revised fix\n" {
+		t.Errorf("playbook reader = %q, want the authoritative Final text", got)
 	}
 	if fe.gotKind != KindReengageFollowup {
 		t.Errorf("kind = %v, want followup", fe.gotKind)
@@ -200,7 +207,7 @@ func TestWrapup_EventPath_ArtifactAndKB(t *testing.T) {
 	if activity == nil {
 		t.Fatal("event path must return a non-nil activity channel")
 	}
-	go wantActivity(t, activity)
+	go wantActivity(t, activity, "Resolved.\n\n## Solution\n")
 
 	_, _ = io.ReadAll(stream)
 	if err := stream.Close(); err != nil {

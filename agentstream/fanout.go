@@ -52,9 +52,9 @@ func FanOut(events <-chan Event, closeFn func() error, activityBuf int) (io.Read
 
 	go func() {
 		var (
-			wroteDelta bool
-			finalText  string
-			haveFinal  bool
+			deltaBuf  bytes.Buffer // fallback body if no Final is emitted
+			finalText string
+			haveFinal bool
 		)
 		sendActivity := func(s string) {
 			// Best-effort, never block the pump: a slow ui drops the summary.
@@ -66,11 +66,15 @@ func FanOut(events <-chan Event, closeFn func() error, activityBuf int) (io.Read
 		for ev := range events {
 			switch ev.Kind {
 			case TextDelta:
-				// Write to the playbook pipe and accumulate the body. A pipe write
-				// error means the reader went away; keep draining so closeFn still runs.
-				_, _ = io.WriteString(pw, ev.Text)
-				f.body.WriteString(ev.Text)
-				wroteDelta = true
+				// Streamed text is the agent's live PROCESS output — interim narration
+				// ("I will verify the state…") AND the answer being written — NOT the
+				// rendered doc. Surface it transiently on the activity line (like tools /
+				// reasoning) so the spinner+activity show the whole wait; the doc pipe
+				// stays empty until the authoritative result arrives, so `thinking` (and
+				// the spinner) survive the entire authoring phase. Accumulate as a
+				// fallback body in case a harness emits no Final.
+				sendActivity(ev.Text)
+				deltaBuf.WriteString(ev.Text)
 			case Final:
 				finalText = ev.Text
 				haveFinal = true
@@ -79,17 +83,16 @@ func FanOut(events <-chan Event, closeFn func() error, activityBuf int) (io.Read
 			}
 		}
 
-		// Final handling: a Final-only stream (no deltas) must still render — write
-		// the Final text to the pipe and use it as the body. When deltas streamed,
-		// the pipe already carries the playbook; Final is authoritative for the
-		// stored body only (prefer it when present).
-		if haveFinal {
-			if !wroteDelta {
-				_, _ = io.WriteString(pw, finalText)
-			}
-			f.body.Reset()
-			f.body.WriteString(finalText)
+		// The doc is written ONCE, at completion, from the authoritative final answer
+		// (claude `result` = the final message text = the playbook, excluding interim
+		// narration). Fall back to the accumulated deltas only if no Final was emitted.
+		body := finalText
+		if !haveFinal {
+			body = deltaBuf.String()
 		}
+		_, _ = io.WriteString(pw, body)
+		f.body.Reset()
+		f.body.WriteString(body)
 
 		_ = pw.Close()
 		close(activity)

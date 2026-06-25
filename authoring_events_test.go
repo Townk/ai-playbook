@@ -86,21 +86,28 @@ func TestAuthorEventsFanOut_Integration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read playbook: %v", err)
 	}
-	// Deltas streamed → the ui-facing pipe carries the streamed delta text; the
-	// Final result is authoritative for the stored CACHE body, not the live stream.
-	if string(playbook) != "# Diagnosis\n" {
-		t.Errorf("playbook reaching the ui stream = %q, want the streamed delta", playbook)
+	// The doc reaching the ui pipe is the authoritative Final/result text — the
+	// rendered playbook — NOT the interim streamed narration. The streamed text
+	// deltas arrive transiently on the activity channel instead.
+	if string(playbook) != "# Diagnosis\nrun make test\n" {
+		t.Errorf("playbook reaching the ui stream = %q, want the Final/result text", playbook)
 	}
 
 	gotAct := <-actCh
-	foundTool := false
+	foundTool, foundDelta := false, false
 	for _, s := range gotAct {
 		if s == "❯ make test" {
 			foundTool = true
 		}
+		if s == "# Diagnosis\n" {
+			foundDelta = true
+		}
 	}
 	if !foundTool {
 		t.Errorf("activity feed = %v, want it to include the tool line %q", gotAct, "❯ make test")
+	}
+	if !foundDelta {
+		t.Errorf("activity feed = %v, want it to include the streamed text delta %q", gotAct, "# Diagnosis\n")
 	}
 
 	if fo.Body() != "# Diagnosis\nrun make test\n" {
