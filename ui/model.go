@@ -475,6 +475,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.flushRender() // render whatever's pending immediately
 			m.streaming = false
 			m.thinking = false
+			// Confirm what the agent actually produced: 0 runnable blocks at EOF means
+			// it narrated/applied instead of WRITING {id=fix}/{id=verify} blocks (a
+			// prompt-compliance gap), vs blocks>0 not visible (a render gap).
+			dbg("stream EOF: md=%dB blocks=%d head=%q", len(m.md), len(m.blocks), collapseLine(m.md))
 			// Close a live in-process re-engagement stream so the agent process is
 			// reaped and the orchestrator's on-close side effects fire (regenerate's
 			// cache re-store, wrap-up's artifact close). No-op in FIFO mode (nil).

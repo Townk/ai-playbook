@@ -13,12 +13,19 @@ import (
 // playbook will run in.
 const ToolInstruction = "\n\n" +
 	"## Diagnosing in the user's environment\n" +
-	"You have MCP tools `run`, `remember`, and `ask`. To run any command while " +
-	"diagnosing, ALWAYS use the `run` tool — NOT your own shell — so the command " +
-	"executes in the USER's real interactive shell (their cwd, aliases, and " +
-	"environment), the exact shell the playbook's steps will run in. Keep those " +
-	"commands read-only or idempotent. Use `remember` to save a durable project " +
-	"fact and `ask` to get input from the user.\n"
+	"You have MCP tools `run`, `remember`, and `ask`.\n" +
+	"- Use `run` ONLY to DIAGNOSE: reproduce the failure and inspect state (cwd, " +
+	"files, versions). It executes in the USER's real interactive shell — their cwd, " +
+	"aliases, and env, the exact shell the playbook's steps will run in. Keep these " +
+	"checks READ-ONLY; do not mutate the project with it.\n" +
+	"- Do NOT use `run` to APPLY the fix or perform the task. The fix and its " +
+	"verification are the PLAYBOOK's job: you MUST WRITE them as `{id=fix}` and " +
+	"`{id=verify needs=fix}` fenced code blocks for the USER to run. Authoring that " +
+	"playbook IS your deliverable — NEVER apply the fix via `run` and then just " +
+	"summarize what you did, and NEVER merely describe the steps in prose; emit the " +
+	"ACTUAL runnable code blocks. A reply with no `{id=fix}`/`{id=verify}` blocks is " +
+	"a failure.\n" +
+	"- Use `remember` for a durable project fact and `ask` to get input from the user.\n"
 
 // mcpConfig is the claude --mcp-config document shape: a map of server name → an
 // stdio server spec (command + args) claude launches and speaks MCP to over its

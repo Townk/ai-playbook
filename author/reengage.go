@@ -78,6 +78,10 @@ func FollowupPrompt(req capture.Request, failedOutput string) string {
 	b.WriteString("runner keys success detection, the \"did this solve it?\" confirmation, and any\n")
 	b.WriteString("further follow-ups on them. Untagged blocks get auto-named ids and silently\n")
 	b.WriteString("break that, so always include the {id=...} tag.\n\n")
+	b.WriteString("EMIT THE ACTUAL BLOCKS. Write the real commands inside the fix and verify code\n")
+	b.WriteString("blocks — the USER runs them. Use the `run` tool ONLY to diagnose; do NOT apply\n")
+	b.WriteString("the fix yourself via `run` and then merely describe what you did. A reply with\n")
+	b.WriteString("no runnable {id=fix}/{id=verify} blocks is a failure.\n\n")
 	b.WriteString("Be concise. Do not re-diagnose the original error; focus on why the fix did not work.\n")
 	return b.String()
 }
