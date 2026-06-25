@@ -227,6 +227,27 @@ func (m *model) beginFinalPlaybookInProc() tea.Cmd {
 	})
 }
 
+// commitPlaybookCmd (in-process, stage 3 / spec §E) persists the displayed final
+// playbook draft via orchestrator.CommitPlaybook (save the .md + cache-replace this
+// request's entry), OFF the event loop, and surfaces the outcome as a statusMsg:
+// "✓ saved playbook → <path>" on success, the error otherwise. The model already set
+// committed=true on the trigger (the commit is best-effort/deterministic); this cmd
+// only reports the result. body is the draft to commit (snapshotted on the trigger so
+// a later stream can't race it). Returns a no-op status when re-engagement is unwired.
+func (m *model) commitPlaybookCmd(body string) tea.Cmd {
+	orch := m.orch
+	if orch == nil || orch.Reengage == nil {
+		return func() tea.Msg { return statusMsg{text: "commit: not available in this mode"} }
+	}
+	return func() tea.Msg {
+		path, err := orch.CommitPlaybook(body)
+		if err != nil {
+			return statusMsg{text: "commit: " + err.Error()}
+		}
+		return statusMsg{text: "✓ saved playbook → " + path}
+	}
+}
+
 // beginWrapupInProc (in-process) runs the wrap-up pass and re-arms the parser with
 // the `## Solution` summary stream in APPEND mode (the summary streams below the
 // playbook). The orchestrator performs the side effects (solution artifact + KB

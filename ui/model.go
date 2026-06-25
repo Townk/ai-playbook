@@ -208,10 +208,17 @@ type model struct {
 	confirmResolved bool
 
 	// finalDraft marks that the rendered playbook is a GENERATED final-playbook draft
-	// (the confirm "Yes" / `w` produced it). committed is false until stage 3 persists
-	// it (save + cache). Stage 2 only generates the draft — neither save nor cache.
+	// (the confirm "Yes" / `f` / `w`-on-transcript produced it). committed flips true
+	// once `w` persists it (save + cache-replace via orchestrator.CommitPlaybook).
 	finalDraft bool
 	committed  bool
+
+	// quitGuard is set when the user pressed quit (q/esc/ctrl+c) while an uncommitted
+	// draft was displayed (finalDraft && !committed): instead of quitting we show a
+	// one-line warning and require a SECOND quit to actually exit. A `w` commit in
+	// between clears it (the draft is now saved). Reset on any non-quit key so the
+	// "press quit again" intent stays immediate, not sticky across other interactions.
+	quitGuard bool
 }
 
 // emitAction performs a button's action. In FIFO mode (m.orch == nil) it appends
@@ -619,6 +626,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyPressMsg:
 		m.flashKey = ""
 		m.status = ""
+		// The uncommitted-draft quit guard is a two-press intent: it only persists across
+		// a consecutive quit (to discard) or a `w` (to save, which clears it). Any OTHER
+		// key (navigation, help, …) cancels the pending discard so a later quit warns
+		// afresh rather than silently exiting.
+		if s := msg.String(); s != "q" && s != "esc" && s != "ctrl+c" && s != "w" {
+			m.quitGuard = false
+		}
 		// Help overlay: resolve before hint/normal handling.
 		if m.helpMode {
 			switch msg.String() {
@@ -775,14 +789,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.helpXOff = 0
 			return m, nil
 		case "q", "esc", "ctrl+c":
+			// Uncommitted-draft guard (spec §E): a generated/served playbook draft that
+			// has not been `w`-committed (save + cache-replace) would be LOST on quit. The
+			// first quit press warns instead of exiting; a SECOND quit press confirms the
+			// discard. A `w` commit in between clears the guard (the draft is persisted).
+			if m.finalDraft && !m.committed && !m.quitGuard {
+				dbg("quit with uncommitted draft — warning, requiring a second quit")
+				m.quitGuard = true
+				m.status = "uncommitted playbook — w to save, quit again to discard"
+				return m, nil
+			}
 			return m, tea.Quit
 		case "w":
-			// Stage 2 (spec §E): `w` = manual finalize → GENERATE the final-playbook
-			// draft (the same REPLACE generation as the confirm "Yes"). Only when
-			// settled (not streaming). Stage 3 will make `w` COMMIT (save + cache) when
-			// a draft already exists; for stage 2 it just generates the draft. Answering
-			// any pending confirm is moot — `w` finalizes regardless, so clear it.
+			// Stage 3 (spec §E): `w` is the single finalize/commit action. Only when
+			// settled (not streaming). Two branches:
+			//   - a final-playbook DRAFT already exists (finalDraft && !committed): `w`
+			//     COMMITS it (orchestrator.CommitPlaybook → save + cache-replace), marks
+			//     committed, clears the quit guard, and shows "✓ saved playbook → <path>".
+			//     It does NOT re-generate — the draft IS the finished playbook.
+			//   - no draft (the pager holds a raw troubleshoot TRANSCRIPT): `w` generates
+			//     the final-playbook draft (the stage-2 behavior). committed stays false
+			//     so a following `w` commits it.
 			if !m.streaming {
+				if m.finalDraft && !m.committed {
+					dbg("w: commit existing final-playbook draft")
+					m.confirmResolved = false
+					m.committed = true // persisted below; clears the uncommitted-draft quit guard
+					m.quitGuard = false
+					return m, m.commitPlaybookCmd(m.md)
+				}
 				dbg("w: manual finalize → generate final-playbook draft")
 				m.wrappedUp = true
 				m.confirmResolved = false

@@ -179,6 +179,103 @@ func TestWrapup_ArtifactAndKB(t *testing.T) {
 	}
 }
 
+// CommitPlaybook (stage 3 / spec §E) cache-REPLACES this request's entry with the
+// finalized body AND saves it to <DataRoot>/playbooks/<slug>.md, the slug derived
+// from the `# Playbook — <title>` heading.
+func TestCommitPlaybook_CacheReplaceAndFileSave(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AI_ASSIST_DATA_DIR", root)
+	c := cache.Open()
+	// Seed a stale cached troubleshoot so we can assert the commit REPLACES it.
+	if _, err := c.Store("ctxhash", "reqhash", "playbook", "# stale troubleshoot\n", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+		Req:         sampleReq(),
+		Cache:       c,
+		CtxHash:     "ctxhash",
+		ReqHash:     "reqhash",
+		RequestJSON: `{"command":"make build"}`,
+		DataRoot:    root,
+	})
+
+	body := "# Playbook — Compile an Android Project\n\nSet up the SDK.\n"
+	path, err := o.CommitPlaybook(body)
+	if err != nil {
+		t.Fatalf("CommitPlaybook: %v", err)
+	}
+
+	// (1) Cache entry REPLACED with the final body (stale content gone).
+	entry := filepath.Join(root, "cache", "ctxhash", "reqhash.md")
+	got, err := os.ReadFile(entry)
+	if err != nil {
+		t.Fatalf("read cache entry: %v", err)
+	}
+	if !strings.Contains(string(got), "Compile an Android Project") {
+		t.Errorf("cache entry not replaced with the final body:\n%s", got)
+	}
+	if strings.Contains(string(got), "stale troubleshoot") {
+		t.Errorf("cache entry still holds the stale body:\n%s", got)
+	}
+
+	// (2) File saved at playbooks/<slug>.md with the body; slug from the title.
+	wantPath := filepath.Join(root, "playbooks", "compile-an-android-project.md")
+	if path != wantPath {
+		t.Errorf("saved path = %q, want %q", path, wantPath)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read saved playbook: %v", err)
+	}
+	if string(saved) != body {
+		t.Errorf("saved file body = %q, want the full playbook body", saved)
+	}
+}
+
+// CommitPlaybook is graceful when the cache keys are absent (an unkeyed / cache-
+// disabled request): it skips the cache-replace (no entry to replace) but STILL saves
+// the .md file, falling back to the context hash for the slug when there's no title.
+func TestCommitPlaybook_NoKeysSavesFileOnly(t *testing.T) {
+	root := t.TempDir()
+	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+		Req:      sampleReq(),
+		CtxHash:  "fallbackctx", // present so the slug can fall back to it
+		DataRoot: root,
+		// No Cache / ReqHash → cache-replace skipped.
+	})
+
+	body := "no title here, just prose\n"
+	path, err := o.CommitPlaybook(body)
+	if err != nil {
+		t.Fatalf("CommitPlaybook: %v", err)
+	}
+	// No cache dir should have been created (cache-replace was skipped).
+	if _, err := os.Stat(filepath.Join(root, "cache")); !os.IsNotExist(err) {
+		t.Errorf("cache dir should not exist when keys absent (err=%v)", err)
+	}
+	// Slug falls back to the context hash when there's no title.
+	wantPath := filepath.Join(root, "playbooks", "fallbackctx.md")
+	if path != wantPath {
+		t.Errorf("saved path = %q, want %q (ctx-hash slug fallback)", path, wantPath)
+	}
+	if saved, _ := os.ReadFile(path); string(saved) != body {
+		t.Errorf("saved file body = %q, want %q", saved, body)
+	}
+}
+
+// CommitPlaybook errors on an empty body (nothing to commit) and without a Reengage.
+func TestCommitPlaybook_EmptyAndNoReengage(t *testing.T) {
+	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{DataRoot: t.TempDir()})
+	if _, err := o.CommitPlaybook("   \n"); err == nil {
+		t.Error("CommitPlaybook with an empty body should error")
+	}
+	bare := New(newTestDriver(t), &recMux{})
+	if _, err := bare.CommitPlaybook("# Playbook — x\n"); err == nil {
+		t.Error("CommitPlaybook without Reengage should error")
+	}
+}
+
 // Without a Reengage wired the re-engagement methods return ErrNotImplemented.
 func TestReengageMethods_NoReengage(t *testing.T) {
 	o := New(newTestDriver(t), &recMux{})

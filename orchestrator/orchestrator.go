@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -354,6 +355,85 @@ func (o *Orchestrator) FinalPlaybook(base, change string) (io.ReadCloser, <-chan
 		return nil, nil, ModeReplace, err
 	}
 	return stream, nil, ModeReplace, nil
+}
+
+// CommitPlaybook persists a finalized playbook (spec §E — the `w` commit action),
+// taking the displayed draft body and making it THE saved asset. It performs the
+// two durable side effects:
+//
+//  1. Cache-REPLACE: it re-stores this request's cache entry (same context/request
+//     keys, kind "playbook") with body, exactly as Regenerate's re-store does — so a
+//     future identical context → cache HIT serves the clean final playbook. This is
+//     skipped gracefully (no error) when the cache or the decision keys are absent
+//     (an unkeyed/cache-disabled request): there is no entry to replace, but the file
+//     save below still runs so the asset is never lost.
+//  2. File save: it writes body to <DataRoot>/playbooks/<slug>.md, where <slug> is
+//     derived from the `# Playbook — <title>` heading (sanitized), falling back to the
+//     context hash (then "playbook") when no title is present. The directory is
+//     created. The saved path is returned so the ui can confirm it to the user.
+//
+// KB remember is DEFERRED (spec §E note): the final playbook + cache entry + saved
+// file are the durable assets; a KB fact is a later refinement and must not block the
+// commit. An empty body or a missing Reengage context is an error (nothing to commit).
+func (o *Orchestrator) CommitPlaybook(body string) (string, error) {
+	if o.Reengage == nil {
+		return "", ErrNotImplemented
+	}
+	if strings.TrimSpace(body) == "" {
+		return "", errors.New("orchestrator: cannot commit an empty playbook")
+	}
+	re := o.Reengage
+
+	// (1) Cache-REPLACE — best-effort, skipped when keys/cache absent (no entry to
+	// replace). Mirrors Regenerate's restore: same keys + kind + request sidecar.
+	if re.Cache != nil && re.CtxHash != "" && re.ReqHash != "" {
+		_, _ = re.Cache.Store(re.CtxHash, re.ReqHash, "playbook", body, nil, re.RequestJSON)
+	}
+
+	// (2) Save the .md file under <DataRoot>/playbooks/<slug>.md.
+	dir := filepath.Join(re.dataRoot(), "playbooks")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return "", err
+	}
+	slug := playbookSlug(body, re.CtxHash)
+	path := filepath.Join(dir, slug+".md")
+	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+// playbookTitle matches the literate-config playbook heading `# Playbook — <title>`
+// (the em-dash the FINAL-PLAYBOOK prompt mandates), capturing <title>. A plain
+// `# <title>` (no "Playbook —" prefix) is matched by the fallback in playbookSlug.
+var playbookTitle = regexp.MustCompile(`(?m)^#\s+Playbook\s+—\s+(.+?)\s*$`)
+
+// firstHeading matches the first markdown H1 `# <title>` as a fallback title source.
+var firstHeading = regexp.MustCompile(`(?m)^#\s+(.+?)\s*$`)
+
+// slugNonWord collapses any run of non-alphanumeric characters to a single dash.
+var slugNonWord = regexp.MustCompile(`[^a-z0-9]+`)
+
+// playbookSlug derives a filesystem-safe slug from the playbook body: the title in
+// the `# Playbook — <title>` heading (else the first H1), lowercased with non-word
+// runs collapsed to dashes and the ends trimmed. Falls back to the context hash, then
+// "playbook", when no usable title is present — so a file is always written.
+func playbookSlug(body, ctxHash string) string {
+	title := ""
+	if m := playbookTitle.FindStringSubmatch(body); m != nil {
+		title = m[1]
+	} else if m := firstHeading.FindStringSubmatch(body); m != nil {
+		title = m[1]
+	}
+	slug := slugNonWord.ReplaceAllString(strings.ToLower(title), "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		if ctxHash != "" {
+			return ctxHash
+		}
+		return "playbook"
+	}
+	return slug
 }
 
 // Followup re-engages the agent with the "your fix didn't work" prompt built from

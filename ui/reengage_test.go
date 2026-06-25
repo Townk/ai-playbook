@@ -856,6 +856,171 @@ func TestManualWGeneratesFinalPlaybookDraft(t *testing.T) {
 	}
 }
 
+// Stage 3 (spec §E): `w` on an existing final-playbook DRAFT COMMITS it — it calls
+// orchestrator.CommitPlaybook (save + cache-replace), marks committed, shows the
+// "✓ saved playbook → <path>" status, and does NOT re-generate (the producer is not
+// called and the rendered draft is preserved, not reset).
+func TestWCommitsExistingDraft(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
+	m.md = "# Playbook — My Setup\n\nclean playbook\n"
+	m.finalDraft = true
+	m.committed = false
+	m.inputFifoPath = ""
+	m.reflow()
+
+	nm, cmd := m.Update(key("w"))
+	m = nm.(model)
+	if cmd == nil {
+		t.Fatal("w on a draft must return the commit cmd")
+	}
+	if !m.committed {
+		t.Error("w on a draft must mark committed=true")
+	}
+	// The draft must be PRESERVED (not REPLACE-reset like a generation) and not regenerated.
+	if !strings.Contains(m.md, "My Setup") {
+		t.Errorf("w-commit must preserve the draft, got %q", m.md)
+	}
+	if m.thinking {
+		t.Error("w-commit must NOT start a generation (thinking) — it just persists")
+	}
+	// Run the commit cmd: it persists via CommitPlaybook and yields the saved status.
+	msg := cmd()
+	sm, ok := msg.(statusMsg)
+	if !ok {
+		t.Fatalf("commit cmd must yield a statusMsg, got %T", msg)
+	}
+	if !strings.Contains(sm.text, "saved playbook") {
+		t.Errorf("commit status = %q, want a 'saved playbook' confirmation", sm.text)
+	}
+	// The producer (final-playbook generation) must NOT have been called.
+	if fe.calls != 0 {
+		t.Errorf("w-commit must not generate (producer calls = %d, want 0)", fe.calls)
+	}
+}
+
+// Stage 3 (spec §E): `w` on a raw troubleshoot TRANSCRIPT (no draft yet) still
+// GENERATES the final-playbook draft — the stage-2 behavior, unchanged.
+func TestWGeneratesOnTranscript(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
+	m.md = "# Troubleshoot transcript\n"
+	m.finalDraft = false
+	m.committed = false
+	m.inputFifoPath = ""
+	m.reflow()
+
+	nm, cmd := m.Update(key("w"))
+	m = nm.(model)
+	if cmd == nil {
+		t.Fatal("w on a transcript must trigger generation")
+	}
+	if m.md != "" {
+		t.Errorf("w-generate must REPLACE (reset m.md), got %q", m.md)
+	}
+	if !m.finalDraft || m.committed {
+		t.Errorf("w-generate must mark a draft (finalDraft=%v committed=%v)", m.finalDraft, m.committed)
+	}
+	m = pumpReArm(t, m, cmd)
+	if fe.calls != 1 || fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+		t.Errorf("w-generate must call the final-playbook producer once, got calls=%d kind=%v", fe.calls, fe.gotKind)
+	}
+}
+
+// Stage 3 (spec §E): quitting (q/esc/ctrl+c) with an UNCOMMITTED draft does NOT exit
+// — it warns and requires a SECOND quit press to discard. A committed/absent draft
+// quits normally on the first press.
+func TestQuitGuardWithUncommittedDraft(t *testing.T) {
+	m := newModel("T", "# Playbook — draft\n")
+	m.width, m.height = 80, 24
+	m.finalDraft = true
+	m.committed = false
+	m.reflow()
+
+	// First quit: warns, no exit.
+	nm, cmd := m.Update(key("q"))
+	m = nm.(model)
+	if cmd != nil {
+		t.Fatalf("first quit with an uncommitted draft must NOT quit (cmd=%T)", cmd())
+	}
+	if !m.quitGuard {
+		t.Error("first quit must arm the quit guard")
+	}
+	if !strings.Contains(m.status, "uncommitted") {
+		t.Errorf("first quit must show the uncommitted warning, got %q", m.status)
+	}
+
+	// Second quit: exits.
+	_, cmd2 := m.Update(key("q"))
+	if cmd2 == nil {
+		t.Fatal("second quit must exit")
+	}
+	if _, ok := cmd2().(tea.QuitMsg); !ok {
+		t.Errorf("second quit must return tea.QuitMsg, got %T", cmd2())
+	}
+}
+
+// Stage 3 (spec §E): a `w` commit between the two quit presses clears the guard, so
+// a subsequent quit exits immediately (the draft is now persisted).
+func TestQuitGuardClearedByCommit(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
+	m.md = "# Playbook — draft\n\nbody\n"
+	m.finalDraft = true
+	m.committed = false
+	m.inputFifoPath = ""
+	m.reflow()
+
+	// First quit arms the guard.
+	nm, _ := m.Update(key("q"))
+	m = nm.(model)
+	if !m.quitGuard {
+		t.Fatal("setup: first quit must arm the guard")
+	}
+	// `w` commits → clears the guard.
+	nm2, _ := m.Update(key("w"))
+	m = nm2.(model)
+	if m.quitGuard {
+		t.Error("a w-commit must clear the quit guard")
+	}
+	if !m.committed {
+		t.Error("w must commit the draft")
+	}
+	// A following quit exits immediately (committed → no guard).
+	_, cmd := m.Update(key("q"))
+	if cmd == nil {
+		t.Fatal("quit after commit must exit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Errorf("quit after commit must return tea.QuitMsg, got %T", cmd())
+	}
+}
+
+// Stage 3: quitting with NO draft (or a committed one) exits normally on the first press.
+func TestQuitNormalWithoutDraft(t *testing.T) {
+	m := newModel("T", "# some content\n")
+	m.width, m.height = 80, 24
+	m.reflow()
+	_, cmd := m.Update(key("q"))
+	if cmd == nil {
+		t.Fatal("quit without a draft must exit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Errorf("quit without a draft must return tea.QuitMsg, got %T", cmd())
+	}
+
+	// A committed draft also quits normally.
+	m2 := newModel("T", "# Playbook — done\n")
+	m2.width, m2.height = 80, 24
+	m2.finalDraft = true
+	m2.committed = true
+	m2.reflow()
+	_, cmd2 := m2.Update(key("q"))
+	if cmd2 == nil {
+		t.Fatal("quit with a committed draft must exit")
+	}
+	if _, ok := cmd2().(tea.QuitMsg); !ok {
+		t.Errorf("quit with a committed draft must return tea.QuitMsg, got %T", cmd2())
+	}
+}
+
 // Issue #3 (regression guard): a verify FAILURE still triggers the follow-up,
 // unchanged by the verify-success wrap-up addition.
 func TestVerifyFailStillTriggersFollowupNotWrapup(t *testing.T) {
