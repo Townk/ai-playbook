@@ -171,8 +171,13 @@ func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
 	if orch == nil || orch.Reengage == nil {
 		return nil
 	}
-	// APPEND: keep the existing playbook, add a separator + spinner below it.
-	m.md += "\n\n---\n\n"
+	// APPEND: keep the existing playbook, add a separator + spinner below it — UNLESS
+	// an AUTO follow-up already framed the attempt with a separator ABOVE its
+	// announcement phrase (justAnnounced); a second `---` would double the rule.
+	if !m.justAnnounced {
+		m.md += "\n\n---\n\n"
+	}
+	m.justAnnounced = false
 	m.thinking = true
 	m.spinFrame = 0
 	m.spinTicks = 0

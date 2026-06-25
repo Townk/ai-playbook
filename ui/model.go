@@ -130,16 +130,17 @@ type model struct {
 	inputFifoPath string // --input-fifo path; used to re-open the FIFO on regenerate
 
 	// streaming + thinking
-	thinking     bool
-	thinkLabel   string
-	defaultLabel string
-	spinFrame    int
-	spinTicks    int // 100ms ticks within the current thinking session (seconds = /10)
-	streaming    bool
-	follow       bool      // auto-scroll to bottom while streaming
-	pinTop       int       // body line pinned to the viewport top (>=0): relaxes the scroll clamp so a freshly-announced follow-up sits at top with blank space below until new content fills it. -1 = none (no effect once content grows past the body).
-	reader       io.Reader // input stream source (set by main); nil in tests/static
-	parser       *streamParser
+	thinking      bool
+	thinkLabel    string
+	defaultLabel  string
+	spinFrame     int
+	spinTicks     int // 100ms ticks within the current thinking session (seconds = /10)
+	streaming     bool
+	follow        bool      // auto-scroll to bottom while streaming
+	justAnnounced bool      // set by announceFollowup so beginFollowupInProc skips its own `---` (the announcement already framed the attempt with a separator ABOVE the phrase)
+	pinTop        int       // body line pinned to the viewport top (>=0): relaxes the scroll clamp so a freshly-announced follow-up sits at top with blank space below until new content fills it. -1 = none (no effect once content grows past the body).
+	reader        io.Reader // input stream source (set by main); nil in tests/static
+	parser        *streamParser
 
 	dirty           bool // streamed text appended since the last reflow
 	renderScheduled bool // a coalesced render tick is already pending
@@ -1620,7 +1621,11 @@ func (m *model) announceFollowup(attempt int) {
 	// is the announcement's starting body-line index after the append + reflow.
 	m.reflow()
 	startLine := len(m.lines)
-	m.md += "\n\n_" + followupAnnouncement(attempt) + "_\n\n"
+	// Separator ABOVE the phrase, so the rule frames the TOP of the new attempt:
+	// ──────  /  _That didn't work — let me try…_  /  <new instructions>. The
+	// following beginFollowupInProc must then NOT add its own `---` (justAnnounced).
+	m.md += "\n\n---\n\n_" + followupAnnouncement(attempt) + "_\n\n"
+	m.justAnnounced = true
 	m.reflow()
 	// One-time scroll: make the announcement the FIRST visible body row. Pin it so
 	// clampScroll permits the over-scroll (blank below) — otherwise the announcement,

@@ -861,7 +861,9 @@ func TestAutoFollowupOneTimeScrollThenNoMovement(t *testing.T) {
 	if maxY := len(m.lines) - m.body(); m.yOff <= maxY {
 		t.Errorf("announcement not pinned to top: yOff=%d <= maxY=%d (clamped to bottom)", m.yOff, maxY)
 	}
-	if annIdx-m.yOff > 2 {
+	// Near the top — a few rows down is fine: the separator `---` (+ blank lines)
+	// frames the attempt ABOVE the phrase, so the phrase sits a couple rows below yOff.
+	if annIdx-m.yOff > 4 {
 		t.Errorf("announcement must be near the TOP of the body (pinned), got %d rows down (yOff=%d)", annIdx-m.yOff, m.yOff)
 	}
 
