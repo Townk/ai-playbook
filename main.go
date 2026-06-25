@@ -142,7 +142,7 @@ func troubleshoot() int {
 	}
 
 	req := capture.Capture(capture.Options{
-		Mux:         mux.NewZellij(),
+		Mux:         mux.Load(),
 		Atuin:       capture.NewAtuin(),
 		PaneID:      paneID,
 		UserRequest: userRequest,

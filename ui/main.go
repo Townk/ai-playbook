@@ -152,7 +152,7 @@ func Main() int {
 				fmt.Fprintf(os.Stderr, "ai-playbook run: driver.Open failed (%v); falling back to render-only\n", derr)
 			} else {
 				defer d.Close()
-				orch = orchestrator.New(d, &cliMux{}).WithFloat(mux.NewZellij())
+				orch = orchestrator.New(d, &cliMux{}).WithFloat(mux.Load())
 				if pendingReengage != nil {
 					orch.WithReengage(pendingReengage)
 				}

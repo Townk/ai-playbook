@@ -1,98 +1,102 @@
-// Package mux is the terminal-multiplexer adapter: a pluggable interface with a
-// zellij implementation. It is the "detect don't list" seam from the design —
-// the producer's capture step needs only DumpScreen now; float/pane spawn are
-// defined for the later stages but return ErrNotImplemented until wired.
+// Package mux is the terminal-multiplexer adapter. It is now CONFIG-DRIVEN: the
+// per-action commands are TOML templates (config.Mux) the user can override —
+// there is no per-mux Go code. The adapter substitutes placeholders into the
+// configured template, splits the result into argv (no shell), and runs it.
 //
-// The interface is injectable so capture (and any other consumer) is testable
-// with a fake that returns canned screen dumps.
+// The Mux interface is unchanged for existing callers (capture, orchestrator
+// view-diff). Map of method → template:
+//
+//	DumpScreen  → dump-screen          (captures stdout, returns the screen text)
+//	SpawnFloat  → open-floating-pane   (fire-and-forget, detached stdio)
+//	SpawnDocked → open-docked-pane     (fire-and-forget, detached stdio) [new]
+//	TypeInto    → type-into-pane       (the `play` action) [new]
+//
+// The interface stays injectable so consumers are testable with a fake.
 package mux
 
 import (
 	"bytes"
 	"errors"
-	"os"
 	"os/exec"
 	"strconv"
+
+	"ai-playbook/config"
 )
 
 // ErrNotImplemented marks a Mux method modeled but deferred to a later stage.
 var ErrNotImplemented = errors.New("mux: not implemented yet")
 
 // SpawnOptions describes a pane/float to open. Fields beyond Cmd are advisory
-// hints the impl may honor; they exist so the interface is stable across stages.
+// hints honored by the configured template; they exist so the interface is
+// stable across stages.
 type SpawnOptions struct {
-	Cmd       []string // command + args to run in the new pane
-	Cwd       string   // working dir for the pane
-	Name      string   // pane title
-	Floating  bool     // float vs tiled
-	Width     int      // requested columns (impl may ignore)
-	Height    int      // requested rows (impl may ignore)
-	Direction string   // tiled direction (e.g. "right")
+	Cmd       []string // command + args to run in the new pane ({cmd})
+	Cwd       string   // working dir for the pane ({cwd}/{cwdarg})
+	Name      string   // pane title ({name}/{namearg})
+	Floating  bool     // float vs tiled (advisory; template selects the action)
+	Width     int      // requested columns as a percent (0 → template default)
+	Height    int      // requested rows as a percent (0 → template default)
+	Direction string   // tiled direction (advisory)
 }
 
-// Mux is the terminal-multiplexer surface for the producer. DumpScreen is the
-// only method needed in stage 4a; the spawn methods are part of the contract but
-// return ErrNotImplemented for now (wired in a later stage).
+// Mux is the terminal-multiplexer surface for the producer.
 type Mux interface {
 	// DumpScreen returns the current viewport text of pane (a mux-specific pane
 	// id, e.g. "terminal_3"; empty means the focused pane).
 	DumpScreen(pane string) (string, error)
 	// SpawnFloat opens a floating pane running opts.Cmd (e.g. the diff viewer).
 	SpawnFloat(opts SpawnOptions) error
-	// SpawnPane opens a tiled pane running opts.Cmd. Deferred.
+	// SpawnPane opens a tiled pane running opts.Cmd. Deferred (use SpawnDocked).
 	SpawnPane(opts SpawnOptions) error
+	// SpawnDocked opens a docked (down-direction) tiled pane running opts.Cmd.
+	SpawnDocked(opts SpawnOptions) error
+	// TypeInto types text into a pane — the `play` action. pane is advisory
+	// (zellij write-chars targets the focused pane); empty means focused.
+	TypeInto(pane, text string) error
 }
 
-// Zellij is the zellij implementation of Mux. The binary path is resolved once;
-// an empty Bin falls back to "zellij" on PATH.
-type Zellij struct {
-	Bin string
+// templated is the config-driven Mux implementation. It holds the resolved mux
+// templates and substitutes/execs them per action. Its zero value is unusable;
+// build it with FromConfig.
+type templated struct {
+	tpl config.Mux
 }
 
-// NewZellij returns a Zellij adapter, resolving the binary like the shell's
-// assist::zellij_bin: $ZELLIJ_BIN, else "zellij" on PATH, else a few well-known
-// install locations.
-func NewZellij() *Zellij {
-	return &Zellij{Bin: resolveZellijBin()}
+// FromConfig builds a Mux from the merged config. With the default profile this
+// reproduces the previous hardcoded zellij invocations exactly, so capture and
+// view-diff are unchanged when no config file is present.
+func FromConfig(cfg *config.Config) Mux {
+	return &templated{tpl: cfg.Mux}
 }
 
-func resolveZellijBin() string {
-	if v := os.Getenv("ZELLIJ_BIN"); v != "" {
-		if isExec(v) {
-			return v
-		}
+// Load builds a Mux from the user's merged config (config.Load), falling back to
+// the baked-in default profile if the config cannot be loaded. Convenience for
+// call sites that just want "the configured mux" without threading a *Config.
+func Load() Mux {
+	cfg, err := config.Load()
+	if err != nil {
+		cfg = config.Default()
 	}
-	if p, err := exec.LookPath("zellij"); err == nil {
-		return p
-	}
-	home, _ := os.UserHomeDir()
-	for _, cand := range []string{
-		"/opt/homebrew/bin/zellij",
-		"/usr/local/bin/zellij",
-		"/snap/bin/zellij",
-		home + "/.local/bin/zellij",
-	} {
-		if isExec(cand) {
-			return cand
-		}
-	}
-	return "zellij"
+	return FromConfig(cfg)
 }
 
-func isExec(p string) bool {
-	fi, err := os.Stat(p)
-	return err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0
+// percent renders n as a "<n>%" size string, empty when n <= 0 (template default).
+func percent(n int) string {
+	if n <= 0 {
+		return ""
+	}
+	return strconv.Itoa(n) + "%"
 }
 
-// DumpScreen runs `zellij action dump-screen [-p <pane>]` and returns stdout.
-// Mirrors assist::capture_scrollback's dump (viewport, NOT --full). A failed
-// dump returns the error so the caller can fall back to an empty capture.
-func (z *Zellij) DumpScreen(pane string) (string, error) {
-	args := []string{"action", "dump-screen"}
-	if pane != "" {
-		args = append(args, "-p", pane)
+// DumpScreen runs the dump-screen template and returns stdout. Mirrors
+// assist::capture_scrollback's dump (viewport, NOT --full). A failed dump
+// returns the error so the caller can fall back to an empty capture.
+func (t *templated) DumpScreen(pane string) (string, error) {
+	argv := t.tpl.Substitute(t.tpl.DumpScreen, config.Subst{Pane: pane})
+	if len(argv) == 0 {
+		return "", errors.New("mux: dump-screen template is empty")
 	}
-	cmd := exec.Command(z.Bin, args...)
+	cmd := exec.Command(argv[0], argv[1:]...)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	cmd.Stderr = nil
@@ -102,57 +106,64 @@ func (z *Zellij) DumpScreen(pane string) (string, error) {
 	return out.String(), nil
 }
 
-// floatArgs builds the `zellij action new-pane --floating …` argument vector for
-// opts, ported from the shell broker's broker::open_diff invocation:
-//
-//	zellij action new-pane --floating --width 90% --height 90% --close-on-exit \
-//	  --cwd <root> --name <name> -- <cmd...>
-//
-// Width/Height default to 90% (the broker's literal) when opts leaves them 0;
-// --cwd and --name are emitted only when set. opts.Cmd follows the `--` separator
-// so its own flags are never parsed by zellij. Exposed (lower-case, package-local)
-// so a test can assert the constructed command without a real zellij.
-func (z *Zellij) floatArgs(opts SpawnOptions) []string {
-	width := "90%"
-	if opts.Width > 0 {
-		width = itoaPercent(opts.Width)
-	}
-	height := "90%"
-	if opts.Height > 0 {
-		height = itoaPercent(opts.Height)
-	}
-	args := []string{"action", "new-pane", "--floating",
-		"--width", width, "--height", height, "--close-on-exit"}
-	if opts.Cwd != "" {
-		args = append(args, "--cwd", opts.Cwd)
-	}
-	if opts.Name != "" {
-		args = append(args, "--name", opts.Name)
-	}
-	args = append(args, "--")
-	args = append(args, opts.Cmd...)
-	return args
-}
-
-// SpawnFloat opens a floating zellij pane running opts.Cmd, mirroring the shell
-// broker's broker::open_diff. Per the broker's best-effort pattern, the spawned
-// `zellij action` process's own stdout/stderr are redirected to /dev/null so a
-// chatty/failed spawn can never corrupt the docked UI pane (the broker used
-// `2>/dev/null || true`). A spawn error is returned but is non-fatal to callers.
-func (z *Zellij) SpawnFloat(opts SpawnOptions) error {
+// spawn runs a fire-and-forget pane template (float or docked). Per the broker's
+// best-effort pattern, the spawned process's stdio is detached so a chatty/failed
+// spawn can never corrupt the docked UI pane. A spawn error is returned but is
+// non-fatal to callers.
+func (t *templated) spawn(template string, opts SpawnOptions) error {
 	if len(opts.Cmd) == 0 {
-		return errors.New("mux: SpawnFloat needs a command")
+		return errors.New("mux: spawn needs a command")
 	}
-	cmd := exec.Command(z.Bin, z.floatArgs(opts)...)
-	// Detach the float-spawn's stdio so it cannot write into our pane.
+	argv := t.tpl.Substitute(template, config.Subst{
+		Cmd:    opts.Cmd,
+		Cwd:    opts.Cwd,
+		Name:   opts.Name,
+		Width:  defaultPercent(opts.Width, 90),
+		Height: defaultPercent(opts.Height, 90),
+	})
+	if len(argv) == 0 {
+		return errors.New("mux: spawn template is empty")
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	// Detach the spawn's stdio so it cannot write into our pane.
 	cmd.Stdout = nil
 	cmd.Stderr = nil
 	cmd.Stdin = nil
 	return cmd.Run()
 }
 
-// SpawnPane is deferred to a later migration stage.
-func (z *Zellij) SpawnPane(opts SpawnOptions) error { return ErrNotImplemented }
+// defaultPercent renders n as a percent, substituting def when n <= 0 — so the
+// float/docked templates get the broker's literal 90% default when unset.
+func defaultPercent(n, def int) string {
+	if n <= 0 {
+		return percent(def)
+	}
+	return percent(n)
+}
 
-// itoaPercent renders n as a "<n>%" zellij size string.
-func itoaPercent(n int) string { return strconv.Itoa(n) + "%" }
+// SpawnFloat opens a floating pane via the open-floating-pane template.
+func (t *templated) SpawnFloat(opts SpawnOptions) error {
+	return t.spawn(t.tpl.OpenFloatingPane, opts)
+}
+
+// SpawnDocked opens a docked (down) pane via the open-docked-pane template.
+func (t *templated) SpawnDocked(opts SpawnOptions) error {
+	return t.spawn(t.tpl.OpenDockedPane, opts)
+}
+
+// SpawnPane is deferred; callers should use SpawnDocked or SpawnFloat.
+func (t *templated) SpawnPane(opts SpawnOptions) error { return ErrNotImplemented }
+
+// TypeInto types text into the focused pane via the type-into-pane template —
+// the `play` action. Best-effort: stdio is detached. pane is advisory.
+func (t *templated) TypeInto(pane, text string) error {
+	argv := t.tpl.Substitute(t.tpl.TypeIntoPane, config.Subst{Pane: pane, Text: text})
+	if len(argv) == 0 {
+		return errors.New("mux: type-into-pane template is empty")
+	}
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.Stdout = nil
+	cmd.Stderr = nil
+	cmd.Stdin = nil
+	return cmd.Run()
+}

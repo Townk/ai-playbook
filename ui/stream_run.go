@@ -90,7 +90,7 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 		fmt.Fprintf(os.Stderr, "ai-playbook: driver.Open failed (%v); falling back to render-only\n", derr)
 	} else {
 		defer d.Close()
-		orch = orchestrator.New(d, &cliMux{}).WithFloat(mux.NewZellij())
+		orch = orchestrator.New(d, &cliMux{}).WithFloat(mux.Load())
 		if opts.Reengage != nil {
 			orch.WithReengage(opts.Reengage)
 		}
