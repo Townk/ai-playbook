@@ -165,6 +165,11 @@ func (m *model) beginRegenerate() tea.Cmd {
 	m.spinTicks = 0
 	m.streaming = true
 	m.follow = false
+	// Issue #3: a re-generated document is a NEW document — scroll to the TOP and
+	// drop any follow-up pin so the user reads it from the start. follow stays false
+	// so streaming content stays anchored at the top rather than chasing the bottom.
+	m.yOff = 0
+	m.pinTop = -1
 	m.reflow()
 	return tea.Batch(m.restartTick(), func() tea.Msg {
 		stream, activity, _, err := orch.Regenerate()
@@ -252,6 +257,11 @@ func (m *model) beginFinalPlaybookGenerate(base, change string) tea.Cmd {
 	m.spinTicks = 0
 	m.streaming = true
 	m.follow = false
+	// Issue #3: the (re)generated final playbook is a NEW document — scroll to the
+	// TOP and drop any follow-up pin so the user reads it from the start; follow
+	// stays false so streaming content stays anchored at the top.
+	m.yOff = 0
+	m.pinTop = -1
 	// Mark the upcoming render a draft (not yet committed/persisted).
 	m.finalDraft = true
 	m.committed = false

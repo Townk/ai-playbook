@@ -1417,6 +1417,12 @@ func TestAutoFollowupOneTimeScrollThenNoMovement(t *testing.T) {
 	if annIdx-m.yOff > 4 {
 		t.Errorf("announcement must be near the TOP of the body (pinned), got %d rows down (yOff=%d)", annIdx-m.yOff, m.yOff)
 	}
+	// Issue #1: the pin is one line higher than before — the `---` SEPARATOR (the rule
+	// framing the top of the new attempt), not the leading blank above it, is the FIRST
+	// visible body row. The top row (m.lines[m.yOff]) must render the rule.
+	if top := strings.TrimSpace(strip(m.lines[m.yOff].Text)); !strings.ContainsAny(top, "─-") || top == "" {
+		t.Errorf("top visible body row must be the `---` separator, got %q", m.lines[m.yOff].Text)
+	}
 
 	// Apply the re-arm + stream content; yOff must NOT move further.
 	var rearm reArmStreamMsg
@@ -1675,5 +1681,244 @@ func TestFDraftCoveredByQuitGuard(t *testing.T) {
 	}
 	if !m.quitGuard {
 		t.Error("first quit over an `f` draft must arm the quit guard")
+	}
+}
+
+// Issue #4: the verify-success confirm row is keyboard-focusable. Default focus is
+// Yes (confirmFocus==0); ←/→ (and h/l, Tab) move focus; Enter/Space select the
+// focused button; y/n still resolve directly regardless of focus.
+func TestConfirmFocusDefaultsToYes(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
+	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	if !m.confirmResolved {
+		t.Fatal("setup: confirm not set")
+	}
+	if m.confirmFocus != 0 {
+		t.Errorf("default confirm focus must be Yes (0), got %d", m.confirmFocus)
+	}
+}
+
+func TestConfirmFocusArrowsMove(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
+	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+
+	// → moves focus to No.
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	m = nm.(model)
+	if m.confirmFocus != 1 {
+		t.Errorf("right arrow must focus No (1), got %d", m.confirmFocus)
+	}
+	// ← moves focus back to Yes.
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyLeft})
+	m = nm.(model)
+	if m.confirmFocus != 0 {
+		t.Errorf("left arrow must focus Yes (0), got %d", m.confirmFocus)
+	}
+	// l (vim) focuses No; h focuses Yes.
+	nm, _ = m.Update(key("l"))
+	m = nm.(model)
+	if m.confirmFocus != 1 {
+		t.Errorf("l must focus No (1), got %d", m.confirmFocus)
+	}
+	nm, _ = m.Update(key("h"))
+	m = nm.(model)
+	if m.confirmFocus != 0 {
+		t.Errorf("h must focus Yes (0), got %d", m.confirmFocus)
+	}
+	// Tab toggles.
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyTab})
+	m = nm.(model)
+	if m.confirmFocus != 1 {
+		t.Errorf("tab must toggle focus to No (1), got %d", m.confirmFocus)
+	}
+}
+
+// Enter selects the FOCUSED button: with focus on No, Enter must resolve "No" (a
+// follow-up), not Yes (the final-playbook generation).
+func TestConfirmEnterSelectsFocused(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# delta\n", "# Playbook\nclean\n")
+	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+
+	// Move focus to No, then Enter → a follow-up (not the final playbook).
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	m = nm.(model)
+	nm2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	m = nm2.(model)
+	if cmd == nil {
+		t.Fatal("Enter on focused No must trigger a follow-up")
+	}
+	if m.confirmResolved {
+		t.Error("Enter must clear the confirm state")
+	}
+	if m.finalDraft {
+		t.Error("Enter on No must NOT mark a finalDraft (that's the Yes path)")
+	}
+	m = pumpReArm(t, m, cmd)
+	if fe.gotKind != orchestrator.KindReengageFollowup {
+		t.Errorf("Enter-on-No kind = %v, want KindReengageFollowup", fe.gotKind)
+	}
+}
+
+// Enter on the DEFAULT focus (Yes) generates the final-playbook draft, and Space
+// selects the focused button too.
+func TestConfirmSpaceSelectsFocusedYes(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Playbook\nclean\n", "# Playbook\nclean\n")
+	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	nm2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	m = nm2.(model)
+	if cmd == nil {
+		t.Fatal("Space on focused Yes must trigger the final-playbook generation")
+	}
+	if !m.finalDraft {
+		t.Error("Space on Yes must mark a finalDraft")
+	}
+	m = pumpReArm(t, m, cmd)
+	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+		t.Errorf("Space-on-Yes kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
+	}
+}
+
+// The y/n direct shortcuts still resolve regardless of the focus position.
+func TestConfirmYNStillWorkWithFocus(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Playbook\nclean\n", "# Playbook\nclean\n")
+	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	// Focus is on No, but `y` must still resolve Yes (final playbook).
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	m = nm.(model)
+	nm2, cmd := m.Update(key("y"))
+	m = nm2.(model)
+	if cmd == nil {
+		t.Fatal("y must resolve Yes regardless of focus")
+	}
+	if !m.finalDraft {
+		t.Error("y must mark a finalDraft (Yes path)")
+	}
+	m = pumpReArm(t, m, cmd)
+	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+		t.Errorf("y kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
+	}
+}
+
+// The focus-navigation keys must be captured ONLY while the confirm is active: with
+// no confirm, ←/→/h/l still scroll and space enters hint mode (not swallowed).
+func TestConfirmKeysInertWhenNoConfirm(t *testing.T) {
+	// Tall content so vertical scroll has headroom; a runnable block so space → hint.
+	// Blank-line-separated paragraphs render as distinct body lines (a markdown
+	// paragraph collapses consecutive non-blank lines, which wouldn't overflow).
+	m := newModel("T", "```bash\nmake build\n```\n"+strings.Repeat("body paragraph\n\n", 60))
+	m.width, m.height = 80, 24
+	m.reflow()
+	if m.confirmResolved {
+		t.Fatal("setup: confirm must not be active")
+	}
+	// space must enter hint mode over the visible run button — NOT be swallowed as a
+	// confirm selection (which only happens while the confirm row is active). Tested at
+	// the top so the run button is in the visible window.
+	nmSpace, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	mSpace := nmSpace.(model)
+	if !mSpace.hintMode {
+		t.Error("space with no confirm must enter hint mode, not act as a confirm select")
+	}
+	// `down` must still scroll vertically — confirm-only keys never intercept nav, and
+	// the confirm branch returns early only WHILE confirmResolved.
+	nm, _ := m.Update(key("j"))
+	m = nm.(model)
+	if m.yOff == 0 {
+		t.Error("j with no confirm must still scroll down (yOff should advance)")
+	}
+}
+
+// Issue #4: the focused button is highlighted and the unfocused one dimmed; moving
+// focus swaps which label carries the highlight in the rendered confirm row.
+func TestConfirmFocusHighlightInRender(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
+	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+
+	// Default focus Yes: the Yes label must carry a background highlight (the focus
+	// ring), distinct from the No label. We compare the raw (un-stripped) ANSI.
+	rowYes := m.confirmRowString()
+	yesFocused := m.confirmButtonLabel(confirmYesLabel, "confirm-yes", colGreen, true)
+	if !strings.Contains(rowYes, yesFocused) {
+		t.Errorf("with Yes focused, the row must contain the highlighted Yes label")
+	}
+	// Move focus to No; now No carries the highlight and Yes is dimmed.
+	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
+	m = nm.(model)
+	rowNo := m.confirmRowString()
+	noFocused := m.confirmButtonLabel(confirmNoLabel, "confirm-no", colPeach, true)
+	if !strings.Contains(rowNo, noFocused) {
+		t.Errorf("with No focused, the row must contain the highlighted No label")
+	}
+	if rowYes == rowNo {
+		t.Error("moving focus must change the rendered confirm row (highlight moved)")
+	}
+}
+
+// Issue #3: a REPLACE final-playbook generation scrolls to the TOP and clears any
+// follow-up pin, so the user reads the new document from the start.
+func TestFinalPlaybookGenerateScrollsToTop(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# Playbook\nclean\n", "# Playbook\nclean\n")
+	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+	// Simulate the user having scrolled down with a stale follow-up pin set.
+	m.yOff = 7
+	m.pinTop = 5
+	cmd := m.beginFinalPlaybookGenerate("", "the troubleshoot content")
+	if cmd == nil {
+		t.Fatal("beginFinalPlaybookGenerate returned nil (re-engagement not wired?)")
+	}
+	if m.yOff != 0 {
+		t.Errorf("REPLACE generate must scroll to top: yOff=%d, want 0", m.yOff)
+	}
+	if m.pinTop != -1 {
+		t.Errorf("REPLACE generate must clear the follow-up pin: pinTop=%d, want -1", m.pinTop)
+	}
+	if m.follow {
+		t.Error("REPLACE generate must keep follow=false (stay at top while streaming)")
+	}
+}
+
+// Issue #3: regenerate (REPLACE) likewise scrolls to the top and clears the pin.
+func TestRegenerateScrollsToTop(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# Playbook\nfresh\n", "# Playbook\nfresh\n")
+	m.md = "# Old playbook\nlots of lines\n"
+	m.reflow()
+	m.yOff = 4
+	m.pinTop = 3
+	cmd := m.beginRegenerate()
+	if cmd == nil {
+		t.Fatal("beginRegenerate returned nil (re-engagement not wired?)")
+	}
+	if m.yOff != 0 {
+		t.Errorf("regenerate must scroll to top: yOff=%d, want 0", m.yOff)
+	}
+	if m.pinTop != -1 {
+		t.Errorf("regenerate must clear the follow-up pin: pinTop=%d, want -1", m.pinTop)
 	}
 }

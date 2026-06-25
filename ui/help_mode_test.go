@@ -268,8 +268,10 @@ func TestViewThinkingMode(t *testing.T) {
 	})
 
 	t.Run("spinner_position_short_content", func(t *testing.T) {
-		// With 2 lines of content (short, no overflow), spinner should appear at
-		// body row 2 (just below the last content line), not at the bottom.
+		// Issue #2: with content above it, the spinner gets ONE blank body row of
+		// separation. With 2 lines of content the natural row is len(m.lines); the
+		// gap pushes the "Working…" spinner one row lower (len(m.lines)+1), and the
+		// natural row is left blank.
 		m := newModel("T", "line1\nline2")
 		m.width, m.height = 80, 24
 		m.thinking = true
@@ -293,14 +295,19 @@ func TestViewThinkingMode(t *testing.T) {
 		if spinnerFound < 0 {
 			t.Fatal("spinner text not found in body")
 		}
-		// With 2 lines of content, spinner should be at body row 2 (0-indexed).
-		wantRow := len(m.lines)
+		// The spinner sits one row below the last content line (a blank gap between).
+		wantRow := len(m.lines) + 1
 		lastRow := m.body() - 1
 		if spinnerFound == lastRow && lastRow > wantRow {
-			t.Errorf("spinner pinned to bottom row %d; want row %d (just below last content line)", lastRow, wantRow)
+			t.Errorf("spinner pinned to bottom row %d; want row %d (one gap below last content line)", lastRow, wantRow)
 		}
 		if spinnerFound != wantRow {
 			t.Errorf("short content: spinner at body row %d, want %d", spinnerFound, wantRow)
+		}
+		// The natural row (directly under the last content line) must be the blank gap.
+		gapRow := len(m.lines)
+		if gapRow < len(bodyLines) && strings.TrimSpace(strip(bodyLines[gapRow])) != "" {
+			t.Errorf("expected a blank gap row at body row %d, got %q", gapRow, strip(bodyLines[gapRow]))
 		}
 	})
 }

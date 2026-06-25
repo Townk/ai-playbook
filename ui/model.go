@@ -207,6 +207,13 @@ type model struct {
 	// Set once on a verify-success (gated like the old wrap-up); cleared when answered.
 	confirmResolved bool
 
+	// confirmFocus is the keyboard-focused confirm button while confirmResolved is
+	// true: 0 = Yes (the default), 1 = No. The user moves focus with ←/→ (also h/l
+	// and Tab) and selects with Enter/Space; the focused button is highlighted and
+	// the other dimmed (appendConfirmButtons / confirmButtonLabel). The direct y/n
+	// keys and a mouse click on either button still resolve regardless of focus.
+	confirmFocus int
+
 	// servedBase is the playbook body served on a cache HIT (spec §C amend-on-rerun).
 	// When non-empty the session is SERVING an existing playbook for this context: a
 	// failing step → the follow-up loop troubleshoots it → the verify-success confirm /
@@ -790,6 +797,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// Issue #4: while the verify-success confirm row is active it is keyboard-
+		// FOCUSABLE — ←/→ (also h/l, Tab) move focus between [ Yes ] and [ No ], and
+		// Enter/Space SELECT the focused button. These keys are captured ONLY while the
+		// confirm is shown so normal nav (h/l scroll, space=hint leader) is unaffected
+		// otherwise. The direct y/n keys and a mouse click still resolve regardless of
+		// focus (handled below / in the click path).
+		if m.confirmResolved {
+			switch msg.String() {
+			case "left", "h":
+				m.confirmFocus = 0
+				return m, nil
+			case "right", "l":
+				m.confirmFocus = 1
+				return m, nil
+			case "tab":
+				m.confirmFocus = 1 - m.confirmFocus
+				return m, nil
+			case "enter", "space", " ":
+				if cmd := m.resolveConfirm(m.confirmFocus == 0); cmd != nil {
+					return m, cmd
+				}
+				m.reflow()
+				return m, nil
+			}
+		}
 		// Leader: Space enters hint mode over the visible buttons. bubbletea v2
 		// (ultraviolet) reports the space key as "space", not " ".
 		if s := msg.String(); s == "space" || s == " " {
@@ -1071,6 +1103,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.canReengageInProc() {
 			m.wrappedUp = true
 			m.confirmResolved = true
+			m.confirmFocus = 0 // default keyboard focus = Yes
 			dbg("verify exit 0 — rendering native resolve-confirm row")
 			m.reflow()
 		}
@@ -1447,18 +1480,27 @@ func (m model) confirmRowString() string {
 		return ""
 	}
 	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen)).Render(m.confirmPrompt())
-	yes := m.confirmButtonLabel(confirmYesLabel, "confirm-yes", colGreen)
-	no := m.confirmButtonLabel(confirmNoLabel, "confirm-no", colPeach)
+	yes := m.confirmButtonLabel(confirmYesLabel, "confirm-yes", colGreen, m.confirmFocus == 0)
+	no := m.confirmButtonLabel(confirmNoLabel, "confirm-no", colPeach, m.confirmFocus == 1)
 	return prompt + "  " + yes + "  " + no
 }
 
-// confirmButtonLabel renders one confirm button label, highlighting it bright/bold
-// when the flash key matches (mouse-click / hint feedback), else in its accent.
-func (m model) confirmButtonLabel(label, kind, accent string) string {
+// confirmButtonLabel renders one confirm button label. A mouse-click flash always
+// wins (bright/bold on colFlashOn). Otherwise the FOCUSED button (focused=true,
+// issue #4) is highlighted with a distinct background so it reads as the selected
+// control, and the unfocused button is dimmed; this gives keyboard ←/→ navigation
+// a visible focus ring while preserving the accent colour on the focused one.
+func (m model) confirmButtonLabel(label, kind, accent string, focused bool) string {
 	if m.flashKey == "confirm:"+kind {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(colFlashOn)).Bold(true).Render(label)
 	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(accent)).Bold(true).Render(label)
+	if focused {
+		return lipgloss.NewStyle().
+			Foreground(lipgloss.Color(colBase)).
+			Background(lipgloss.Color(accent)).
+			Bold(true).Render(label)
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).Render(label)
 }
 
 // confirmRowScreenRow returns the absolute screen row the confirm row occupies: one
@@ -1719,6 +1761,14 @@ func (m model) normalLines() []string {
 		if spinRow < 0 {
 			spinRow = 0
 		}
+		// Issue #2: when there's content above the spinner (the natural row > 0, e.g.
+		// the follow-up "_That didn't work…_" phrase), leave ONE blank body row between
+		// that content and the "Working…" line so the spinner reads as a fresh section,
+		// not glued to the prose. At the very top (initial authoring / empty doc) keep
+		// the spinner on row 0 with no leading gap.
+		if spinRow > 0 {
+			spinRow++
+		}
 		if spinRow > m.body()-1 {
 			spinRow = m.body() - 1
 		}
@@ -1886,12 +1936,18 @@ func (m *model) announceFollowup(attempt int) {
 	m.md += "\n\n---\n\n_" + followupAnnouncement(attempt) + "_\n\n"
 	m.justAnnounced = true
 	m.reflow()
-	// One-time scroll: make the announcement the FIRST visible body row. Pin it so
+	// One-time scroll: make the `---` SEPARATOR the FIRST visible body row. Pin it so
 	// clampScroll permits the over-scroll (blank below) — otherwise the announcement,
 	// being the last content, gets pulled back to the bottom and the "fresh start"
 	// framing is lost. The pin self-neutralizes once the new attempt fills the body.
-	m.pinTop = startLine
-	m.yOff = startLine
+	//
+	// The appended block is "\n\n---\n\n_…_\n\n": the leading "\n\n" closes the prior
+	// content's line and adds ONE blank body line at startLine, with the `---` rule on
+	// startLine+1. Pin to startLine+1 so the rule (not that leading blank) is the top
+	// visible row — the user confirmed the previous startLine pin sat one line too low.
+	pin := startLine + 1
+	m.pinTop = pin
+	m.yOff = pin
 	m.follow = false // subsequent streamed content must NOT scroll
 	m.clampScroll()
 }
@@ -2012,6 +2068,12 @@ func (m model) View() tea.View {
 	v := tea.NewView(m.viewString())
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
+	// Issue #5: hide the hardware cursor in the pager. In bubbletea v2 the cursor is
+	// shown ONLY when the View carries a non-nil Cursor (the cursed_renderer derives
+	// showCursor := view.Cursor != nil and emits the hide-cursor sequence otherwise).
+	// We render no editable field, so leaving Cursor nil keeps the blinking terminal
+	// cursor hidden while scrolling. Set explicitly to document the intent.
+	v.Cursor = nil
 	return v
 }
 
