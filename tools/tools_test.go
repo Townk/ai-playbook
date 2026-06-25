@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"ai-playbook/driver"
+	"ai-playbook/floatinput"
 	"ai-playbook/kb"
 )
 
@@ -142,6 +143,52 @@ func TestServe_AskSentinel(t *testing.T) {
 	}
 	if res.Error != askUnavailableMsg {
 		t.Errorf("ask error = %q, want sentinel %q", res.Error, askUnavailableMsg)
+	}
+}
+
+// TestServe_AskFloat asserts that, with an Ask seam wired, the `ask` tool drives
+// the float (here a fake that records the request and returns a canned answer)
+// and returns the user's submitted answer over the socket.
+func TestServe_AskFloat(t *testing.T) {
+	d := newTestDriver(t)
+	var gotReq floatinput.Request
+	ask := func(req floatinput.Request) (floatinput.Result, error) {
+		gotReq = req
+		return floatinput.Result{Value: "production", Submitted: true}, nil
+	}
+	socket := serveTest(t, Deps{Driver: d, Cwd: "/proj", Ask: ask})
+
+	res, err := Dial(socket, Call{Tool: "ask", Prompt: "which env?", Type: "line"})
+	if err != nil {
+		t.Fatalf("Dial ask: %v", err)
+	}
+	if res.Unavailable {
+		t.Errorf("ask should be available with an Ask seam (err=%q)", res.Error)
+	}
+	if res.Answer != "production" {
+		t.Errorf("ask answer = %q, want %q", res.Answer, "production")
+	}
+	// The float request carried the agent's prompt/type and the session cwd.
+	if gotReq.Prompt != "which env?" || gotReq.Type != "line" || gotReq.Cwd != "/proj" {
+		t.Errorf("float request = %+v, want prompt/type/cwd from the ask call + session", gotReq)
+	}
+}
+
+// TestServe_AskFloatCancel asserts a cancelled float (Submitted=false) returns
+// the unavailable sentinel so the agent gets a definite, non-hanging answer.
+func TestServe_AskFloatCancel(t *testing.T) {
+	d := newTestDriver(t)
+	ask := func(floatinput.Request) (floatinput.Result, error) {
+		return floatinput.Result{Submitted: false}, nil
+	}
+	socket := serveTest(t, Deps{Driver: d, Ask: ask})
+
+	res, err := Dial(socket, Call{Tool: "ask", Prompt: "?"})
+	if err != nil {
+		t.Fatalf("Dial ask: %v", err)
+	}
+	if !res.Unavailable || res.Error != askUnavailableMsg {
+		t.Errorf("cancelled ask = %+v, want unavailable sentinel", res)
 	}
 }
 

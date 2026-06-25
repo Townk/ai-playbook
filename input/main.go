@@ -26,7 +26,7 @@ func Main() int {
 
 	fs := flag.NewFlagSet("input", flag.ExitOnError)
 	var typ, title, prompt, value, placeholder, variant, affirmative, negative, defaultSide, other, spec, icon string
-	var outFifo, inFifo string
+	var outFifo, inFifo, outFile string
 	var height, padding, inset, width int
 	var danger, warning, multi, measure bool
 	fs.StringVar(&typ, "type", "text", "widget type: text|line|confirm|choose|form")
@@ -49,6 +49,7 @@ func Main() int {
 	fs.StringVar(&icon, "icon", "", "text/line: prompt-column glyph override (default ❯)")
 	fs.StringVar(&outFifo, "out-fifo", "", "path to output FIFO (submit/cancel records written here)")
 	fs.StringVar(&inFifo, "in-fifo", "", "path to input FIFO (status/close records read from here)")
+	fs.StringVar(&outFile, "out", "", "path to a one-shot output FILE: on submit the value is written here and the process exits 0; on cancel nothing is written and the process exits 130. Lets a FLOATED input (whose stdout is detached) hand its answer back to a polling launcher.")
 	fs.BoolVar(&measure, "measure", false, "print the rendered height and exit (no TUI)")
 	fs.IntVar(&width, "width", 50, "pane width for measurement/sizing")
 	theme := registerThemeFlags(fs)
@@ -128,21 +129,21 @@ func Main() int {
 		if prompt == "" {
 			prompt = strings.Join(fs.Args(), " ") // positional fallback for backward compat
 		}
-		runConfirm(*theme, variant, title, prompt, affirmative, negative, defaultSide == "negative", padding, inset)
+		runConfirm(*theme, variant, title, prompt, affirmative, negative, defaultSide == "negative", padding, inset, outFile)
 	case "line":
 		if outFifo != "" && inFifo != "" {
 			runInputWithFifo(*theme, variant, title, prompt, value, placeholder, 1, padding, inset, true, icon, outFifo, inFifo)
 		} else {
-			runInput(*theme, variant, title, prompt, value, placeholder, 1, padding, inset, true, icon)
+			runInput(*theme, variant, title, prompt, value, placeholder, 1, padding, inset, true, icon, outFile)
 		}
-	case "text":
+	case "text", "free":
 		if outFifo != "" && inFifo != "" {
 			runInputWithFifo(*theme, variant, title, prompt, value, "", height, padding, inset, false, icon, outFifo, inFifo)
 		} else {
-			runInput(*theme, variant, title, prompt, value, "", height, padding, inset, false, icon)
+			runInput(*theme, variant, title, prompt, value, "", height, padding, inset, false, icon, outFile)
 		}
 	case "choose":
-		runChoose(*theme, variant, title, prompt, fs.Args(), multi, other, padding, inset)
+		runChoose(*theme, variant, title, prompt, fs.Args(), multi, other, padding, inset, outFile)
 	case "form":
 		runForm(*theme, title, spec, padding, inset)
 	default:

@@ -102,7 +102,7 @@ func (m confirmModel) render() string {
 
 func (m confirmModel) View() tea.View { return tea.NewView(m.render()) }
 
-func runConfirm(theme Theme, variant, title, prompt, affirmative, negative string, defaultNegative bool, padding, inset int) {
+func runConfirm(theme Theme, variant, title, prompt, affirmative, negative string, defaultNegative bool, padding, inset int, outFile string) {
 	fm, err := tea.NewProgram(
 		newConfirmModel(theme, variant, title, prompt, affirmative, negative, defaultNegative, padding, inset),
 		tea.WithOutput(os.Stderr),
@@ -114,9 +114,15 @@ func runConfirm(theme Theme, variant, title, prompt, affirmative, negative strin
 	}
 	res := fm.(confirmModel)
 	if res.cancelled || !res.fld.accepted {
+		if outFile != "" {
+			writeCancelFile(outFile)
+		}
 		os.Exit(130)
 	}
 	result := res.fld.accepted_v
+	if outFile != "" {
+		writeOutFile(outFile, result)
+	}
 	fmt.Print(result)
 	if result == "yes" {
 		os.Exit(0)

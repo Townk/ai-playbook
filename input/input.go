@@ -122,7 +122,37 @@ func (m model) View() tea.View {
 	return v
 }
 
-func runInput(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool, icon string) {
+// writeOutFile writes val to path (the --out one-shot file) so a FLOATED input,
+// whose stdout is detached by the mux, can hand its answer back to a polling
+// launcher. The file is created atomically (write a temp sibling, then rename) so
+// the launcher never reads a half-written value. A write failure is reported but
+// non-fatal — the value is still printed to stdout for the inline path. Returns
+// false on failure.
+func writeOutFile(path, val string) bool {
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(val), 0o600); err != nil {
+		fmt.Fprintf(os.Stderr, "ai-assist-input: --out: %v\n", err)
+		return false
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		fmt.Fprintf(os.Stderr, "ai-assist-input: --out: %v\n", err)
+		_ = os.Remove(tmp)
+		return false
+	}
+	return true
+}
+
+// CancelSuffix is appended to an --out path to form the cancel-marker file. A
+// floated input writes this (empty) file on cancel so a polling launcher learns
+// of the cancel at once. Exported so the poller (floatinput) shares the contract.
+const CancelSuffix = ".cancel"
+
+// writeCancelFile creates the cancel marker for outFile (best-effort).
+func writeCancelFile(outFile string) {
+	_ = os.WriteFile(outFile+CancelSuffix, nil, 0o600)
+}
+
+func runInput(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool, icon, outFile string) {
 	fm, err := tea.NewProgram(
 		newInputModel(theme, variant, title, prompt, value, placeholder, height, padding, inset, singleLine, icon),
 		tea.WithOutput(os.Stderr),
@@ -134,8 +164,18 @@ func runInput(theme Theme, variant, title, prompt, value, placeholder string, he
 	}
 	res := fm.(model)
 	if res.submitted {
+		if outFile != "" {
+			writeOutFile(outFile, res.fld.value())
+		}
 		fmt.Print(res.fld.value())
 		os.Exit(0)
+	}
+	// Cancelled: write the cancel marker (<out>.cancel) so a polling launcher
+	// distinguishes cancel from "still deciding" immediately, instead of waiting
+	// out the poll timeout. The submit value file is left absent (its existence is
+	// the submit signal).
+	if outFile != "" {
+		writeCancelFile(outFile)
 	}
 	os.Exit(130)
 }

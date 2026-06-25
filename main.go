@@ -23,6 +23,7 @@ import (
 	"ai-playbook/cache"
 	"ai-playbook/capture"
 	"ai-playbook/driver"
+	"ai-playbook/floatinput"
 	"ai-playbook/input"
 	"ai-playbook/mcpserver"
 	"ai-playbook/mux"
@@ -45,6 +46,8 @@ func main() {
 		os.Exit(selftest())
 	case "troubleshoot":
 		os.Exit(troubleshoot())
+	case "session":
+		os.Exit(sessionMain())
 	case "run":
 		os.Exit(ui.Main())
 	case "mcp":
@@ -61,7 +64,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ai-playbook {troubleshoot|run <file.md>|mcp --socket <path>|input|selftest}")
+	fmt.Fprintln(os.Stderr, "usage: ai-playbook {troubleshoot|session [--request <json>]|run <file.md>|mcp --socket <path>|input|selftest}")
 }
 
 // mcpMain is the `ai-playbook mcp --socket <path>` subcommand: an MCP stdio
@@ -147,18 +150,29 @@ func selftest() int {
 	return 1
 }
 
-// troubleshoot is the AI producer: gather the bounded request context (capture),
-// route it (triage). On a cache HIT, render + drive the cached playbook via the
-// existing in-process `run` path. On a MISS, author a fresh playbook with the
-// capable agent (stage 4b), stream it into the same render+drive path, and cache
-// it on completion.
+// troubleshoot is the LAUNCHER: it runs transiently in the user's ORIGIN pane
+// (spawned by the ZLE trigger), gathers the bounded origin context, asks the user
+// for their request via an input FLOAT, then spawns the persistent docked SESSION
+// pane (`ai-playbook session`) and exits. The docked pane owns the rest of the
+// lifecycle (triage → author/serve → drive); the launcher must return promptly so
+// the user's prompt stays live.
 //
-// The user's request text comes from the args after `troubleshoot`, else
-// $AI_ASSIST_USER_REQUEST — the live float-submit path lands with stage 4b/5.
+// Topology (mirrors the old ai-assist-summon → input-float → docked-render flow,
+// now one binary): capture here (while we still hold the origin shell's env) →
+// SpawnFloat `ai-playbook input … --out <tmp>` with the prefilled request →
+// poll the out-file for the submitted request → on cancel, exit cleanly → on
+// submit, write the captured Request to a temp JSON and SpawnDocked
+// `ai-playbook session --request <json>`. See runSession for the body.
+//
+// An explicit request on the CLI (args after `troubleshoot`, or
+// $AI_ASSIST_USER_REQUEST) SKIPS the float — the request is already known. Off a
+// mux (no zellij) there is no float/pane to spawn; the launcher runs the session
+// INLINE in the current pane (the pre-topology behavior), so headless and SSH
+// contexts still work.
 func troubleshoot() int {
-	userRequest := strings.TrimSpace(strings.Join(os.Args[2:], " "))
-	if userRequest == "" {
-		userRequest = os.Getenv("AI_ASSIST_USER_REQUEST")
+	cliRequest := strings.TrimSpace(strings.Join(os.Args[2:], " "))
+	if cliRequest == "" {
+		cliRequest = os.Getenv("AI_ASSIST_USER_REQUEST")
 	}
 
 	// pane id from env (mirrors the shell's ZELLIJ_PANE_ID → terminal_<id>).
@@ -167,13 +181,138 @@ func troubleshoot() int {
 		paneID = "terminal_" + p
 	}
 
+	m := mux.Load()
+
+	// Capture the bounded origin context NOW, in the origin pane, while we still
+	// hold the origin shell's env (atuin session, cwd, pane id, scrollback).
 	req := capture.Capture(capture.Options{
-		Mux:         mux.Load(),
+		Mux:         m,
 		Atuin:       capture.NewAtuin(),
 		PaneID:      paneID,
-		UserRequest: userRequest,
+		UserRequest: cliRequest,
 	})
 
+	// In Zellij with no explicit request: ask via the input float, then spawn the
+	// docked session pane. Off-Zellij (or with an explicit request and no pane id)
+	// run the session inline — there is no pane to dock into.
+	inZellij := os.Getenv("ZELLIJ") != "" || paneID != ""
+	if cliRequest == "" && inZellij {
+		selfExe, err := os.Executable()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: cannot resolve self: %v\n", err)
+			return 1
+		}
+		return launch(m, selfExe, req)
+	}
+
+	// Inline path (off-Zellij, or explicit request given): run the session body in
+	// the current pane.
+	return runSession(req)
+}
+
+// launch is the testable launcher core: spawn the request input FLOAT (prefilled
+// from the captured context), read back the submitted request, and on submit
+// spawn the docked SESSION pane carrying the context. On cancel it exits cleanly
+// (0) with no session spawned. selfExe + m are injected so it is unit-testable
+// with a fake mux (no live zellij).
+func launch(m mux.Mux, selfExe string, req capture.Request) int {
+	asker := floatinput.Asker{SelfExe: selfExe, Mux: m}
+	res, err := asker.Ask(floatinput.Request{
+		Type:   "text",
+		Title:  "ai-assist",
+		Prompt: "How can I help you today?",
+		Value:  prefillTemplate(req),
+		Cwd:    req.CWD,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: request float: %v\n", err)
+		return 1
+	}
+	if !res.Submitted {
+		// User cancelled the request float — exit cleanly, no session spawned.
+		return 0
+	}
+	req.UserRequest = strings.TrimSpace(res.Value)
+	return spawnSession(m, selfExe, req)
+}
+
+// spawnSession writes the captured Request to a temp JSON file and opens the
+// persistent docked pane running `ai-playbook session --request <json>`. The
+// launcher then exits — the docked pane is the session. The temp file is NOT
+// removed here (the spawned pane reads it asynchronously and removes it itself).
+func spawnSession(m mux.Mux, selfExe string, req capture.Request) int {
+	f, err := os.CreateTemp("", "aapb-request-*.json")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
+		return 1
+	}
+	if _, err := f.WriteString(requestJSON(req)); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
+		return 1
+	}
+	f.Close()
+
+	cwd := req.ProjectRoot
+	if cwd == "" {
+		cwd = req.CWD
+	}
+	if err := m.SpawnDocked(mux.SpawnOptions{
+		Cmd:  []string{selfExe, "session", "--request", f.Name()},
+		Cwd:  cwd,
+		Name: "ai-assist",
+	}); err != nil {
+		os.Remove(f.Name())
+		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: spawn session pane: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// sessionMain is the `ai-playbook session` subcommand: the persistent docked
+// pane. It reads the captured Request from --request <json> (written by the
+// launcher) and runs the session body. A missing/empty --request falls back to
+// capturing in-process (so `ai-playbook session` is also usable standalone).
+func sessionMain() int {
+	fs := flag.NewFlagSet("session", flag.ExitOnError)
+	var requestPath string
+	fs.StringVar(&requestPath, "request", "", "path to the captured request JSON (written by the launcher)")
+	fs.Parse(os.Args[2:])
+
+	var req capture.Request
+	if requestPath != "" {
+		r, err := readRequestJSON(requestPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ai-playbook session: read request: %v\n", err)
+			return 1
+		}
+		req = r
+		// The launcher handed the file off to us; we own its removal now.
+		os.Remove(requestPath)
+	} else {
+		// Standalone: capture in-process (no launcher handoff).
+		paneID := ""
+		if p := os.Getenv("ZELLIJ_PANE_ID"); p != "" {
+			paneID = "terminal_" + p
+		}
+		req = capture.Capture(capture.Options{
+			Mux:         mux.Load(),
+			Atuin:       capture.NewAtuin(),
+			PaneID:      paneID,
+			UserRequest: os.Getenv("AI_ASSIST_USER_REQUEST"),
+		})
+	}
+	return runSession(req)
+}
+
+// runSession is the session BODY (was the inline troubleshoot): route the request
+// (triage); on a cache HIT render + drive the cached playbook via the in-process
+// `run` path; on a MISS author a fresh playbook with the capable agent, stream it
+// into the same render+drive path, and cache it on completion. It owns the shared
+// driver + tools backend (openSession) so authoring and the run blocks drive the
+// SAME live shell.
+func runSession(req capture.Request) int {
 	c := cache.Open()
 	noCache := os.Getenv("AI_ASSIST_NO_CACHE") != ""
 	d := triage.Route(req, c, noCache)
@@ -196,6 +335,25 @@ func troubleshoot() int {
 	default:
 		return authorPlaybook(req, d, c, noCache, sess)
 	}
+}
+
+// prefillTemplate ports assist::prefill_template: a ready-to-submit request
+// derived from the captured context. For a FAILED command it seeds the request
+// float with "Diagnose and fix why `<cmd>` failed (exit N) in <proj>" so the user
+// can just press Enter; for an ordinary prompt it is empty.
+func prefillTemplate(req capture.Request) string {
+	if req.Kind != "error" {
+		return ""
+	}
+	proj := req.Project.Name
+	if proj == "" {
+		proj = "this directory"
+	}
+	exit := req.Exit
+	if exit == "" {
+		exit = "?"
+	}
+	return fmt.Sprintf("Diagnose and fix why `%s` failed (exit %s) in %s", req.Command, exit, proj)
 }
 
 // session bundles the per-troubleshoot shared resources: the single live shell
@@ -230,9 +388,23 @@ func openSession(req capture.Request) *session {
 		return nil
 	}
 	socket := filepath.Join(dir, "tools.sock")
+	selfExe, _ := os.Executable()
+
+	// Ask seam (the ask-FLOAT): when we can resolve our own binary, the agent's
+	// `ask` tool spawns `ai-playbook input … --out <tmp>` in a float and returns
+	// the user's answer. Without selfExe we can't spawn ourselves, so ask stays the
+	// unavailable sentinel (deps.Ask nil).
+	var ask tools.AskFunc
+	if selfExe != "" {
+		asker := floatinput.Asker{SelfExe: selfExe, Mux: mux.Load()}
+		ask = asker.Ask
+	}
+
 	srv, err := tools.Serve(socket, tools.Deps{
 		Driver:      drv,
 		ProjectRoot: req.ProjectRoot,
+		Cwd:         cwd,
+		Ask:         ask,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: tools.Serve failed (%v); authoring without agent tools\n", err)
@@ -240,7 +412,6 @@ func openSession(req capture.Request) *session {
 		os.RemoveAll(dir)
 		return nil
 	}
-	selfExe, _ := os.Executable()
 	return &session{drv: drv, srv: srv, socket: socket, selfExe: selfExe}
 }
 
@@ -379,6 +550,50 @@ func requestJSON(req capture.Request) string {
 		return ""
 	}
 	return string(b)
+}
+
+// readRequestJSON is the inverse of requestJSON: it decodes the request JSON the
+// launcher wrote (at --request <path>) back into a capture.Request for the docked
+// session. It is the launcher→session context-passing decoder.
+func readRequestJSON(path string) (capture.Request, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return capture.Request{}, err
+	}
+	var doc struct {
+		Kind   string `json:"kind"`
+		Origin struct {
+			PaneID      string `json:"pane_id"`
+			CWD         string `json:"cwd"`
+			ProjectRoot string `json:"project_root"`
+		} `json:"origin"`
+		Command struct {
+			Text       string `json:"text"`
+			Exit       string `json:"exit"`
+			DurationMs string `json:"duration_ms"`
+		} `json:"command"`
+		Scrollback  string `json:"scrollback"`
+		UserRequest string `json:"user_request"`
+		Project     struct {
+			Name   string `json:"name"`
+			Branch string `json:"branch"`
+		} `json:"project"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		return capture.Request{}, err
+	}
+	return capture.Request{
+		Kind:        doc.Kind,
+		Command:     doc.Command.Text,
+		Exit:        doc.Command.Exit,
+		DurationMs:  doc.Command.DurationMs,
+		CWD:         doc.Origin.CWD,
+		ProjectRoot: doc.Origin.ProjectRoot,
+		PaneID:      doc.Origin.PaneID,
+		Scrollback:  doc.Scrollback,
+		UserRequest: doc.UserRequest,
+		Project:     capture.Project{Name: doc.Project.Name, Branch: doc.Project.Branch},
+	}, nil
 }
 
 // serveCachedPlaybook renders the cached entry through the existing in-process

@@ -112,7 +112,7 @@ func (m chooseModel) render() string {
 
 func (m chooseModel) View() tea.View { return tea.NewView(m.render()) }
 
-func runChoose(theme Theme, variant, title, prompt string, options []string, multi bool, other string, padding, inset int) {
+func runChoose(theme Theme, variant, title, prompt string, options []string, multi bool, other string, padding, inset int, outFile string) {
 	fm, err := tea.NewProgram(
 		newChooseModel(theme, variant, title, prompt, options, multi, other, padding, inset),
 		tea.WithOutput(os.Stderr),
@@ -124,11 +124,20 @@ func runChoose(theme Theme, variant, title, prompt string, options []string, mul
 	}
 	res := fm.(chooseModel)
 	if res.cancelled || !res.done {
+		if outFile != "" {
+			writeCancelFile(outFile)
+		}
 		os.Exit(130)
 	}
 	val := res.fld.value()
 	if val == "" {
+		if outFile != "" {
+			writeCancelFile(outFile)
+		}
 		os.Exit(130)
+	}
+	if outFile != "" {
+		writeOutFile(outFile, val)
 	}
 	fmt.Print(val)
 	os.Exit(0)

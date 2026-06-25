@@ -20,16 +20,18 @@
 //	← {"ok":true}
 //
 //	→ {"tool":"ask","prompt":"which env?","type":"line"}
-//	← {"answer":"","unavailable":true,"error":"interactive ask not available in this context"}
+//	← {"answer":"prod"}                        (submitted)
+//	← {"answer":"","unavailable":true,"error":"…"}   (no float backend / cancelled)
 //
 // Tools:
 //   - run      — execute a command in the session shell via *driver.Driver.RunID;
 //     the load-bearing one (the agent runs `gg build` etc. in the user's env).
 //   - remember — append a distilled fact to the project KB (kb.Append).
-//   - ask      — the user-input channel. The real float-backed ask needs the
-//     mux/topology, DEFERRED here; for now it replies with a clear "unavailable"
-//     sentinel so the RPC + protocol are complete and a harness gets a definite,
-//     non-hanging answer.
+//   - ask      — the user-input channel. When the session wired an Asker (the
+//     float plumbing — selfExe + mux), `ask` spawns an input FLOAT and returns
+//     the user's submitted answer; on cancel it returns the unavailable sentinel
+//     so the agent gets a definite answer rather than hanging. With no Asker (the
+//     no-mux fallback) it returns the unavailable sentinel directly.
 package tools
 
 import (
@@ -42,6 +44,7 @@ import (
 	"time"
 
 	"ai-playbook/driver"
+	"ai-playbook/floatinput"
 	"ai-playbook/kb"
 )
 
@@ -54,14 +57,23 @@ const runTimeout = 120 * time.Second
 // returns a definite "unavailable" answer rather than hanging the agent.
 const askUnavailableMsg = "interactive ask not available in this context"
 
+// AskFunc spawns an input float and returns the user's answer. It is the seam
+// the `ask` tool drives: the session wires it from a floatinput.Asker (the real
+// float plumbing); tests inject a fake. A nil AskFunc means no interactive ask is
+// available (the no-mux fallback → unavailable sentinel).
+type AskFunc func(req floatinput.Request) (floatinput.Result, error)
+
 // Deps carry what the backend needs to service tool calls: the session's live
 // shell driver (RunID for `run`), the project root (the KB key + the default
-// `remember` target), and the KB data-dir root (kb.Append target; empty →
-// kb.DefaultRoot, the real data dir).
+// `remember` target), the KB data-dir root (kb.Append target; empty →
+// kb.DefaultRoot, the real data dir), the cwd ask-floats open in, and the Ask
+// seam (nil → ask is unavailable).
 type Deps struct {
 	Driver      *driver.Driver
 	ProjectRoot string
 	KBRoot      string // kb data-dir root; "" → kb.DefaultRoot()
+	Cwd         string // working dir an ask-float opens in (the request's project root)
+	Ask         AskFunc
 }
 
 // request is the inbound RPC: tool selector + the union of per-tool fields.
@@ -221,10 +233,26 @@ func (s *Server) doRemember(req request) reply {
 	return reply{OK: true}
 }
 
-// doAsk is the user-input channel. The real float-backed ask needs the
-// mux/topology and is DEFERRED; for now it returns a definite "unavailable"
-// sentinel so the protocol is complete and the agent gets a non-hanging answer it
-// can reason about (rather than blocking on input that can't be delivered).
+// doAsk is the user-input channel. With an Ask seam wired (the float plumbing),
+// it spawns an input FLOAT for the agent's question and returns the user's
+// submitted answer; a cancel (no answer) returns the unavailable sentinel so the
+// agent gets a definite, non-hanging reply. Without an Ask seam (no-mux fallback)
+// it returns the sentinel directly.
 func (s *Server) doAsk(req request) reply {
-	return reply{Unavailable: true, Error: askUnavailableMsg}
+	if s.deps.Ask == nil {
+		return reply{Unavailable: true, Error: askUnavailableMsg}
+	}
+	res, err := s.deps.Ask(floatinput.Request{
+		Type:   req.Type,
+		Title:  "ai-assist",
+		Prompt: req.Prompt,
+		Cwd:    s.deps.Cwd,
+	})
+	if err != nil {
+		return reply{Unavailable: true, Error: err.Error()}
+	}
+	if !res.Submitted {
+		return reply{Unavailable: true, Error: askUnavailableMsg}
+	}
+	return reply{Answer: res.Value}
 }
