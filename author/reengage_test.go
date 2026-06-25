@@ -57,6 +57,25 @@ func TestWrapupPrompt_VerifyAndSolutionFraming(t *testing.T) {
 	}
 }
 
+// Issue #3: the wrap-up prompt must ask the user (via the ask tool, confirm type)
+// whether the fix solved their problem, and only finalize the Solution/remember on
+// confirmation — handing back to another fix attempt on "no".
+func TestWrapupPrompt_AsksToConfirmResolution(t *testing.T) {
+	sys := WrapupPrompt(sampleFailure(), `{"id":"verify","exit":0}`)
+	wants := []string{
+		"ai-assist-ask --type confirm", // ask the user via the confirm tool
+		"Did this solve your problem?", // the confirmation question
+		"ONLY IF the user confirms",    // gate the Solution/remember on confirmation
+		"says NO",                      // the not-resolved branch
+		"another attempt",              // hand back to a fresh fix on "no"
+	}
+	for _, w := range wants {
+		if !strings.Contains(sys, w) {
+			t.Errorf("wrap-up prompt missing %q\n--- prompt ---\n%s", w, sys)
+		}
+	}
+}
+
 func TestWrapupPrompt_NoRunLog(t *testing.T) {
 	sys := WrapupPrompt(sampleFailure(), "")
 	if !strings.Contains(sys, "No blocks were run in this session.") {

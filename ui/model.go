@@ -188,6 +188,14 @@ type model struct {
 	// past the cap it falls back to the manual "try another fix" button.
 	followups    int
 	maxFollowups int
+
+	// wrappedUp gates the verify-SUCCESS auto wrap-up (issue #3) to fire ONCE per
+	// resolution. A verify RUN with exit 0 auto-triggers the wrap-up re-engagement
+	// (the agent asks the user, via the ask tool, whether the fix solved their
+	// problem, then finalizes the `## Solution` + remember only on confirmation).
+	// Set the first time it fires so a re-rendered/re-run verify-0 does not re-trigger
+	// (no wrap-up loop). The manual `w`-key wrap-up is unaffected by this flag.
+	wrappedUp bool
 }
 
 // emitAction performs a button's action. In FIFO mode (m.orch == nil) it appends
@@ -733,6 +741,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Wrap-up: only when settled (not streaming).
 			if !m.streaming {
 				dbg("emit %s id=%s", "wrapup", "")
+				// A manual wrap-up also marks wrappedUp so a later verify-0 doesn't
+				// auto-trigger a second wrap-up on top of this one (issue #3 once-guard).
+				m.wrappedUp = true
 				// In-process: run the wrap-up pass via the orchestrator and re-arm the
 				// parser with the `## Solution` summary stream (APPEND). The orchestrator
 				// writes the solution artifact + appends the KB fact.
@@ -905,6 +916,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
+		// Issue #3: a SUCCESSFUL verify (exit 0 on a RUN, not an apply/undo) means the
+		// fix verified — auto-trigger the WRAP-UP re-engagement so the agent CONFIRMS
+		// resolution with the user (the wrap-up prompt asks via the ask tool, then
+		// finalizes the `## Solution`/remember only on confirmation; on "no" it hands
+		// back to another fix attempt). Gated on m.wrappedUp so it fires ONCE per
+		// resolution — a re-rendered or re-run verify-0 must not re-trigger (no
+		// wrap-up loop). A deliberately stopped verify already returned above; exit 0
+		// is by definition neither signal-killed (>128) nor 127, so those guards are
+		// moot here. Requires in-process re-engagement (the live session path).
+		if msg.ID == "verify" && msg.Exit == 0 && !m.wrappedUp &&
+			prevAction != "apply" && prevAction != "undo" &&
+			m.canReengageInProc() {
+			m.wrappedUp = true
+			dbg("auto-wrapup fire: verify exit 0 — confirming resolution with the user")
+			if cmd := m.beginWrapupInProc(m.runLog()); cmd != nil {
+				return m, cmd
+			}
+		}
 		return m, nil
 	case statusMsg:
 		// Transient one-line note (e.g. a deferred in-process action). Shown in the
@@ -972,11 +1001,25 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reader = bufio.NewReader(msg.reader)
 		m.parser = &streamParser{}
 		cmds := []tea.Cmd{readStream(m.reader, m.parser)}
-		// Swap the activity feed to the re-engagement's live reasoning + tool feed
-		// (when the event path produced one) and re-subscribe, so the
-		// followup/regenerate/wrapup wait shows live reasoning on the activity line,
-		// exactly like the initial authoring. A nil activity (text fallback) leaves
-		// the previous subscription untouched.
+		// Swap the activity feed to the re-engagement's live reasoning + tool feed and
+		// re-subscribe, so EVERY round (followup/regenerate/wrapup) shows live reasoning
+		// on the activity line, exactly like the initial authoring.
+		//
+		// Issue #2 (live activity on repeat rounds): each re-engagement round's
+		// orchestrator fan-out (orchestrator.Followup/Regenerate/Wrapup → agentstream.
+		// FanOut) yields a FRESH activity channel; the ui MUST swap m.activity to it
+		// and issue a fresh activityWaitCmd unconditionally. Critically this must NOT
+		// be gated on the PRIOR feed's liveness: by the 2nd follow-up the 1st round's
+		// channel has already drained+closed, so m.activity is nil and there is NO live
+		// wait. A swap that re-subscribes only "when the previous one is alive" would
+		// leave the 2nd round with a dead activity line (the reported symptom — a long
+		// silent wait, then text). The fresh wait captures the just-swapped channel, so
+		// a stale in-flight wait from the prior round resolves against its own (now
+		// different) channel and is dropped by the activityMsg stale-guard — it can
+		// never clobber this fresh subscription.
+		//
+		// A nil activity (text-fallback round only) leaves the previous subscription
+		// untouched — there is no live feed to swap in.
 		if msg.activity != nil {
 			m.activity = msg.activity
 			m.activityLine = ""
@@ -1553,7 +1596,9 @@ func (m *model) beginFollowupStream(blockID, command string) tea.Cmd {
 	m.spinFrame = 0
 	m.spinTicks = 0
 	m.streaming = true
-	m.follow = true
+	// Issue #1: do NOT auto-scroll to the bottom on a follow-up — keep the viewport
+	// where the user is reading (the spinner/activity line still clamp into view).
+	m.follow = false
 	m.reflow()
 	return tea.Batch(m.restartTick(), m.reArmReaderCmd())
 }

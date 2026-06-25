@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -476,6 +477,248 @@ func TestStaleActivityFeedIgnoredAfterReArm(t *testing.T) {
 	if m.activityLine == "stale: do not show" {
 		t.Error("a stale feed's summary must not paint the activity line")
 	}
+}
+
+// Issue #1: a follow-up re-arm followed by streamed content must NOT auto-scroll
+// the viewport to the bottom — the user is reading the failed attempt. m.yOff must
+// stay where it was; only an explicit follow (wrap-up) jumps to the bottom.
+func TestFollowupReArmDoesNotAutoScroll(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# Revised\n", "# Revised fix\n")
+	// A long playbook the user has scrolled UP into (yOff well above the bottom).
+	var sb strings.Builder
+	for i := 0; i < 80; i++ {
+		fmt.Fprintf(&sb, "line %d of the original playbook\n", i)
+	}
+	m.md = sb.String()
+	m.reflow()
+	m.yOff = 5 // user is reading near the top
+	startYOff := m.yOff
+
+	// Begin a follow-up: APPEND mode. follow MUST be false so the viewport is pinned.
+	cmd := m.beginFollowupInProc("boom")
+	if cmd == nil {
+		t.Fatal("beginFollowupInProc returned nil")
+	}
+	if m.follow {
+		t.Fatal("follow-up must keep follow=false so the viewport does not scroll")
+	}
+	if m.yOff != startYOff {
+		t.Fatalf("begin follow-up moved yOff %d -> %d before any content", startYOff, m.yOff)
+	}
+
+	// Apply the re-arm, then stream new content + flush — yOff must NOT jump to the bottom.
+	var rearm reArmStreamMsg
+	for _, msg := range collectMsgs(cmd) {
+		if rs, ok := msg.(reArmStreamMsg); ok {
+			rearm = rs
+			break
+		}
+	}
+	nm, _ := m.Update(rearm)
+	m = nm.(model)
+	if m.follow {
+		t.Error("re-arm must not re-enable follow for a follow-up")
+	}
+	m2, _ := m.Update(streamEventsMsg{events: []streamEvent{textEvent{text: "## Revised diagnosis\nmore content\n"}}})
+	m = m2.(model)
+	m.flushRender() // force the coalesced reflow now
+
+	if m.yOff != startYOff {
+		t.Errorf("follow-up streamed content auto-scrolled the viewport: yOff %d -> %d (want unchanged)", startYOff, m.yOff)
+	}
+}
+
+// Issue #2: two successive follow-up re-arms must EACH deliver a non-nil, FRESH
+// activity channel that the model swaps in and that updates m.activityLine — the
+// 2nd/3rd round must show live activity exactly like the first (no dead feed). This
+// drives the real resultMsg verify-fail auto-fire path twice.
+func TestTwoSuccessiveFollowupsLiveActivity(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "", "# fix\n") // empty delta → activity gets reasoning+tool
+	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.maxFollowups = 5
+	m.reflow()
+	if !m.canReengageInProc() {
+		t.Fatal("setup: expected in-process re-engagement")
+	}
+
+	var seen []<-chan string
+	round := func(label string) {
+		nm, cmd := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: ""})
+		m = nm.(model)
+		if cmd == nil {
+			t.Fatalf("%s: verify-fail did not auto-fire", label)
+		}
+		var rearm reArmStreamMsg
+		var found bool
+		for _, msg := range collectMsgs(cmd) {
+			if rs, ok := msg.(reArmStreamMsg); ok {
+				rearm = rs
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("%s: no reArmStreamMsg", label)
+		}
+		if rearm.activity == nil {
+			t.Fatalf("%s: re-arm carried a NIL activity channel (dead feed)", label)
+		}
+		for _, prev := range seen {
+			if prev == rearm.activity {
+				t.Fatalf("%s: re-arm reused a PRIOR activity channel — must be fresh", label)
+			}
+		}
+		seen = append(seen, rearm.activity)
+
+		nm2, c := m.Update(rearm)
+		m = nm2.(model)
+		if m.activity != rearm.activity {
+			t.Fatalf("%s: model did not swap m.activity to the fresh feed", label)
+		}
+		// Pump the fresh subscription to drain its summaries: the activityMsg handler
+		// re-issues activityWaitCmd, so follow that chain until a non-empty summary
+		// updates m.activityLine (the empty TextDelta is dropped by collapseLine).
+		m.thinking = true
+		m.activityLine = ""
+		next := firstActivityWait(c)
+		for i := 0; i < 20 && next != nil && m.activityLine == ""; i++ {
+			msg := next()
+			am, ok := msg.(activityMsg)
+			if !ok {
+				break
+			}
+			nm3, c3 := m.Update(am)
+			m = nm3.(model)
+			next = c3
+		}
+		if m.activityLine == "" {
+			t.Errorf("%s: activityLine never updated off the fresh feed (dead feed)", label)
+		}
+		// End this round (closes the round's stream) so the next verify can re-fire.
+		nm4, _ := m.Update(streamEventsMsg{eof: true})
+		m = nm4.(model)
+	}
+
+	round("first followup")
+	round("second followup")
+}
+
+// Issue #3: a verify exit-0 result auto-triggers the wrap-up re-engagement ONCE
+// (and not again on a second verify-0); a verify-fail still triggers the follow-up.
+func TestVerifySuccessTriggersWrapupOnce(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# resolved?\n", "## Solution\ndone\n")
+	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+	if !m.canReengageInProc() {
+		t.Fatal("setup: expected in-process re-engagement")
+	}
+
+	// First verify exit 0 → wrap-up fires once.
+	nm, cmd := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	if cmd == nil {
+		t.Fatal("verify exit 0 must auto-trigger the wrap-up re-engagement")
+	}
+	if !m.wrappedUp {
+		t.Fatal("verify exit 0 must set wrappedUp")
+	}
+	if !m.thinking {
+		t.Error("wrap-up auto-trigger must set thinking=true")
+	}
+	// Drain the wrap-up round so the model settles before the next verify.
+	m = pumpReArm(t, m, cmd)
+
+	// Second verify exit 0 → must NOT re-trigger (once per resolution).
+	nm2, cmd2 := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm2.(model)
+	if cmd2 != nil {
+		t.Errorf("a second verify exit 0 must NOT re-trigger the wrap-up, got %T", cmd2)
+	}
+}
+
+// Issue #3 (regression guard): a verify FAILURE still triggers the follow-up,
+// unchanged by the verify-success wrap-up addition.
+func TestVerifyFailStillTriggersFollowupNotWrapup(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# Revised\n", "# Revised fix\n")
+	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+
+	nm, cmd := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: ""})
+	m = nm.(model)
+	if cmd == nil {
+		t.Fatal("verify failure must still auto-fire the follow-up")
+	}
+	if m.wrappedUp {
+		t.Error("a verify FAILURE must not set wrappedUp")
+	}
+	if m.followups != 1 {
+		t.Errorf("verify failure must increment followups, got %d", m.followups)
+	}
+}
+
+// firstActivityWait flattens cmd's batch and returns the single tea.Cmd that yields
+// an activityMsg (the activityWaitCmd), so a test can drive the activity feed by
+// following its re-subscription chain.
+func firstActivityWait(cmd tea.Cmd) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if bm, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range bm {
+			if w := firstActivityWait(c); w != nil {
+				return w
+			}
+		}
+		return nil
+	}
+	if _, ok := msg.(activityMsg); ok {
+		// Re-wrap the already-produced msg as a cmd so the caller can apply it.
+		return func() tea.Msg { return msg }
+	}
+	return nil
+}
+
+// pumpReArm applies the reArmStreamMsg in a trigger's batch and drains the resulting
+// stream to EOF (settling thinking/streaming), mirroring pumpStream but tolerant of
+// the event-path activity batch.
+func pumpReArm(t *testing.T, m model, cmd tea.Cmd) model {
+	t.Helper()
+	var rearm reArmStreamMsg
+	var found bool
+	for _, msg := range collectMsgs(cmd) {
+		if rs, ok := msg.(reArmStreamMsg); ok {
+			rearm = rs
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("no reArmStreamMsg in trigger batch")
+	}
+	nm, c := m.Update(rearm)
+	m = nm.(model)
+	next := c
+	for i := 0; i < 1000 && next != nil; i++ {
+		msg := next()
+		ev, ok := msg.(streamEventsMsg)
+		if !ok {
+			// Skip non-stream msgs (e.g. activityMsg/spinTick) and stop pumping.
+			break
+		}
+		nm2, c2 := m.Update(ev)
+		m = nm2.(model)
+		if ev.eof {
+			break
+		}
+		next = c2
+	}
+	// Ensure settled for the test's next step.
+	m2, _ := m.Update(streamEventsMsg{eof: true})
+	return m2.(model)
 }
 
 // Follow-up in-process re-arms in APPEND mode with the failed output threaded in.

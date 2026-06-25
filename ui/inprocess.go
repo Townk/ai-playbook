@@ -177,7 +177,11 @@ func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
 	m.spinFrame = 0
 	m.spinTicks = 0
 	m.streaming = true
-	m.follow = true
+	// Issue #1: a follow-up must NOT yank the viewport to the bottom as the revised
+	// fix streams in — the user is reading the failed attempt. Keep follow=false so
+	// flushRender leaves m.yOff where the user left it (the spinner/activity line
+	// still clamp into the visible body, so the "thinking" feedback stays on screen).
+	m.follow = false
 	m.reflow()
 	return tea.Batch(m.restartTick(), func() tea.Msg {
 		stream, activity, _, err := orch.Followup(failedOutput)
