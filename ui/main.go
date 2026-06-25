@@ -68,6 +68,19 @@ var pendingServedBase string
 // (the cache-HIT serve path). Consumed (and cleared) by Main.
 func SetServedBase(base string) { pendingServedBase = base }
 
+// pendingAsker is the request-input-float asker consumed by the next Main() call,
+// set by SetAsker. The cached-replay path (serveCachedPlaybook → ui.Main via the
+// os.Args-reshaped seam) can't pass a closure through that seam, so it stashes the
+// asker here; Main attaches it to the model (m.asker) and clears it. It backs the
+// `f` keybind (spec §D): proactive user-initiated amend via the request float. nil →
+// `f` is a no-op (off-zellij / no selfExe).
+var pendingAsker AskFunc
+
+// SetAsker stashes the request-input-float asker for the next ui.Main() invocation
+// (the cache-HIT serve path, where `f` proactively amends the served playbook).
+// Consumed (and cleared) by Main.
+func SetAsker(a AskFunc) { pendingAsker = a }
+
 // Main is the entrypoint for the `ai-playbook run` subcommand. It parses flags
 // from os.Args[2:] (os.Args[1] is the "run" subcommand) and returns an exit
 // code; the caller is responsible for os.Exit.
@@ -209,10 +222,12 @@ func Main() int {
 	}
 	activity := pendingActivity
 	servedBase := pendingServedBase
+	askerFn := pendingAsker
 	pendingReengage = nil  // consume once, regardless of whether an orch was built
 	pendingDriver = nil    // ditto: the session owns the driver's lifecycle
 	pendingActivity = nil  // ditto: the session owns the activity channel's lifecycle
 	pendingServedBase = "" // ditto: served-base amend stash is consume-once
+	pendingAsker = nil     // ditto: the `f` asker stash is consume-once
 
 	// Force TrueColor: zellij's alt-screen pane underreports the color profile
 	// during bubbletea's auto-detection, causing colors to be downsampled.
@@ -231,6 +246,7 @@ func Main() int {
 	m.parser = parser
 	m.activity = activity
 	m.servedBase = servedBase
+	m.asker = askerFn
 	prog := tea.NewProgram(
 		m,
 		tea.WithInput(tty),

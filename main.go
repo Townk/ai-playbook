@@ -480,6 +480,25 @@ func (s *session) authoringAgent() author.Agent {
 	return author.ClaudeAgentWithMCP(s.selfExe, s.socket)
 }
 
+// asker builds the ui.AskFunc that backs the pager's `f` keybind (spec §D): it
+// spawns `ai-playbook input … --out` in a float (the same floatinput.Asker the
+// agent's `ask` tool uses), opened in cwd, and returns the user's typed adjustment.
+// The ui passes a prompt ("What should I change?"); the Request is fixed text type.
+// Returns nil when we can't spawn ourselves (no selfExe / nil session) → `f` no-ops.
+func (s *session) asker(cwd string) ui.AskFunc {
+	if s == nil || s.selfExe == "" {
+		return nil
+	}
+	a := floatinput.Asker{SelfExe: s.selfExe, Mux: mux.Load()}
+	return func(prompt string) (string, bool) {
+		res, err := a.Ask(floatinput.Request{Type: "text", Prompt: prompt, Cwd: cwd})
+		if err != nil {
+			return "", false
+		}
+		return res.Value, res.Submitted
+	}
+}
+
 // writeMCPConfig writes the claude --mcp-config pointing at this session's tools
 // backend and returns its path (and a removal func), so the owned AuthorEvents
 // invocation reaches the agent's run/ask/remember tools. Returns "" when the
@@ -570,6 +589,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		Driver:   sharedDrv,
 		Reengage: reengage,
 		Activity: activity,
+		Asker:    sess.asker(cwd), // `f` proactive amend (spec §D)
 	})
 
 	// Cache-store on completion — only when the cache wasn't disabled/bypassed and
@@ -827,6 +847,12 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session) 
 	// context is a different cache entry → a cache MISS → authorPlaybook (servedBase
 	// stays "" → fresh). The base is the INPUT to the amend; the output is base+fix.
 	ui.SetServedBase(body)
+
+	// Stage 5 (spec §D): stash the request-input-float asker so the served playbook's
+	// `f` keybind proactively amends it (base = the displayed content, change = the
+	// user's typed adjustment) → REPLACE draft → `w` to re-cache. nil session / no
+	// selfExe → nil → `f` no-ops.
+	ui.SetAsker(sess.asker(cwd))
 
 	// Reuse the `run` subcommand entrypoint in-process by shaping os.Args the way
 	// ui.Main() parses them (os.Args[1]="run", flags from os.Args[2:]).

@@ -17,6 +17,17 @@ import (
 // status bar until the next key/click and never crashes the UI.
 type statusMsg struct{ text string }
 
+// fChangeMsg carries the outcome of the `f` request-input float back into the model
+// (spec §D, stage 5): the user's typed adjustment (value) and whether they submitted.
+// base is the pager content snapshotted when `f` was pressed — the AMEND base, so a
+// stream arriving between the press and the answer can't race the amend input. On a
+// submitted non-empty value the model amends base+value (REPLACE draft); a cancel or
+// an empty value is a no-op.
+type fChangeMsg struct {
+	base, value string
+	submitted   bool
+}
+
 // activityMsg carries one agent tool-call summary read off the activity channel
 // (the session bridged the tools backend's OnActivity hook to it). ok is false
 // when the channel closed (the session torn down) — the model then stops
@@ -215,15 +226,24 @@ func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
 // (servedBase set) → amends; a different context is a different cache entry → a miss
 // → authorPlaybook leaves servedBase "" → fresh. Unrelated playbooks never cross.
 func (m *model) beginFinalPlaybookInProc() tea.Cmd {
+	// The troubleshoot content is the input the FINAL-PLAYBOOK prompt distills; grab
+	// it BEFORE the REPLACE reset clears m.md. The served base is independent of m.md
+	// (stashed on the cache-HIT serve), so it survives the reset.
+	return m.beginFinalPlaybookGenerate(m.servedBase, m.md)
+}
+
+// beginFinalPlaybookGenerate is the shared REPLACE re-arm that both the confirm /
+// `w` finalize path (beginFinalPlaybookInProc, base=servedBase) and the user-initiated
+// `f` amend (base=m.md — amend what's shown) drive. It resets the rendered content,
+// marks the upcoming render a DRAFT (finalDraft=true, committed=false — persistence is
+// the `w` commit), and re-arms the parser with orch.FinalPlaybook(base, change) in
+// REPLACE mode. base!="" → AMEND (fold change into base, preserve existing steps);
+// base=="" → FRESH. Returns nil when re-engagement isn't wired (off-zellij/tests).
+func (m *model) beginFinalPlaybookGenerate(base, change string) tea.Cmd {
 	orch := m.orch
 	if orch == nil || orch.Reengage == nil {
 		return nil
 	}
-	// The troubleshoot content is the input the FINAL-PLAYBOOK prompt distills; grab
-	// it BEFORE the REPLACE reset clears m.md. The served base is independent of m.md
-	// (stashed on the cache-HIT serve), so it survives the reset.
-	change := m.md
-	base := m.servedBase
 	// REPLACE: reset the rendered content + thinking state (like regenerate).
 	m.md = ""
 	m.isCached = false

@@ -228,7 +228,23 @@ type model struct {
 	// between clears it (the draft is now saved). Reset on any non-quit key so the
 	// "press quit again" intent stays immediate, not sticky across other interactions.
 	quitGuard bool
+
+	// asker spawns the request-input float (the same floatinput.Asker the agent's
+	// `ask` tool uses) and returns the user's typed answer, OFF the bubbletea event
+	// loop. It backs the `f` keybind (spec §D): `f` → ask "What should I change?" →
+	// the user types a free-form adjustment → re-author the displayed playbook in
+	// AMEND mode (base=m.md, change=the typed value) → REPLACE draft. nil when the
+	// float can't be spawned (off-zellij / tests / no selfExe) → `f` is a no-op. Set
+	// by Main/RunStream from the consume-once SetAsker stash / StreamOptions.Asker.
+	asker AskFunc
 }
+
+// AskFunc opens the request-input float with the given prompt (the floatinput Type
+// is text) and blocks until the user submits or cancels. It returns the typed value
+// and whether the user submitted (false → cancel/Esc or the float vanished). It is a
+// closure so the ui package needn't import floatinput; the session builds it from its
+// floatinput.Asker (a fixed text-type Request with the given prompt).
+type AskFunc func(prompt string) (value string, submitted bool)
 
 // emitAction performs a button's action. In FIFO mode (m.orch == nil) it appends
 // a record framed as "<kind>US<id>US<payload>RS" to the actions FIFO, where US
@@ -835,6 +851,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+		case "f":
+			// Stage 5 (spec §D): `f` is the user-initiated proactive amend. It opens the
+			// request-input float ("What should I change?"), the user types a free-form
+			// adjustment, and the agent re-authors the DISPLAYED document in AMEND mode
+			// (base=m.md — amend what's shown) → REPLACE draft. Repeatable (each `f`
+			// amends the new content); `w` then commits. Only meaningful while settled
+			// (not mid-stream) and only when an asker is wired (off-zellij/tests → no-op).
+			if m.streaming {
+				return m, nil
+			}
+			if m.asker == nil {
+				m.status = "follow-up unavailable in this mode"
+				return m, nil
+			}
+			// Spawn the float + poll OFF the event loop, then feed the answer back as an
+			// fChangeMsg. The base is snapshotted now so a later stream can't race it.
+			ask := m.asker
+			base := m.md
+			return m, func() tea.Msg {
+				value, submitted := ask("What should I change?")
+				return fChangeMsg{base: base, value: value, submitted: submitted}
+			}
 		case "y":
 			// Confirm "Yes" (spec §A): the verify-success resolved — generate the final
 			// playbook draft (REPLACE). Only meaningful while the confirm row is shown.
@@ -1038,6 +1076,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// status bar until the next key/click clears it. Never crashes the UI.
 		dbg("status: %s", msg.text)
 		m.status = msg.text
+		return m, nil
+	case fChangeMsg:
+		// Stage 5 (spec §D): the `f` request-input float returned. On a submitted,
+		// non-empty value → AMEND the displayed playbook: base = the snapshotted pager
+		// content (amend what was shown), change = the typed adjustment. This drives the
+		// SAME REPLACE re-arm the confirm/`w` finalize uses, marking a fresh draft
+		// (finalDraft=true, committed=false) so the existing uncommitted-draft quit guard
+		// and the `w` commit apply unchanged. A cancel or an empty value is a no-op.
+		if !msg.submitted {
+			return m, nil
+		}
+		if strings.TrimSpace(msg.value) == "" {
+			return m, nil
+		}
+		dbg("f: proactive amend (base len=%d, change=%q)", len(msg.base), msg.value)
+		if cmd := m.beginFinalPlaybookGenerate(msg.base, msg.value); cmd != nil {
+			return m, cmd
+		}
 		return m, nil
 	case activityMsg:
 		// One agent tool-call summary off the activity feed. A summary from a STALE

@@ -1468,3 +1468,212 @@ func TestVerifyBlockIDFallback(t *testing.T) {
 		t.Errorf("tagged: verifyBlockID()=%q, want \"verify\"", got)
 	}
 }
+
+// fakeAsker is the ui.AskFunc test double: it records the prompt it was asked and
+// returns a canned (value, submitted) pair — standing in for the request-input float
+// without spawning a real zellij pane.
+type fakeAsker struct {
+	value     string
+	submitted bool
+	gotPrompt string
+	calls     int
+}
+
+func (f *fakeAsker) fn(prompt string) (string, bool) {
+	f.calls++
+	f.gotPrompt = prompt
+	return f.value, f.submitted
+}
+
+// Stage 5 (spec §D): pressing `f` with an asker wired issues a cmd that calls the
+// asker; the resulting fChangeMsg carries the snapshotted pager content as the base
+// and the typed value, and is submitted.
+func TestFKeyIssuesAskCmd(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "", "")
+	m.md = "# Playbook — current\n\nstep\n"
+	m.streaming = false
+	m.reflow()
+	fk := &fakeAsker{value: "also configure the NDK", submitted: true}
+	m.asker = fk.fn
+
+	nm, cmd := m.Update(key("f"))
+	m = nm.(model)
+	if cmd == nil {
+		t.Fatal("`f` with an asker must issue a cmd")
+	}
+	msg := cmd()
+	fc, ok := msg.(fChangeMsg)
+	if !ok {
+		t.Fatalf("`f` cmd must yield an fChangeMsg, got %T", msg)
+	}
+	if fk.calls != 1 {
+		t.Fatalf("asker calls = %d, want 1", fk.calls)
+	}
+	if fk.gotPrompt != "What should I change?" {
+		t.Errorf("asker prompt = %q, want \"What should I change?\"", fk.gotPrompt)
+	}
+	if !fc.submitted {
+		t.Error("fChangeMsg.submitted must reflect the asker's submit")
+	}
+	if fc.value != "also configure the NDK" {
+		t.Errorf("fChangeMsg.value = %q, want the typed value", fc.value)
+	}
+	if fc.base != "# Playbook — current\n\nstep\n" {
+		t.Errorf("fChangeMsg.base must snapshot the displayed content, got %q", fc.base)
+	}
+}
+
+// Stage 5 (spec §D): a submitted, non-empty fChangeMsg triggers the AMEND generation —
+// the producer is called with base==m.md (the snapshotted content) and change==the
+// typed value, in REPLACE mode, marked a DRAFT (finalDraft set, committed false).
+func TestFChangeSubmittedTriggersAmend(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Playbook — amended\nbase + ndk\n", "# Playbook — amended\nbase + ndk\n")
+	base := "# Playbook — current\n\nstep\n"
+	change := "also configure the NDK"
+	m.md = base
+	m.streaming = false
+	m.reflow()
+
+	nm, cmd := m.Update(fChangeMsg{base: base, value: change, submitted: true})
+	m = nm.(model)
+	if cmd == nil {
+		t.Fatal("a submitted non-empty fChangeMsg must trigger the amend generation")
+	}
+	if !m.finalDraft || m.committed {
+		t.Errorf("`f` amend must mark a draft (finalDraft=%v committed=%v)", m.finalDraft, m.committed)
+	}
+	// REPLACE: the displayed content was reset on the trigger.
+	if m.md != "" {
+		t.Errorf("`f` amend must REPLACE (reset m.md), got %q", m.md)
+	}
+
+	m = pumpReArm(t, m, cmd)
+	if fe.calls != 1 {
+		t.Fatalf("producer calls = %d, want 1", fe.calls)
+	}
+	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+		t.Errorf("producer kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
+	}
+	if fe.gotBase != base {
+		t.Errorf("`f` amend base must be the displayed content, got %q want %q", fe.gotBase, base)
+	}
+	if fe.gotChange != change {
+		t.Errorf("`f` amend change must be the typed value, got %q want %q", fe.gotChange, change)
+	}
+	if !strings.Contains(m.md, "base + ndk") {
+		t.Errorf("the amended playbook must stream into m.md, got %q", m.md)
+	}
+}
+
+// Stage 5 (spec §D): a cancelled `f` (submitted=false) is a no-op — no generation,
+// no draft.
+func TestFChangeCancelledIsNoOp(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "x", "x")
+	m.md = "# Playbook — current\n\nstep\n"
+	m.streaming = false
+	m.reflow()
+
+	nm, cmd := m.Update(fChangeMsg{base: m.md, value: "ignored", submitted: false})
+	m = nm.(model)
+	if cmd != nil {
+		t.Error("a cancelled `f` must not trigger a cmd")
+	}
+	if m.finalDraft {
+		t.Error("a cancelled `f` must not mark a draft")
+	}
+	if fe.calls != 0 {
+		t.Errorf("a cancelled `f` must not call the producer, calls=%d", fe.calls)
+	}
+}
+
+// Stage 5 (spec §D): a submitted but EMPTY/whitespace `f` value is a no-op (nothing
+// to amend with).
+func TestFChangeEmptyValueIsNoOp(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "x", "x")
+	m.md = "# Playbook — current\n\nstep\n"
+	m.streaming = false
+	m.reflow()
+
+	nm, cmd := m.Update(fChangeMsg{base: m.md, value: "   \n", submitted: true})
+	m = nm.(model)
+	if cmd != nil {
+		t.Error("an empty submitted `f` must not trigger a cmd")
+	}
+	if m.finalDraft {
+		t.Error("an empty submitted `f` must not mark a draft")
+	}
+	if fe.calls != 0 {
+		t.Errorf("an empty submitted `f` must not call the producer, calls=%d", fe.calls)
+	}
+}
+
+// Stage 5 (spec §D): with no asker wired (off-zellij / tests), `f` is a no-op (a brief
+// status, no cmd, no draft).
+func TestFKeyNilAskerNoOp(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "x", "x")
+	m.md = "# Playbook — current\n\nstep\n"
+	m.streaming = false
+	m.asker = nil
+	m.reflow()
+
+	nm, cmd := m.Update(key("f"))
+	m = nm.(model)
+	if cmd != nil {
+		t.Error("`f` with no asker must be a no-op (nil cmd)")
+	}
+	if m.finalDraft {
+		t.Error("`f` with no asker must not mark a draft")
+	}
+	if fe.calls != 0 {
+		t.Errorf("`f` with no asker must not call the producer, calls=%d", fe.calls)
+	}
+}
+
+// Stage 5 (spec §D): `f` while streaming is a no-op — amends only apply to settled
+// content (and must not be issued while a generation is in flight).
+func TestFKeyWhileStreamingNoOp(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "x", "x")
+	m.md = "# Playbook — current\n\nstep\n"
+	m.streaming = true
+	fk := &fakeAsker{value: "x", submitted: true}
+	m.asker = fk.fn
+	m.reflow()
+
+	nm, cmd := m.Update(key("f"))
+	_ = nm.(model)
+	if cmd != nil {
+		t.Error("`f` while streaming must be a no-op (nil cmd)")
+	}
+	if fk.calls != 0 {
+		t.Errorf("`f` while streaming must not call the asker, calls=%d", fk.calls)
+	}
+}
+
+// Stage 5 (spec §E): an `f` draft sets finalDraft && !committed, so the existing
+// uncommitted-draft quit guard covers it — the first quit warns, a `w` commit clears
+// it. This verifies `f` drafts ride the same guard as confirm/`w` drafts.
+func TestFDraftCoveredByQuitGuard(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# amended\n", "# amended\n")
+	base := "# Playbook — current\n\nstep\n"
+	m.md = base
+	m.streaming = false
+	m.width, m.height = 80, 24
+	m.reflow()
+
+	nm, cmd := m.Update(fChangeMsg{base: base, value: "tweak it", submitted: true})
+	m = nm.(model)
+	m = pumpReArm(t, m, cmd)
+	if !m.finalDraft || m.committed {
+		t.Fatalf("setup: `f` must produce an uncommitted draft (finalDraft=%v committed=%v)", m.finalDraft, m.committed)
+	}
+
+	// First quit press: the guard warns instead of quitting.
+	nm2, qcmd := m.Update(key("q"))
+	m = nm2.(model)
+	if qcmd != nil {
+		t.Error("first quit over an `f` draft must NOT quit (guard warns)")
+	}
+	if !m.quitGuard {
+		t.Error("first quit over an `f` draft must arm the quit guard")
+	}
+}

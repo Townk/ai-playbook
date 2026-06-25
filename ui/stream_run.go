@@ -37,6 +37,10 @@ type StreamOptions struct {
 	// latest summary next to the "Working…" spinner during the silent authoring wait.
 	// nil → no activity line (the spinner still animates).
 	Activity <-chan string
+	// Asker, when non-nil, spawns the request-input float for the `f` keybind (spec
+	// §D): proactive user-initiated amend. The session builds it from its
+	// floatinput.Asker. nil (off-zellij / no selfExe) → `f` is a no-op.
+	Asker AskFunc
 }
 
 // RunStream renders + drives a playbook from a live input stream in-process. It
@@ -124,6 +128,7 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 	m.reader = bufio.NewReader(src)
 	m.parser = parser
 	m.activity = opts.Activity
+	m.asker = opts.Asker
 	prog := tea.NewProgram(
 		m,
 		tea.WithInput(tty),

@@ -40,6 +40,7 @@ var helpGroups = []helpGroup{
 		{"󱁐", "hint mode — activate a button"},
 		{"󰳽", "activate a button (mouse)"},
 		{"y / n", "answer the verify-success confirm (solved?)"},
+		{"f", "follow-up — amend the displayed playbook"},
 		{"w", "finalize — generate the final playbook draft"},
 		{"?", "toggle this help"},
 		{"q / 󱊷", "quit"},
