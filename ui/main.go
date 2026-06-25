@@ -31,6 +31,20 @@ var pendingReengage *orchestrator.Reengage
 // kinds can re-author in-process). It is consumed (and cleared) by Main.
 func SetReengage(re *orchestrator.Reengage) { pendingReengage = re }
 
+// pendingDriver is the session's shared shell driver consumed by the next Main()
+// call, set by SetDriver. The cached-replay path (troubleshoot →
+// serveCachedPlaybook → ui.Main via os.Args reshaping) can't pass a struct
+// through that seam, so it stashes the driver here; Main reuses it for the
+// playbook's run blocks (the same shell the tools backend exposes) instead of
+// opening its own. A supplied driver is OWNED by the session — Main does NOT
+// close it. nil → Main opens its own driver (the pre-stage-5 behavior).
+var pendingDriver *driver.Driver
+
+// SetDriver stashes the session's shared shell driver for the next ui.Main()
+// invocation (the troubleshoot cached-replay path). Consumed (and cleared) by
+// Main; the driver is not closed by Main.
+func SetDriver(d *driver.Driver) { pendingDriver = d }
+
 // Main is the entrypoint for the `ai-playbook run` subcommand. It parses flags
 // from os.Args[2:] (os.Args[1] is the "run" subcommand) and returns an exit
 // code; the caller is responsible for os.Exit.
@@ -138,20 +152,31 @@ func Main() int {
 	var orch *orchestrator.Orchestrator
 	if fifoPath == "" && inputFifo == "" {
 		if file := fs.Arg(0); file != "" {
-			runCwd := cwd
-			if runCwd == "" {
-				if abs, aerr := filepath.Abs(file); aerr == nil {
-					runCwd = filepath.Dir(abs)
+			// Reuse the session's shared driver when stashed (the troubleshoot
+			// cached-replay path), so run blocks execute in the shell the tools
+			// backend exposes; else open our own. A session-supplied driver is owned
+			// by the session — we don't close it here.
+			d := pendingDriver
+			if d == nil {
+				runCwd := cwd
+				if runCwd == "" {
+					if abs, aerr := filepath.Abs(file); aerr == nil {
+						runCwd = filepath.Dir(abs)
+					}
+				}
+				if runCwd == "" {
+					runCwd, _ = os.Getwd()
+				}
+				var derr error
+				d, derr = driver.Open(driver.Options{Cwd: runCwd})
+				if derr != nil {
+					fmt.Fprintf(os.Stderr, "ai-playbook run: driver.Open failed (%v); falling back to render-only\n", derr)
+					d = nil
+				} else {
+					defer d.Close()
 				}
 			}
-			if runCwd == "" {
-				runCwd, _ = os.Getwd()
-			}
-			d, derr := driver.Open(driver.Options{Cwd: runCwd})
-			if derr != nil {
-				fmt.Fprintf(os.Stderr, "ai-playbook run: driver.Open failed (%v); falling back to render-only\n", derr)
-			} else {
-				defer d.Close()
+			if d != nil {
 				orch = orchestrator.New(d, &cliMux{}).WithFloat(mux.Load())
 				if pendingReengage != nil {
 					orch.WithReengage(pendingReengage)
@@ -160,6 +185,7 @@ func Main() int {
 		}
 	}
 	pendingReengage = nil // consume once, regardless of whether an orch was built
+	pendingDriver = nil   // ditto: the session owns the driver's lifecycle
 
 	// Force TrueColor: zellij's alt-screen pane underreports the color profile
 	// during bubbletea's auto-detection, causing colors to be downsampled.

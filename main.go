@@ -12,6 +12,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -23,8 +24,10 @@ import (
 	"ai-playbook/capture"
 	"ai-playbook/driver"
 	"ai-playbook/input"
+	"ai-playbook/mcpserver"
 	"ai-playbook/mux"
 	"ai-playbook/orchestrator"
+	"ai-playbook/tools"
 	"ai-playbook/triage"
 	"ai-playbook/ui"
 
@@ -44,6 +47,8 @@ func main() {
 		os.Exit(troubleshoot())
 	case "run":
 		os.Exit(ui.Main())
+	case "mcp":
+		os.Exit(mcpMain())
 	case "input":
 		os.Exit(input.Main())
 	case "-h", "--help", "help":
@@ -56,7 +61,28 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ai-playbook {troubleshoot|run <file.md>|input|selftest}")
+	fmt.Fprintln(os.Stderr, "usage: ai-playbook {troubleshoot|run <file.md>|mcp --socket <path>|input|selftest}")
+}
+
+// mcpMain is the `ai-playbook mcp --socket <path>` subcommand: an MCP stdio
+// server (the claude harness adapter) whose tool calls dial the session's tools
+// backend at <path>. claude launches this via --mcp-config; it forwards run /
+// remember / ask to the unix socket. Blocks until the client disconnects.
+func mcpMain() int {
+	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
+	var socket string
+	fs.StringVar(&socket, "socket", "", "path to the session's tools-backend unix socket")
+	argv := os.Args[2:]
+	fs.Parse(argv)
+	if socket == "" {
+		fmt.Fprintln(os.Stderr, "ai-playbook mcp: --socket <path> is required")
+		return 2
+	}
+	if err := mcpserver.Run(socket); err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook mcp: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 // selftest drives the user's REAL shell (unaltered) and reports — the live
@@ -152,12 +178,96 @@ func troubleshoot() int {
 	noCache := os.Getenv("AI_ASSIST_NO_CACHE") != ""
 	d := triage.Route(req, c, noCache)
 
+	// Session setup: ONE shared shell driver is created here, at session start, so
+	// BOTH authoring (the agent's tools backend) and the ui's run-blocks drive the
+	// SAME live shell — the agent diagnoses in the exact environment the playbook's
+	// steps will run in. A tools backend is exposed over a temp unix socket; the
+	// claude harness reaches it via the MCP adapter (`ai-playbook mcp --socket`).
+	// A failed setup degrades to no-tools authoring (sess is nil) — the ui then
+	// opens its own driver, the pre-stage-5 behavior.
+	sess := openSession(req)
+	if sess != nil {
+		defer sess.close()
+	}
+
 	switch d.Outcome {
 	case triage.Hit:
-		return serveCachedPlaybook(d, req)
+		return serveCachedPlaybook(d, req, sess)
 	default:
-		return authorPlaybook(req, d, c, noCache)
+		return authorPlaybook(req, d, c, noCache, sess)
 	}
+}
+
+// session bundles the per-troubleshoot shared resources: the single live shell
+// driver (shared by authoring tools and the ui run blocks), the tools backend
+// serving it over a unix socket, the socket path, and the path to this binary
+// (for the claude --mcp-config). A nil *session means tools setup failed and the
+// session runs in the no-agent-tools fallback (the ui opens its own driver).
+type session struct {
+	drv     *driver.Driver
+	srv     *tools.Server
+	socket  string
+	selfExe string
+}
+
+// openSession creates the shared driver and starts the tools backend on a temp
+// unix socket. The driver's cwd is the request's project root (else its cwd).
+// Returns nil on any failure (driver open, socket dir, or Serve) so the caller
+// degrades to no-tools authoring rather than aborting.
+func openSession(req capture.Request) *session {
+	cwd := req.ProjectRoot
+	if cwd == "" {
+		cwd = req.CWD
+	}
+	drv, err := driver.Open(driver.Options{Cwd: cwd})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: driver.Open failed (%v); authoring without agent tools\n", err)
+		return nil
+	}
+	dir, err := os.MkdirTemp("", "ai-playbook-sock")
+	if err != nil {
+		drv.Close()
+		return nil
+	}
+	socket := filepath.Join(dir, "tools.sock")
+	srv, err := tools.Serve(socket, tools.Deps{
+		Driver:      drv,
+		ProjectRoot: req.ProjectRoot,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: tools.Serve failed (%v); authoring without agent tools\n", err)
+		drv.Close()
+		os.RemoveAll(dir)
+		return nil
+	}
+	selfExe, _ := os.Executable()
+	return &session{drv: drv, srv: srv, socket: socket, selfExe: selfExe}
+}
+
+// close tears down the tools backend, the shared driver, and the socket temp dir.
+func (s *session) close() {
+	if s == nil {
+		return
+	}
+	if s.srv != nil {
+		s.srv.Close()
+	}
+	if s.drv != nil {
+		s.drv.Close()
+	}
+	os.RemoveAll(filepath.Dir(s.socket))
+}
+
+// authoringAgent returns the agent the producer should use: the MCP-tools-wired
+// claude agent when the session is up (so the agent diagnoses via the `run` tool
+// in the user's real shell), else the plain claude agent (author-as-before). A
+// missing selfExe also falls back (we can't point claude's --mcp-config at
+// ourselves). The fallback keeps the no-agent-tools path working.
+func (s *session) authoringAgent() author.Agent {
+	if s == nil || s.selfExe == "" {
+		return author.ClaudeAgent
+	}
+	return author.ClaudeAgentWithMCP(s.selfExe, s.socket)
 }
 
 // authorPlaybook handles a cache MISS (stage 4b): run the capable agent to author
@@ -171,8 +281,9 @@ func troubleshoot() int {
 // captured body via cache.Store(ctxHash, reqHash, "playbook", body, …) alongside
 // the original request.json sidecar. Storing respects triage's decision: skipped
 // when the cache was disabled (unreliable key) or bypassed (no-cache).
-func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool) int {
-	stream, err := author.Author(req, author.ClaudeAgent)
+func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, sess *session) int {
+	agent := sess.authoringAgent()
+	stream, err := author.Author(req, agent)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: author: %v\n", err)
 		return 1
@@ -191,7 +302,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 	// authors-without-re-storing (matching the shell's cache-bypassed re-run).
 	reengage := &orchestrator.Reengage{
 		Req:         req,
-		Agent:       author.ClaudeAgent,
+		Agent:       agent,
 		Cache:       c,
 		RequestJSON: requestJSON(req),
 	}
@@ -201,12 +312,19 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 	}
 
 	// Tee the produced playbook into a buffer as the ui consumes it, so we can
-	// persist it on completion.
+	// persist it on completion. The ui reuses the SESSION's shared driver (the same
+	// shell the agent diagnosed in via its tools backend) when one is up; else it
+	// opens its own.
+	var sharedDrv *driver.Driver
+	if sess != nil {
+		sharedDrv = sess.drv
+	}
 	var body bytes.Buffer
 	code := ui.RunStream(stream, ui.StreamOptions{
 		Harness:  "Claude Code",
 		Cwd:      cwd,
 		Tee:      &body,
+		Driver:   sharedDrv,
 		Reengage: reengage,
 	})
 
@@ -268,7 +386,7 @@ func requestJSON(req capture.Request) string {
 // body, write it to a temp file, and reuse ui.Main() (which spins up the driver +
 // orchestrator and drives the playbook in-process), passing --cached for the
 // header badge and --cwd so runs execute in the request's project root.
-func serveCachedPlaybook(d triage.Decision, req capture.Request) int {
+func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session) int {
 	raw, err := os.ReadFile(d.Path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: read cache entry: %v\n", err)
@@ -305,12 +423,19 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request) int {
 	// ai-assist-regenerate. Stashed for ui.Main to attach to the orchestrator.
 	ui.SetReengage(&orchestrator.Reengage{
 		Req:         req,
-		Agent:       author.ClaudeAgent,
+		Agent:       sess.authoringAgent(),
 		Cache:       cache.Open(),
 		CtxHash:     d.CtxHash,
 		ReqHash:     d.ReqHash,
 		RequestJSON: requestJSON(req),
 	})
+
+	// Reuse the session's shared driver for the cached replay's run blocks (the
+	// same shell the re-engagement agent's tools backend drives), stashed for
+	// ui.Main to consume. nil session → ui.Main opens its own driver.
+	if sess != nil {
+		ui.SetDriver(sess.drv)
+	}
 
 	// Reuse the `run` subcommand entrypoint in-process by shaping os.Args the way
 	// ui.Main() parses them (os.Args[1]="run", flags from os.Args[2:]).

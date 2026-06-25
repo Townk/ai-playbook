@@ -81,14 +81,22 @@ func claudePermissionMode() string {
 // Stdout is returned as a streaming pipe (cmd.StdoutPipe) so the ui renders
 // incrementally; closing the returned ReadCloser waits for the process to exit.
 func ClaudeAgent(systemPrompt, userMessage string) (io.ReadCloser, error) {
-	cmd := exec.Command(
-		claudeBin(),
+	return runClaude(systemPrompt, userMessage, nil)
+}
+
+// runClaude builds and starts the claude headless invocation with the base flags,
+// optionally appending extraArgs (e.g. --mcp-config for the tools backend). Stdout
+// is returned as a streaming pipe (Close waits for the process).
+func runClaude(systemPrompt, userMessage string, extraArgs []string) (io.ReadCloser, error) {
+	args := []string{
 		"--print", "--output-format", "text",
 		"--permission-mode", claudePermissionMode(),
 		"--model", claudeModel(),
-		"--append-system-prompt", systemPrompt,
-		userMessage,
-	)
+	}
+	args = append(args, extraArgs...)
+	args = append(args, "--append-system-prompt", systemPrompt, userMessage)
+
+	cmd := exec.Command(claudeBin(), args...)
 	cmd.Stderr = os.Stderr
 
 	stdout, err := cmd.StdoutPipe()

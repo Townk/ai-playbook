@@ -22,9 +22,15 @@ import (
 // the stream is parsed incrementally, rendered, and its run blocks are driven by
 // the in-process orchestrator against the user's real shell.
 type StreamOptions struct {
-	Harness  string                 // header label (default "agent")
-	Cwd      string                 // working dir for the in-process driver (default $PWD)
-	Tee      io.Writer              // if non-nil, every byte read from Src is mirrored here
+	Harness string    // header label (default "agent")
+	Cwd     string    // working dir for the in-process driver (default $PWD)
+	Tee     io.Writer // if non-nil, every byte read from Src is mirrored here
+	// Driver, when non-nil, is the SESSION's shared shell driver — the same one
+	// the authoring agent's tools backend drives, so the playbook's run blocks
+	// execute in the exact shell the agent diagnosed in. When nil, RunStream opens
+	// its own driver (the pre-stage-5 behavior). A supplied Driver is OWNED by the
+	// caller: RunStream does NOT close it.
+	Driver   *driver.Driver
 	Reengage *orchestrator.Reengage // re-engagement context (regenerate/followup/wrapup); nil disables those kinds
 }
 
@@ -78,18 +84,28 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 	}
 	defer tty.Close()
 
-	// In-process drive: spin up the real shell driver + orchestrator. A failed
-	// Open falls back to render-only (logged) rather than crashing.
+	// In-process drive: use the SESSION's shared driver when supplied (so the
+	// playbook's run blocks execute in the exact shell the authoring agent
+	// diagnosed in via its tools backend); else open our own. A failed Open falls
+	// back to render-only (logged) rather than crashing. A caller-supplied driver
+	// is owned by the caller — we don't close it here.
 	var orch *orchestrator.Orchestrator
-	runCwd := opts.Cwd
-	if runCwd == "" {
-		runCwd, _ = os.Getwd()
+	d := opts.Driver
+	if d == nil {
+		runCwd := opts.Cwd
+		if runCwd == "" {
+			runCwd, _ = os.Getwd()
+		}
+		var derr error
+		d, derr = driver.Open(driver.Options{Cwd: runCwd})
+		if derr != nil {
+			fmt.Fprintf(os.Stderr, "ai-playbook: driver.Open failed (%v); falling back to render-only\n", derr)
+			d = nil
+		} else {
+			defer d.Close()
+		}
 	}
-	d, derr := driver.Open(driver.Options{Cwd: runCwd})
-	if derr != nil {
-		fmt.Fprintf(os.Stderr, "ai-playbook: driver.Open failed (%v); falling back to render-only\n", derr)
-	} else {
-		defer d.Close()
+	if d != nil {
 		orch = orchestrator.New(d, &cliMux{}).WithFloat(mux.Load())
 		if opts.Reengage != nil {
 			orch.WithReengage(opts.Reengage)
