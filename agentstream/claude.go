@@ -21,6 +21,15 @@ import (
 //
 // Robustness: blank and malformed lines are skipped, not fatal; very long lines
 // are handled (bufio.Reader, not a fixed-size Scanner buffer).
+//
+// Reasoning caveat: this adapter maps thinking / thinking_delta → Reasoning, but
+// Claude Code only EMITS thinking blocks when extended thinking is enabled. The
+// owned invocation enables it via MAX_THINKING_TOKENS (see author.events:
+// claudeThinkingTokens, driven by config [agent].thinking). Even then, in
+// `--print --output-format stream-json` Claude Code OMITS the thinking block
+// text (the readable summary is not surfaced), so Reasoning events fire — driving
+// the "model is reasoning" activity — but their Text is typically empty. pi
+// (--mode json, thinkingText) surfaces the reasoning text natively.
 type claudeAdapter struct{}
 
 // toolSummaryMaxCols bounds the single-line tool-activity summary width.
@@ -122,31 +131,73 @@ func parseClaudeLine(line string, emit func(Event)) {
 	// "system" and any unknown type fall through → ignored.
 }
 
-// toolSummary renders a one-line, width-bounded activity label for a tool_use:
-// the tool name plus a short rendering of its input. For a `run` tool the
-// command field is surfaced; otherwise the compacted raw input is used.
+// toolSummary renders a one-line, width-bounded activity label for a tool_use.
+// The agent reaches our tools via an MCP server, so the wire name arrives as
+// `mcp__<server>__<tool>` (e.g. mcp__ai-playbook__run); already-bare names are
+// also tolerated. The bare tool is what matters, and for our own tools the tool
+// NAME is mostly noise — the payload is the signal — so each is mapped to a
+// glyph + the useful detail:
+//
+//   - run      → ❯ <command>   (the command, from the command/cmd input field)
+//   - ask      → ❓ <prompt>    (truncated)
+//   - remember → 📝 <fact>      (truncated; or "📝 noted" when no fact field)
+//   - other    → <tool>: <compact-input>  (mcp prefix stripped)
+//
+// The result is always single-line and capped at toolSummaryMaxCols.
 func toolSummary(name string, input json.RawMessage) string {
-	detail := toolInputDetail(name, input)
-	summary := name
-	if detail != "" {
-		summary = name + ": " + detail
+	bare := stripMCPPrefix(name)
+	var summary string
+	switch bare {
+	case "run":
+		cmd := inputField(input, "command", "cmd")
+		summary = "❯ " + cmd
+	case "ask":
+		summary = "❓ " + inputField(input, "prompt", "question", "q")
+	case "remember":
+		fact := inputField(input, "fact", "text", "note")
+		if fact == "" {
+			summary = "📝 noted"
+		} else {
+			summary = "📝 " + fact
+		}
+	default:
+		detail := toolInputDetail(input)
+		summary = bare
+		if detail != "" {
+			summary = bare + ": " + detail
+		}
 	}
 	return truncateCols(singleLine(summary), toolSummaryMaxCols)
 }
 
-// toolInputDetail extracts the most useful single value from a tool's input.
-// For a `run` tool that's the command; otherwise it falls back to the compact
-// JSON of the whole input object.
-func toolInputDetail(name string, input json.RawMessage) string {
+// stripMCPPrefix removes a leading `mcp__<server>__` so the bare tool name
+// remains. Names without the prefix pass through unchanged. The server segment
+// may itself contain no `__`, so we drop exactly the first two `__`-delimited
+// segments when the name starts with `mcp__`.
+func stripMCPPrefix(name string) string {
+	const p = "mcp__"
+	if !strings.HasPrefix(name, p) {
+		return name
+	}
+	rest := name[len(p):] // <server>__<tool>
+	if i := strings.Index(rest, "__"); i >= 0 {
+		return rest[i+len("__"):]
+	}
+	return rest
+}
+
+// inputField returns the first present key's string value from the tool input,
+// trying keys in order. Empty string when the input is absent/malformed or none
+// of the keys are present.
+func inputField(input json.RawMessage, keys ...string) string {
 	if len(input) == 0 {
 		return ""
 	}
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(input, &fields); err != nil {
-		return singleLine(string(input))
+		return ""
 	}
-	// Prefer a command-like key for run-style tools.
-	for _, key := range []string{"command", "cmd"} {
+	for _, key := range keys {
 		if raw, ok := fields[key]; ok {
 			var s string
 			if err := json.Unmarshal(raw, &s); err == nil {
@@ -154,6 +205,19 @@ func toolInputDetail(name string, input json.RawMessage) string {
 			}
 			return singleLine(string(raw))
 		}
+	}
+	return ""
+}
+
+// toolInputDetail extracts the most useful single value from an unknown tool's
+// input: a command-like key if present, else the compact JSON of the whole
+// input object.
+func toolInputDetail(input json.RawMessage) string {
+	if len(input) == 0 {
+		return ""
+	}
+	if v := inputField(input, "command", "cmd"); v != "" {
+		return v
 	}
 	// Fallback: compact JSON of the whole input.
 	return singleLine(string(input))

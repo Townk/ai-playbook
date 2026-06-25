@@ -87,6 +87,41 @@ func TestTimeoutKillsAndSurvives(t *testing.T) {
 	}
 }
 
+// The load-bearing Stop test: a long in-flight RunID is interrupted by a
+// concurrent Stop() and returns promptly (well under its own timeout). This
+// proves Stop delivers a real interrupt to the foreground command.
+func TestStopInterruptsInflightRun(t *testing.T) {
+	d := newTestDriver(t)
+	done := make(chan Result, 1)
+	go func() {
+		// A generous timeout: if Stop did NOT interrupt, the run would block here
+		// for the full 30s and the select below would time out first.
+		done <- d.RunID("", "sleep 30", 30*time.Second)
+	}()
+	// Wait until the command is actually running (a foreground pgrp appears, or
+	// at least the run has had time to start).
+	for i := 0; i < 150; i++ {
+		time.Sleep(40 * time.Millisecond)
+		if d.Pgrp() > 0 {
+			break
+		}
+	}
+	d.Stop()
+	select {
+	case r := <-done:
+		// A Ctrl-C'd sleep exits non-zero (SIGINT → 130) — never a clean 0.
+		if r.Exit == 0 && !r.TimedOut {
+			t.Errorf("interrupted run should not report clean success → %+v", r)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("Stop did not interrupt the in-flight run promptly")
+	}
+	// The shell must survive the interrupt and remain drivable.
+	if r := d.Run("print -r -- alive", 5*time.Second); r.Out != "alive" {
+		t.Errorf("shell should survive Stop → %+v", r)
+	}
+}
+
 func TestForegroundPgrpIsRealPID(t *testing.T) {
 	d := newTestDriver(t)
 	done := make(chan struct{}, 1)

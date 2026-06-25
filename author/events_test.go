@@ -45,6 +45,71 @@ func TestClaudeArgs_OmitsEmptyModelAndMCP(t *testing.T) {
 	}
 }
 
+// TestClaudeThinkingTokens: the config thinking preference maps to a sane
+// MAX_THINKING_TOKENS budget; empty defaults to "on" (>0) so reasoning streams.
+func TestClaudeThinkingTokens(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"", 8000},
+		{"medium", 8000},
+		{"on", 8000},
+		{"low", 4000},
+		{"high", 16000},
+		{"off", 0},
+		{"none", 0},
+		{"0", 0},
+		{"12345", 12345},
+		{"garbage", 8000},
+	}
+	for _, c := range cases {
+		if got := claudeThinkingTokens(c.in); got != c.want {
+			t.Errorf("claudeThinkingTokens(%q) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}
+
+// TestRunHarnessEvents_ThinkingEnvWired: a non-off thinking preference sets
+// MAX_THINKING_TOKENS on the harness process env; "off" leaves it unset.
+func TestRunHarnessEvents_ThinkingEnvWired(t *testing.T) {
+	bin := writeFakeHarness(t)
+
+	check := func(thinking string, want string) {
+		cfg := config.Default()
+		cfg.Agent.Harness = "claude"
+		cfg.Agent.Thinking = thinking
+
+		var cmd *exec.Cmd
+		events, wait, err := RunHarnessEvents("SYS", "USER", AuthorOptions{
+			Cfg: cfg,
+			Command: func(b string, args []string) *exec.Cmd {
+				cmd = exec.Command(bin, args...) // captured; Env set by RunHarnessEvents after this returns
+				return cmd
+			},
+		})
+		if err != nil {
+			t.Fatalf("RunHarnessEvents(%q): %v", thinking, err)
+		}
+		for range events {
+		}
+		_ = wait()
+
+		var got string
+		for _, kv := range cmd.Env {
+			if strings.HasPrefix(kv, "MAX_THINKING_TOKENS=") {
+				got = strings.TrimPrefix(kv, "MAX_THINKING_TOKENS=")
+			}
+		}
+		if got != want {
+			t.Errorf("thinking %q: MAX_THINKING_TOKENS=%q, want %q", thinking, got, want)
+		}
+	}
+	check("medium", "8000")
+	check("high", "16000")
+	check("off", "") // unset → no MAX_THINKING_TOKENS in env
+}
+
 // TestAuthorEvents_UnsupportedHarness: pi/cursor → a clear error, no process.
 func TestAuthorEvents_UnsupportedHarness(t *testing.T) {
 	cfg := config.Default()
@@ -110,7 +175,7 @@ func TestAuthorEvents_FakeHarness(t *testing.T) {
 
 	want := []agentstream.Event{
 		{Kind: agentstream.TextDelta, Text: "step one"},
-		{Kind: agentstream.ToolActivity, Text: "run: make test"},
+		{Kind: agentstream.ToolActivity, Text: "❯ make test"},
 		{Kind: agentstream.Final, Text: "# Playbook\nrun make test\n"},
 	}
 	if len(got) != len(want) {

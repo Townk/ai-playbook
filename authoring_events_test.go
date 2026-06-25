@@ -95,12 +95,12 @@ func TestAuthorEventsFanOut_Integration(t *testing.T) {
 	gotAct := <-actCh
 	foundTool := false
 	for _, s := range gotAct {
-		if s == "run: make test" {
+		if s == "❯ make test" {
 			foundTool = true
 		}
 	}
 	if !foundTool {
-		t.Errorf("activity feed = %v, want it to include the tool line %q", gotAct, "run: make test")
+		t.Errorf("activity feed = %v, want it to include the tool line %q", gotAct, "❯ make test")
 	}
 
 	if fo.Body() != "# Diagnosis\nrun make test\n" {

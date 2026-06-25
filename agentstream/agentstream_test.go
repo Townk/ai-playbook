@@ -102,7 +102,7 @@ func TestClaudeAdapter_FullSession(t *testing.T) {
 		{Kind: Reasoning, Text: "let me check the logs"},
 		{Kind: Reasoning, Text: "I should run the build"},
 		{Kind: TextDelta, Text: "Running the build now."},
-		{Kind: ToolActivity, Text: "run: make build"},
+		{Kind: ToolActivity, Text: "❯ make build"},
 		{Kind: TextDelta, Text: "Done."},
 		{Kind: Final, Text: "# Fix\n\nrun make build\n"},
 	}
@@ -155,11 +155,55 @@ func TestClaudeAdapter_ToolSummaryTruncated(t *testing.T) {
 	if n := len([]rune(got[0].Text)); n > toolSummaryMaxCols {
 		t.Fatalf("summary %d cols > max %d: %q", n, toolSummaryMaxCols, got[0].Text)
 	}
-	if !strings.HasPrefix(got[0].Text, "run: echo") {
-		t.Fatalf("summary should start with the run command: %q", got[0].Text)
+	if !strings.HasPrefix(got[0].Text, "❯ echo") {
+		t.Fatalf("summary should start with the run glyph + command: %q", got[0].Text)
 	}
 	if !strings.HasSuffix(got[0].Text, "…") {
 		t.Fatalf("truncated summary should end with ellipsis: %q", got[0].Text)
+	}
+}
+
+// TestClaudeAdapter_ToolSummaryMCPPrefixStripped: the agent reaches our tools via
+// an MCP server, so names arrive as mcp__<server>__<tool>. The prefix must be
+// stripped and run mapped to the ❯ glyph + bare command.
+func TestClaudeAdapter_ToolSummaryMCPPrefixStripped(t *testing.T) {
+	a, _ := Get("claude")
+	in := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__ai-playbook__run","input":{"command":"cd /x/y"}}]}}` + "\n"
+	got := collect(t, a, strings.NewReader(in))
+	if len(got) != 1 || got[0].Kind != ToolActivity {
+		t.Fatalf("want one ToolActivity, got %+v", got)
+	}
+	if got[0].Text != "❯ cd /x/y" {
+		t.Fatalf("mcp-prefixed run summary = %q, want %q", got[0].Text, "❯ cd /x/y")
+	}
+}
+
+// TestClaudeAdapter_ToolGlyphs: ask → ❓ prompt, remember → 📝 fact (and 📝 noted
+// with no fact), for both mcp-prefixed and bare names; an unknown tool keeps its
+// bare name with compact input and strips the mcp prefix.
+func TestClaudeAdapter_ToolGlyphs(t *testing.T) {
+	a, _ := Get("claude")
+	cases := []struct {
+		name string
+		line string
+		want string
+	}{
+		{"ask mcp", `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__ai-playbook__ask","input":{"prompt":"which env?"}}]}}`, "❓ which env?"},
+		{"ask bare", `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"ask","input":{"prompt":"go?"}}]}}`, "❓ go?"},
+		{"remember fact", `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__ai-playbook__remember","input":{"fact":"uses pnpm"}}]}}`, "📝 uses pnpm"},
+		{"remember nofact", `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"remember","input":{}}]}}`, "📝 noted"},
+		{"unknown strips prefix", `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__ai-playbook__read","input":{"path":"/tmp/x"}}]}}`, `read: {"path":"/tmp/x"}`},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := collect(t, a, strings.NewReader(c.line+"\n"))
+			if len(got) != 1 || got[0].Kind != ToolActivity {
+				t.Fatalf("want one ToolActivity, got %+v", got)
+			}
+			if got[0].Text != c.want {
+				t.Fatalf("summary = %q, want %q", got[0].Text, c.want)
+			}
+		})
 	}
 }
 

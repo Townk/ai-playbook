@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 
 	"ai-playbook/agentstream"
 	"ai-playbook/capture"
@@ -38,6 +39,36 @@ func ClaudeArgs(model, mcpConfigPath, systemPrompt, userMessage string) []string
 	}
 	args = append(args, "--append-system-prompt", systemPrompt, userMessage)
 	return args
+}
+
+// claudeThinkingTokens maps the config [agent].thinking preference to a
+// MAX_THINKING_TOKENS budget for the OWNED claude invocation. Claude Code's
+// `--print --output-format stream-json` only EMITS thinking blocks (which the
+// claude adapter maps to Reasoning events) when extended thinking is enabled,
+// and the env var MAX_THINKING_TOKENS is the mechanism Claude Code honors in
+// print mode. An empty/unrecognized preference defaults to "on" (medium) so
+// reasoning activity streams out of the box. "off" returns 0 → no env var set →
+// no thinking. NOTE: in --print stream-json the thinking block TEXT is omitted
+// (Claude Code does not surface the readable summary); the blocks still stream,
+// so the live "model is reasoning" activity fires even though the text is empty.
+// pi (--mode json, thinkingText) surfaces the reasoning text natively.
+func claudeThinkingTokens(thinking string) int {
+	switch thinking {
+	case "off", "none", "0":
+		return 0
+	case "low":
+		return 4000
+	case "high":
+		return 16000
+	case "medium", "on", "":
+		return 8000
+	default:
+		// Unknown value: tolerate a bare integer budget; else default to medium.
+		if n, err := strconv.Atoi(thinking); err == nil && n >= 0 {
+			return n
+		}
+		return 8000
+	}
 }
 
 // AuthorOptions tunes AuthorEvents. Cfg supplies the harness selection + value
@@ -99,6 +130,7 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 	var (
 		args        []string
 		adapterName string
+		extraEnv    []string // appended to the harness process env (e.g. thinking)
 	)
 	switch harness {
 	case "claude":
@@ -108,6 +140,11 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 		}
 		args = ClaudeArgs(cfg.Agent.Model, opts.MCPConfigPath, sys, userMessage)
 		adapterName = "claude"
+		// Enable thinking so the claude adapter's Reasoning mapping has blocks to
+		// emit; off → no env var (no thinking). See claudeThinkingTokens.
+		if tok := claudeThinkingTokens(cfg.Agent.Thinking); tok > 0 {
+			extraEnv = append(extraEnv, "MAX_THINKING_TOKENS="+strconv.Itoa(tok))
+		}
 	default:
 		return nil, nil, fmt.Errorf("harness %q not yet supported", harness)
 	}
@@ -124,6 +161,15 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 	}
 
 	cmd := buildCommand(opts.Command, bin, args)
+	if len(extraEnv) > 0 {
+		// Inherit the parent env (nil Env == os.Environ at exec time) and append
+		// our extras. Set explicitly only when adding, to avoid disturbing a
+		// test-seam command that may have configured its own Env.
+		if cmd.Env == nil {
+			cmd.Env = os.Environ()
+		}
+		cmd.Env = append(cmd.Env, extraEnv...)
+	}
 	cmd.Stderr = os.Stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {

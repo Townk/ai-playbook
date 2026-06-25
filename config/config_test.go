@@ -28,8 +28,11 @@ func TestLoad_NoFile_Defaults(t *testing.T) {
 	if cfg.Agent.Harness != "claude" {
 		t.Fatalf("agent.harness default = %q, want claude", cfg.Agent.Harness)
 	}
-	if cfg.Agent.Model != "" || cfg.Agent.Bin != "" || cfg.Agent.Thinking != "" {
-		t.Fatalf("agent non-harness defaults should be empty: %+v", cfg.Agent)
+	if cfg.Agent.Model != "" || cfg.Agent.Bin != "" {
+		t.Fatalf("agent model/bin defaults should be empty: %+v", cfg.Agent)
+	}
+	if cfg.Agent.Thinking != "medium" {
+		t.Fatalf("agent.thinking default = %q, want medium", cfg.Agent.Thinking)
 	}
 }
 
@@ -81,8 +84,8 @@ func TestMerge_OnlyOverridesPresentKeys(t *testing.T) {
 	if cfg.Agent.Harness != "claude" {
 		t.Fatalf("agent.harness should keep default: %q", cfg.Agent.Harness)
 	}
-	if cfg.Agent.Thinking != "" {
-		t.Fatalf("agent.thinking should keep empty default: %q", cfg.Agent.Thinking)
+	if cfg.Agent.Thinking != "medium" {
+		t.Fatalf("agent.thinking should keep its default: %q", cfg.Agent.Thinking)
 	}
 }
 

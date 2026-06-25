@@ -42,7 +42,10 @@ type Mux struct {
 //   - Model: the model id to pass the harness (empty → harness default).
 //   - Bin: optional override for the harness executable path (empty → the
 //     harness name resolved on PATH).
-//   - Thinking: optional thinking/reasoning preference (empty → harness default).
+//   - Thinking: reasoning effort for the owned claude invocation, mapped to a
+//     MAX_THINKING_TOKENS budget (off | low | medium | high, or a bare integer).
+//     Empty defaults to "medium" so the model's reasoning streams as live
+//     activity. "off" disables thinking. See author.claudeThinkingTokens.
 type Agent struct {
 	Harness  string `toml:"harness"`
 	Model    string `toml:"model"`
@@ -74,10 +77,12 @@ func Default() *Config {
 			TypeIntoPane:   "zellij action write-chars {text}",
 		},
 		Agent: Agent{
-			Harness:  "claude",
-			Model:    "",
-			Bin:      "",
-			Thinking: "",
+			Harness: "claude",
+			Model:   "",
+			Bin:     "",
+			// "medium" → MAX_THINKING_TOKENS=8000 in the owned claude invocation, so
+			// reasoning blocks stream as live activity by default. "off" disables it.
+			Thinking: "medium",
 		},
 	}
 }

@@ -47,6 +47,7 @@ type Driver struct {
 	mu       sync.Mutex
 	buf      []byte
 	lastSeen time.Time
+	stopped  bool // set by Stop, observed by waitSentinel to return promptly
 
 	runMu sync.Mutex // serializes Run (one foreground command at a time)
 }
@@ -108,17 +109,58 @@ func (d *Driver) RunID(id, cmd string, timeout time.Duration) Result {
 	return d.runID(id, cmd, timeout)
 }
 
-// Stop kills the currently-running command's foreground process group (TERM then
-// KILL). Safe to call from another goroutine while a Run is in flight: it only
-// signals — the in-flight Run observes the sentinel/EOF and returns on its own.
-// A no-op when the shell is idle (foreground pgrp == the shell itself).
+// Stop interrupts whatever the session is currently running — the robust,
+// generic equivalent of a user hitting Ctrl-C. Safe to call from another
+// goroutine while a Run is in flight: it only signals; the in-flight Run
+// observes the sentinel/EOF and returns on its own.
+//
+// It works in two stages, mirroring a real terminal interrupt:
+//
+//  1. Write the interrupt character (^C / 0x03) to the pty master. The tty line
+//     discipline delivers SIGINT to the foreground process group — exactly what
+//     Ctrl-C does. This interrupts external commands AND shell builtins /
+//     functions uniformly, and crucially it covers the case where the running
+//     command shares the shell's own process group (where a pgrp-targeted signal
+//     would be skipped to avoid killing the shell).
+//  2. After a brief grace period, if a DISTINCT foreground process group is
+//     still in front (pg > 0 && pg != shellPid), escalate to SIGTERM then
+//     SIGKILL on that group. The shell itself is never signalled.
+//
+// Known limitation: a command that deliberately detaches into its own session
+// (e.g. a build tool that spawns a persistent background daemon, like the gradle
+// daemon) escapes the controlling tty's foreground group. Stop interrupts the
+// invocation we launched here — not an intentional, independently-sessioned
+// background daemon, which by design outlives the foreground command.
 func (d *Driver) Stop() {
+	// Signal any in-flight waitSentinel to stop waiting promptly. A SIGINT
+	// delivered via ^C aborts the shell's `source` of the job, so the sentinel
+	// may never print — without this flag the Run would block until its timeout.
+	d.setStopped(true)
+
+	// Stage 1: deliver SIGINT via the tty, like Ctrl-C. Covers builtins,
+	// functions, and commands sharing the shell's pgrp.
+	_, _ = d.ptmx.Write([]byte{0x03})
+
+	// Stage 2: escalate to a distinct foreground group if one survives.
+	time.Sleep(150 * time.Millisecond)
 	pg := d.Pgrp()
 	if pg > 0 && pg != d.shellPid {
 		_ = unix.Kill(-pg, unix.SIGTERM)
 		time.Sleep(300 * time.Millisecond)
 		_ = unix.Kill(-pg, unix.SIGKILL)
 	}
+}
+
+func (d *Driver) setStopped(v bool) {
+	d.mu.Lock()
+	d.stopped = v
+	d.mu.Unlock()
+}
+
+func (d *Driver) isStopped() bool {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.stopped
 }
 
 // Pgrp returns the pty's foreground process group — the running command's group
@@ -169,15 +211,21 @@ func (d *Driver) idleFor() time.Duration {
 }
 
 // waitSentinel scans the pty for the next __AAPB__<digits>__AAPB__; returns the
-// submatch, or nil on timeout.
+// submatch, or nil on timeout. It also returns nil promptly when Stop has been
+// called: a ^C-interrupted job may never print its sentinel, so the stop flag
+// short-circuits the wait instead of blocking for the full timeout.
 func (d *Driver) waitSentinel(timeout time.Duration) []string {
 	dl := time.Now().Add(timeout)
 	for time.Now().Before(dl) {
 		d.mu.Lock()
 		m := d.re.FindStringSubmatch(string(d.buf))
+		stopped := d.stopped
 		d.mu.Unlock()
 		if m != nil {
 			return m
+		}
+		if stopped {
+			return nil
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
@@ -241,6 +289,7 @@ func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
 			vp+
 			"print -r -- "+sentinel+"${__aapb_rc}"+sentinel+"\n"), 0644)
 	d.clearBuf()
+	d.setStopped(false)
 	d.send("source " + job)
 
 	res := Result{Exit: -1}
