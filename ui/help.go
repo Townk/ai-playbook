@@ -12,38 +12,47 @@ type helpGroup struct {
 	binds []helpBind
 }
 
-var helpGroups = []helpGroup{
-	// Buttons appear inside blocks; click them (mouse) or activate via hint mode.
-	{"Buttons", []helpBind{
-		{glyphCopy, "copy the block to your clipboard"},
-		{glyphPlay, "send the command to your shell (review, then run)"},
-		{glyphRun, "run the block in the assistant's shell"},
-		{glyphStop, "stop a running block"},
-		{glyphViewDiff, "view the diff side-by-side in a float"},
-		{glyphApply, "apply the patch"},
-		{glyphUndo, "undo an applied patch"},
-		{"\U0010F1DA", "cached pill — click to regenerate (re-run, no cache)"},
+// helpSection is a top-level group (rendered in Mauve) containing sub-groups.
+type helpSection struct {
+	title  string
+	groups []helpGroup
+}
+
+var helpSections = []helpSection{
+	{"Key Bindings", []helpGroup{
+		{"Actions", []helpBind{
+			{"󱁐", "hint mode for keyboard-only click"},
+			{"󰳽", "mouse clicks activate buttons"},
+			{"f", "follow-up with agent manually"},
+			{"w", "wrap-up work in the playbook"},
+			{"?", "toggle this help"},
+			{"q / 󱊷", "quit/dismiss"},
+		}},
+		{"Movement", []helpBind{
+			{"J / ↓", "down one line"},
+			{"K / ↑", "up one line"},
+			{"󰘴 D / 󰘴 U", "half page down / up"},
+			{"󰘴 F / 󰘴 B", "full page down / up"},
+			{"G / 󰘶 G", "top / bottom"},
+		}},
+		{"Horizontal", []helpBind{
+			{"H / L", "left / right one column"},
+			{"󰘶 H / 󰘶 L", "left / right half-width"},
+			{"0 / $", "line start / end"},
+		}},
 	}},
-	{"Movement", []helpBind{
-		{"J / ↓", "down one line"},
-		{"K / ↑", "up one line"},
-		{"󰘴 D / 󰘴 U", "half page down / up"},
-		{"󰘴 F / 󰘴 B", "full page down / up"},
-		{"G / 󰘶 G", "top / bottom"},
-	}},
-	{"Horizontal", []helpBind{
-		{"H / L", "left / right one column"},
-		{"󰘶 H / 󰘶 L", "left / right half-width"},
-		{"0 / $", "line start / end"},
-	}},
-	{"Actions", []helpBind{
-		{"󱁐", "hint mode — activate a button"},
-		{"󰳽", "activate a button (mouse)"},
-		{"y / n", "answer the verify-success confirm (solved?)"},
-		{"f", "follow-up — amend the displayed playbook"},
-		{"w", "finalize — generate the final playbook draft"},
-		{"?", "toggle this help"},
-		{"q / 󱊷", "quit"},
+	{"Other Interactions", []helpGroup{
+		// Buttons appear inside blocks; click them (mouse) or activate via hint mode.
+		{"Buttons", []helpBind{
+			{glyphCopy, "copy block to clipboard"},
+			{glyphPlay, "run entire block in origin shell"},
+			{glyphRun, "run block in assistant's shell"},
+			{glyphStop, "stop an agent-running block"},
+			{glyphViewDiff, "view the diff in a pop-up window"},
+			{glyphApply, "apply diff as patch"},
+			{glyphUndo, "revert applied patch"},
+			{"\U0010F1DA", "invalidate cache re-run prompt"},
+		}},
 	}},
 }
 
@@ -56,49 +65,56 @@ func buildHelpLines() []Line {
 	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colWhite))
 	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext))
 
-	// Compute max widths of left/right sides of each key split for /-alignment.
+	// Compute max widths of left/right sides of each key split for /-alignment,
+	// across EVERY binding in every section so the key column lines up throughout.
 	maxLeftW := 0
 	maxRightW := 0
-	for _, g := range helpGroups {
-		for _, b := range g.binds {
-			left, right, _ := splitKey(b.keys)
-			if w := lipgloss.Width(left); w > maxLeftW {
-				maxLeftW = w
-			}
-			if w := lipgloss.Width(right); w > maxRightW {
-				maxRightW = w
+	for _, s := range helpSections {
+		for _, g := range s.groups {
+			for _, b := range g.binds {
+				left, right, _ := splitKey(b.keys)
+				if w := lipgloss.Width(left); w > maxLeftW {
+					maxLeftW = w
+				}
+				if w := lipgloss.Width(right); w > maxRightW {
+					maxRightW = w
+				}
 			}
 		}
 	}
 
+	sectionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve)).Bold(true)
+	// Sub-group titles share one color (headingColor(2) = colPeach), a level below
+	// the colMauve top-section titles.
+	groupStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(headingColor(2))).Bold(true)
+
 	var out []Line
 	add := func(s string) { out = append(out, Line{Text: s, Wide: true}) }
-	// The title scrolls with the content (no separate fixed header line).
-	add(lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve)).Bold(true).Render("Pager guide"))
-	add("") // blank between the title and the first section
-	for gi, g := range helpGroups {
-		if gi > 0 {
-			add("")
+	for si, s := range helpSections {
+		if si > 0 {
+			add("") // blank before the next top-level (Mauve) section
 		}
-		// All section titles share one color (headingColor(2) = colPeach) — they
-		// are all the same "level" under the colMauve modal title.
-		sectionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(headingColor(2))).Bold(true)
-		add(sectionStyle.Render(g.title))
-		add(rule.Render(strings.Repeat("─", lipgloss.Width(g.title))))
-		for _, b := range g.binds {
-			left, right, hasSep := splitKey(b.keys)
-			// Right-pad left so all "/" separators align; left-pad right for symmetry.
-			leftPadded := strings.Repeat(" ", maxLeftW-lipgloss.Width(left)) + left
-			var sep string
-			if hasSep {
-				sep = " / "
-			} else {
-				sep = "   "
+		add(sectionStyle.Render(s.title)) // top-level header, Mauve
+		add("")                           // blank between the section header and its first sub-group
+		for gi, g := range s.groups {
+			if gi > 0 {
+				add("")
 			}
-			rightPadded := right + strings.Repeat(" ", maxRightW-lipgloss.Width(right))
-			// No sub-indent: the widest binding's leftmost symbol aligns with the
-			// modal title and the section headers (all at the content's left edge).
-			add(keyStyle.Render(leftPadded+sep+rightPadded) + "  " + descStyle.Render(b.desc))
+			add(groupStyle.Render(g.title)) // sub-group header, Peach
+			add(rule.Render(strings.Repeat("─", lipgloss.Width(g.title))))
+			for _, b := range g.binds {
+				left, right, hasSep := splitKey(b.keys)
+				// Right-pad left so all "/" separators align; left-pad right for symmetry.
+				leftPadded := strings.Repeat(" ", maxLeftW-lipgloss.Width(left)) + left
+				var sep string
+				if hasSep {
+					sep = " / "
+				} else {
+					sep = "   "
+				}
+				rightPadded := right + strings.Repeat(" ", maxRightW-lipgloss.Width(right))
+				add(keyStyle.Render(leftPadded+sep+rightPadded) + "  " + descStyle.Render(b.desc))
+			}
 		}
 	}
 	return out

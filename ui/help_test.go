@@ -21,9 +21,14 @@ func TestBuildHelpLines(t *testing.T) {
 		t.Fatal("help lines must be Wide (horizontally scrollable)")
 	}
 	for _, want := range []string{
-		"Movement", "Horizontal", "Actions", // group headers
+		"Key Bindings", "Other Interactions", // top-level (Mauve) section headers
+		"Actions", "Movement", "Horizontal", "Buttons", // sub-group headers
 		"down one line", "half page down / up", "left / right half-width",
-		"hint mode", "activate a button (mouse)", "toggle this help", "quit",
+		"hint mode for keyboard-only click", "mouse clicks activate buttons",
+		"follow-up with agent manually", "wrap-up work in the playbook",
+		"toggle this help", "quit/dismiss",
+		"copy block to clipboard", "run entire block in origin shell",
+		"invalidate cache re-run prompt",
 	} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("help content missing %q\n---\n%s", want, got)

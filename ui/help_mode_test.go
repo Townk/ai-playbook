@@ -129,7 +129,7 @@ func TestHelpOverlayShowsDocument(t *testing.T) {
 	if !strings.Contains(out, "Doc Heading") {
 		t.Fatal("document content must still render behind the help modal")
 	}
-	if !strings.Contains(out, "Pager guide") {
+	if !strings.Contains(out, "Key Bindings") {
 		t.Fatal("modal title must render on top of the document")
 	}
 }
