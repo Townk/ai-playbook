@@ -641,8 +641,11 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 		// On a failed run/shell block (other than the verify re-run, which auto-fires
 		// a follow-up), offer a "↻ try another fix" button that re-engages the agent.
 		// Its click payload is the block's raw command text.
+		// The verify block normally hides this button (it auto-fires a follow-up),
+		// but once the auto-follow-up cap is reached (st.FollowupExhausted) it shows
+		// the button so the user can keep iterating by hand.
 		followupCol := -1
-		if st.Status == "failed" && id != "verify" && (blk.Type == "run" || blk.Type == "shell") {
+		if st.Status == "failed" && (id != "verify" || st.FollowupExhausted) && (blk.Type == "run" || blk.Type == "shell") {
 			sep := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).Render(glyphSep)
 			followupCol = indentW + lipgloss.Width(label) + 1 + lipgloss.Width(rawToggle) + 1 + lipgloss.Width(glyphSep) + 1
 			retryGlyph := glyphRetry

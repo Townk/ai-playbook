@@ -40,6 +40,7 @@ import (
 	"errors"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -74,6 +75,15 @@ type Deps struct {
 	KBRoot      string // kb data-dir root; "" → kb.DefaultRoot()
 	Cwd         string // working dir an ask-float opens in (the request's project root)
 	Ask         AskFunc
+
+	// OnActivity, when set, is called at the START of each tool handler with a
+	// SHORT one-line summary of what the agent is doing (e.g. "run: gg build",
+	// "ask: which env?", "remember: noted"). It surfaces the agent's live activity
+	// during the otherwise-silent `claude --print` wait so the ui can render it
+	// next to the "Working…" spinner. It MUST be non-blocking (the session bridges
+	// it to a drop-if-full channel) — a slow/blocking hook would stall the agent's
+	// tool calls. Optional; nil disables the activity feed.
+	OnActivity func(summary string)
 }
 
 // request is the inbound RPC: tool selector + the union of per-tool fields.
@@ -192,8 +202,10 @@ func (s *Server) handleConn(conn net.Conn) {
 }
 
 // dispatch routes one decoded request to its tool. Each handler returns the
-// already-shaped reply.
+// already-shaped reply. Before dispatching, it emits a SHORT activity summary so
+// the ui can show the agent's live tool calls during the silent authoring wait.
 func (s *Server) dispatch(req request) reply {
+	s.activity(req)
 	switch req.Tool {
 	case "run":
 		return s.doRun(req)
@@ -204,6 +216,48 @@ func (s *Server) dispatch(req request) reply {
 	default:
 		return reply{Exit: -1, Error: "unknown tool: " + req.Tool}
 	}
+}
+
+// activityMax bounds the length of an activity summary line (the ui shows it on
+// one row next to the spinner; longer payloads are truncated with an ellipsis).
+const activityMax = 60
+
+// activity emits a SHORT one-line summary of the tool call to the OnActivity hook
+// (when wired). It is best-effort and non-blocking — the hook itself must not
+// block (the session bridges it to a drop-if-full channel). Summaries:
+//
+//	run      → "run: <cmd>"        (cmd truncated)
+//	ask      → "ask: <prompt>"     (prompt truncated)
+//	remember → "remember: noted"
+//	other    → "<tool>"
+func (s *Server) activity(req request) {
+	if s.deps.OnActivity == nil {
+		return
+	}
+	var summary string
+	switch req.Tool {
+	case "run":
+		summary = "run: " + truncateSummary(req.Cmd)
+	case "ask":
+		summary = "ask: " + truncateSummary(req.Prompt)
+	case "remember":
+		summary = "remember: noted"
+	default:
+		summary = req.Tool
+	}
+	s.deps.OnActivity(summary)
+}
+
+// truncateSummary collapses whitespace/newlines in s to single spaces and caps
+// it to activityMax runes, appending "…" when truncated — so a multi-line command
+// renders as one short line.
+func truncateSummary(s string) string {
+	s = strings.TrimSpace(strings.Join(strings.Fields(s), " "))
+	r := []rune(s)
+	if len(r) > activityMax {
+		return string(r[:activityMax]) + "…"
+	}
+	return s
 }
 
 // doRun executes the command in the session shell via the driver (RunID, so the

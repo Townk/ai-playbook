@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -15,11 +16,17 @@ import (
 	"ai-playbook/orchestrator"
 )
 
-// spinTickMsg drives the spinner animation/timer while thinking.
-type spinTickMsg struct{}
+// spinTickMsg drives the spinner animation/timer while thinking. gen identifies
+// which tick loop issued it: only the loop whose gen == m.tickGen continues, so a
+// restartTick (which bumps tickGen) makes any older overlapping loop self-cancel.
+type spinTickMsg struct{ gen int }
 
-func (m model) tickCmd() tea.Cmd {
-	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return spinTickMsg{} })
+// tickCmd issues a tick for the CURRENT generation (the streaming hot-path's
+// single loop). restartTick uses tickCmdGen to stamp a fresh generation.
+func (m model) tickCmd() tea.Cmd { return m.tickCmdGen(m.tickGen) }
+
+func (m model) tickCmdGen(gen int) tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return spinTickMsg{gen: gen} })
 }
 
 // startTick returns the single spinner tick loop, or nil if a loop is already
@@ -35,6 +42,28 @@ func (m *model) startTick() tea.Cmd {
 	}
 	m.tickRunning = true
 	return m.tickCmd()
+}
+
+// restartTick force-(re)starts the spinner tick loop for a NEW thinking state,
+// even when tickRunning is already set. The re-engagement paths (follow-up,
+// regenerate, wrap-up) enter a fresh thinking state whose first stream chunk may
+// be minutes away (claude --print is silent until its tool-use phase ends); the
+// spinner must animate the whole time. startTick's single-loop guard is correct
+// for the streaming hot-path but leaves the follow-up spinner STATIC whenever
+// tickRunning is stale-true (e.g. the prior verify-run loop's flag had not yet
+// been cleared) — startTick no-ops, so no loop drives the new thinking state.
+//
+// restartTick bumps tickGen and issues a fresh tickCmd unconditionally. Every
+// tickCmd is stamped with the generation it belongs to (spinTickMsg.gen); the
+// spinTickMsg handler advances the spinner once per tick but only CONTINUES the
+// loop whose gen is current, so any older in-flight loop self-cancels on its next
+// fire — exactly one loop survives, no double-counted seconds, and the spinner is
+// guaranteed to animate. Use this on the re-engagement entry points; startTick on
+// the streaming continuation path.
+func (m *model) restartTick() tea.Cmd {
+	m.tickGen++
+	m.tickRunning = true
+	return m.tickCmdGen(m.tickGen)
 }
 
 // renderInterval bounds how often streamed text is re-rendered. A stream can
@@ -114,6 +143,7 @@ type model struct {
 	dirty           bool // streamed text appended since the last reflow
 	renderScheduled bool // a coalesced render tick is already pending
 	tickRunning     bool // a single 100ms spinner tick loop is live
+	tickGen         int  // current spinner-loop generation; older loops self-cancel
 
 	// flash: non-empty while a button is briefly highlighted after activation.
 	// Identity key is "<blockID>:<kind>"; cleared by flashTickMsg after ~140ms.
@@ -140,6 +170,24 @@ type model struct {
 	// (regenerate's cache re-store, wrap-up's solution-artifact close). nil when no
 	// in-process re-engagement stream is active.
 	reengageStream io.Closer
+
+	// activity is the buffered channel the session writes the agent's live tool
+	// calls to (via the tools backend's OnActivity hook). The model subscribes via
+	// a tea.Cmd (activityWaitCmd) that reads one summary → activityMsg. nil when no
+	// tools backend is wired (the no-tools fallback) — then no activity is shown and
+	// the spinner still animates. Set by RunStream from StreamOptions.Activity.
+	activity <-chan string
+
+	// activityLine is the latest agent tool-call summary, shown under the "Working…"
+	// line while thinking/streaming. Cleared when real playbook content starts
+	// arriving (the first textEvent) so it never lingers over rendered content.
+	activityLine string
+
+	// followups counts how many auto-follow-ups have fired this session. The
+	// verify-fail auto-fire repeats on EACH failure while followups < maxFollowups;
+	// past the cap it falls back to the manual "try another fix" button.
+	followups    int
+	maxFollowups int
 }
 
 // emitAction performs a button's action. In FIFO mode (m.orch == nil) it appends
@@ -180,14 +228,39 @@ func newModel(harness, md string) model {
 		defaultLabel: "Working…",
 		follow:       false, // start at the top on load; only append (wrap-up) re-enables follow
 		blockStates:  map[string]blockRunState{},
+		maxFollowups: resolveMaxFollowups(),
 	}
 }
 
-func (m model) Init() tea.Cmd {
-	if m.reader == nil {
-		return nil
+// defaultMaxFollowups is how many times the verify-fail auto-follow-up may fire
+// before falling back to the manual "try another fix" button.
+const defaultMaxFollowups = 3
+
+// resolveMaxFollowups reads the auto-follow-up cap from $AI_ASSIST_MAX_FOLLOWUPS
+// (a positive integer), else defaultMaxFollowups. A non-positive / unparseable
+// value falls back to the default rather than disabling the feature.
+func resolveMaxFollowups() int {
+	if v := os.Getenv("AI_ASSIST_MAX_FOLLOWUPS"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			return n
+		}
 	}
-	cmds := []tea.Cmd{readStream(m.reader, m.parser)}
+	return defaultMaxFollowups
+}
+
+func (m model) Init() tea.Cmd {
+	var cmds []tea.Cmd
+	// Subscribe to the agent's live activity feed (the tools backend's OnActivity
+	// bridged through m.activity). nil-channel returns nil, so this is a no-op
+	// without a tools backend. Started even when there's no stream reader so the
+	// feed is live for the whole session.
+	if c := m.activityWaitCmd(); c != nil {
+		cmds = append(cmds, c)
+	}
+	if m.reader == nil {
+		return tea.Batch(cmds...)
+	}
+	cmds = append(cmds, readStream(m.reader, m.parser))
 	if m.thinking {
 		cmds = append(cmds, m.startTick())
 	}
@@ -295,6 +368,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.md += e.text // cheap append; reflow is coalesced (renderTickMsg)
 				m.dirty = true
 				m.thinking = false
+				// Real playbook content is arriving: the agent's tool-use phase is over,
+				// so clear the live activity line (it would otherwise linger over the
+				// rendered content).
+				m.activityLine = ""
 			case thinkEvent:
 				label := e.label
 				if label == "" {
@@ -348,6 +425,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reflow()
 		return m, nil
 	case spinTickMsg:
+		// Stale loop: a restartTick bumped the generation, so a newer loop now drives
+		// the spinner. Advance the frame once (so the animation never visibly stalls
+		// during the swap) but do NOT continue this loop — it self-cancels here,
+		// leaving exactly one live loop and no double-counted seconds.
+		if msg.gen != m.tickGen {
+			return m, nil
+		}
 		running := false
 		for id, st := range m.blockStates {
 			if st.Status == "running" {
@@ -435,7 +519,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.streaming = true
 						m.follow = false
 						m.reflow()
-						return m, tea.Batch(m.flashCmd(), m.startTick(), m.reArmReaderCmd(), ac)
+						return m, tea.Batch(m.flashCmd(), m.restartTick(), m.reArmReaderCmd(), ac)
 					}
 					m.reflow()
 					return m, tea.Batch(m.flashCmd(), ac)
@@ -578,7 +662,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.streaming = true
 							m.follow = false
 							m.reflow()
-							return m, tea.Batch(m.flashCmd(), m.startTick(), m.reArmReaderCmd(), ac)
+							return m, tea.Batch(m.flashCmd(), m.restartTick(), m.reArmReaderCmd(), ac)
 						}
 						m.reflow()
 						return m, tea.Batch(m.flashCmd(), ac)
@@ -647,7 +731,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.streaming = true
 					m.follow = true
 					m.reflow()
-					return m, tea.Batch(m.startTick(), m.reArmReaderCmd(), ac)
+					return m, tea.Batch(m.restartTick(), m.reArmReaderCmd(), ac)
 				}
 				if ac != nil {
 					return m, ac
@@ -710,7 +794,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case resultMsg:
 		st := m.blockStates[msg.ID]
-		prevStatus := st.Status
 		prevAction := st.Action
 		st.Logpath = msg.Logpath
 		st.Exit = msg.Exit
@@ -750,14 +833,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reflow()
 		// Auto-fire a follow-up when the VERIFY re-run fails: a non-zero exit on a
 		// RUN result (not an apply/undo) for block id "verify" is the unambiguous
-		// "the fix didn't work" signal. Gate to fire once — only on the transition
-		// INTO the failed state (prevStatus != "failed"), so a repeated result for
-		// the same already-failed verify block doesn't re-fire.
+		// "the fix didn't work" signal. It fires on EACH verify failure — including
+		// the re-armed follow-up playbook's own verify block, which reuses id=verify
+		// and so flows through this same path — until the attempt cap (m.maxFollowups,
+		// default 3, $AI_ASSIST_MAX_FOLLOWUPS) is reached. Past the cap it stops
+		// auto-firing and the manual "try another fix" button is shown on the verify
+		// block instead (render.go gates that button on m.followups >= m.maxFollowups).
+		//
+		// NOTE: the previous once-only guard (prevStatus == "failed") meant the SECOND
+		// verify failure — the re-armed playbook's verify, which leaves the block in
+		// "failed" — was suppressed as "already fired", so the loop never auto-repeated.
+		// The attempt counter replaces that guard.
 		if msg.ID == "verify" && msg.Exit != 0 &&
 			prevAction != "apply" && prevAction != "undo" {
 			switch {
-			case prevStatus == "failed":
-				dbg("auto-followup SUPPRESSED: already fired (id=%s exit=%d)", msg.ID, msg.Exit)
+			case m.followups >= m.maxFollowups:
+				// Cap reached: stop auto-firing. Mark the verify block so render.go shows
+				// the manual "try another fix" button, letting the user keep going by hand.
+				dbg("auto-followup SUPPRESSED: cap reached (followups=%d max=%d id=%s)", m.followups, m.maxFollowups, msg.ID)
+				vst := m.blockStates[msg.ID]
+				vst.FollowupExhausted = true
+				m.blockStates[msg.ID] = vst
+				m.reflow()
 			case msg.Exit > 128:
 				// Signal-killed (e.g. 143=SIGTERM, 130=SIGINT): a deliberate kill is
 				// not a fix failure — do NOT auto-fire. Ordinary non-zero exits
@@ -777,7 +874,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// follow-up (the regression).
 				dbg("auto-followup SUPPRESSED: no FIFO and no in-process reengage (id=%s exit=%d)", msg.ID, msg.Exit)
 			default:
-				dbg("auto-followup fire: id=%s exit=%d", msg.ID, msg.Exit)
+				m.followups++
+				dbg("auto-followup fire: id=%s exit=%d attempt=%d/%d", msg.ID, msg.Exit, m.followups, m.maxFollowups)
 				if cmd := m.beginFollowupStream("verify", m.blockCommand("verify")); cmd != nil {
 					return m, cmd
 				}
@@ -790,6 +888,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		dbg("status: %s", msg.text)
 		m.status = msg.text
 		return m, nil
+	case activityMsg:
+		// One agent tool-call summary off the activity feed. Channel closed (!ok):
+		// the session is torn down — stop re-subscribing. Otherwise record the latest
+		// summary (shown under the "Working…" line ONLY while thinking, so a late
+		// summary never paints over settled content) and wait for the next one.
+		if !msg.ok {
+			m.activity = nil
+			return m, nil
+		}
+		if m.thinking {
+			m.activityLine = msg.summary
+		}
+		return m, m.activityWaitCmd()
 	case reArmedMsg:
 		dbg("re-arm: reader ready err=%v", msg.err)
 		if msg.err != nil {
@@ -1267,6 +1378,7 @@ func (m model) normalLines() []string {
 		out = append(out, pad("")) // top-pad (single blank)
 	}
 	spinRow := -1
+	actRow := -1
 	if m.thinking {
 		// Spinner sits just below the last real content line visible from the top
 		// of the body (or the first body row when empty), within the body region.
@@ -1277,10 +1389,21 @@ func (m model) normalLines() []string {
 		if spinRow > m.body()-1 {
 			spinRow = m.body() - 1
 		}
+		// The live agent-activity line (when any) sits on the row directly below the
+		// spinner, as long as there's room in the body. claude --print is silent for
+		// minutes during its tool-use phase, so this row shows the agent's latest tool
+		// call (e.g. "⟳ run: gg build") next to the animating spinner.
+		if m.activityLine != "" && spinRow+1 <= m.body()-1 {
+			actRow = spinRow + 1
+		}
 	}
 	for i := 0; i < m.body(); i++ {
 		if i == spinRow {
 			out = append(out, pad("  "+padTo(spinnerLine(m.spinFrame, m.thinkLabel, m.spinTicks/10), cw)+vscrollCell(spinRow, pos, size)))
+			continue
+		}
+		if i == actRow {
+			out = append(out, pad("  "+padTo(activityLineStr(m.activityLine, cw), cw)+vscrollCell(actRow, pos, size)))
 			continue
 		}
 		if i < len(rows) {
@@ -1379,7 +1502,7 @@ func (m *model) beginFollowupStream(blockID, command string) tea.Cmd {
 	m.streaming = true
 	m.follow = true
 	m.reflow()
-	return tea.Batch(m.startTick(), m.reArmReaderCmd())
+	return tea.Batch(m.restartTick(), m.reArmReaderCmd())
 }
 
 // followupCap bounds the failed-command output fed to the follow-up prompt,

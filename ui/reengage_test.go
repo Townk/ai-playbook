@@ -218,6 +218,139 @@ func TestVerifyFailureNoReengageNoFifoDoesNotFire(t *testing.T) {
 	}
 }
 
+// hasSpinTick reports whether running cmd (flattening batches) yields a spinTickMsg
+// — i.e. a spinner tick loop is (re)started.
+func hasSpinTick(cmd tea.Cmd) bool {
+	for _, msg := range collectMsgs(cmd) {
+		if _, ok := msg.(spinTickMsg); ok {
+			return true
+		}
+	}
+	return false
+}
+
+// Issue #1: when the verify-fail auto-fire begins the follow-up thinking state,
+// a spinner tick MUST be (re)issued so the follow-up "Working…" animates exactly
+// like the first authoring — even when a (stale) tick loop flag was still set from
+// the just-finished verify run. restartTick guarantees this regardless of the flag.
+func TestFollowupReissuesSpinnerTick(t *testing.T) {
+	m, _ := newReengageModel(t, "# Revised fix\n")
+	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
+	m.width, m.height = 80, 24
+	m.inputFifoPath = ""
+	m.reflow()
+	// Stale-true tick flag (the prior verify-run loop's flag had not been cleared):
+	// this is exactly the condition under which startTick would no-op and the
+	// follow-up spinner would freeze. restartTick must still issue a fresh tick.
+	m.tickRunning = true
+
+	_, cmd := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: "/tmp/x.log"})
+	if cmd == nil {
+		t.Fatal("verify failure must auto-fire (non-nil cmd)")
+	}
+	if !hasSpinTick(cmd) {
+		t.Error("follow-up auto-fire must (re)issue a spinner tick so the spinner animates")
+	}
+}
+
+// Issue #2: an activityMsg while thinking updates the visible thinking-region line
+// to the agent's latest tool-call summary (rendered with the "⟳" glyph), and a
+// later real-content stream clears it.
+func TestActivityMsgUpdatesThinkingLine(t *testing.T) {
+	m := newModel("agent", "")
+	m.width, m.height = 80, 24
+	m.thinking = true
+	m.streaming = true
+	ch := make(chan string, 4)
+	m.activity = ch
+
+	m2, _ := m.Update(activityMsg{summary: "run: gg build", ok: true})
+	m = m2.(model)
+	if m.activityLine != "run: gg build" {
+		t.Fatalf("activityLine = %q, want %q", m.activityLine, "run: gg build")
+	}
+	view := strip(m.viewString())
+	if !strings.Contains(view, "run: gg build") {
+		t.Errorf("thinking view must show the activity summary; got:\n%s", view)
+	}
+	if !strings.Contains(view, activityGlyph) {
+		t.Errorf("activity line must render the %q glyph", activityGlyph)
+	}
+
+	// Real playbook content arrives → the activity line is cleared.
+	m3, _ := m.Update(streamEventsMsg{events: []streamEvent{textEvent{text: "# Diagnosis\n"}}})
+	m = m3.(model)
+	if m.activityLine != "" {
+		t.Errorf("activityLine must clear when real content arrives, got %q", m.activityLine)
+	}
+}
+
+// Issue #2: a closed activity channel (!ok) stops the model re-subscribing — the
+// activityMsg handler must not re-issue the wait cmd.
+func TestActivityChannelClosedStopsSubscription(t *testing.T) {
+	m := newModel("agent", "")
+	ch := make(chan string)
+	m.activity = ch
+	m2, cmd := m.Update(activityMsg{ok: false})
+	m = m2.(model)
+	if m.activity != nil {
+		t.Error("a closed activity channel must clear m.activity")
+	}
+	if cmd != nil {
+		t.Errorf("a closed activity channel must not re-subscribe, got %T", cmd)
+	}
+}
+
+// Issue #3 (in-process path): two successive verify failures both auto-fire the
+// in-process follow-up; a third (at the cap) does not, and the manual button shows.
+func TestVerifyFailureRepeatsUntilCapInProc(t *testing.T) {
+	m, _ := newReengageModel(t, "# Revised fix\n")
+	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
+	m.width, m.height = 80, 24
+	m.inputFifoPath = ""
+	m.maxFollowups = 2
+	m.reflow()
+	if !m.canReengageInProc() {
+		t.Fatal("test setup: expected in-process re-engagement to be available")
+	}
+
+	m2, cmd1 := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: "/tmp/x.log"})
+	m = m2.(model)
+	if cmd1 == nil {
+		t.Fatal("first verify failure must auto-fire in-process")
+	}
+	if m.followups != 1 {
+		t.Fatalf("followups after first = %d, want 1", m.followups)
+	}
+
+	m3, cmd2 := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: "/tmp/x.log"})
+	m = m3.(model)
+	if cmd2 == nil {
+		t.Fatal("second verify failure must ALSO auto-fire in-process (repeat-until-success)")
+	}
+	if m.followups != 2 {
+		t.Fatalf("followups after second = %d, want 2", m.followups)
+	}
+
+	m4, cmd3 := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: "/tmp/x.log"})
+	m = m4.(model)
+	if cmd3 != nil {
+		t.Errorf("at the cap, in-process verify failure must NOT auto-fire, got %T", cmd3)
+	}
+	if !m.blockStates["verify"].FollowupExhausted {
+		t.Error("at the cap, the verify block must be marked FollowupExhausted")
+	}
+	var hasManual bool
+	for _, b := range m.buttons {
+		if b.BlockID == "verify" && b.Kind == "followup" {
+			hasManual = true
+		}
+	}
+	if !hasManual {
+		t.Error("at the cap, the verify block must show the manual 'try another fix' button")
+	}
+}
+
 // Follow-up in-process re-arms in APPEND mode with the failed output threaded in.
 func TestInProcessFollowupReArmsAppend(t *testing.T) {
 	m, fa := newReengageModel(t, "# Revised fix\n")

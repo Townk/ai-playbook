@@ -23,6 +23,12 @@ type blockRunState struct {
 	Expanded  bool
 	SpinFrame int
 	Stopped   bool // user clicked stop on this block; suppress auto-followup when its result arrives
+
+	// FollowupExhausted is set on the "verify" block once the auto-follow-up cap is
+	// reached: the verify block normally hides the manual "try another fix" button
+	// (it auto-fires), but past the cap auto-firing stops and the button is shown so
+	// the user can keep iterating by hand. See render.go's failed-block button gate.
+	FollowupExhausted bool
 }
 
 // parseResults reads <id>\x1f<exit>\x1f<logpath>\x1e records until EOF, calling

@@ -392,7 +392,18 @@ type session struct {
 	srv     *tools.Server
 	socket  string
 	selfExe string
+
+	// activity is the agent's live tool-call feed: the tools backend's OnActivity
+	// hook does a non-blocking send here (drop-if-full, so a slow ui never stalls a
+	// tool call), and the ui subscribes to render the latest summary next to the
+	// "Working…" spinner during the silent `claude --print` wait. Buffered so a
+	// brief ui stall doesn't drop the most recent activity. Closed in close().
+	activity chan string
 }
+
+// activityBuffer is the depth of the session's activity channel: enough to absorb
+// a brief ui stall without blocking a tool handler (OnActivity drops if full).
+const activityBuffer = 16
 
 // openSession creates the shared driver and starts the tools backend on a temp
 // unix socket. The driver's cwd is the request's project root (else its cwd).
@@ -426,11 +437,27 @@ func openSession(req capture.Request) *session {
 		ask = asker.Ask
 	}
 
+	// Activity feed: the tools backend reports each tool call here so the ui can show
+	// the agent's live activity during the silent authoring wait. The OnActivity hook
+	// MUST NOT block a tool handler, so the send is non-blocking (drop-if-full).
+	activity := make(chan string, activityBuffer)
+	onActivity := func(summary string) {
+		// A handler can still be in flight when the session tears down and closes the
+		// channel (srv.Close() stops accepting but doesn't drain in-flight conns), so a
+		// send on a closed channel is possible — recover from it (drop the summary).
+		defer func() { _ = recover() }()
+		select {
+		case activity <- summary:
+		default: // ui not draining fast enough; drop this one (best-effort, never block)
+		}
+	}
+
 	srv, err := tools.Serve(socket, tools.Deps{
 		Driver:      drv,
 		ProjectRoot: req.ProjectRoot,
 		Cwd:         cwd,
 		Ask:         ask,
+		OnActivity:  onActivity,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: tools.Serve failed (%v); authoring without agent tools\n", err)
@@ -438,16 +465,21 @@ func openSession(req capture.Request) *session {
 		os.RemoveAll(dir)
 		return nil
 	}
-	return &session{drv: drv, srv: srv, socket: socket, selfExe: selfExe}
+	return &session{drv: drv, srv: srv, socket: socket, selfExe: selfExe, activity: activity}
 }
 
 // close tears down the tools backend, the shared driver, and the socket temp dir.
+// The activity channel is closed AFTER the tools server (so no handler can send to
+// a closed channel) — the closed channel signals the ui to stop subscribing.
 func (s *session) close() {
 	if s == nil {
 		return
 	}
 	if s.srv != nil {
 		s.srv.Close()
+	}
+	if s.activity != nil {
+		close(s.activity)
 	}
 	if s.drv != nil {
 		s.drv.Close()
@@ -513,8 +545,10 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 	// shell the agent diagnosed in via its tools backend) when one is up; else it
 	// opens its own.
 	var sharedDrv *driver.Driver
+	var activity <-chan string
 	if sess != nil {
 		sharedDrv = sess.drv
+		activity = sess.activity
 	}
 	var body bytes.Buffer
 	code := ui.RunStream(stream, ui.StreamOptions{
@@ -523,6 +557,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		Tee:      &body,
 		Driver:   sharedDrv,
 		Reengage: reengage,
+		Activity: activity,
 	})
 
 	// Cache-store on completion — only when the cache wasn't disabled/bypassed and
@@ -673,9 +708,12 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session) 
 
 	// Reuse the session's shared driver for the cached replay's run blocks (the
 	// same shell the re-engagement agent's tools backend drives), stashed for
-	// ui.Main to consume. nil session → ui.Main opens its own driver.
+	// ui.Main to consume. nil session → ui.Main opens its own driver. The activity
+	// feed is stashed too so a re-engagement during the cached replay surfaces the
+	// agent's tool calls next to the spinner.
 	if sess != nil {
 		ui.SetDriver(sess.drv)
+		ui.SetActivity(sess.activity)
 	}
 
 	// Reuse the `run` subcommand entrypoint in-process by shaping os.Args the way

@@ -441,9 +441,12 @@ func TestVerifyFailureAutoFiresFollowup(t *testing.T) {
 	}
 }
 
-// TestVerifyFailureFiresOnce verifies that a repeated failed result for the same
-// already-failed verify block does NOT re-fire a followup.
-func TestVerifyFailureFiresOnce(t *testing.T) {
+// TestVerifyFailureRepeatsUntilCap verifies that successive verify failures
+// auto-fire a follow-up on EACH failure (not just the first) until the attempt
+// cap is reached; past the cap auto-firing stops and the verify block surfaces the
+// manual "try another fix" button. This is the issue-#3 repeat-until-success
+// behavior; it replaces the old once-only guard.
+func TestVerifyFailureRepeatsUntilCap(t *testing.T) {
 	dir := t.TempDir()
 	fifo := filepath.Join(dir, "act")
 
@@ -451,16 +454,48 @@ func TestVerifyFailureFiresOnce(t *testing.T) {
 	m.width, m.height = 80, 24
 	m.fifoPath = fifo
 	m.inputFifoPath = filepath.Join(dir, "input-fifo")
+	m.maxFollowups = 2 // small cap so the test is quick + explicit
 	m.reflow()
-	// Pre-set the verify block as already failed (the first failure already fired).
-	m.blockStates["verify"] = blockRunState{Status: "failed", Exit: 1}
 
-	_, cmd := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: "/tmp/x.log"})
-	if cmd != nil {
-		t.Error("a repeated failure on an already-failed verify block must not re-fire")
+	// First verify failure: auto-fires (attempt 1).
+	m2, cmd := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: "/tmp/x.log"})
+	m = m2.(model)
+	if cmd == nil {
+		t.Fatal("first verify failure must auto-fire")
 	}
-	if _, err := os.Stat(fifo); err == nil {
-		t.Error("no followup action should have been emitted on the repeat")
+	if m.followups != 1 {
+		t.Fatalf("followups after first = %d, want 1", m.followups)
+	}
+
+	// Second verify failure (re-armed playbook's verify also fails): auto-fires
+	// again (attempt 2) — the old once-only guard would have suppressed this.
+	m3, cmd2 := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: "/tmp/x.log"})
+	m = m3.(model)
+	if cmd2 == nil {
+		t.Fatal("second verify failure must ALSO auto-fire (repeat-until-success)")
+	}
+	if m.followups != 2 {
+		t.Fatalf("followups after second = %d, want 2", m.followups)
+	}
+
+	// Third verify failure: cap reached → does NOT auto-fire; the verify block now
+	// shows the manual "try another fix" button.
+	m4, cmd3 := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: "/tmp/x.log"})
+	m = m4.(model)
+	if cmd3 != nil {
+		t.Errorf("at the cap, verify failure must NOT auto-fire, got %T", cmd3)
+	}
+	if !m.blockStates["verify"].FollowupExhausted {
+		t.Error("at the cap, the verify block must be marked FollowupExhausted")
+	}
+	var hasManual bool
+	for _, b := range m.buttons {
+		if b.BlockID == "verify" && b.Kind == "followup" {
+			hasManual = true
+		}
+	}
+	if !hasManual {
+		t.Error("at the cap, the verify block must show the manual 'try another fix' button")
 	}
 }
 

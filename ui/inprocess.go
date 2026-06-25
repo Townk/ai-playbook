@@ -17,6 +17,30 @@ import (
 // status bar until the next key/click and never crashes the UI.
 type statusMsg struct{ text string }
 
+// activityMsg carries one agent tool-call summary read off the activity channel
+// (the session bridged the tools backend's OnActivity hook to it). ok is false
+// when the channel closed (the session torn down) — the model then stops
+// re-subscribing. The summary is shown under the "Working…" line while thinking.
+type activityMsg struct {
+	summary string
+	ok      bool
+}
+
+// activityWaitCmd blocks (inside the tea.Cmd goroutine, off the event loop) on
+// the next activity summary and reports it as an activityMsg. It returns nil when
+// no activity channel is wired (no tools backend) so the subscription simply never
+// starts. The handler re-issues this cmd to keep the subscription live.
+func (m model) activityWaitCmd() tea.Cmd {
+	ch := m.activity
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		s, ok := <-ch
+		return activityMsg{summary: s, ok: ok}
+	}
+}
+
 // kindOf maps a UI button kind string to the orchestrator's typed Kind. The
 // second result is false for kinds that have no orchestrator action (e.g.
 // "toggle", which is pager-local and never reaches emitAction in in-process use).
@@ -120,7 +144,7 @@ func (m *model) beginRegenerate() tea.Cmd {
 	m.streaming = true
 	m.follow = false
 	m.reflow()
-	return tea.Batch(m.startTick(), func() tea.Msg {
+	return tea.Batch(m.restartTick(), func() tea.Msg {
 		stream, _, err := orch.Regenerate()
 		return reArmStreamMsg{reader: stream, err: err}
 	})
@@ -144,7 +168,7 @@ func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
 	m.streaming = true
 	m.follow = true
 	m.reflow()
-	return tea.Batch(m.startTick(), func() tea.Msg {
+	return tea.Batch(m.restartTick(), func() tea.Msg {
 		stream, _, err := orch.Followup(failedOutput)
 		return reArmStreamMsg{reader: stream, err: err}
 	})
@@ -169,7 +193,7 @@ func (m *model) beginWrapupInProc(runlog string) tea.Cmd {
 	m.streaming = true
 	m.follow = true
 	m.reflow()
-	return tea.Batch(m.startTick(), func() tea.Msg {
+	return tea.Batch(m.restartTick(), func() tea.Msg {
 		stream, _, err := orch.Wrapup(runlog)
 		return reArmStreamMsg{reader: stream, err: err}
 	})

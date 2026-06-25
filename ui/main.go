@@ -45,6 +45,17 @@ var pendingDriver *driver.Driver
 // Main; the driver is not closed by Main.
 func SetDriver(d *driver.Driver) { pendingDriver = d }
 
+// pendingActivity is the agent's live activity feed consumed by the next Main()
+// call, set by SetActivity. The cached-replay path stashes it here (same seam as
+// the driver/reengage) so a re-engagement (regenerate / verify follow-up) during
+// a cached replay can surface the agent's tool calls next to the spinner. nil →
+// no activity line.
+var pendingActivity <-chan string
+
+// SetActivity stashes the agent activity feed for the next ui.Main() invocation
+// (the troubleshoot cached-replay path). Consumed (and cleared) by Main.
+func SetActivity(ch <-chan string) { pendingActivity = ch }
+
 // Main is the entrypoint for the `ai-playbook run` subcommand. It parses flags
 // from os.Args[2:] (os.Args[1] is the "run" subcommand) and returns an exit
 // code; the caller is responsible for os.Exit.
@@ -184,8 +195,10 @@ func Main() int {
 			}
 		}
 	}
+	activity := pendingActivity
 	pendingReengage = nil // consume once, regardless of whether an orch was built
 	pendingDriver = nil   // ditto: the session owns the driver's lifecycle
+	pendingActivity = nil // ditto: the session owns the activity channel's lifecycle
 
 	// Force TrueColor: zellij's alt-screen pane underreports the color profile
 	// during bubbletea's auto-detection, causing colors to be downsampled.
@@ -202,6 +215,7 @@ func Main() int {
 	m.streaming = true
 	m.reader = bufio.NewReader(src)
 	m.parser = parser
+	m.activity = activity
 	prog := tea.NewProgram(
 		m,
 		tea.WithInput(tty),
