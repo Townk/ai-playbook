@@ -308,8 +308,8 @@ func TestStatusBarHasNoShortcutKeys(t *testing.T) {
 // and includes a Buttons section.
 func TestHelpModalDocumentsWrapUp(t *testing.T) {
 	out := joinText(buildHelpLines())
-	if !strings.Contains(out, "finalize") {
-		t.Errorf("help modal must document the w (finalize) key; got:\n%s", out)
+	if !strings.Contains(out, "wrap-up work in the playbook") {
+		t.Errorf("help modal must document the w (wrap-up) key; got:\n%s", out)
 	}
 	if !strings.Contains(out, "Buttons") {
 		t.Errorf("help modal must have a Buttons section; got:\n%s", out)
