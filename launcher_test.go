@@ -27,8 +27,12 @@ type launchMux struct {
 func (m *launchMux) DumpScreen(string) (string, error) { return "", nil }
 func (m *launchMux) SpawnPane(mux.SpawnOptions) error  { return nil }
 func (m *launchMux) TypeInto(string, string) error     { return nil }
+func (m *launchMux) SpawnFloat(mux.SpawnOptions) error { return nil }
 
-func (m *launchMux) SpawnFloat(opts mux.SpawnOptions) error {
+// SpawnInputFloat is the launcher's request-float seam (Asker.Ask now spawns the
+// borderless input float through it). It records the argv and simulates the
+// floated `input --out <file>` writing the submitted value (or cancel marker).
+func (m *launchMux) SpawnInputFloat(opts mux.SpawnOptions) error {
 	m.floats = append(m.floats, opts.Cmd)
 	for i, a := range opts.Cmd {
 		if a == "--out" && i+1 < len(opts.Cmd) {

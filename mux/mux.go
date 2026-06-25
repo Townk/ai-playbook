@@ -17,6 +17,7 @@ package mux
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os/exec"
 	"strconv"
 
@@ -30,13 +31,19 @@ var ErrNotImplemented = errors.New("mux: not implemented yet")
 // hints honored by the configured template; they exist so the interface is
 // stable across stages.
 type SpawnOptions struct {
-	Cmd       []string // command + args to run in the new pane ({cmd})
-	Cwd       string   // working dir for the pane ({cwd}/{cwdarg})
-	Name      string   // pane title ({name}/{namearg})
-	Floating  bool     // float vs tiled (advisory; template selects the action)
-	Width     int      // requested columns as a percent (0 → template default)
-	Height    int      // requested rows as a percent (0 → template default)
-	Direction string   // tiled direction (advisory)
+	Cmd      []string // command + args to run in the new pane ({cmd})
+	Cwd      string   // working dir for the pane ({cwd}/{cwdarg})
+	Name     string   // pane title ({name}/{namearg})
+	Floating bool     // float vs tiled (advisory; template selects the action)
+	Width    int      // requested columns as a PERCENT (0 → template default)
+	Height   int      // requested rows as a PERCENT (0 → template default)
+	// WidthCols/HeightRows are ABSOLUTE sizes (literal columns/rows). When > 0 they
+	// take precedence over the percent Width/Height and {width}/{height} expand to a
+	// bare integer (not "<n>%") — used by the input float, which is sized exactly
+	// like ai-assist-summon's `--width 57 --height <measured>`.
+	WidthCols  int
+	HeightRows int
+	Direction  string // tiled direction (advisory)
 }
 
 // Mux is the terminal-multiplexer surface for the producer.
@@ -46,6 +53,10 @@ type Mux interface {
 	DumpScreen(pane string) (string, error)
 	// SpawnFloat opens a floating pane running opts.Cmd (e.g. the diff viewer).
 	SpawnFloat(opts SpawnOptions) error
+	// SpawnInputFloat opens the borderless+pinned, absolute-sized INPUT float (the
+	// request/ask widget) running opts.Cmd. Sizing comes from opts.WidthCols /
+	// opts.HeightRows (absolute columns/rows), mirroring ai-assist-summon.
+	SpawnInputFloat(opts SpawnOptions) error
 	// SpawnPane opens a tiled pane running opts.Cmd. Deferred (use SpawnDocked).
 	SpawnPane(opts SpawnOptions) error
 	// SpawnDocked opens a docked (down-direction) tiled pane running opts.Cmd.
@@ -114,22 +125,40 @@ func (t *templated) spawn(template string, opts SpawnOptions) error {
 	if len(opts.Cmd) == 0 {
 		return errors.New("mux: spawn needs a command")
 	}
+	// Absolute (WidthCols/HeightRows) wins over the percent Width/Height: the input
+	// float emits bare integers (57 / measured), the diff float keeps percents.
+	width, height := defaultPercent(opts.Width, 90), defaultPercent(opts.Height, 90)
+	if opts.WidthCols > 0 {
+		width = strconv.Itoa(opts.WidthCols)
+	}
+	if opts.HeightRows > 0 {
+		height = strconv.Itoa(opts.HeightRows)
+	}
 	argv := t.tpl.Substitute(template, config.Subst{
 		Cmd:    opts.Cmd,
 		Cwd:    opts.Cwd,
 		Name:   opts.Name,
-		Width:  defaultPercent(opts.Width, 90),
-		Height: defaultPercent(opts.Height, 90),
+		Width:  width,
+		Height: height,
 	})
 	if len(argv) == 0 {
 		return errors.New("mux: spawn template is empty")
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
-	// Detach the spawn's stdio so it cannot write into our pane.
+	// Detach stdout/stdin so the spawn cannot write into our pane; capture stderr
+	// into a buffer (not the pane) so a failed spawn can explain itself in the
+	// returned error without corrupting the UI.
 	cmd.Stdout = nil
-	cmd.Stderr = nil
 	cmd.Stdin = nil
-	return cmd.Run()
+	var errb bytes.Buffer
+	cmd.Stderr = &errb
+	if err := cmd.Run(); err != nil {
+		if msg := bytes.TrimSpace(errb.Bytes()); len(msg) > 0 {
+			return fmt.Errorf("%w: %s", err, msg)
+		}
+		return err
+	}
+	return nil
 }
 
 // defaultPercent renders n as a percent, substituting def when n <= 0 — so the
@@ -144,6 +173,18 @@ func defaultPercent(n, def int) string {
 // SpawnFloat opens a floating pane via the open-floating-pane template.
 func (t *templated) SpawnFloat(opts SpawnOptions) error {
 	return t.spawn(t.tpl.OpenFloatingPane, opts)
+}
+
+// SpawnInputFloat opens the borderless+pinned, absolute-sized input float via the
+// open-input-float template (the request/ask widget). Falls back to the plain
+// floating-pane template if open-input-float is unconfigured (empty after merge),
+// so an operator who only overrode open-floating-pane still gets a float.
+func (t *templated) SpawnInputFloat(opts SpawnOptions) error {
+	tpl := t.tpl.OpenInputFloat
+	if tpl == "" {
+		tpl = t.tpl.OpenFloatingPane
+	}
+	return t.spawn(tpl, opts)
 }
 
 // SpawnDocked opens a docked (down) pane via the open-docked-pane template.

@@ -168,9 +168,10 @@ func (f *recFloat) SpawnFloat(o mux.SpawnOptions) error {
 	f.spawned = append(f.spawned, o)
 	return f.err
 }
-func (f *recFloat) SpawnPane(mux.SpawnOptions) error   { return nil }
-func (f *recFloat) SpawnDocked(mux.SpawnOptions) error { return nil }
-func (f *recFloat) TypeInto(string, string) error      { return nil }
+func (f *recFloat) SpawnInputFloat(mux.SpawnOptions) error { return nil }
+func (f *recFloat) SpawnPane(mux.SpawnOptions) error       { return nil }
+func (f *recFloat) SpawnDocked(mux.SpawnOptions) error     { return nil }
+func (f *recFloat) TypeInto(string, string) error          { return nil }
 
 // apply-diff changes the file (Exit 0), undo-diff reverts it; the driver runs git
 // apply inside the temp repo (Cwd).

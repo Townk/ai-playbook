@@ -769,8 +769,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// non-interactive shell), NOT that the fix failed — do NOT auto-fire.
 				// The manual "try another fix" button still appears (unchanged).
 				dbg("auto-followup SUPPRESSED: exit 127 (command not found) id=%s", msg.ID)
-			case m.inputFifoPath == "":
-				dbg("auto-followup SUPPRESSED: inputFifoPath empty (id=%s exit=%d)", msg.ID, msg.Exit)
+			case m.inputFifoPath == "" && !m.canReengageInProc():
+				// No way to deliver the follow-up: neither a FIFO to re-arm (broker mode)
+				// nor in-process re-engagement (orch + Reengage wired, the live session
+				// path). Without this second clause the live session — which has NO input
+				// FIFO but DOES have Reengage — silently dropped every verify-fail
+				// follow-up (the regression).
+				dbg("auto-followup SUPPRESSED: no FIFO and no in-process reengage (id=%s exit=%d)", msg.ID, msg.Exit)
 			default:
 				dbg("auto-followup fire: id=%s exit=%d", msg.ID, msg.Exit)
 				if cmd := m.beginFollowupStream("verify", m.blockCommand("verify")); cmd != nil {
@@ -1342,6 +1347,14 @@ func (m model) blockCommand(id string) string {
 // revised fix streams in. Returns the cmd batch to run, or nil when no input
 // FIFO is configured (standalone/sample — emit only). Shared by the verify
 // auto-fire path and the `↻ try another fix` button.
+// canReengageInProc reports whether in-process re-engagement is wired (an
+// orchestrator with a Reengage context). When true, beginFollowupStream re-arms
+// the parser with the agent's revised-fix stream directly — no input FIFO needed.
+// This is the live session path (file/stdin input, no FIFO, Reengage set).
+func (m *model) canReengageInProc() bool {
+	return m.orch != nil && m.orch.Reengage != nil
+}
+
 func (m *model) beginFollowupStream(blockID, command string) tea.Cmd {
 	dbg("emit %s id=%s", "followup", blockID)
 	// In-process: re-engage the agent via the orchestrator and re-arm the parser

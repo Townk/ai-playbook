@@ -18,10 +18,23 @@ package floatinput
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"ai-playbook/mux"
+)
+
+// Float geometry — matches ai-assist-summon: a 57-column pinned/borderless float
+// whose height is MEASURED from the rendered widget (fallback when measuring
+// fails). inputHeight is the widget's textarea --height (3 rows), passed both to
+// the measure run and the live float so they render identically.
+const (
+	floatCols      = 57
+	inputHeight    = 3
+	fallbackHeight = 9
 )
 
 // Request describes one float-input ask: the widget type and labels, an optional
@@ -83,15 +96,59 @@ func (a Asker) Ask(req Request) (Result, error) {
 	out := filepath.Join(dir, "answer")
 
 	cmd := a.buildCmd(req, out)
-	if err := a.Mux.SpawnFloat(mux.SpawnOptions{
-		Cmd:      cmd,
-		Cwd:      req.Cwd,
-		Floating: true,
+	if err := a.Mux.SpawnInputFloat(mux.SpawnOptions{
+		Cmd:        cmd,
+		Cwd:        req.Cwd,
+		Floating:   true,
+		Name:       "",
+		WidthCols:  floatCols,
+		HeightRows: a.measureHeight(req),
 	}); err != nil {
 		return Result{}, err
 	}
 
 	return a.poll_(out), nil
+}
+
+// measureHeight runs `<selfExe> input --type <t> --measure --width 57 …` to get
+// the exact rendered pane height (no TTY), mirroring ai-assist-summon's measure
+// step. It parses a bare integer from stdout; any failure (run error or
+// non-integer output) falls back to fallbackHeight (9), exactly like the shell's
+// `[[ "$measured_h" == <-> ]] || measured_h=9`.
+func (a Asker) measureHeight(req Request) int {
+	typ := req.Type
+	if typ == "" || typ == "free" {
+		typ = "text"
+	}
+	args := []string{
+		"input", "--type", typ, "--measure",
+		"--width", strconv.Itoa(floatCols),
+		"--height", strconv.Itoa(inputHeight),
+	}
+	if req.Title != "" {
+		args = append(args, "--title", req.Title)
+	}
+	if req.Prompt != "" {
+		args = append(args, "--prompt", req.Prompt)
+	}
+	if req.Value != "" {
+		args = append(args, "--value", req.Value)
+	}
+	if typ == "choose" {
+		args = append(args, req.Choices...)
+	}
+	cmd := exec.Command(a.SelfExe, args...)
+	cmd.Stdin = nil
+	cmd.Stderr = nil
+	outb, err := cmd.Output()
+	if err != nil {
+		return fallbackHeight
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(outb)))
+	if err != nil || n <= 0 {
+		return fallbackHeight
+	}
+	return n
 }
 
 // buildCmd assembles the `<selfExe> input …` argv the float runs. free maps to
@@ -102,7 +159,7 @@ func (a Asker) buildCmd(req Request, out string) []string {
 	if typ == "" || typ == "free" {
 		typ = "text"
 	}
-	cmd := []string{a.SelfExe, "input", "--type", typ, "--out", out}
+	cmd := []string{a.SelfExe, "input", "--type", typ, "--out", out, "--height", strconv.Itoa(inputHeight)}
 	if req.Title != "" {
 		cmd = append(cmd, "--title", req.Title)
 	}

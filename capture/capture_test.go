@@ -24,10 +24,11 @@ func (f *fakeMux) DumpScreen(pane string) (string, error) {
 	f.lastPane = pane
 	return f.screen, nil
 }
-func (f *fakeMux) SpawnFloat(mux.SpawnOptions) error  { return mux.ErrNotImplemented }
-func (f *fakeMux) SpawnPane(mux.SpawnOptions) error   { return mux.ErrNotImplemented }
-func (f *fakeMux) SpawnDocked(mux.SpawnOptions) error { return mux.ErrNotImplemented }
-func (f *fakeMux) TypeInto(string, string) error      { return mux.ErrNotImplemented }
+func (f *fakeMux) SpawnFloat(mux.SpawnOptions) error      { return mux.ErrNotImplemented }
+func (f *fakeMux) SpawnInputFloat(mux.SpawnOptions) error { return mux.ErrNotImplemented }
+func (f *fakeMux) SpawnPane(mux.SpawnOptions) error       { return mux.ErrNotImplemented }
+func (f *fakeMux) SpawnDocked(mux.SpawnOptions) error     { return mux.ErrNotImplemented }
+func (f *fakeMux) TypeInto(string, string) error          { return mux.ErrNotImplemented }
 
 // noGit makes project-root resolution deterministic in tests (no live git).
 func noGit(dir string) (string, bool) { return "", false }

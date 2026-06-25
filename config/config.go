@@ -25,6 +25,7 @@ import (
 // merge mean the action is unconfigured.
 type Mux struct {
 	OpenFloatingPane string `toml:"open-floating-pane"`
+	OpenInputFloat   string `toml:"open-input-float"`
 	OpenDockedPane   string `toml:"open-docked-pane"`
 	DumpScreen       string `toml:"dump-screen"`
 	TypeIntoPane     string `toml:"type-into-pane"`
@@ -49,9 +50,15 @@ func Default() *Config {
 	return &Config{
 		Mux: Mux{
 			OpenFloatingPane: "zellij action new-pane --floating --width {width} --height {height} --close-on-exit {cwdarg} {namearg} -- {cmd}",
-			OpenDockedPane:   "zellij action new-pane --direction down --close-on-exit {cwdarg} {namearg} -- {cmd}",
-			DumpScreen:       "zellij action dump-screen {panearg}",
-			TypeIntoPane:     "zellij action write-chars {text}",
+			// The request/ask INPUT float: borderless + pinned, with the widget's own
+			// border as the only frame, sized in ABSOLUTE columns/rows ({width}/{height}
+			// are bare integers here, not percents) — mirroring ai-assist-summon's
+			// `--borderless true --pinned true --name "" --width 57 --height <measured>`.
+			// A bare empty {name} after substitution drops, matching the shell's --name "".
+			OpenInputFloat: `zellij action new-pane --floating --close-on-exit --name "" --borderless true --pinned true --width {width} --height {height} {cwdarg} -- {cmd}`,
+			OpenDockedPane: "zellij action new-pane --direction right --close-on-exit {cwdarg} {namearg} -- {cmd}",
+			DumpScreen:     "zellij action dump-screen {panearg}",
+			TypeIntoPane:   "zellij action write-chars {text}",
 		},
 		Harness: map[string]Harness{},
 	}
@@ -103,6 +110,7 @@ func loadFrom(base *Config, path string, data []byte) (*Config, error) {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 	mergeStr(&base.Mux.OpenFloatingPane, user.Mux.OpenFloatingPane)
+	mergeStr(&base.Mux.OpenInputFloat, user.Mux.OpenInputFloat)
 	mergeStr(&base.Mux.OpenDockedPane, user.Mux.OpenDockedPane)
 	mergeStr(&base.Mux.DumpScreen, user.Mux.DumpScreen)
 	mergeStr(&base.Mux.TypeIntoPane, user.Mux.TypeIntoPane)
@@ -182,6 +190,13 @@ func (m Mux) Substitute(template string, s Subst) []string {
 			if s.Pane != "" {
 				out = append(out, "-p", s.Pane)
 			}
+			continue
+		case `""`, "''":
+			// A literal empty-string token: emit an actual empty argv element rather
+			// than dropping it (so a template's `--name ""` reaches the mux as an
+			// empty title, matching ai-assist-summon's borderless `--name ""`). This
+			// is NOT a shell, so the quotes are the operator's explicit "empty arg".
+			out = append(out, "")
 			continue
 		}
 		// Single-valued placeholders: substring substitution within the token.

@@ -14,16 +14,23 @@ import (
 // --out file (so the Asker's poll observes a submit). A blank answer with
 // cancel=true simulates a cancel (no file written → the poll times out).
 type recordMux struct {
-	floats [][]string // argv of each SpawnFloat
-	answer string     // value the simulated float "submits" to --out
-	cancel bool       // when true, write nothing (simulate cancel)
+	floats   [][]string       // argv of each input float
+	lastOpts mux.SpawnOptions // the last SpawnInputFloat opts (geometry assertions)
+	answer   string           // value the simulated float "submits" to --out
+	cancel   bool             // when true, write nothing (simulate cancel)
 }
 
 func (m *recordMux) DumpScreen(string) (string, error)  { return "", nil }
 func (m *recordMux) SpawnPane(mux.SpawnOptions) error   { return nil }
 func (m *recordMux) SpawnDocked(mux.SpawnOptions) error { return nil }
 func (m *recordMux) TypeInto(string, string) error      { return nil }
-func (m *recordMux) SpawnFloat(opts mux.SpawnOptions) error {
+func (m *recordMux) SpawnFloat(mux.SpawnOptions) error  { return nil }
+
+// SpawnInputFloat is the request/ask seam Asker.Ask now drives. It records the
+// opts (argv + absolute geometry) and simulates the floated `input --out <file>`
+// writing the submitted value (or the cancel marker).
+func (m *recordMux) SpawnInputFloat(opts mux.SpawnOptions) error {
+	m.lastOpts = opts
 	m.floats = append(m.floats, opts.Cmd)
 	out := outFromArgv(opts.Cmd)
 	if m.cancel {
@@ -75,6 +82,35 @@ func TestAsker_BuildsInputCommand(t *testing.T) {
 		if !contains(argv, want) {
 			t.Errorf("argv missing %q\nargv: %v", want, argv)
 		}
+	}
+}
+
+// The input float is spawned through SpawnInputFloat with ABSOLUTE geometry:
+// WidthCols=57 and a positive HeightRows (the measured height, or the 9-row
+// fallback when measuring can't run because SelfExe isn't a real binary). The
+// pane Name is empty — matching ai-assist-summon's `--name "" --width 57`.
+func TestAsker_InputFloatAbsoluteGeometry(t *testing.T) {
+	m := &recordMux{answer: "x"}
+	a := Asker{SelfExe: "/path/ai-playbook", Mux: m, poll: time.Millisecond}
+	if _, err := a.Ask(Request{Type: "text", Title: "ai-assist", Prompt: "How?"}); err != nil {
+		t.Fatal(err)
+	}
+	if m.lastOpts.WidthCols != floatCols {
+		t.Errorf("WidthCols = %d, want %d", m.lastOpts.WidthCols, floatCols)
+	}
+	if m.lastOpts.HeightRows <= 0 {
+		t.Errorf("HeightRows = %d, want a positive (measured or fallback) height", m.lastOpts.HeightRows)
+	}
+	// SelfExe isn't a real binary here, so measuring fails → the 9-row fallback.
+	if m.lastOpts.HeightRows != fallbackHeight {
+		t.Errorf("HeightRows = %d, want fallback %d when measuring can't run", m.lastOpts.HeightRows, fallbackHeight)
+	}
+	if m.lastOpts.Name != "" {
+		t.Errorf("input float Name = %q, want empty", m.lastOpts.Name)
+	}
+	// The live float carries --height (so it renders like the measured pane).
+	if after(m.floats[0], "--height") != "3" {
+		t.Errorf("float argv --height = %q, want 3", after(m.floats[0], "--height"))
 	}
 }
 

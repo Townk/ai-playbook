@@ -160,6 +160,64 @@ func TestInProcessWrapupReArmsAppend(t *testing.T) {
 	}
 }
 
+// A failed VERIFY result must AUTO-fire the in-process follow-up when Reengage is
+// wired but there is NO input FIFO — the live session path. This is the stage-4c-ii
+// regression: the resultMsg guard previously suppressed the auto-fire whenever
+// inputFifoPath was empty, so the live session (file/stdin input, no FIFO, Reengage
+// set) silently dropped every verify-fail follow-up. Driving the resultMsg through
+// Update must return a non-nil cmd (re-engagement initiated) and re-arm the model
+// (thinking + APPEND separator), exactly like the FIFO path's auto-fire.
+func TestVerifyFailureAutoFiresFollowupInProc(t *testing.T) {
+	m, _ := newReengageModel(t, "# Revised fix\n")
+	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
+	m.width, m.height = 80, 24
+	m.inputFifoPath = "" // live session: NO input FIFO, only in-process Reengage
+	m.reflow()           // populate m.blocks so blockCommand("verify") resolves
+
+	if !m.canReengageInProc() {
+		t.Fatal("test setup: expected in-process re-engagement to be available")
+	}
+	originalMd := m.md
+
+	m2, cmd := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: "/tmp/x.log"})
+	m3 := m2.(model)
+
+	if cmd == nil {
+		t.Fatal("verify failure with Reengage wired (no FIFO) must auto-fire — got nil cmd")
+	}
+	if m3.blockStates["verify"].Status != "failed" {
+		t.Errorf("verify block status = %q, want failed", m3.blockStates["verify"].Status)
+	}
+	if !m3.thinking {
+		t.Error("in-process auto-fire must set thinking=true")
+	}
+	if !m3.streaming {
+		t.Error("in-process auto-fire must set streaming=true")
+	}
+	if !strings.Contains(m3.md, originalMd) {
+		t.Error("in-process auto-fire must keep prior md content (APPEND)")
+	}
+	if !strings.Contains(m3.md, "---") {
+		t.Error("in-process auto-fire must append the --- separator")
+	}
+}
+
+// With NEITHER an input FIFO nor in-process re-engagement, a verify failure must
+// NOT auto-fire (nothing could deliver the follow-up) — the pre-4c-ii standalone
+// behavior is preserved.
+func TestVerifyFailureNoReengageNoFifoDoesNotFire(t *testing.T) {
+	m := newModel("T", "```bash {id=verify}\nmake build\n```\n")
+	m.width, m.height = 80, 24
+	m.inputFifoPath = "" // no FIFO
+	// m.orch is nil → no in-process re-engagement either.
+	m.reflow()
+
+	_, cmd := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: "/tmp/x.log"})
+	if cmd != nil {
+		t.Errorf("verify failure with no FIFO and no Reengage must not auto-fire, got %T", cmd)
+	}
+}
+
 // Follow-up in-process re-arms in APPEND mode with the failed output threaded in.
 func TestInProcessFollowupReArmsAppend(t *testing.T) {
 	m, fa := newReengageModel(t, "# Revised fix\n")

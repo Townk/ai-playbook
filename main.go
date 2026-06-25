@@ -170,6 +170,7 @@ func selftest() int {
 // INLINE in the current pane (the pre-topology behavior), so headless and SSH
 // contexts still work.
 func troubleshoot() int {
+	dbgInit(os.Getenv("AI_ASSIST_DEBUG_LOG"))
 	cliRequest := strings.TrimSpace(strings.Join(os.Args[2:], " "))
 	if cliRequest == "" {
 		cliRequest = os.Getenv("AI_ASSIST_USER_REQUEST")
@@ -191,6 +192,8 @@ func troubleshoot() int {
 		PaneID:      paneID,
 		UserRequest: cliRequest,
 	})
+	dbg("troubleshoot: cmd=%q exit=%q kind=%q cwd=%q root=%q paneID=%q cliReq=%q",
+		req.Command, req.Exit, req.Kind, req.CWD, req.ProjectRoot, paneID, cliRequest)
 
 	// In Zellij with no explicit request: ask via the input float, then spawn the
 	// docked session pane. Off-Zellij (or with an explicit request and no pane id)
@@ -224,6 +227,7 @@ func launch(m mux.Mux, selfExe string, req capture.Request) int {
 		Value:  prefillTemplate(req),
 		Cwd:    req.CWD,
 	})
+	dbg("launch: Ask returned submitted=%v err=%v value=%q", res.Submitted, err, res.Value)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: request float: %v\n", err)
 		return 1
@@ -258,15 +262,25 @@ func spawnSession(m mux.Mux, selfExe string, req capture.Request) int {
 	if cwd == "" {
 		cwd = req.CWD
 	}
+	sessionCmd := []string{selfExe, "session", "--request", f.Name()}
+	if dbgPath != "" {
+		// Carry the debug-log path into the spawned pane explicitly — the pane
+		// inherits the zellij server's env, not ours, so AI_ASSIST_DEBUG_LOG may
+		// not reach it.
+		sessionCmd = append(sessionCmd, "--debug-log", dbgPath)
+	}
+	dbg("spawnSession: cwd=%q jsonPath=%q cmd=%q", cwd, f.Name(), sessionCmd)
 	if err := m.SpawnDocked(mux.SpawnOptions{
-		Cmd:  []string{selfExe, "session", "--request", f.Name()},
+		Cmd:  sessionCmd,
 		Cwd:  cwd,
 		Name: "ai-assist",
 	}); err != nil {
+		dbg("spawnSession: SpawnDocked FAILED err=%v", err)
 		os.Remove(f.Name())
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: spawn session pane: %v\n", err)
 		return 1
 	}
+	dbg("spawnSession: SpawnDocked OK")
 	return 0
 }
 
@@ -276,9 +290,15 @@ func spawnSession(m mux.Mux, selfExe string, req capture.Request) int {
 // capturing in-process (so `ai-playbook session` is also usable standalone).
 func sessionMain() int {
 	fs := flag.NewFlagSet("session", flag.ExitOnError)
-	var requestPath string
+	var requestPath, debugLog string
 	fs.StringVar(&requestPath, "request", "", "path to the captured request JSON (written by the launcher)")
+	fs.StringVar(&debugLog, "debug-log", "", "append a debug trace to this file (set by the launcher)")
 	fs.Parse(os.Args[2:])
+	if debugLog == "" {
+		debugLog = os.Getenv("AI_ASSIST_DEBUG_LOG")
+	}
+	dbgInit(debugLog)
+	dbg("session: start requestPath=%q", requestPath)
 
 	var req capture.Request
 	if requestPath != "" {
@@ -313,9 +333,11 @@ func sessionMain() int {
 // driver + tools backend (openSession) so authoring and the run blocks drive the
 // SAME live shell.
 func runSession(req capture.Request) int {
+	dbgEnv("runSession")
 	c := cache.Open()
 	noCache := os.Getenv("AI_ASSIST_NO_CACHE") != ""
 	d := triage.Route(req, c, noCache)
+	dbg("runSession: triage outcome=%v noCache=%v", d.Outcome, noCache)
 
 	// Session setup: ONE shared shell driver is created here, at session start, so
 	// BOTH authoring (the agent's tools backend) and the ui's run-blocks drive the
@@ -325,14 +347,18 @@ func runSession(req capture.Request) int {
 	// A failed setup degrades to no-tools authoring (sess is nil) — the ui then
 	// opens its own driver, the pre-stage-5 behavior.
 	sess := openSession(req)
+	dbg("runSession: openSession sess!=nil=%v (agent tools %s)", sess != nil,
+		map[bool]string{true: "enabled", false: "DISABLED"}[sess != nil])
 	if sess != nil {
 		defer sess.close()
 	}
 
 	switch d.Outcome {
 	case triage.Hit:
+		dbg("runSession: serving cached playbook")
 		return serveCachedPlaybook(d, req, sess)
 	default:
+		dbg("runSession: authoring playbook (this runs the agent)")
 		return authorPlaybook(req, d, c, noCache, sess)
 	}
 }
