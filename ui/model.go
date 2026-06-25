@@ -137,6 +137,7 @@ type model struct {
 	spinTicks    int // 100ms ticks within the current thinking session (seconds = /10)
 	streaming    bool
 	follow       bool      // auto-scroll to bottom while streaming
+	pinTop       int       // body line pinned to the viewport top (>=0): relaxes the scroll clamp so a freshly-announced follow-up sits at top with blank space below until new content fills it. -1 = none (no effect once content grows past the body).
 	reader       io.Reader // input stream source (set by main); nil in tests/static
 	parser       *streamParser
 
@@ -235,6 +236,7 @@ func newModel(harness, md string) model {
 		helpLines:    buildHelpLines(),
 		defaultLabel: "Working…",
 		follow:       false, // start at the top on load; only append (wrap-up) re-enables follow
+		pinTop:       -1,    // no pin until a follow-up announcement frames itself at the top
 		blockStates:  map[string]blockRunState{},
 		maxFollowups: resolveMaxFollowups(),
 	}
@@ -334,6 +336,13 @@ func (m *model) clampScroll() {
 	maxY := len(m.lines) - m.body()
 	if maxY < 0 {
 		maxY = 0
+	}
+	// A pinned follow-up announcement may sit near the end of the doc; allow the
+	// over-scroll (blank space below) so it can stay at the viewport top until the
+	// new attempt's content fills in. No effect once content grows past the body
+	// (then pinTop <= maxY and this is a no-op).
+	if m.pinTop >= 0 && m.pinTop > maxY {
+		maxY = m.pinTop
 	}
 	if m.yOff > maxY {
 		m.yOff = maxY
@@ -1613,7 +1622,11 @@ func (m *model) announceFollowup(attempt int) {
 	startLine := len(m.lines)
 	m.md += "\n\n_" + followupAnnouncement(attempt) + "_\n\n"
 	m.reflow()
-	// One-time scroll: make the announcement the FIRST visible body row.
+	// One-time scroll: make the announcement the FIRST visible body row. Pin it so
+	// clampScroll permits the over-scroll (blank below) — otherwise the announcement,
+	// being the last content, gets pulled back to the bottom and the "fresh start"
+	// framing is lost. The pin self-neutralizes once the new attempt fills the body.
+	m.pinTop = startLine
 	m.yOff = startLine
 	m.follow = false // subsequent streamed content must NOT scroll
 	m.clampScroll()

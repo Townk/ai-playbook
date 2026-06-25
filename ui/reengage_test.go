@@ -854,6 +854,16 @@ func TestAutoFollowupOneTimeScrollThenNoMovement(t *testing.T) {
 	if annIdx < 0 {
 		t.Fatalf("announcement %q must be visible in the body window [%d,%d); lines=%d", want, m.yOff, m.yOff+m.body(), len(m.lines))
 	}
+	// The bug: the announcement sits past the normal scroll max, so clampScroll
+	// pulled the viewport to the BOTTOM. The pin must relax the clamp (over-scroll:
+	// yOff past maxY, blank below) and put the announcement at the TOP of the body —
+	// not merely visible.
+	if maxY := len(m.lines) - m.body(); m.yOff <= maxY {
+		t.Errorf("announcement not pinned to top: yOff=%d <= maxY=%d (clamped to bottom)", m.yOff, maxY)
+	}
+	if annIdx-m.yOff > 2 {
+		t.Errorf("announcement must be near the TOP of the body (pinned), got %d rows down (yOff=%d)", annIdx-m.yOff, m.yOff)
+	}
 
 	// Apply the re-arm + stream content; yOff must NOT move further.
 	var rearm reArmStreamMsg
