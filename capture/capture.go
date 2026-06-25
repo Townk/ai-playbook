@@ -267,34 +267,42 @@ func (a *Atuin) Last() (LastCommand, error) {
 // single-field guard (CAP_CMD == CAP_EXIT → empty exit).
 func parseAtuinRows(out string) LastCommand {
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
-	// last non-empty row
-	var row string
+	// Most recent non-empty row whose command is NOT one of our own trigger
+	// invocations — so a manually-typed `ai-playbook …` (or a re-trigger) doesn't
+	// become "the failed command"; we look back to what the user actually ran.
 	for i := len(lines) - 1; i >= 0; i-- {
-		if strings.TrimSpace(lines[i]) != "" {
-			row = lines[i]
-			break
+		if strings.TrimSpace(lines[i]) == "" {
+			continue
 		}
+		fields := strings.SplitN(lines[i], "\t", 4)
+		if isOwnTrigger(fields[0]) {
+			continue
+		}
+		var lc LastCommand
+		lc.Command = fields[0]
+		if len(fields) > 1 {
+			lc.Exit = fields[1]
+		}
+		if len(fields) > 2 {
+			lc.Dir = fields[2]
+		}
+		if len(fields) > 3 {
+			lc.Duration = fields[3]
+		}
+		// single-field row guard: command echoed into exit slot.
+		if lc.Command == lc.Exit {
+			lc.Exit = ""
+		}
+		return lc
 	}
-	if row == "" {
-		return LastCommand{}
-	}
-	fields := strings.SplitN(row, "\t", 4)
-	var lc LastCommand
-	lc.Command = fields[0]
-	if len(fields) > 1 {
-		lc.Exit = fields[1]
-	}
-	if len(fields) > 2 {
-		lc.Dir = fields[2]
-	}
-	if len(fields) > 3 {
-		lc.Duration = fields[3]
-	}
-	// single-field row guard: command echoed into exit slot.
-	if lc.Command == lc.Exit {
-		lc.Exit = ""
-	}
-	return lc
+	return LastCommand{}
+}
+
+// isOwnTrigger reports whether a command line is one of ai-playbook's own
+// invocations (the trigger), which must be skipped when finding the failed command.
+func isOwnTrigger(cmd string) bool {
+	f := strings.Fields(strings.TrimSpace(cmd))
+	return len(f) > 0 && (f[0] == "ai-playbook" || strings.HasSuffix(f[0], "/ai-playbook"))
 }
 
 // ExitInt returns the request's exit as an int (and ok=false if not numeric).

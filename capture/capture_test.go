@@ -131,6 +131,18 @@ func TestParseAtuinRows(t *testing.T) {
 	}
 }
 
+func TestParseAtuinRows_SkipsOwnTrigger(t *testing.T) {
+	// The most recent entries are ai-playbook's own invocations; capture must look
+	// back past them to the command the user actually ran.
+	out := "gg build\t1\t/work\t37\n" +
+		"ai-playbook troubleshoot\t-1\t/work\t5\n" +
+		"/Users/x/.local/share/go/bin/ai-playbook session\t0\t/work\t2\n"
+	lc := parseAtuinRows(out)
+	if lc.Command != "gg build" || lc.Exit != "1" {
+		t.Fatalf("expected the pre-trigger command, got: %+v", lc)
+	}
+}
+
 func TestParseAtuinRows_SingleFieldGuard(t *testing.T) {
 	// A row with only a command (no tabs): command == exit slot → exit cleared.
 	lc := parseAtuinRows("just-a-command\n")
