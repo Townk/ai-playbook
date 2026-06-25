@@ -262,13 +262,28 @@ func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
 	o := filepath.Join(dir, "o")
 	e := filepath.Join(dir, "e")
 	job := filepath.Join(dir, "job.zsh")
-	// Main context (`{ }`, sourced — not a subshell): cd/exports persist, hooks
-	// fire. Own sentinel carries $? (the group's exit). stdin /dev/null. We
-	// capture $? immediately, map SIGPIPE (141)→0 (a producer killed by a
-	// downstream `| head`/`| grep -q` is not a failure), then — BEFORE the
-	// sentinel print — export the value-passing vars read from the per-job out/err
-	// files (still present here; the driver removes the temp dir only after the
-	// sentinel returns). ${(q)…} keeps multi-line values intact.
+	// The block runs in a SUBSHELL `( … )` — sourced in the main shell, but the
+	// subshell isolates a block's `set -e`/`set -u`/`setopt`/`trap`. This is
+	// critical: zsh `errexit` exits the WHOLE shell on a failing command regardless
+	// of function scope, so a block doing `set -euo pipefail` then a failing command
+	// would kill the hosted shell (and the sentinel would never print → the driver
+	// waits out its whole timeout). A subshell contains that exit. To keep
+	// cd-persistence + auto-env across blocks (the reason we don't just always use a
+	// subshell), an EXIT trap captures the block's final cwd — even when errexit
+	// aborts the subshell — and the MAIN shell re-applies it afterwards, which fires
+	// chpwd/precmd so mise/direnv/nix activate for the next block. Own sentinel
+	// carries $? (the block's exit). stdin /dev/null. We capture $? immediately, map
+	// SIGPIPE (141)→0 (a producer killed by a downstream `| head`/`| grep -q` is not
+	// a failure), re-apply the cwd, then — BEFORE the sentinel print — export the
+	// value-passing vars read from the per-job out/err files (still present here; the
+	// driver removes the temp dir only after the sentinel returns). ${(q)…} keeps
+	// multi-line values intact. Post-block lines use if/fi (not `&&`) defensively.
+	// (Trade-off: a block's raw `export FOO=…` no longer persists to later blocks;
+	// value-passing across blocks goes through AAS_OUT_<id>/LAST_*, which the driver
+	// sets in the main context below.)
+	cwdf := filepath.Join(dir, "cwd")
+	qcwd := shquote(cwdf)
+	trapBody := "builtin pwd >| " + qcwd
 	qo := shquote(o)
 	qe := shquote(e)
 	vp := "" +
@@ -283,9 +298,10 @@ func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
 			"export AAS_EXIT_" + key + "=${(q)__aapb_rc}\n"
 	}
 	_ = os.WriteFile(job, []byte(
-		"{ "+cmdline+" } </dev/null >"+o+" 2>"+e+"\n"+
+		"( trap "+shquote(trapBody)+" EXIT\n"+cmdline+"\n) </dev/null >"+o+" 2>"+e+"\n"+
 			"__aapb_rc=$?\n"+
-			"[[ $__aapb_rc -eq 141 ]] && __aapb_rc=0\n"+
+			"if [[ $__aapb_rc -eq 141 ]]; then __aapb_rc=0; fi\n"+
+			"if [[ -s "+qcwd+" ]]; then builtin cd -- \"$(< "+qcwd+")\" 2>/dev/null; fi\n"+
 			vp+
 			"print -r -- "+sentinel+"${__aapb_rc}"+sentinel+"\n"), 0644)
 	d.clearBuf()

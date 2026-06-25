@@ -77,6 +77,31 @@ func TestCdPersists(t *testing.T) {
 	}
 }
 
+// A block using the `set -euo pipefail` safety idiom that then FAILS must NOT kill
+// the hosted shell — zsh errexit exits the whole shell on a failing command, so the
+// subshell must isolate it. We must still get the real non-zero exit (not a
+// timeout), the shell must survive (errexit not leaked), and a cd inside the
+// errexit-aborted block must still persist via the EXIT-trap cwd capture.
+func TestSetEFailingBlockIsolated(t *testing.T) {
+	d := newTestDriver(t)
+	r := d.Run("set -euo pipefail\nbuiltin cd -- /tmp\nfalse\nprint should-not-run", 10*time.Second)
+	if r.TimedOut {
+		t.Fatalf("set -e failing block timed out (errexit not isolated): %+v", r)
+	}
+	if r.Exit == 0 {
+		t.Errorf("want non-zero exit from a failing set -e block, got %+v", r)
+	}
+	if r.Out == "should-not-run" {
+		t.Errorf("errexit should have stopped the block before the final print: %+v", r)
+	}
+	if r2 := d.Run("false; print -r -- alive", 5*time.Second); r2.Out != "alive" || r2.TimedOut {
+		t.Errorf("shell didn't survive / errexit leaked to next run: %+v", r2)
+	}
+	if r3 := d.Run("pwd", 5*time.Second); r3.Out != "/tmp" {
+		t.Errorf("cd inside the set -e block didn't persist: %q", r3.Out)
+	}
+}
+
 func TestTimeoutKillsAndSurvives(t *testing.T) {
 	d := newTestDriver(t)
 	if r := d.Run("sleep 30", 2*time.Second); !r.TimedOut {

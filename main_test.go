@@ -44,15 +44,18 @@ func TestOpenSession_SharedDriverAndToolsBackend(t *testing.T) {
 	}
 
 	// The tools backend is live and drives the SHARED session driver: a run RPC
-	// executes in that shell. We prove it shares state by exporting a var via the
-	// driver directly and reading it back through the socket.
-	sess.drv.Run("export SHARED_PROOF=yes", 5*time.Second)
-	res, err := tools.Dial(sess.socket, tools.Call{Tool: "run", Cmd: "print -r -- $SHARED_PROOF"})
+	// executes in that shell. We prove shared state via CWD, which persists across
+	// runs by design (auto-env on cd depends on it). NB: a block's raw `export` is
+	// intentionally isolated to its subshell so a block's `set -e` can't kill the
+	// hosted shell; cross-block data flows through AAS_OUT_<id>/LAST_* (driver-managed
+	// in the main context), not bare exports.
+	sess.drv.Run("builtin cd -- /tmp", 5*time.Second)
+	res, err := tools.Dial(sess.socket, tools.Call{Tool: "run", Cmd: "pwd"})
 	if err != nil {
 		t.Fatalf("dial tools backend: %v", err)
 	}
-	if res.Out != "yes" {
-		t.Errorf("tools backend run = %q, want %q (backend must drive the shared session driver)", res.Out, "yes")
+	if res.Out != "/tmp" {
+		t.Errorf("tools backend run pwd = %q, want %q (backend must drive the shared session driver)", res.Out, "/tmp")
 	}
 }
 
