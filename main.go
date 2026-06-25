@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"ai-playbook/agentstream"
 	"ai-playbook/author"
 	"ai-playbook/cache"
 	"ai-playbook/capture"
@@ -26,6 +27,7 @@ import (
 	"ai-playbook/driver"
 	"ai-playbook/floatinput"
 	"ai-playbook/input"
+	"ai-playbook/kb"
 	"ai-playbook/mcpserver"
 	"ai-playbook/mux"
 	"ai-playbook/orchestrator"
@@ -511,15 +513,18 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		cwd = req.CWD
 	}
 
-	// Re-engagement context (stage 4c-ii): the in-process regenerate / followup /
-	// wrapup kinds re-invoke the author. They stay on the existing text path (the
-	// author.Agent), upgraded in part 2b. regenerate re-stores the fresh playbook
-	// (cache + keys), so it gets them; followup/wrapup only need the request +
-	// agent. When the cache is disabled/bypassed the keys are empty and regenerate
-	// authors-without-re-storing (matching the shell's cache-bypassed re-run).
+	// Re-engagement context (stage 4c-ii / 2b): the in-process regenerate / followup
+	// / wrapup kinds re-invoke the author. Events (part 2b) is the OWNED normalized
+	// event producer — it streams the model's live reasoning + tool activity during
+	// the re-engagement wait, exactly like the initial authoring; Agent is the text
+	// fallback. regenerate re-stores the fresh playbook (cache + keys), so it gets
+	// them; followup/wrapup only need the request + producer. When the cache is
+	// disabled/bypassed the keys are empty and regenerate authors-without-re-storing
+	// (matching the shell's cache-bypassed re-run).
 	reengage := &orchestrator.Reengage{
 		Req:         req,
 		Agent:       sess.authoringAgent(),
+		Events:      buildReengageEvents(req, sess),
 		Cache:       c,
 		RequestJSON: requestJSON(req),
 	}
@@ -554,7 +559,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 
 	// Fan the events into the playbook reader + activity feed; Body() holds the
 	// accumulated playbook for the cache once the reader hits EOF.
-	reader, activity, fo := fanOut(events, closeFn, activityBuffer)
+	reader, activity, fo := agentstream.FanOut(events, closeFn, activityBuffer)
 	defer reader.Close()
 	defer removeMCP()
 
@@ -577,6 +582,59 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		}
 	}
 	return code
+}
+
+// buildReengageEvents builds the orchestrator.EventsFunc that re-engagement
+// (regenerate/followup/wrapup) uses to stream the model's live reasoning + tool
+// activity, exactly like the initial authoring. It lives in main (which imports
+// author) so the orchestrator stays free of an author import on the event path.
+//
+// Per invocation it builds the right prompt for the kind (regenerate → the
+// standard authoring prompt; followup → the failed-output prompt; wrapup → the
+// runlog wrap-up prompt), lazily writes a fresh --mcp-config pointing at the
+// session's tools backend (so the re-engaged agent still reaches run/ask/remember),
+// and runs the OWNED harness invocation via author.RunHarnessEvents. The returned
+// close/wait func reaps the process AND removes the per-invocation mcp-config.
+//
+// A nil session (no tools backend) authors-without-tools (mcp path stays empty),
+// which still streams reasoning. Returns nil so the orchestrator falls back to the
+// text Agent only if config can't be loaded — otherwise the EventsFunc is always
+// returned and the orchestrator prefers it.
+func buildReengageEvents(req capture.Request, sess *session) orchestrator.EventsFunc {
+	return func(kind orchestrator.ReengageKind, failedOutput string) (<-chan agentstream.Event, func() error, error) {
+		// Per-invocation mcp-config so the re-engaged agent reaches the live backend.
+		mcpPath, removeMCP := sess.writeMCPConfig()
+
+		var sys, user string
+		switch kind {
+		case orchestrator.KindReengageFollowup:
+			sys = author.FollowupPrompt(req, failedOutput)
+			user = author.BuildUserMessage(req)
+		case orchestrator.KindReengageWrapup:
+			sys = author.WrapupPrompt(req, failedOutput) // failedOutput carries the runlog for wrapup
+			user = author.BuildUserMessage(req)
+		default: // KindReengageRegenerate → the standard authoring prompt + folded KB
+			sys = author.SystemPrompt(req, author.KnowledgeBase(kb.Load(req.ProjectRoot)))
+			user = author.BuildUserMessage(req)
+		}
+
+		cfg, _ := config.Load()
+		events, wait, err := author.RunHarnessEvents(sys, user, author.AuthorOptions{
+			Cfg:           cfg,
+			MCPConfigPath: mcpPath,
+		})
+		if err != nil {
+			removeMCP()
+			return nil, nil, err
+		}
+		// Wrap wait to also remove the per-invocation mcp-config once the process exits.
+		closeFn := func() error {
+			werr := wait()
+			removeMCP()
+			return werr
+		}
+		return events, closeFn, nil
+	}
 }
 
 // authorPlaybookText is the fallback authoring path: it runs the existing
@@ -737,6 +795,7 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session) 
 	ui.SetReengage(&orchestrator.Reengage{
 		Req:         req,
 		Agent:       sess.authoringAgent(),
+		Events:      buildReengageEvents(req, sess),
 		Cache:       cache.Open(),
 		CtxHash:     d.CtxHash,
 		ReqHash:     d.ReqHash,
@@ -745,9 +804,9 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session) 
 
 	// Reuse the session's shared driver for the cached replay's run blocks (the
 	// same shell the re-engagement agent's tools backend drives), stashed for
-	// ui.Main to consume. nil session → ui.Main opens its own driver. A re-engagement
-	// during the cached replay stays on the text author path (no live activity line
-	// until part 2b upgrades re-engagement to AuthorEvents).
+	// ui.Main to consume. nil session → ui.Main opens its own driver. Re-engagement
+	// during the cached replay now streams the model's live reasoning + tool activity
+	// via Reengage.Events (part 2b), with the text Agent as the fallback.
 	if sess != nil {
 		ui.SetDriver(sess.drv)
 	}

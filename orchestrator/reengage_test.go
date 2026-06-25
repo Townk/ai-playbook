@@ -49,7 +49,7 @@ func TestRegenerate_StreamsAndMode(t *testing.T) {
 		Agent: fa.agent,
 	})
 
-	stream, mode, err := o.Regenerate()
+	stream, _, mode, err := o.Regenerate()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestRegenerate_ReStoresFreshPlaybook(t *testing.T) {
 		ReqHash: "reqhash",
 	})
 
-	stream, _, err := o.Regenerate()
+	stream, _, _, err := o.Regenerate()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -114,7 +114,7 @@ func TestFollowup_StreamsWithFailedOutput(t *testing.T) {
 	})
 
 	const failed = "ld: symbol not found"
-	stream, mode, err := o.Followup(failed)
+	stream, _, mode, err := o.Followup(failed)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestWrapup_ArtifactAndKB(t *testing.T) {
 		DataRoot: root,
 	})
 
-	stream, mode, err := o.Wrapup(`{"id":"verify","exit":0}`)
+	stream, _, mode, err := o.Wrapup(`{"id":"verify","exit":0}`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,13 +182,13 @@ func TestWrapup_ArtifactAndKB(t *testing.T) {
 // Without a Reengage wired the re-engagement methods return ErrNotImplemented.
 func TestReengageMethods_NoReengage(t *testing.T) {
 	o := New(newTestDriver(t), &recMux{})
-	if _, _, err := o.Regenerate(); err == nil {
+	if _, _, _, err := o.Regenerate(); err == nil {
 		t.Error("Regenerate without Reengage should error")
 	}
-	if _, _, err := o.Followup(""); err == nil {
+	if _, _, _, err := o.Followup(""); err == nil {
 		t.Error("Followup without Reengage should error")
 	}
-	if _, _, err := o.Wrapup(""); err == nil {
+	if _, _, _, err := o.Wrapup(""); err == nil {
 		t.Error("Wrapup without Reengage should error")
 	}
 }

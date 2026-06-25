@@ -56,15 +56,35 @@ type AuthorOptions struct {
 
 // AuthorEvents runs the configured harness on req and returns a channel of
 // normalized agentstream.Events, a close/wait func that reaps the process, and a
-// start error. It selects the harness from cfg [agent].Harness (claude
-// implemented; pi/cursor return a clear "not yet supported" error), resolves the
-// bin (cfg [agent].Bin else the harness name on PATH), builds the OWNED argv,
-// starts the process, and streams its stdout through agentstream.Get(adapter)'s
-// Parse, forwarding each event on the returned channel (closed on EOF).
+// start error. It builds the STANDARD authoring prompt (system prompt + folded KB,
+// user message) from req and delegates the owned invocation + adapter to
+// RunHarnessEvents. Re-engagement (followup/wrapup/regenerate) reuses
+// RunHarnessEvents directly with its own prompts.
 //
 // The returned func() error waits for the process to exit (reaping it) and
 // returns its exit error; call it after draining the channel.
 func AuthorEvents(req capture.Request, opts AuthorOptions) (<-chan agentstream.Event, func() error, error) {
+	sys := SystemPrompt(req, KnowledgeBase(kb.Load(req.ProjectRoot)))
+	user := BuildUserMessage(req)
+	return RunHarnessEvents(sys, user, opts)
+}
+
+// RunHarnessEvents is the OWNED harness invocation + adapter core: given a final
+// systemPrompt and userMessage, it selects the harness from cfg [agent].Harness
+// (claude implemented; pi/cursor return a clear "not yet supported" error),
+// resolves the bin (cfg [agent].Bin else the harness name on PATH), builds the
+// OWNED argv, starts the process, and streams its stdout through
+// agentstream.Get(adapter)'s Parse, forwarding each event on the returned channel
+// (closed on EOF).
+//
+// When opts.MCPConfigPath is set, the harness's tool-use instruction is appended
+// to systemPrompt (so the agent reaches the session's run/ask/remember backend)
+// and --mcp-config is wired into the argv — exactly as the standard authoring path
+// does, so re-engagement's followup/wrapup/regenerate prompts get the same tools.
+//
+// The returned func() error waits for the process to exit (reaping it) and returns
+// its exit error; call it after draining the channel.
+func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-chan agentstream.Event, func() error, error) {
 	cfg := opts.Cfg
 	if cfg == nil {
 		cfg = config.Default()
@@ -82,12 +102,11 @@ func AuthorEvents(req capture.Request, opts AuthorOptions) (<-chan agentstream.E
 	)
 	switch harness {
 	case "claude":
-		sys := SystemPrompt(req, KnowledgeBase(kb.Load(req.ProjectRoot)))
-		user := BuildUserMessage(req)
+		sys := systemPrompt
 		if opts.MCPConfigPath != "" {
 			sys += ToolInstruction
 		}
-		args = ClaudeArgs(cfg.Agent.Model, opts.MCPConfigPath, sys, user)
+		args = ClaudeArgs(cfg.Agent.Model, opts.MCPConfigPath, sys, userMessage)
 		adapterName = "claude"
 	default:
 		return nil, nil, fmt.Errorf("harness %q not yet supported", harness)

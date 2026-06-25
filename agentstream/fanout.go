@@ -1,19 +1,19 @@
-package main
+package agentstream
 
 import (
 	"bytes"
 	"io"
-
-	"ai-playbook/agentstream"
 )
 
-// fanout splits a normalized agentstream.Event channel into the two surfaces the
-// ui already consumes: an io.ReadCloser carrying the playbook markdown (fed into
-// ui.RunStream's reader-based stream) and an activity chan string carrying the
-// model's live reasoning + tool summaries (the ui's "⟳ …" activity line). It also
-// accumulates the playbook BODY for the cache.
+// FanOut splits a normalized Event channel into the two surfaces the ui consumes:
+// an io.ReadCloser carrying the playbook markdown (fed into the ui's reader-based
+// stream) and an activity chan string carrying the model's live reasoning + tool
+// summaries (the ui's "⟳ …" activity line). It also accumulates the playbook BODY
+// for the cache. This is the shared core used by BOTH the initial authoring path
+// (package main) and re-engagement (package orchestrator) so they render the
+// model's live reasoning identically.
 //
-// Event mapping (the part-1 contract — see package agentstream):
+// Event mapping (the part-1 contract):
 //
 //   - TextDelta    → written to the playbook pipe AND appended to the body buffer.
 //   - Final        → if NO TextDelta was ever written, the Final text is written to
@@ -30,23 +30,25 @@ import (
 // blocks the harness — activity sends are best-effort (drop-if-full) so a slow ui
 // can't stall the pipe writes.
 //
-// The returned reader is consumed by the ui; Body() yields the accumulated cache
-// body and is valid after the reader hits EOF.
-type fanout struct {
+// The returned reader is consumed by the ui; (*Fan).Body() yields the accumulated
+// cache body and is valid after the reader hits EOF.
+
+// Fan exposes the accumulated playbook body after the fan-out reader reaches EOF.
+type Fan struct {
 	body bytes.Buffer
 }
 
 // Body returns the accumulated playbook body for the cache. It is complete once
 // the returned reader has reached EOF (the event channel drained).
-func (f *fanout) Body() string { return f.body.String() }
+func (f *Fan) Body() string { return f.body.String() }
 
-// fanOut starts the pump and returns the playbook reader, the activity feed, and a
-// *fanout whose Body() holds the cache text after EOF. activityBuf bounds the
-// activity channel (drop-if-full on send).
-func fanOut(events <-chan agentstream.Event, closeFn func() error, activityBuf int) (io.ReadCloser, <-chan string, *fanout) {
+// FanOut starts the pump and returns the playbook reader, the activity feed, and a
+// *Fan whose Body() holds the cache text after EOF. activityBuf bounds the activity
+// channel (drop-if-full on send).
+func FanOut(events <-chan Event, closeFn func() error, activityBuf int) (io.ReadCloser, <-chan string, *Fan) {
 	pr, pw := io.Pipe()
 	activity := make(chan string, activityBuf)
-	f := &fanout{}
+	f := &Fan{}
 
 	go func() {
 		var (
@@ -63,16 +65,16 @@ func fanOut(events <-chan agentstream.Event, closeFn func() error, activityBuf i
 		}
 		for ev := range events {
 			switch ev.Kind {
-			case agentstream.TextDelta:
+			case TextDelta:
 				// Write to the playbook pipe and accumulate the body. A pipe write
 				// error means the reader went away; keep draining so closeFn still runs.
 				_, _ = io.WriteString(pw, ev.Text)
 				f.body.WriteString(ev.Text)
 				wroteDelta = true
-			case agentstream.Final:
+			case Final:
 				finalText = ev.Text
 				haveFinal = true
-			case agentstream.Reasoning, agentstream.ToolActivity:
+			case Reasoning, ToolActivity:
 				sendActivity(ev.Text)
 			}
 		}

@@ -9,6 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"ai-playbook/agentstream"
 	"ai-playbook/capture"
 	"ai-playbook/driver"
 	"ai-playbook/orchestrator"
@@ -348,6 +349,132 @@ func TestVerifyFailureRepeatsUntilCapInProc(t *testing.T) {
 	}
 	if !hasManual {
 		t.Error("at the cap, the verify block must show the manual 'try another fix' button")
+	}
+}
+
+// newReengageEventsModel wires an in-process model to an orchestrator whose
+// Reengage uses an injected EVENT producer (the part-2b path) instead of the text
+// Agent, so regenerate/followup/wrapup stream a normalized event channel that the
+// orchestrator fans into a playbook reader + a live activity feed.
+func newReengageEventsModel(t *testing.T, delta, final string) (model, *fakeEventsProducer) {
+	t.Helper()
+	zdot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	d, err := driver.Open(driver.Options{Env: append(os.Environ(), "ZDOTDIR="+zdot)})
+	if err != nil {
+		t.Fatalf("driver.Open: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+	fe := &fakeEventsProducer{delta: delta, final: final}
+	m := newModel("agent", "old playbook content")
+	m.width, m.height = 80, 24
+	m.orch = orchestrator.New(d, &cliMux{}).WithReengage(&orchestrator.Reengage{
+		Req: capture.Request{
+			Command:     "make build",
+			Exit:        "2",
+			UserRequest: "fix my build",
+			ProjectRoot: t.TempDir(),
+		},
+		Events:   fe.fn,
+		DataRoot: t.TempDir(),
+	})
+	return m, fe
+}
+
+// fakeEventsProducer is the ui-side injected orchestrator.EventsFunc: it emits a
+// canned normalized event stream (delta → playbook; reasoning + tool → activity;
+// Final → body) so a re-engagement exercises the live activity feed deterministically.
+type fakeEventsProducer struct {
+	delta, final string
+}
+
+func (f *fakeEventsProducer) fn(kind orchestrator.ReengageKind, failedOutput string) (<-chan agentstream.Event, func() error, error) {
+	ch := make(chan agentstream.Event)
+	go func() {
+		ch <- agentstream.Event{Kind: agentstream.TextDelta, Text: f.delta}
+		ch <- agentstream.Event{Kind: agentstream.Reasoning, Text: "thinking it through"}
+		ch <- agentstream.Event{Kind: agentstream.ToolActivity, Text: "run: make build"}
+		ch <- agentstream.Event{Kind: agentstream.Final, Text: f.final}
+		close(ch)
+	}()
+	return ch, func() error { return nil }, nil
+}
+
+// Part 2b: a followup over the EVENT path re-arms with the orchestrator's fan-out,
+// carrying a live activity channel into the model. The reArmStreamMsg swaps
+// m.activity to that feed, and an activityMsg off it updates m.activityLine while
+// thinking — mirroring how the initial authoring shows live reasoning.
+func TestInProcessFollowupEventPathWiresActivity(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# Revised\n", "# Revised fix\n")
+
+	cmd := m.beginFollowupInProc("ld: symbol not found")
+	if cmd == nil {
+		t.Fatal("beginFollowupInProc returned nil with an Events-backed Reengage")
+	}
+
+	// Find the reArmStreamMsg the trigger produced (off the event loop) and apply it.
+	var rearm reArmStreamMsg
+	var found bool
+	for _, msg := range collectMsgs(cmd) {
+		if rs, ok := msg.(reArmStreamMsg); ok {
+			rearm = rs
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("no reArmStreamMsg produced by the followup trigger")
+	}
+	if rearm.err != nil {
+		t.Fatalf("re-arm error: %v", rearm.err)
+	}
+	if rearm.activity == nil {
+		t.Fatal("event-path followup must carry a non-nil activity channel into the model")
+	}
+
+	// Apply the re-arm: the model must swap m.activity to the re-engagement feed.
+	nm, _ := m.Update(rearm)
+	m = nm.(model)
+	if m.activity != rearm.activity {
+		t.Fatal("reArmStreamMsg must swap m.activity to the re-engagement feed")
+	}
+
+	// A summary off the NEW feed updates the activity line while thinking.
+	m.thinking = true
+	m2, _ := m.Update(activityMsg{summary: "run: make build", ok: true, ch: m.activity})
+	m = m2.(model)
+	if m.activityLine != "run: make build" {
+		t.Errorf("activityLine = %q, want the re-engagement tool summary", m.activityLine)
+	}
+}
+
+// A stale activityMsg (from the initial-authoring feed that has since been swapped
+// out) must NOT clobber the freshly-wired re-engagement feed nor paint its summary.
+func TestStaleActivityFeedIgnoredAfterReArm(t *testing.T) {
+	m := newModel("agent", "")
+	m.width, m.height = 80, 24
+	m.thinking = true
+	stale := make(chan string)
+	fresh := make(chan string)
+	m.activity = fresh // the current (re-engagement) feed
+
+	// A close (!ok) from the STALE feed must not clear the current m.activity.
+	m2, cmd := m.Update(activityMsg{ok: false, ch: stale})
+	m = m2.(model)
+	if m.activity != fresh {
+		t.Error("a stale feed's close must not clobber the current activity feed")
+	}
+	if cmd != nil {
+		t.Errorf("a stale feed's close must not re-subscribe, got %T", cmd)
+	}
+
+	// A summary from the STALE feed must not paint the activity line.
+	m3, _ := m.Update(activityMsg{summary: "stale: do not show", ok: true, ch: stale})
+	m = m3.(model)
+	if m.activityLine == "stale: do not show" {
+		t.Error("a stale feed's summary must not paint the activity line")
 	}
 }
 

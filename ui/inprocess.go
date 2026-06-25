@@ -24,6 +24,11 @@ type statusMsg struct{ text string }
 type activityMsg struct {
 	summary string
 	ok      bool
+	// ch is the channel this summary was read from. The handler uses it to ignore a
+	// close (!ok) from a STALE feed: when re-engagement swaps m.activity to a fresh
+	// channel, the old initial-authoring channel's close must not clobber the new
+	// subscription. Only a close matching the current m.activity clears it.
+	ch <-chan string
 }
 
 // activityWaitCmd blocks (inside the tea.Cmd goroutine, off the event loop) on
@@ -37,7 +42,7 @@ func (m model) activityWaitCmd() tea.Cmd {
 	}
 	return func() tea.Msg {
 		s, ok := <-ch
-		return activityMsg{summary: s, ok: ok}
+		return activityMsg{summary: s, ok: ok, ch: ch}
 	}
 }
 
@@ -120,7 +125,13 @@ func (m model) orchCmd(b Button) tea.Cmd {
 // on-close side effects when the stream EOFs.
 type reArmStreamMsg struct {
 	reader io.ReadCloser
-	err    error
+	// activity is the re-engagement's live reasoning + tool-activity feed (from the
+	// orchestrator's fan-out), or nil when the re-engagement used the text fallback
+	// path. When non-nil the model swaps m.activity to it and re-subscribes so the
+	// followup/regenerate/wrapup wait shows live reasoning on the activity line,
+	// exactly like the initial authoring.
+	activity <-chan string
+	err      error
 }
 
 // beginRegenerate (in-process) re-authors the original request cache-bypassed and
@@ -145,8 +156,8 @@ func (m *model) beginRegenerate() tea.Cmd {
 	m.follow = false
 	m.reflow()
 	return tea.Batch(m.restartTick(), func() tea.Msg {
-		stream, _, err := orch.Regenerate()
-		return reArmStreamMsg{reader: stream, err: err}
+		stream, activity, _, err := orch.Regenerate()
+		return reArmStreamMsg{reader: stream, activity: activity, err: err}
 	})
 }
 
@@ -169,8 +180,8 @@ func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
 	m.follow = true
 	m.reflow()
 	return tea.Batch(m.restartTick(), func() tea.Msg {
-		stream, _, err := orch.Followup(failedOutput)
-		return reArmStreamMsg{reader: stream, err: err}
+		stream, activity, _, err := orch.Followup(failedOutput)
+		return reArmStreamMsg{reader: stream, activity: activity, err: err}
 	})
 }
 
@@ -194,8 +205,8 @@ func (m *model) beginWrapupInProc(runlog string) tea.Cmd {
 	m.follow = true
 	m.reflow()
 	return tea.Batch(m.restartTick(), func() tea.Msg {
-		stream, _, err := orch.Wrapup(runlog)
-		return reArmStreamMsg{reader: stream, err: err}
+		stream, activity, _, err := orch.Wrapup(runlog)
+		return reArmStreamMsg{reader: stream, activity: activity, err: err}
 	})
 }
 

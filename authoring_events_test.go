@@ -7,11 +7,30 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+	"time"
 
+	"ai-playbook/agentstream"
 	"ai-playbook/author"
 	"ai-playbook/capture"
 	"ai-playbook/config"
 )
+
+// drainActivity reads the activity channel to close, returning everything it saw.
+func drainActivity(ch <-chan string) []string {
+	var got []string
+	timeout := time.After(5 * time.Second)
+	for {
+		select {
+		case s, ok := <-ch:
+			if !ok {
+				return got
+			}
+			got = append(got, s)
+		case <-timeout:
+			return got
+		}
+	}
+}
 
 // fakeClaudeStream emits canned claude stream-json: an init record, a text delta
 // (the playbook), a tool_use (tool activity), and a final result.
@@ -57,7 +76,7 @@ func TestAuthorEventsFanOut_Integration(t *testing.T) {
 		t.Fatalf("AuthorEvents: %v", err)
 	}
 
-	reader, activity, fo := fanOut(events, closeFn, activityBuffer)
+	reader, activity, fo := agentstream.FanOut(events, closeFn, activityBuffer)
 	defer reader.Close()
 
 	actCh := make(chan []string, 1)

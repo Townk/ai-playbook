@@ -889,10 +889,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = msg.text
 		return m, nil
 	case activityMsg:
-		// One agent tool-call summary off the activity feed. Channel closed (!ok):
-		// the session is torn down — stop re-subscribing. Otherwise record the latest
-		// summary (shown under the "Working…" line ONLY while thinking, so a late
-		// summary never paints over settled content) and wait for the next one.
+		// One agent tool-call summary off the activity feed. A summary from a STALE
+		// feed (m.activity was swapped to a fresh re-engagement channel since this
+		// wait was issued) is ignored — don't paint it and don't re-subscribe to the
+		// dead channel. msg.ch == nil is the legacy/no-source case (always current).
+		if msg.ch != nil && msg.ch != m.activity {
+			return m, nil
+		}
+		// Channel closed (!ok): the current feed is torn down — stop re-subscribing.
+		// Otherwise record the latest summary (shown under the "Working…" line ONLY
+		// while thinking, so a late summary never paints over settled content) and
+		// wait for the next one.
 		if !msg.ok {
 			m.activity = nil
 			return m, nil
@@ -935,7 +942,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.reengageStream = msg.reader
 		m.reader = bufio.NewReader(msg.reader)
 		m.parser = &streamParser{}
-		return m, readStream(m.reader, m.parser)
+		cmds := []tea.Cmd{readStream(m.reader, m.parser)}
+		// Swap the activity feed to the re-engagement's live reasoning + tool feed
+		// (when the event path produced one) and re-subscribe, so the
+		// followup/regenerate/wrapup wait shows live reasoning on the activity line,
+		// exactly like the initial authoring. A nil activity (text fallback) leaves
+		// the previous subscription untouched.
+		if msg.activity != nil {
+			m.activity = msg.activity
+			m.activityLine = ""
+			cmds = append(cmds, m.activityWaitCmd())
+		}
+		return m, tea.Batch(cmds...)
 	}
 	return m, nil
 }

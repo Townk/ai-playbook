@@ -40,6 +40,34 @@ func (s *storeOnClose) Close() error {
 	return err
 }
 
+// closeHook wraps a stream and runs onClose exactly once when the stream is
+// closed. Unlike storeOnClose it does not buffer the read bytes — the body for the
+// side effect is supplied by the onClose callback itself (e.g. the fan-out's
+// Body(), which is authoritative — Final wins over the streamed deltas — and valid
+// only after EOF). It is the event-path seam for regenerate's re-store and the
+// wrap-up's artifact, where the cache/artifact body is the accumulated playbook,
+// not the verbatim pipe bytes.
+type closeHook struct {
+	io.ReadCloser
+	onClose func()
+	done    bool
+}
+
+func newCloseHook(rc io.ReadCloser, onClose func()) *closeHook {
+	return &closeHook{ReadCloser: rc, onClose: onClose}
+}
+
+func (c *closeHook) Close() error {
+	err := c.ReadCloser.Close()
+	if !c.done {
+		c.done = true
+		if c.onClose != nil {
+			c.onClose()
+		}
+	}
+	return err
+}
+
 // teeCloser wraps a stream, mirroring every byte read into w (e.g. the solution
 // artifact file), and closes extra (the same file) when the stream is closed. It
 // is the wrap-up's tee-into-artifact seam: the ui reads + renders the stream while

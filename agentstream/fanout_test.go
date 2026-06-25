@@ -1,11 +1,9 @@
-package main
+package agentstream
 
 import (
 	"io"
 	"testing"
 	"time"
-
-	"ai-playbook/agentstream"
 )
 
 // drainActivity reads the activity channel to close, returning everything it saw.
@@ -31,18 +29,18 @@ func drainActivity(ch <-chan string) []string {
 // pipe yields the concatenated playbook, the activity feed carries the reasoning +
 // tool strings, the body buffer equals the playbook, and closeFn is called.
 func TestFanOut_DeltasReasoningToolFinal(t *testing.T) {
-	events := make(chan agentstream.Event)
+	events := make(chan Event)
 	closed := make(chan struct{})
 	closeFn := func() error { close(closed); return nil }
 
-	reader, activity, fo := fanOut(events, closeFn, 16)
+	reader, activity, fo := FanOut(events, closeFn, 16)
 
 	go func() {
-		events <- agentstream.Event{Kind: agentstream.TextDelta, Text: "# Step one\n"}
-		events <- agentstream.Event{Kind: agentstream.Reasoning, Text: "thinking about the failure"}
-		events <- agentstream.Event{Kind: agentstream.TextDelta, Text: "run make test\n"}
-		events <- agentstream.Event{Kind: agentstream.ToolActivity, Text: "run: make test"}
-		events <- agentstream.Event{Kind: agentstream.Final, Text: "# Step one\nrun make test\n"}
+		events <- Event{Kind: TextDelta, Text: "# Step one\n"}
+		events <- Event{Kind: Reasoning, Text: "thinking about the failure"}
+		events <- Event{Kind: TextDelta, Text: "run make test\n"}
+		events <- Event{Kind: ToolActivity, Text: "run: make test"}
+		events <- Event{Kind: Final, Text: "# Step one\nrun make test\n"}
 		close(events)
 	}()
 
@@ -85,11 +83,11 @@ func TestFanOut_DeltasReasoningToolFinal(t *testing.T) {
 // TestFanOut_FinalOnly: a harness that emits only Final (no TextDelta) must still
 // write the Final text to the pipe and set it as the body.
 func TestFanOut_FinalOnly(t *testing.T) {
-	events := make(chan agentstream.Event)
-	reader, activity, fo := fanOut(events, func() error { return nil }, 16)
+	events := make(chan Event)
+	reader, activity, fo := FanOut(events, func() error { return nil }, 16)
 
 	go func() {
-		events <- agentstream.Event{Kind: agentstream.Final, Text: "# Whole playbook\n"}
+		events <- Event{Kind: Final, Text: "# Whole playbook\n"}
 		close(events)
 	}()
 	go drainActivity(activity)
@@ -109,13 +107,13 @@ func TestFanOut_FinalOnly(t *testing.T) {
 // TestFanOut_DeltasPreferFinalBody: when both deltas and a Final arrive, the pipe
 // carries the streamed deltas while the stored body prefers the Final text.
 func TestFanOut_DeltasPreferFinalBody(t *testing.T) {
-	events := make(chan agentstream.Event)
-	reader, activity, fo := fanOut(events, func() error { return nil }, 16)
+	events := make(chan Event)
+	reader, activity, fo := FanOut(events, func() error { return nil }, 16)
 
 	go func() {
-		events <- agentstream.Event{Kind: agentstream.TextDelta, Text: "partial "}
-		events <- agentstream.Event{Kind: agentstream.TextDelta, Text: "stream"}
-		events <- agentstream.Event{Kind: agentstream.Final, Text: "FINAL BODY"}
+		events <- Event{Kind: TextDelta, Text: "partial "}
+		events <- Event{Kind: TextDelta, Text: "stream"}
+		events <- Event{Kind: Final, Text: "FINAL BODY"}
 		close(events)
 	}()
 	go drainActivity(activity)
