@@ -51,18 +51,3 @@ func SetDebugLog(path string) {
 	os.Setenv("AI_ASSIST_DEBUG_LOG", path)
 	resolveDbg()
 }
-
-// dbgEvery throttles high-frequency traces (e.g. the 100ms spinner tick) so they
-// don't flood the log: it logs the 1st call per tag and every nth thereafter.
-var dbgCounts = map[string]int{}
-
-func dbgEvery(tag string, n int, format string, args ...any) {
-	if dbgFile == nil {
-		return
-	}
-	c := dbgCounts[tag]
-	dbgCounts[tag] = c + 1
-	if c%n == 0 {
-		dbg(format, args...)
-	}
-}

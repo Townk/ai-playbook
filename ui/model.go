@@ -538,7 +538,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// live loop already does both) and do NOT continue — it self-cancels here,
 		// leaving exactly one live loop and no double-counted seconds.
 		if msg.gen != m.tickGen {
-			dbg("spinTick STALE gen=%d tickGen=%d -> drop", msg.gen, m.tickGen)
 			return m, nil
 		}
 		running := false
@@ -553,9 +552,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.spinFrame++
 			m.spinTicks++
 		}
-		dbgEvery("spinTick", 10, "spinTick gen=%d thinking=%v running=%v frame=%d ticks=%d", msg.gen, m.thinking, running, m.spinFrame, m.spinTicks)
 		if !m.thinking && !running {
-			dbg("spinTick STOP (thinking=false running=false) -> tickRunning=false")
 			m.tickRunning = false
 			return m, nil
 		}
@@ -1847,8 +1844,6 @@ func (m model) normalLines() []string {
 			actRow = spinRow + 1
 		}
 	}
-	dbgEvery("render", 30, "render thinking=%v spinRow=%d actRow=%d frame=%d width=%d body=%d lines=%d cw=%d activity=%q",
-		m.thinking, spinRow, actRow, m.spinFrame, m.width, m.body(), len(m.lines), cw, collapseLine(m.activityLine))
 	for i := 0; i < m.body(); i++ {
 		if i == spinRow {
 			// Issue #3: use the dynamic working-progression label (workingLabel),
