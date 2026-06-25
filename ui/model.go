@@ -261,9 +261,15 @@ func (m model) Init() tea.Cmd {
 		return tea.Batch(cmds...)
 	}
 	cmds = append(cmds, readStream(m.reader, m.parser))
+	var tickIssued bool
 	if m.thinking {
-		cmds = append(cmds, m.startTick())
+		if c := m.startTick(); c != nil {
+			cmds = append(cmds, c)
+			tickIssued = true
+		}
 	}
+	dbg("Init thinking=%v streaming=%v reader=%v activity=%v tickIssued=%v",
+		m.thinking, m.streaming, m.reader != nil, m.activity != nil, tickIssued)
 	return tea.Batch(cmds...)
 }
 
@@ -374,6 +380,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// text chunks during the work phase, and an empty chunk is not real
 				// playbook content. Only non-whitespace text ends thinking.
 				if strings.TrimSpace(e.text) != "" {
+					if m.thinking {
+						dbg("textEvent ends thinking: textlen=%d %q", len(e.text), collapseLine(e.text))
+					}
 					m.thinking = false
 					m.activityLine = ""
 				}
@@ -435,6 +444,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// live loop already does both) and do NOT continue — it self-cancels here,
 		// leaving exactly one live loop and no double-counted seconds.
 		if msg.gen != m.tickGen {
+			dbg("spinTick STALE gen=%d tickGen=%d -> drop", msg.gen, m.tickGen)
 			return m, nil
 		}
 		running := false
@@ -449,7 +459,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.spinFrame++
 			m.spinTicks++
 		}
+		dbgEvery("spinTick", 10, "spinTick gen=%d thinking=%v running=%v frame=%d ticks=%d", msg.gen, m.thinking, running, m.spinFrame, m.spinTicks)
 		if !m.thinking && !running {
+			dbg("spinTick STOP (thinking=false running=false) -> tickRunning=false")
 			m.tickRunning = false
 			return m, nil
 		}
@@ -800,6 +812,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case resultMsg:
 		st := m.blockStates[msg.ID]
 		prevAction := st.Action
+		if dbgFile != nil {
+			ids := make([]string, 0, len(m.blockStates))
+			for id := range m.blockStates {
+				ids = append(ids, id)
+			}
+			dbg("result id=%s exit=%d priorStatus=%q priorAction=%q knownBlockStates=%v", msg.ID, msg.Exit, st.Status, prevAction, ids)
+		}
 		st.Logpath = msg.Logpath
 		st.Exit = msg.Exit
 		// A result for a block the user deliberately stopped is NOT a failed fix.
@@ -944,6 +963,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.reengageStream != nil {
 			_ = m.reengageStream.Close()
 		}
+		// Reset block run-states for the fresh round: the re-authored playbook reuses
+		// ids (id=fix, id=verify, …), so stale states from the prior round would
+		// otherwise paint "failed"/"succeeded" onto the new, not-yet-run blocks.
+		dbg("re-arm: clearing %d stale block states for the fresh round", len(m.blockStates))
+		clear(m.blockStates)
 		m.reengageStream = msg.reader
 		m.reader = bufio.NewReader(msg.reader)
 		m.parser = &streamParser{}
@@ -1424,6 +1448,8 @@ func (m model) normalLines() []string {
 			actRow = spinRow + 1
 		}
 	}
+	dbgEvery("render", 30, "render thinking=%v spinRow=%d actRow=%d frame=%d width=%d body=%d lines=%d cw=%d activity=%q",
+		m.thinking, spinRow, actRow, m.spinFrame, m.width, m.body(), len(m.lines), cw, collapseLine(m.activityLine))
 	for i := 0; i < m.body(); i++ {
 		if i == spinRow {
 			out = append(out, pad("  "+padTo(spinnerLine(m.spinFrame, m.thinkLabel, m.spinTicks/10), cw)+vscrollCell(spinRow, pos, size)))

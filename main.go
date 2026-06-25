@@ -301,6 +301,7 @@ func sessionMain() int {
 		debugLog = os.Getenv("AI_ASSIST_DEBUG_LOG")
 	}
 	dbgInit(debugLog)
+	ui.SetDebugLog(debugLog) // the ui pkg traces too; the pane got --debug-log as a flag (env dropped)
 	dbg("session: start requestPath=%q", requestPath)
 
 	var req capture.Request

@@ -40,3 +40,29 @@ func dbg(format string, args ...any) {
 	msg := fmt.Sprintf(format, args...)
 	fmt.Fprintf(dbgFile, "%s [pager] %s\n", time.Now().Format(time.RFC3339), msg)
 }
+
+// SetDebugLog points the ui trace at path. The session pane receives the path as
+// a --debug-log FLAG (the zellij spawn drops env vars), so it must set the env +
+// reopen the handle for the ui's dbg() to write. No-op for empty path.
+func SetDebugLog(path string) {
+	if path == "" {
+		return
+	}
+	os.Setenv("AI_ASSIST_DEBUG_LOG", path)
+	resolveDbg()
+}
+
+// dbgEvery throttles high-frequency traces (e.g. the 100ms spinner tick) so they
+// don't flood the log: it logs the 1st call per tag and every nth thereafter.
+var dbgCounts = map[string]int{}
+
+func dbgEvery(tag string, n int, format string, args ...any) {
+	if dbgFile == nil {
+		return
+	}
+	c := dbgCounts[tag]
+	dbgCounts[tag] = c + 1
+	if c%n == 0 {
+		dbg(format, args...)
+	}
+}
