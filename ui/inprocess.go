@@ -194,12 +194,50 @@ func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
 	})
 }
 
+// beginFinalPlaybookInProc (in-process, stage 2 / spec §A+§B) generates the clean
+// final-playbook and re-arms the parser with it in REPLACE mode: the rendered
+// troubleshoot is cleared and the fresh playbook streams in, like `run <file>.md`.
+// The current troubleshoot content (m.md) is passed as the change to fold in; base
+// is "" (stage 2 is fresh-only — amend-on-rerun is a later stage). The result is
+// marked a DRAFT (finalDraft=true, committed=false): stage 2 does NOT save or cache
+// it — persistence is stage 3. Returns nil when re-engagement isn't wired.
+func (m *model) beginFinalPlaybookInProc() tea.Cmd {
+	orch := m.orch
+	if orch == nil || orch.Reengage == nil {
+		return nil
+	}
+	// The troubleshoot content is the input the FINAL-PLAYBOOK prompt distills; grab
+	// it BEFORE the REPLACE reset clears m.md.
+	change := m.md
+	// REPLACE: reset the rendered content + thinking state (like regenerate).
+	m.md = ""
+	m.isCached = false
+	m.thinking = true
+	m.spinFrame = 0
+	m.spinTicks = 0
+	m.streaming = true
+	m.follow = false
+	// Mark the upcoming render a draft (not yet committed/persisted).
+	m.finalDraft = true
+	m.committed = false
+	m.reflow()
+	return tea.Batch(m.restartTick(), func() tea.Msg {
+		stream, activity, _, err := orch.FinalPlaybook("", change)
+		return reArmStreamMsg{reader: stream, activity: activity, err: err}
+	})
+}
+
 // beginWrapupInProc (in-process) runs the wrap-up pass and re-arms the parser with
 // the `## Solution` summary stream in APPEND mode (the summary streams below the
 // playbook). The orchestrator performs the side effects (solution artifact + KB
 // append). runlog is the run log to feed the wrap-up prompt (empty here — the
 // in-process run log is the model's block states; a richer run log is a later
 // refinement). Returns nil when re-engagement isn't wired.
+//
+// RETIRED (stage 2): no production path calls this anymore — the native verify-success
+// confirm + FinalPlaybook (beginFinalPlaybookInProc) replaces the agent-ask `## Solution`
+// wrap-up. It (and its orchestrator.Wrapup / author.Wrapup plumbing) is left in the
+// tree, unused but exercised by TestInProcessWrapupReArmsAppend; stage 3 may delete it.
 func (m *model) beginWrapupInProc(runlog string) tea.Cmd {
 	orch := m.orch
 	if orch == nil || orch.Reengage == nil {

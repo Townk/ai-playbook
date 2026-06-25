@@ -15,20 +15,22 @@ import (
 
 // fakeEvents builds an EventsFunc that emits a canned normalized event stream:
 // a text delta (→ playbook), a reasoning line + a tool line (→ activity), and a
-// Final (→ authoritative cache/artifact body). It records the kind + failedOutput
+// Final (→ authoritative cache/artifact body). It records the kind + base + change
 // it was called with so tests can assert the right prompt path was selected.
 type fakeEvents struct {
 	gotKind   ReengageKind
+	gotBase   string
 	gotFailed string
 	calls     int
 	delta     string
 	final     string
 }
 
-func (f *fakeEvents) fn(kind ReengageKind, failedOutput string) (<-chan agentstream.Event, func() error, error) {
+func (f *fakeEvents) fn(kind ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error) {
 	f.calls++
 	f.gotKind = kind
-	f.gotFailed = failedOutput
+	f.gotBase = base
+	f.gotFailed = change
 	ch := make(chan agentstream.Event)
 	go func() {
 		ch <- agentstream.Event{Kind: agentstream.TextDelta, Text: f.delta}
@@ -179,6 +181,84 @@ func TestFollowup_EventPath_StreamsActivity(t *testing.T) {
 	}
 	if fe.gotFailed != failed {
 		t.Errorf("failedOutput = %q, want %q", fe.gotFailed, failed)
+	}
+}
+
+// FinalPlaybook via the EVENT path (stage 2): the prompt kind is finalplaybook, the
+// base + change are threaded through, the StreamMode is Replace, the playbook
+// streams, and (stage 2) NOTHING is persisted — no cache entry is written.
+func TestFinalPlaybook_EventPath_ReplaceNoPersist(t *testing.T) {
+	root := t.TempDir()
+	fe := &fakeEvents{delta: "# Playbook — fix\n", final: "# Playbook — fix\nclean setup\n"}
+	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+		Req:      sampleReq(),
+		Events:   fe.fn,
+		CtxHash:  "ctxhash",
+		ReqHash:  "reqhash",
+		DataRoot: root,
+	})
+
+	const change = "# Troubleshoot\nthe fixes that worked\n"
+	stream, activity, mode, err := o.FinalPlaybook("", change)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != ModeReplace {
+		t.Errorf("mode = %v, want ModeReplace", mode)
+	}
+	if activity == nil {
+		t.Fatal("event path must return a non-nil activity channel")
+	}
+	go wantActivity(t, activity, "# Playbook — fix\n")
+
+	got, _ := io.ReadAll(stream)
+	_ = stream.Close()
+	if string(got) != "# Playbook — fix\nclean setup\n" {
+		t.Errorf("playbook reader = %q, want the authoritative Final text", got)
+	}
+	if fe.gotKind != KindReengageFinalPlaybook {
+		t.Errorf("kind = %v, want finalplaybook", fe.gotKind)
+	}
+	if fe.gotBase != "" {
+		t.Errorf("fresh: base = %q, want empty", fe.gotBase)
+	}
+	if fe.gotFailed != change {
+		t.Errorf("change = %q, want %q", fe.gotFailed, change)
+	}
+
+	// Stage 2 is GENERATE-ONLY: no cache entry must be written (persistence is stage 3).
+	if matches, _ := filepath.Glob(filepath.Join(root, "cache", "ctxhash", "*")); len(matches) != 0 {
+		t.Errorf("stage 2 FinalPlaybook must NOT persist a cache entry, found %v", matches)
+	}
+}
+
+// FinalPlaybook in AMEND mode threads the base playbook through to the producer.
+func TestFinalPlaybook_AmendThreadsBase(t *testing.T) {
+	fe := &fakeEvents{delta: "# Playbook\n", final: "# Playbook\nupdated\n"}
+	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+		Req:    sampleReq(),
+		Events: fe.fn,
+	})
+
+	const base = "# Playbook — existing\nstep one\n"
+	const change = "also configure the NDK"
+	stream, _, mode, err := o.FinalPlaybook(base, change)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode != ModeReplace {
+		t.Errorf("mode = %v, want ModeReplace", mode)
+	}
+	_, _ = io.ReadAll(stream)
+	_ = stream.Close()
+	if fe.gotKind != KindReengageFinalPlaybook {
+		t.Errorf("kind = %v, want finalplaybook", fe.gotKind)
+	}
+	if fe.gotBase != base {
+		t.Errorf("amend: base = %q, want %q", fe.gotBase, base)
+	}
+	if fe.gotFailed != change {
+		t.Errorf("amend: change = %q, want %q", fe.gotFailed, change)
 	}
 }
 

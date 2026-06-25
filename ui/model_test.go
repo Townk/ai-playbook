@@ -190,10 +190,13 @@ func TestReArmedMsgError(t *testing.T) {
 	}
 }
 
-// TestWrapUpKeyWithFifoPath verifies that pressing "w" when settled (streaming=false)
-// emits a wrapup record, appends a separator to md (keeping prior content), sets
-// thinking=true/streaming=true, and returns a non-nil cmd.
-func TestWrapUpKeyWithFifoPath(t *testing.T) {
+// Stage 2 (spec §E): the `w` key now MANUALLY FINALIZES by generating the final
+// playbook draft — an IN-PROCESS-only action (it needs Reengage). With no
+// orchestrator wired (FIFO/standalone mode), `w` is a no-op: the old FIFO `wrapup`
+// emission is retired (the native confirm + FinalPlaybook replaces the agent-ask
+// wrap-up). It must NOT write a FIFO record, must NOT start a thinking session, and
+// must return a nil cmd.
+func TestWrapUpKeyNoOrchIsNoOp(t *testing.T) {
 	dir := t.TempDir()
 	fifo := filepath.Join(dir, "act")
 
@@ -201,86 +204,25 @@ func TestWrapUpKeyWithFifoPath(t *testing.T) {
 	m.width, m.height = 80, 24
 	m.streaming = false
 	m.fifoPath = fifo
-	m.inputFifoPath = "/tmp/nonexistent-wrapup-fifo-" + t.Name() // won't be opened until reArmReaderCmd runs
-	m.reflow()
-
-	originalMd := m.md
-
-	m2, cmd := m.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})
-	m3 := m2.(model)
-
-	// The actions FIFO must contain a wrapup record.
-	f, err := os.Open(fifo)
-	if err != nil {
-		t.Fatalf("failed to open actions fifo: %v", err)
-	}
-	defer f.Close()
-	rec, _ := bufio.NewReader(f).ReadString('\x1e')
-	rec = strings.TrimSuffix(rec, "\x1e")
-	kind, _, _ := strings.Cut(rec, "\x1f")
-	if kind != "wrapup" {
-		t.Errorf("emitted kind = %q, want wrapup", kind)
-	}
-
-	// Prior content must still be present (separator appended, not replaced).
-	if !strings.Contains(m3.md, originalMd) {
-		t.Errorf("prior md content lost; md = %q, want it to contain %q", m3.md, originalMd)
-	}
-	if !strings.Contains(m3.md, "---") {
-		t.Errorf("separator not appended; md = %q", m3.md)
-	}
-
-	// State must show thinking/streaming.
-	if !m3.thinking {
-		t.Error("after w key, thinking must be true")
-	}
-	if !m3.streaming {
-		t.Error("after w key, streaming must be true")
-	}
-	if !m3.follow {
-		t.Error("after w key, follow must be true")
-	}
-	if cmd == nil {
-		t.Error("w key with inputFifoPath set must return a non-nil cmd")
-	}
-}
-
-// TestWrapUpKeyNoFifoPath verifies that pressing "w" with no inputFifoPath
-// emits the action but does NOT panic and returns (no re-arm).
-func TestWrapUpKeyNoFifoPath(t *testing.T) {
-	dir := t.TempDir()
-	fifo := filepath.Join(dir, "act")
-
-	m := newModel("T", "# Playbook\n")
-	m.width, m.height = 80, 24
-	m.streaming = false
-	m.fifoPath = fifo
-	m.inputFifoPath = "" // no input fifo
+	m.inputFifoPath = "" // no input fifo; no orch either → no in-process reengage
 	m.reflow()
 
 	m2, cmd := m.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})
 	m3 := m2.(model)
 
-	// Verify emit happened (wrapup record in the actions fifo).
-	f, err := os.Open(fifo)
-	if err != nil {
-		t.Fatalf("failed to open actions fifo: %v", err)
+	// No FIFO record (the retired wrapup emission must not fire).
+	if f, err := os.Open(fifo); err == nil {
+		defer f.Close()
+		b := make([]byte, 1)
+		if n, _ := f.Read(b); n > 0 {
+			t.Error("w key with no orchestrator must not emit any FIFO action (wrapup retired)")
+		}
 	}
-	defer f.Close()
-	rec, _ := bufio.NewReader(f).ReadString('\x1e')
-	rec = strings.TrimSuffix(rec, "\x1e")
-	kind, _, _ := strings.Cut(rec, "\x1f")
-	if kind != "wrapup" {
-		t.Errorf("emitted kind = %q, want wrapup", kind)
-	}
-
-	// Must not have started re-arm (thinking stays false).
 	if m3.thinking {
-		t.Error("w key without inputFifoPath must not set thinking")
+		t.Error("w key with no in-process reengage must not start a thinking session")
 	}
-	// cmd should be nil (no re-arm, no tick).
 	if cmd != nil {
-		t.Errorf("w key without inputFifoPath must return nil cmd, got %T", cmd)
+		t.Errorf("w key with no in-process reengage must return nil cmd, got %T", cmd)
 	}
 }
 
@@ -362,12 +304,12 @@ func TestStatusBarHasNoShortcutKeys(t *testing.T) {
 	}
 }
 
-// TestHelpModalDocumentsWrapUp verifies the ? modal documents the w (wrap up) key
+// TestHelpModalDocumentsWrapUp verifies the ? modal documents the w (finalize) key
 // and includes a Buttons section.
 func TestHelpModalDocumentsWrapUp(t *testing.T) {
 	out := joinText(buildHelpLines())
-	if !strings.Contains(out, "wrap up") {
-		t.Errorf("help modal must document the wrap-up key; got:\n%s", out)
+	if !strings.Contains(out, "finalize") {
+		t.Errorf("help modal must document the w (finalize) key; got:\n%s", out)
 	}
 	if !strings.Contains(out, "Buttons") {
 		t.Errorf("help modal must have a Buttons section; got:\n%s", out)

@@ -39,7 +39,8 @@ var helpGroups = []helpGroup{
 	{"Actions", []helpBind{
 		{"󱁐", "hint mode — activate a button"},
 		{"󰳽", "activate a button (mouse)"},
-		{"w", "wrap up the session (verify + summary)"},
+		{"y / n", "answer the verify-success confirm (solved?)"},
+		{"w", "finalize — generate the final playbook draft"},
 		{"?", "toggle this help"},
 		{"q / 󱊷", "quit"},
 	}},

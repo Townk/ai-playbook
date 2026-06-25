@@ -198,6 +198,20 @@ type model struct {
 	// Set the first time it fires so a re-rendered/re-run verify-0 does not re-trigger
 	// (no wrap-up loop). The manual `w`-key wrap-up is unaffected by this flag.
 	wrappedUp bool
+
+	// confirmResolved is the native verify-success confirm state (stage 2, spec §A).
+	// When true the pager renders an inline confirm row — "✓ Verified — did this
+	// solve your problem?  [ Yes ]  [ No ]" — answerable by mouse-click on the
+	// buttons or the `y`/`n` keys. It replaces the old agent-ask wrap-up: Yes
+	// generates the final playbook (REPLACE draft), No falls back to a follow-up.
+	// Set once on a verify-success (gated like the old wrap-up); cleared when answered.
+	confirmResolved bool
+
+	// finalDraft marks that the rendered playbook is a GENERATED final-playbook draft
+	// (the confirm "Yes" / `w` produced it). committed is false until stage 3 persists
+	// it (save + cache). Stage 2 only generates the draft — neither save nor cache.
+	finalDraft bool
+	committed  bool
 }
 
 // emitAction performs a button's action. In FIFO mode (m.orch == nil) it appends
@@ -315,6 +329,7 @@ func (m *model) body() int {
 func (m *model) reflow() {
 	m.lines, m.buttons, m.blocks = Render(m.md, m.contentWidth(), m.blockStates, m.flashKey)
 	m.appendCachedButton()
+	m.appendConfirmButtons()
 	m.clampScroll()
 }
 
@@ -566,6 +581,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reflow()
 					return m, m.flashCmd()
 				}
+				if b.Kind == "confirm-yes" || b.Kind == "confirm-no" {
+					if cmd := m.resolveConfirm(b.Kind == "confirm-yes"); cmd != nil {
+						return m, tea.Batch(m.flashCmd(), cmd)
+					}
+					m.reflow()
+					return m, m.flashCmd()
+				}
 				ac := m.emitAction(b)
 				m.reflow()
 				return m, tea.Batch(m.flashCmd(), ac)
@@ -709,6 +731,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.reflow()
 						return m, m.flashCmd()
 					}
+					if b.Kind == "confirm-yes" || b.Kind == "confirm-no" {
+						if cmd := m.resolveConfirm(b.Kind == "confirm-yes"); cmd != nil {
+							return m, tea.Batch(m.flashCmd(), cmd)
+						}
+						m.reflow()
+						return m, m.flashCmd()
+					}
 					ac := m.emitAction(b)
 					m.reflow()
 					return m, tea.Batch(m.flashCmd(), ac)
@@ -748,32 +777,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "esc", "ctrl+c":
 			return m, tea.Quit
 		case "w":
-			// Wrap-up: only when settled (not streaming).
+			// Stage 2 (spec §E): `w` = manual finalize → GENERATE the final-playbook
+			// draft (the same REPLACE generation as the confirm "Yes"). Only when
+			// settled (not streaming). Stage 3 will make `w` COMMIT (save + cache) when
+			// a draft already exists; for stage 2 it just generates the draft. Answering
+			// any pending confirm is moot — `w` finalizes regardless, so clear it.
 			if !m.streaming {
-				dbg("emit %s id=%s", "wrapup", "")
-				// A manual wrap-up also marks wrappedUp so a later verify-0 doesn't
-				// auto-trigger a second wrap-up on top of this one (issue #3 once-guard).
+				dbg("w: manual finalize → generate final-playbook draft")
 				m.wrappedUp = true
-				// In-process: run the wrap-up pass via the orchestrator and re-arm the
-				// parser with the `## Solution` summary stream (APPEND). The orchestrator
-				// writes the solution artifact + appends the KB fact.
-				if cmd := m.beginWrapupInProc(m.runLog()); cmd != nil {
+				m.confirmResolved = false
+				if cmd := m.beginFinalPlaybookInProc(); cmd != nil {
 					return m, cmd
 				}
-				ac := m.emitAction(Button{Kind: "wrapup"})
-				if m.inputFifoPath != "" {
-					m.md += "\n\n---\n\n"
-					m.thinking = true
-					m.spinFrame = 0
-					m.spinTicks = 0
-					m.streaming = true
-					m.follow = true
-					m.reflow()
-					return m, tea.Batch(m.restartTick(), m.reArmReaderCmd(), ac)
+			}
+			return m, nil
+		case "y":
+			// Confirm "Yes" (spec §A): the verify-success resolved — generate the final
+			// playbook draft (REPLACE). Only meaningful while the confirm row is shown.
+			if m.confirmResolved {
+				if cmd := m.resolveConfirm(true); cmd != nil {
+					return m, cmd
 				}
-				if ac != nil {
-					return m, ac
+				m.reflow()
+			}
+			return m, nil
+		case "n":
+			// Confirm "No" (spec §A): not solved — fall back to another fix attempt (the
+			// existing follow-up loop), unchanged. Only meaningful while the confirm row
+			// is shown.
+			if m.confirmResolved {
+				if cmd := m.resolveConfirm(false); cmd != nil {
+					return m, cmd
 				}
+				m.reflow()
 			}
 			return m, nil
 		// Vertical: line
@@ -935,23 +971,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 		}
-		// Issue #3: a SUCCESSFUL verify (exit 0 on a RUN, not an apply/undo) means the
-		// fix verified — auto-trigger the WRAP-UP re-engagement so the agent CONFIRMS
-		// resolution with the user (the wrap-up prompt asks via the ask tool, then
-		// finalizes the `## Solution`/remember only on confirmation; on "no" it hands
-		// back to another fix attempt). Gated on m.wrappedUp so it fires ONCE per
-		// resolution — a re-rendered or re-run verify-0 must not re-trigger (no
-		// wrap-up loop). A deliberately stopped verify already returned above; exit 0
-		// is by definition neither signal-killed (>128) nor 127, so those guards are
-		// moot here. Requires in-process re-engagement (the live session path).
+		// Stage 2 (spec §A): a SUCCESSFUL verify (exit 0 on a RUN, not an apply/undo)
+		// means the fix verified — render the NATIVE in-pager confirm row ("✓ Verified
+		// — did this solve your problem?  [ Yes ]  [ No ]") INSTEAD of the old agent-ask
+		// wrap-up. The ui owns the branch: Yes generates the final-playbook draft
+		// (REPLACE), No falls back to a follow-up. Gated on m.wrappedUp so it shows
+		// ONCE per resolution — a re-rendered or re-run verify-0 must not re-prompt. A
+		// deliberately stopped verify already returned above; exit 0 is by definition
+		// neither signal-killed (>128) nor 127. Requires in-process re-engagement (the
+		// live session path), so the confirm's Yes can actually generate.
 		if msg.ID == verifyID && msg.Exit == 0 && !m.wrappedUp &&
 			prevAction != "apply" && prevAction != "undo" &&
 			m.canReengageInProc() {
 			m.wrappedUp = true
-			dbg("auto-wrapup fire: verify exit 0 — confirming resolution with the user")
-			if cmd := m.beginWrapupInProc(m.runLog()); cmd != nil {
-				return m, cmd
-			}
+			m.confirmResolved = true
+			dbg("verify exit 0 — rendering native resolve-confirm row")
+			m.reflow()
 		}
 		return m, nil
 	case statusMsg:
@@ -1274,6 +1309,72 @@ func (m model) statusBar() string {
 	return st.Render("\U000F1050: action • \U000F12B7: close • ?: keys")
 }
 
+// confirmPrompt is the leading prose of the native verify-success confirm row.
+const confirmPrompt = "✓ Verified — did this solve your problem?"
+
+// confirmYesLabel / confirmNoLabel are the two button labels (with padded brackets
+// so they read as clickable controls).
+const (
+	confirmYesLabel = "[ Yes ]"
+	confirmNoLabel  = "[ No ]"
+)
+
+// confirmRowString builds the styled confirm row: the prompt prose followed by the
+// Yes/No button labels. When flash is set for a button it highlights bright. The
+// row is rendered inside the pager pane (NOT a mux float), like the run/copy button
+// rows. Returns "" when the confirm state is not active.
+func (m model) confirmRowString() string {
+	if !m.confirmResolved {
+		return ""
+	}
+	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen)).Render(confirmPrompt)
+	yes := m.confirmButtonLabel(confirmYesLabel, "confirm-yes", colGreen)
+	no := m.confirmButtonLabel(confirmNoLabel, "confirm-no", colPeach)
+	return prompt + "  " + yes + "  " + no
+}
+
+// confirmButtonLabel renders one confirm button label, highlighting it bright/bold
+// when the flash key matches (mouse-click / hint feedback), else in its accent.
+func (m model) confirmButtonLabel(label, kind, accent string) string {
+	if m.flashKey == "confirm:"+kind {
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(colFlashOn)).Bold(true).Render(label)
+	}
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(accent)).Bold(true).Render(label)
+}
+
+// confirmRowScreenRow returns the absolute screen row the confirm row occupies: one
+// row above the status bar (the last body+pad region), so it sits at the bottom of
+// the pane regardless of scroll. -1 when the confirm is not shown.
+func (m model) confirmRowScreenRow() int {
+	if !m.confirmResolved {
+		return -1
+	}
+	// normalLines layout ends with: bottom-pad, status bar. The confirm row replaces
+	// the bottom-pad row (m.height-2), directly above the status bar (m.height-1).
+	return m.height - 2
+}
+
+// appendConfirmButtons registers the two Screen-fixed confirm buttons (Yes/No) on
+// the confirm row so a mouse click resolves them. Their columns track the visible
+// width of the prompt prose + gaps, mirroring how block tab buttons compute Col.
+func (m *model) appendConfirmButtons() {
+	if !m.confirmResolved {
+		return
+	}
+	row := m.confirmRowScreenRow()
+	if row < 0 {
+		return
+	}
+	// Col is the content column (buttonAt strips the 2-col left margin). The prompt is
+	// followed by 2 spaces, then Yes, 2 spaces, then No.
+	yesCol := lipgloss.Width(confirmPrompt) + 2
+	noCol := yesCol + lipgloss.Width(confirmYesLabel) + 2
+	m.buttons = append(m.buttons,
+		Button{Line: row, Col: yesCol, Width: lipgloss.Width(confirmYesLabel), Kind: "confirm-yes", BlockID: "confirm", Screen: true},
+		Button{Line: row, Col: noCol, Width: lipgloss.Width(confirmNoLabel), Kind: "confirm-no", BlockID: "confirm", Screen: true},
+	)
+}
+
 func helpInnerH(m model) int { _, h, _, _ := m.helpTextDims(); return h }
 func helpInnerW(m model) int { w, _, _, _ := m.helpTextDims(); return w }
 func helpHalf(m model) int {
@@ -1540,7 +1641,13 @@ func (m model) normalLines() []string {
 			out = append(out, pad(""))
 		}
 	}
-	out = append(out, pad(""))                 // bottom pad
+	// The confirm row (when shown) replaces the bottom-pad row, sitting directly
+	// above the status bar (spec §A: an inline row in the pane, not a mux float).
+	if m.confirmResolved {
+		out = append(out, pad("  "+m.confirmRowString()))
+	} else {
+		out = append(out, pad("")) // bottom pad
+	}
 	out = append(out, pad("  "+m.statusBar())) // status bar
 	return out
 }
@@ -1676,6 +1783,22 @@ func (m *model) announceFollowup(attempt int) {
 // revised fix streams in. Returns the cmd batch to run, or nil when no input
 // FIFO is configured (standalone/sample — emit only). Shared by the verify
 // auto-fire path and the `↻ try another fix` button.
+// resolveConfirm answers the native verify-success confirm (spec §A): yes → generate
+// the final-playbook draft (REPLACE); no → fall back to another fix attempt (the
+// existing follow-up loop). It clears the confirm state and returns the trigger cmd
+// (nil when there is nothing to do, e.g. confirm not active or re-engagement unwired).
+func (m *model) resolveConfirm(yes bool) tea.Cmd {
+	if !m.confirmResolved {
+		return nil
+	}
+	m.confirmResolved = false
+	if yes {
+		return m.beginFinalPlaybookInProc()
+	}
+	verifyID := m.verifyBlockID()
+	return m.beginFollowupStream(verifyID, m.blockCommand(verifyID))
+}
+
 // canReengageInProc reports whether in-process re-engagement is wired (an
 // orchestrator with a Reengage context). When true, beginFollowupStream re-arms
 // the parser with the agent's revised-fix stream directly — no input FIFO needed.

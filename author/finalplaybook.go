@@ -2,6 +2,7 @@ package author
 
 import (
 	"fmt"
+	"io"
 	"strings"
 
 	"ai-playbook/agentstream"
@@ -118,4 +119,15 @@ func FinalPlaybook(req capture.Request, base, context string, opts AuthorOptions
 	sys := FinalPlaybookPrompt(req, base, context)
 	user := BuildUserMessage(req)
 	return RunHarnessEvents(sys, user, opts)
+}
+
+// FinalPlaybookText is the text-path (io.ReadCloser) fallback for FinalPlaybook,
+// mirroring Author/Followup: it builds the FINAL-PLAYBOOK system prompt via
+// FinalPlaybookPrompt(req, base, context) and runs it through the injected text
+// Agent. Used by the orchestrator when the owned event stream can't start (and in
+// tests with a fake Agent). base=="" → fresh; base!="" → amend.
+func FinalPlaybookText(req capture.Request, base, context string, agent Agent) (io.ReadCloser, error) {
+	sys := FinalPlaybookPrompt(req, base, context)
+	user := BuildUserMessage(req)
+	return agent(sys, user)
 }

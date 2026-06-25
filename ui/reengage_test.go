@@ -389,9 +389,17 @@ func newReengageEventsModel(t *testing.T, delta, final string) (model, *fakeEven
 // Final → body) so a re-engagement exercises the live activity feed deterministically.
 type fakeEventsProducer struct {
 	delta, final string
+	gotKind      orchestrator.ReengageKind
+	gotBase      string
+	gotChange    string
+	calls        int
 }
 
-func (f *fakeEventsProducer) fn(kind orchestrator.ReengageKind, failedOutput string) (<-chan agentstream.Event, func() error, error) {
+func (f *fakeEventsProducer) fn(kind orchestrator.ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error) {
+	f.calls++
+	f.gotKind = kind
+	f.gotBase = base
+	f.gotChange = change
 	ch := make(chan agentstream.Event)
 	go func() {
 		ch <- agentstream.Event{Kind: agentstream.TextDelta, Text: f.delta}
@@ -604,10 +612,12 @@ func TestTwoSuccessiveFollowupsLiveActivity(t *testing.T) {
 	round("second followup")
 }
 
-// Issue #3: a verify exit-0 result auto-triggers the wrap-up re-engagement ONCE
-// (and not again on a second verify-0); a verify-fail still triggers the follow-up.
-func TestVerifySuccessTriggersWrapupOnce(t *testing.T) {
-	m, _ := newReengageEventsModel(t, "# resolved?\n", "## Solution\ndone\n")
+// Stage 2 (spec §A): a verify exit-0 result sets the NATIVE confirm state ONCE
+// (rendering an inline row, no auto agent-ask wrap-up); a second verify-0 must not
+// re-prompt. No re-engagement cmd is fired on the result itself — the confirm is
+// answered by y/n/click.
+func TestVerifySuccessSetsConfirmOnce(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# resolved?\n", "## Solution\ndone\n")
 	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
 	m.inputFifoPath = ""
 	m.reflow()
@@ -615,26 +625,234 @@ func TestVerifySuccessTriggersWrapupOnce(t *testing.T) {
 		t.Fatal("setup: expected in-process re-engagement")
 	}
 
-	// First verify exit 0 → wrap-up fires once.
+	// First verify exit 0 → confirm state set; NO agent re-engagement fired yet.
 	nm, cmd := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
-	if cmd == nil {
-		t.Fatal("verify exit 0 must auto-trigger the wrap-up re-engagement")
+	if cmd != nil {
+		t.Errorf("verify exit 0 must NOT auto-fire an agent re-engagement (native confirm), got %T", cmd)
+	}
+	if !m.confirmResolved {
+		t.Fatal("verify exit 0 must set the native confirmResolved state")
 	}
 	if !m.wrappedUp {
-		t.Fatal("verify exit 0 must set wrappedUp")
+		t.Fatal("verify exit 0 must set wrappedUp (once-guard)")
 	}
-	if !m.thinking {
-		t.Error("wrap-up auto-trigger must set thinking=true")
+	if m.thinking {
+		t.Error("setting the confirm must NOT set thinking=true (no generation yet)")
 	}
-	// Drain the wrap-up round so the model settles before the next verify.
-	m = pumpReArm(t, m, cmd)
+	if fe.calls != 0 {
+		t.Errorf("no agent call must happen on the confirm prompt itself, got %d", fe.calls)
+	}
 
-	// Second verify exit 0 → must NOT re-trigger (once per resolution).
+	// Second verify exit 0 → must NOT re-set the confirm (once per resolution). Clear
+	// the first confirm to detect a spurious re-set.
+	m.confirmResolved = false
 	nm2, cmd2 := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm2.(model)
 	if cmd2 != nil {
-		t.Errorf("a second verify exit 0 must NOT re-trigger the wrap-up, got %T", cmd2)
+		t.Errorf("a second verify exit 0 must NOT re-trigger, got %T", cmd2)
+	}
+	if m.confirmResolved {
+		t.Error("a second verify exit 0 must NOT re-set the confirm state")
+	}
+}
+
+// Stage 2 (spec §A): the confirm row + its [ Yes ] [ No ] buttons render in the
+// pager pane on a verify-success.
+func TestVerifySuccessRendersConfirmRow(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# resolved?\n", "# Playbook\n")
+	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	if !m.confirmResolved {
+		t.Fatal("verify exit 0 must set confirmResolved")
+	}
+	view := strip(m.viewString())
+	if !strings.Contains(view, "did this solve your problem?") {
+		t.Errorf("confirm prompt prose missing from view:\n%s", view)
+	}
+	if !strings.Contains(view, confirmYesLabel) || !strings.Contains(view, confirmNoLabel) {
+		t.Errorf("confirm Yes/No buttons missing from view:\n%s", view)
+	}
+	// The two Screen-fixed confirm buttons must be registered for click hit-testing.
+	var yes, no bool
+	for _, b := range m.buttons {
+		if b.Kind == "confirm-yes" {
+			yes = true
+		}
+		if b.Kind == "confirm-no" {
+			no = true
+		}
+	}
+	if !yes || !no {
+		t.Errorf("confirm buttons not registered: yes=%v no=%v", yes, no)
+	}
+}
+
+// Stage 2 (spec §A): answering "Yes" (the `y` key) generates the FINAL-PLAYBOOK in
+// REPLACE mode as a DRAFT — the producer is called with KindReengageFinalPlaybook,
+// the rendered content is reset, thinking starts, and finalDraft is set / committed
+// stays false. The current troubleshoot content is threaded as the change.
+func TestConfirmYesGeneratesFinalPlaybookReplaceDraft(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Playbook — fix\nclean playbook\n", "# Playbook — fix\nclean playbook\n")
+	troubleshoot := "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.md = troubleshoot
+	m.inputFifoPath = ""
+	m.reflow()
+
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	if !m.confirmResolved {
+		t.Fatal("setup: confirm not set")
+	}
+
+	nm2, cmd := m.Update(key("y"))
+	m = nm2.(model)
+	if cmd == nil {
+		t.Fatal("confirm Yes (y) must trigger the final-playbook generation")
+	}
+	if m.confirmResolved {
+		t.Error("answering Yes must clear the confirm state")
+	}
+	// REPLACE: the troubleshoot content was reset on the trigger.
+	if m.md != "" {
+		t.Errorf("Yes must REPLACE (reset m.md), got %q", m.md)
+	}
+	if !m.thinking {
+		t.Error("Yes must set thinking=true (generation in flight)")
+	}
+	if !m.finalDraft {
+		t.Error("Yes must mark the result a finalDraft")
+	}
+	if m.committed {
+		t.Error("stage 2 must NOT commit the draft (committed stays false)")
+	}
+
+	// Drain the generation so the producer is invoked and we can assert the kind/change.
+	m = pumpReArm(t, m, cmd)
+	if fe.calls != 1 {
+		t.Fatalf("producer calls = %d, want 1", fe.calls)
+	}
+	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+		t.Errorf("producer kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
+	}
+	if fe.gotBase != "" {
+		t.Errorf("stage 2 is fresh-only: base must be empty, got %q", fe.gotBase)
+	}
+	if fe.gotChange != troubleshoot {
+		t.Errorf("Yes must thread the troubleshoot content as the change, got %q", fe.gotChange)
+	}
+	if !strings.Contains(m.md, "clean playbook") {
+		t.Errorf("the clean playbook must stream into m.md, got %q", m.md)
+	}
+}
+
+// Stage 2 (spec §A): answering "No" (the `n` key) falls back to the follow-up loop
+// (another fix), NOT the final-playbook generation.
+func TestConfirmNoTriggersFollowup(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Revised\n", "# Revised fix\n")
+	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	if !m.confirmResolved {
+		t.Fatal("setup: confirm not set")
+	}
+	originalMd := m.md
+
+	nm2, cmd := m.Update(key("n"))
+	m = nm2.(model)
+	if cmd == nil {
+		t.Fatal("confirm No (n) must trigger a follow-up")
+	}
+	if m.confirmResolved {
+		t.Error("answering No must clear the confirm state")
+	}
+	if m.finalDraft {
+		t.Error("No must NOT mark a finalDraft")
+	}
+	// APPEND (follow-up): the existing content is kept.
+	if !strings.Contains(m.md, originalMd) {
+		t.Errorf("No (follow-up) must keep the existing content (APPEND), got %q", m.md)
+	}
+
+	m = pumpReArm(t, m, cmd)
+	if fe.gotKind != orchestrator.KindReengageFollowup {
+		t.Errorf("No must select the followup kind, got %v", fe.gotKind)
+	}
+}
+
+// Stage 2 (spec §A): a mouse click on the [ Yes ] / [ No ] buttons resolves the
+// confirm exactly like the y/n keys.
+func TestConfirmResolvesByClick(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
+	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	if !m.confirmResolved {
+		t.Fatal("setup: confirm not set")
+	}
+	// Locate the registered Yes button and click its center cell (+2 for the left margin).
+	var yes Button
+	var found bool
+	for _, b := range m.buttons {
+		if b.Kind == "confirm-yes" {
+			yes = b
+			found = true
+		}
+	}
+	if !found {
+		t.Fatal("confirm-yes button not registered")
+	}
+	clickX := yes.Col + 2 // buttonAt strips the 2-col left margin
+	clickY := yes.Line    // Screen button: absolute screen row
+	nm2, cmd := m.Update(tea.MouseClickMsg{X: clickX, Y: clickY, Button: tea.MouseLeft})
+	m = nm2.(model)
+	if cmd == nil {
+		t.Fatal("clicking Yes must trigger the final-playbook generation")
+	}
+	if m.confirmResolved {
+		t.Error("clicking Yes must clear the confirm state")
+	}
+	if !m.finalDraft {
+		t.Error("clicking Yes must mark a finalDraft")
+	}
+	m = pumpReArm(t, m, cmd)
+	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+		t.Errorf("click Yes kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
+	}
+}
+
+// Stage 2 (spec §E): the `w` key manually finalizes — it generates the same
+// final-playbook draft (REPLACE) as the confirm Yes, even without a pending confirm.
+func TestManualWGeneratesFinalPlaybookDraft(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
+	m.md = "# Troubleshoot content\n"
+	m.inputFifoPath = ""
+	m.reflow()
+
+	nm, cmd := m.Update(key("w"))
+	m = nm.(model)
+	if cmd == nil {
+		t.Fatal("w must trigger the final-playbook generation")
+	}
+	if m.md != "" {
+		t.Errorf("w must REPLACE (reset m.md), got %q", m.md)
+	}
+	if !m.finalDraft || m.committed {
+		t.Errorf("w must mark a draft (finalDraft=%v committed=%v)", m.finalDraft, m.committed)
+	}
+	m = pumpReArm(t, m, cmd)
+	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+		t.Errorf("w kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
 	}
 }
 
@@ -701,12 +919,13 @@ func pumpReArm(t *testing.T, m model, cmd tea.Cmd) model {
 	}
 	nm, c := m.Update(rearm)
 	m = nm.(model)
-	next := c
+	// The reArmStreamMsg handler returns a BATCH (readStream + activityWaitCmd on the
+	// event path); extract the readStream cmd from it before pumping.
+	next := firstStreamCmd(c)
 	for i := 0; i < 1000 && next != nil; i++ {
 		msg := next()
 		ev, ok := msg.(streamEventsMsg)
 		if !ok {
-			// Skip non-stream msgs (e.g. activityMsg/spinTick) and stop pumping.
 			break
 		}
 		nm2, c2 := m.Update(ev)
@@ -714,11 +933,33 @@ func pumpReArm(t *testing.T, m model, cmd tea.Cmd) model {
 		if ev.eof {
 			break
 		}
-		next = c2
+		next = firstStreamCmd(c2)
 	}
 	// Ensure settled for the test's next step.
 	m2, _ := m.Update(streamEventsMsg{eof: true})
 	return m2.(model)
+}
+
+// firstStreamCmd flattens cmd's batch and returns the single tea.Cmd that yields a
+// streamEventsMsg (the readStream cmd), so pumpReArm can drive the stream regardless
+// of the event-path activity batch wrapping it.
+func firstStreamCmd(cmd tea.Cmd) tea.Cmd {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	if bm, ok := msg.(tea.BatchMsg); ok {
+		for _, c := range bm {
+			if s := firstStreamCmd(c); s != nil {
+				return s
+			}
+		}
+		return nil
+	}
+	if _, ok := msg.(streamEventsMsg); ok {
+		return func() tea.Msg { return msg }
+	}
+	return nil
 }
 
 // Follow-up in-process re-arms in APPEND mode with the failed output threaded in.

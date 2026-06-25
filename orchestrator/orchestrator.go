@@ -132,20 +132,31 @@ const (
 	// failed block's captured output.
 	KindReengageFollowup
 	// KindReengageWrapup builds the verify + `## Solution` wrap-up prompt from the
-	// run log.
+	// run log. Retired by stage 2 (the native confirm + FinalPlaybook replaces the
+	// agent-ask wrap-up) but kept enumerated for the legacy Wrapup method.
 	KindReengageWrapup
+	// KindReengageFinalPlaybook builds the FINAL-PLAYBOOK prompt (author.FinalPlaybook):
+	// fresh when base=="" (distill the resolved troubleshoot into a clean reusable
+	// playbook), amend when base!="" (fold the change into the served base playbook).
+	KindReengageFinalPlaybook
 )
 
 // EventsFunc is the injected event producer for re-engagement: per kind it builds
 // the right system prompt + user message (regenerate → standard authoring prompt;
-// followup → the failed-output prompt; wrapup → the runlog wrap-up prompt) and runs
-// the OWNED harness invocation (author.RunHarnessEvents), returning a normalized
-// agentstream.Event channel + a close/wait func. It is built in main.go (which
-// imports author + carries the session's mcp-config) so the orchestrator does NOT
-// import author for the event path. The failedOutput arg carries the failed
-// command's output for followup, and the runlog for wrapup; it is unused for
-// regenerate. A nil Events on Reengage selects the legacy text Agent fallback.
-type EventsFunc func(kind ReengageKind, failedOutput string) (<-chan agentstream.Event, func() error, error)
+// followup → the failed-output prompt; finalplaybook → the FINAL-PLAYBOOK prompt)
+// and runs the OWNED harness invocation (author.RunHarnessEvents), returning a
+// normalized agentstream.Event channel + a close/wait func. It is built in main.go
+// (which imports author + carries the session's mcp-config) so the orchestrator
+// does NOT import author for the event path.
+//
+// The two payload args generalize the producer so each kind gets what it needs:
+//   - base: the base playbook to AMEND (KindReengageFinalPlaybook only; "" → fresh).
+//   - change: the change/context — for followup the failed command's output; for
+//     finalplaybook the troubleshoot content / fix to fold in; for wrapup the runlog.
+//     Unused for regenerate.
+//
+// A nil Events on Reengage selects the legacy text Agent fallback.
+type EventsFunc func(kind ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error)
 
 // Reengage bundles the re-engagement context. Req is the original captured
 // request; Agent is the injected author.Agent (author.ClaudeAgent in production,
@@ -288,7 +299,7 @@ func (o *Orchestrator) Regenerate() (io.ReadCloser, <-chan string, StreamMode, e
 	// EVENT PATH (preferred): the owned harness invocation streams the model's live
 	// reasoning + tool activity during the wait, exactly like the initial authoring.
 	if re.Events != nil {
-		events, closeFn, err := re.Events(KindReengageRegenerate, "")
+		events, closeFn, err := re.Events(KindReengageRegenerate, "", "")
 		if err == nil {
 			reader, activity, fan := agentstream.FanOut(events, closeFn, reengageActivityBuffer)
 			reader = newCloseHook(reader, func() { restore(fan.Body()) })
@@ -311,6 +322,40 @@ func (o *Orchestrator) Regenerate() (io.ReadCloser, <-chan string, StreamMode, e
 	return stream, nil, ModeReplace, nil
 }
 
+// FinalPlaybook generates the clean, reusable FINAL-PLAYBOOK (spec §B) and returns
+// its stream in ModeReplace — the ui clears the rendered troubleshoot and streams
+// the playbook in, as if `run <file>.md`. base selects the mode: "" → FRESH (distill
+// the resolved troubleshoot), non-empty → AMEND (fold the change into the base). The
+// change arg carries the troubleshoot content (fresh) or the requested change (amend)
+// to integrate. Stage 2 is GENERATE-ONLY: this method does NOT save or cache the
+// result (no restore-on-close); persistence (save + cache-replace) is stage 3.
+func (o *Orchestrator) FinalPlaybook(base, change string) (io.ReadCloser, <-chan string, StreamMode, error) {
+	if o.Reengage == nil {
+		return nil, nil, ModeReplace, ErrNotImplemented
+	}
+	re := o.Reengage
+
+	// EVENT PATH (preferred): stream the model's live reasoning + tool activity.
+	if re.Events != nil {
+		events, closeFn, err := re.Events(KindReengageFinalPlaybook, base, change)
+		if err == nil {
+			reader, activity, _ := agentstream.FanOut(events, closeFn, reengageActivityBuffer)
+			return reader, activity, ModeReplace, nil
+		}
+		// Fall through to the text path on a producer/start error.
+	}
+
+	// TEXT PATH (fallback): the FinalPlaybook prompt over the legacy text Agent.
+	if re.Agent == nil {
+		return nil, nil, ModeReplace, ErrNotImplemented
+	}
+	stream, err := author.FinalPlaybookText(re.Req, base, change, re.Agent)
+	if err != nil {
+		return nil, nil, ModeReplace, err
+	}
+	return stream, nil, ModeReplace, nil
+}
+
 // Followup re-engages the agent with the "your fix didn't work" prompt built from
 // the original request + the failed command's captured output, and returns the
 // revised-fix stream (ModeAppend — the ui appends the new section below the
@@ -324,7 +369,7 @@ func (o *Orchestrator) Followup(failedOutput string) (io.ReadCloser, <-chan stri
 
 	// EVENT PATH (preferred): stream the model's live reasoning + tool activity.
 	if re.Events != nil {
-		events, closeFn, err := re.Events(KindReengageFollowup, failedOutput)
+		events, closeFn, err := re.Events(KindReengageFollowup, "", failedOutput)
 		if err == nil {
 			reader, activity, _ := agentstream.FanOut(events, closeFn, reengageActivityBuffer)
 			return reader, activity, ModeAppend, nil
@@ -375,7 +420,7 @@ func (o *Orchestrator) Wrapup(runlog string) (io.ReadCloser, <-chan string, Stre
 	// (1) The solution artifact captures the accumulated `## Solution` body
 	// (Fan.Body() — Final-authoritative) written on close, after the front matter.
 	if re.Events != nil {
-		events, closeFn, err := re.Events(KindReengageWrapup, runlog)
+		events, closeFn, err := re.Events(KindReengageWrapup, "", runlog)
 		if err == nil {
 			reader, activity, fan := agentstream.FanOut(events, closeFn, reengageActivityBuffer)
 			artifact := o.openSolutionArtifact()

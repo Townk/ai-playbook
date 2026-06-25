@@ -602,17 +602,22 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 // text Agent only if config can't be loaded — otherwise the EventsFunc is always
 // returned and the orchestrator prefers it.
 func buildReengageEvents(req capture.Request, sess *session) orchestrator.EventsFunc {
-	return func(kind orchestrator.ReengageKind, failedOutput string) (<-chan agentstream.Event, func() error, error) {
+	return func(kind orchestrator.ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error) {
 		// Per-invocation mcp-config so the re-engaged agent reaches the live backend.
 		mcpPath, removeMCP := sess.writeMCPConfig()
 
 		var sys, user string
 		switch kind {
 		case orchestrator.KindReengageFollowup:
-			sys = author.FollowupPrompt(req, failedOutput)
+			sys = author.FollowupPrompt(req, change) // change carries the failed output for followup
 			user = author.BuildUserMessage(req)
 		case orchestrator.KindReengageWrapup:
-			sys = author.WrapupPrompt(req, failedOutput) // failedOutput carries the runlog for wrapup
+			sys = author.WrapupPrompt(req, change) // change carries the runlog for wrapup (retired in stage 2)
+			user = author.BuildUserMessage(req)
+		case orchestrator.KindReengageFinalPlaybook:
+			// FINAL-PLAYBOOK (stage 2): fresh when base=="" (change = the troubleshoot
+			// content to distill), amend when base!="" (fold change into the base).
+			sys = author.FinalPlaybookPrompt(req, base, change)
 			user = author.BuildUserMessage(req)
 		default: // KindReengageRegenerate → the standard authoring prompt + folded KB
 			sys = author.SystemPrompt(req, author.KnowledgeBase(kb.Load(req.ProjectRoot)))
