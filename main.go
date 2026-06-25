@@ -534,11 +534,11 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 	}
 
 	// Re-engagement context (stage 4c-ii / 2b): the in-process regenerate / followup
-	// / wrapup kinds re-invoke the author. Events (part 2b) is the OWNED normalized
+	// / finalplaybook kinds re-invoke the author. Events (part 2b) is the OWNED normalized
 	// event producer — it streams the model's live reasoning + tool activity during
 	// the re-engagement wait, exactly like the initial authoring; Agent is the text
 	// fallback. regenerate re-stores the fresh playbook (cache + keys), so it gets
-	// them; followup/wrapup only need the request + producer. When the cache is
+	// them; followup/finalplaybook only need the request + producer. When the cache is
 	// disabled/bypassed the keys are empty and regenerate authors-without-re-storing
 	// (matching the shell's cache-bypassed re-run).
 	reengage := &orchestrator.Reengage{
@@ -606,13 +606,13 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 }
 
 // buildReengageEvents builds the orchestrator.EventsFunc that re-engagement
-// (regenerate/followup/wrapup) uses to stream the model's live reasoning + tool
-// activity, exactly like the initial authoring. It lives in main (which imports
+// (regenerate/followup/finalplaybook) uses to stream the model's live reasoning +
+// tool activity, exactly like the initial authoring. It lives in main (which imports
 // author) so the orchestrator stays free of an author import on the event path.
 //
 // Per invocation it builds the right prompt for the kind (regenerate → the
-// standard authoring prompt; followup → the failed-output prompt; wrapup → the
-// runlog wrap-up prompt), lazily writes a fresh --mcp-config pointing at the
+// standard authoring prompt; followup → the failed-output prompt; finalplaybook →
+// the FINAL-PLAYBOOK prompt), lazily writes a fresh --mcp-config pointing at the
 // session's tools backend (so the re-engaged agent still reaches run/ask/remember),
 // and runs the OWNED harness invocation via author.RunHarnessEvents. The returned
 // close/wait func reaps the process AND removes the per-invocation mcp-config.
@@ -630,9 +630,6 @@ func buildReengageEvents(req capture.Request, sess *session) orchestrator.Events
 		switch kind {
 		case orchestrator.KindReengageFollowup:
 			sys = author.FollowupPrompt(req, change) // change carries the failed output for followup
-			user = author.BuildUserMessage(req)
-		case orchestrator.KindReengageWrapup:
-			sys = author.WrapupPrompt(req, change) // change carries the runlog for wrapup (retired in stage 2)
 			user = author.BuildUserMessage(req)
 		case orchestrator.KindReengageFinalPlaybook:
 			// FINAL-PLAYBOOK (stage 2): fresh when base=="" (change = the troubleshoot

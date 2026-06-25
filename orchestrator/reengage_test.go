@@ -10,7 +10,6 @@ import (
 	"ai-playbook/author"
 	"ai-playbook/cache"
 	"ai-playbook/capture"
-	"ai-playbook/kb"
 )
 
 // fakeAgent records the system prompt it was called with and returns a canned
@@ -128,54 +127,6 @@ func TestFollowup_StreamsWithFailedOutput(t *testing.T) {
 	}
 	if !strings.Contains(fa.gotSystem, failed) {
 		t.Errorf("followup prompt missing the failed output %q", failed)
-	}
-}
-
-// Wrapup returns the fake stream (ModeAppend), writes a solution artifact, and
-// appends a distilled fact to the KB.
-func TestWrapup_ArtifactAndKB(t *testing.T) {
-	root := t.TempDir()
-	req := sampleReq()
-	fa := &fakeAgent{canned: "Resolved.\n\n## Solution\nrun make -B\n"}
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
-		Req:      req,
-		Agent:    fa.agent,
-		CtxHash:  "ctxhash",
-		DataRoot: root,
-	})
-
-	stream, _, mode, err := o.Wrapup(`{"id":"verify","exit":0}`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mode != ModeAppend {
-		t.Errorf("mode = %v, want ModeAppend", mode)
-	}
-	got, _ := io.ReadAll(stream)
-	if err := stream.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if string(got) != fa.canned {
-		t.Errorf("stream = %q, want canned", got)
-	}
-
-	// (1) Solution artifact: solutions/<ctx>-<ts>.md with front matter + body.
-	matches, _ := filepath.Glob(filepath.Join(root, "solutions", "ctxhash-*.md"))
-	if len(matches) != 1 {
-		t.Fatalf("solution artifacts = %d, want 1 (%v)", len(matches), matches)
-	}
-	art, _ := os.ReadFile(matches[0])
-	if !strings.Contains(string(art), "## Solution") {
-		t.Errorf("artifact missing the streamed Solution body:\n%s", art)
-	}
-	if !strings.Contains(string(art), "request: fix my build") {
-		t.Errorf("artifact missing the front-matter request:\n%s", art)
-	}
-
-	// (2) KB append: the project's knowledge.md gained a distilled bullet.
-	kbText := kb.LoadFrom(root, req.ProjectRoot)
-	if !strings.Contains(string(kbText), "make build") {
-		t.Errorf("KB not appended with a distilled fact:\n%s", kbText)
 	}
 }
 
@@ -341,8 +292,5 @@ func TestReengageMethods_NoReengage(t *testing.T) {
 	}
 	if _, _, _, err := o.Followup(""); err == nil {
 		t.Error("Followup without Reengage should error")
-	}
-	if _, _, _, err := o.Wrapup(""); err == nil {
-		t.Error("Wrapup without Reengage should error")
 	}
 }

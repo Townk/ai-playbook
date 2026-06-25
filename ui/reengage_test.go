@@ -135,33 +135,6 @@ func TestInProcessRegenerateReArmsReplace(t *testing.T) {
 	}
 }
 
-// Triggering wrap-up in-process appends the `## Solution` stream below the existing
-// playbook (APPEND mode).
-func TestInProcessWrapupReArmsAppend(t *testing.T) {
-	m, fa := newReengageModel(t, "## Solution\nrun make -B\n")
-
-	cmd := m.beginWrapupInProc(m.runLog())
-	if cmd == nil {
-		t.Fatal("beginWrapupInProc returned nil cmd with Reengage wired")
-	}
-	// APPEND: the existing content is kept (a separator was appended).
-	if !strings.Contains(m.md, "old playbook content") {
-		t.Errorf("APPEND dropped the existing playbook → %q", m.md)
-	}
-
-	m = pumpStream(t, m, cmd)
-
-	if fa.calls != 1 {
-		t.Fatalf("agent calls = %d, want 1", fa.calls)
-	}
-	if !strings.Contains(m.md, "old playbook content") {
-		t.Errorf("APPEND must keep the original playbook → %q", m.md)
-	}
-	if !strings.Contains(m.md, "## Solution") {
-		t.Errorf("wrap-up did not append the Solution section → %q", m.md)
-	}
-}
-
 // A failed VERIFY result must AUTO-fire the in-process follow-up when Reengage is
 // wired but there is NO input FIFO — the live session path. This is the stage-4c-ii
 // regression: the resultMsg guard previously suppressed the auto-fire whenever

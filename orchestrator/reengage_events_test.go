@@ -10,7 +10,6 @@ import (
 
 	"ai-playbook/agentstream"
 	"ai-playbook/cache"
-	"ai-playbook/kb"
 )
 
 // fakeEvents builds an EventsFunc that emits a canned normalized event stream:
@@ -259,64 +258,6 @@ func TestFinalPlaybook_AmendThreadsBase(t *testing.T) {
 	}
 	if fe.gotFailed != change {
 		t.Errorf("amend: change = %q, want %q", fe.gotFailed, change)
-	}
-}
-
-// Wrapup via the EVENT path: StreamMode Append, the artifact captures the
-// Final-authoritative `## Solution` body (written on close), and the KB gains the
-// distilled fact.
-func TestWrapup_EventPath_ArtifactAndKB(t *testing.T) {
-	root := t.TempDir()
-	req := sampleReq()
-	fe := &fakeEvents{delta: "Resolved.\n\n## Solution\n", final: "Resolved.\n\n## Solution\nrun make -B\n"}
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
-		Req:      req,
-		Events:   fe.fn,
-		CtxHash:  "ctxhash",
-		DataRoot: root,
-	})
-
-	const runlog = `{"id":"verify","exit":0}`
-	stream, activity, mode, err := o.Wrapup(runlog)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if mode != ModeAppend {
-		t.Errorf("mode = %v, want ModeAppend", mode)
-	}
-	if activity == nil {
-		t.Fatal("event path must return a non-nil activity channel")
-	}
-	go wantActivity(t, activity, "Resolved.\n\n## Solution\n")
-
-	_, _ = io.ReadAll(stream)
-	if err := stream.Close(); err != nil {
-		t.Fatal(err)
-	}
-	if fe.gotKind != KindReengageWrapup {
-		t.Errorf("kind = %v, want wrapup", fe.gotKind)
-	}
-	if fe.gotFailed != runlog {
-		t.Errorf("wrapup failedOutput (runlog) = %q, want %q", fe.gotFailed, runlog)
-	}
-
-	// (1) Artifact: solutions/<ctx>-*.md with front matter + the Final-authoritative body.
-	matches, _ := filepath.Glob(filepath.Join(root, "solutions", "ctxhash-*.md"))
-	if len(matches) != 1 {
-		t.Fatalf("solution artifacts = %d, want 1 (%v)", len(matches), matches)
-	}
-	art, _ := os.ReadFile(matches[0])
-	if !strings.Contains(string(art), "run make -B") {
-		t.Errorf("artifact missing the authoritative Final Solution body:\n%s", art)
-	}
-	if !strings.Contains(string(art), "request: fix my build") {
-		t.Errorf("artifact missing the front-matter request:\n%s", art)
-	}
-
-	// (2) KB append: the distilled fact landed.
-	kbText := kb.LoadFrom(root, req.ProjectRoot)
-	if !strings.Contains(string(kbText), "make build") {
-		t.Errorf("KB not appended with a distilled fact:\n%s", kbText)
 	}
 }
 

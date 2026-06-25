@@ -80,8 +80,6 @@ func kindOf(s string) (orchestrator.Kind, bool) {
 		return orchestrator.KindRegenerate, true
 	case "followup":
 		return orchestrator.KindFollowup, true
-	case "wrapup":
-		return orchestrator.KindWrapup, true
 	default:
 		return 0, false
 	}
@@ -139,7 +137,7 @@ type reArmStreamMsg struct {
 	// activity is the re-engagement's live reasoning + tool-activity feed (from the
 	// orchestrator's fan-out), or nil when the re-engagement used the text fallback
 	// path. When non-nil the model swaps m.activity to it and re-subscribes so the
-	// followup/regenerate/wrapup wait shows live reasoning on the activity line,
+	// followup/regenerate wait shows live reasoning on the activity line,
 	// exactly like the initial authoring.
 	activity <-chan string
 	err      error
@@ -291,36 +289,6 @@ func (m *model) commitPlaybookCmd(body string) tea.Cmd {
 		}
 		return statusMsg{text: "✓ saved playbook → " + path}
 	}
-}
-
-// beginWrapupInProc (in-process) runs the wrap-up pass and re-arms the parser with
-// the `## Solution` summary stream in APPEND mode (the summary streams below the
-// playbook). The orchestrator performs the side effects (solution artifact + KB
-// append). runlog is the run log to feed the wrap-up prompt (empty here — the
-// in-process run log is the model's block states; a richer run log is a later
-// refinement). Returns nil when re-engagement isn't wired.
-//
-// RETIRED (stage 2): no production path calls this anymore — the native verify-success
-// confirm + FinalPlaybook (beginFinalPlaybookInProc) replaces the agent-ask `## Solution`
-// wrap-up. It (and its orchestrator.Wrapup / author.Wrapup plumbing) is left in the
-// tree, unused but exercised by TestInProcessWrapupReArmsAppend; stage 3 may delete it.
-func (m *model) beginWrapupInProc(runlog string) tea.Cmd {
-	orch := m.orch
-	if orch == nil || orch.Reengage == nil {
-		return nil
-	}
-	// APPEND: keep the playbook, add a separator + spinner below it.
-	m.md += "\n\n---\n\n"
-	m.thinking = true
-	m.spinFrame = 0
-	m.spinTicks = 0
-	m.streaming = true
-	m.follow = true
-	m.reflow()
-	return tea.Batch(m.restartTick(), func() tea.Msg {
-		stream, activity, _, err := orch.Wrapup(runlog)
-		return reArmStreamMsg{reader: stream, activity: activity, err: err}
-	})
 }
 
 // writeRunLog writes a run's captured stdout then stderr to a temp file and

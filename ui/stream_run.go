@@ -31,7 +31,7 @@ type StreamOptions struct {
 	// its own driver (the pre-stage-5 behavior). A supplied Driver is OWNED by the
 	// caller: RunStream does NOT close it.
 	Driver   *driver.Driver
-	Reengage *orchestrator.Reengage // re-engagement context (regenerate/followup/wrapup); nil disables those kinds
+	Reengage *orchestrator.Reengage // re-engagement context (regenerate/followup/finalplaybook); nil disables those kinds
 	// Activity, when non-nil, is the agent's live tool-call feed (the session bridges
 	// the tools backend's OnActivity hook to it). The model subscribes and shows the
 	// latest summary next to the "Working…" spinner during the silent authoring wait.

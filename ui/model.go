@@ -2100,27 +2100,6 @@ func (m model) failedOutput(blockID string) string {
 	return string(b)
 }
 
-// runLog assembles a compact run log of the blocks the user ran in this session
-// (id + exit code) for the wrap-up prompt, mirroring the shell's $run_dir/
-// runlog.jsonl (which the shell catted into the wrap-up prompt). Only blocks that
-// actually ran (have a settled status) are included; order follows the rendered
-// blocks so it reads top-to-bottom. Empty when nothing was run (the wrap-up prompt
-// then says "No blocks were run").
-func (m model) runLog() string {
-	var b strings.Builder
-	for _, blk := range m.blocks {
-		st, ok := m.blockStates[blk.ID]
-		if !ok {
-			continue
-		}
-		switch st.Status {
-		case "ok", "failed", "stopped":
-			fmt.Fprintf(&b, "{\"id\":%q,\"exit\":%d}\n", blk.ID, st.Exit)
-		}
-	}
-	return b.String()
-}
-
 // handleToggle flips the Expanded state of the given block and reflows.
 // Toggle is pager-local: it never calls emitAction.
 func (m model) handleToggle(id string) model {

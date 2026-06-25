@@ -10,7 +10,6 @@ package orchestrator
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -24,7 +23,6 @@ import (
 	"ai-playbook/cache"
 	"ai-playbook/capture"
 	"ai-playbook/driver"
-	"ai-playbook/kb"
 	"ai-playbook/mux"
 )
 
@@ -64,7 +62,6 @@ const (
 	KindUndoDiff
 	KindRegenerate
 	KindFollowup
-	KindWrapup
 )
 
 // String renders a Kind as its broker record name.
@@ -88,8 +85,6 @@ func (k Kind) String() string {
 		return "regenerate"
 	case KindFollowup:
 		return "followup"
-	case KindWrapup:
-		return "wrapup"
 	default:
 		return "unknown"
 	}
@@ -132,10 +127,6 @@ const (
 	// KindReengageFollowup builds the "your fix didn't work" prompt from the
 	// failed block's captured output.
 	KindReengageFollowup
-	// KindReengageWrapup builds the verify + `## Solution` wrap-up prompt from the
-	// run log. Retired by stage 2 (the native confirm + FinalPlaybook replaces the
-	// agent-ask wrap-up) but kept enumerated for the legacy Wrapup method.
-	KindReengageWrapup
 	// KindReengageFinalPlaybook builds the FINAL-PLAYBOOK prompt (author.FinalPlaybook):
 	// fresh when base=="" (distill the resolved troubleshoot into a clean reusable
 	// playbook), amend when base!="" (fold the change into the served base playbook).
@@ -153,7 +144,7 @@ const (
 // The two payload args generalize the producer so each kind gets what it needs:
 //   - base: the base playbook to AMEND (KindReengageFinalPlaybook only; "" → fresh).
 //   - change: the change/context — for followup the failed command's output; for
-//     finalplaybook the troubleshoot content / fix to fold in; for wrapup the runlog.
+//     finalplaybook the troubleshoot content / fix to fold in.
 //     Unused for regenerate.
 //
 // A nil Events on Reengage selects the legacy text Agent fallback.
@@ -256,11 +247,11 @@ func (o *Orchestrator) Do(a Action) (driver.Result, error) {
 	// ---- re-engagement kinds (stage 4c-ii) ----
 	// These re-invoke the author and yield a NEW stream that must SWAP the ui's
 	// rendered playbook — that doesn't fit Do's (Result, error) shape, so the ui
-	// drives them through the dedicated Regenerate/Followup/Wrapup methods (which
+	// drives them through the dedicated Regenerate/Followup methods (which
 	// return io.ReadCloser + a StreamMode) instead of Do. Reaching them here means
 	// the caller used the wrong seam; surface ErrNotImplemented rather than
 	// silently doing nothing.
-	case KindRegenerate, KindFollowup, KindWrapup:
+	case KindRegenerate, KindFollowup:
 		return driver.Result{}, ErrNotImplemented
 	default:
 		return driver.Result{}, ErrNotImplemented
@@ -486,109 +477,6 @@ func (o *Orchestrator) Followup(failedOutput string) (io.ReadCloser, <-chan stri
 		return nil, nil, ModeAppend, err
 	}
 	return stream, nil, ModeAppend, nil
-}
-
-// Wrapup runs the wrap-up pass (verify + `## Solution` summary) and returns the
-// summary stream (ModeAppend — the ui appends the `## Solution` section below the
-// existing playbook). It performs the two side effects of ai-assist-wrapup:
-//
-//  1. writes the solution artifact to $DATA/ai-assist/solutions/<ctx>-<ts>.md with
-//     the same front matter, tee'ing the streamed body into it as the ui consumes
-//     it; and
-//  2. appends a distilled fact to the project KB (kb.Append) — the WRITE path
-//     deferred in 4c-i, landed here.
-//
-// The artifact captures the model's verbatim `## Solution` output; the KB append
-// records one durable fact derived from the request so a future session benefits
-// even when the headless agent can't shell out to ai-assist-remember itself.
-func (o *Orchestrator) Wrapup(runlog string) (io.ReadCloser, <-chan string, StreamMode, error) {
-	if o.Reengage == nil {
-		return nil, nil, ModeAppend, ErrNotImplemented
-	}
-	re := o.Reengage
-
-	// (2) KB append — best-effort, the same for both paths. The headless wrap-up
-	// agent can't reliably shell out to ai-assist-remember from this in-process
-	// path, so we record one durable fact derived from the original request.
-	appendKB := func() {
-		if fact := wrapupKBFact(re.Req); fact != "" {
-			_ = kb.AppendTo(re.dataRoot(), re.Req.ProjectRoot, fact)
-		}
-	}
-
-	// EVENT PATH (preferred): stream the model's live reasoning + tool activity.
-	// (1) The solution artifact captures the accumulated `## Solution` body
-	// (Fan.Body() — Final-authoritative) written on close, after the front matter.
-	if re.Events != nil {
-		events, closeFn, err := re.Events(KindReengageWrapup, "", runlog)
-		if err == nil {
-			reader, activity, fan := agentstream.FanOut(events, closeFn, reengageActivityBuffer)
-			artifact := o.openSolutionArtifact()
-			reader = newCloseHook(reader, func() {
-				if artifact != nil {
-					_, _ = io.WriteString(artifact, fan.Body())
-					_ = artifact.Close()
-				}
-				appendKB()
-			})
-			return reader, activity, ModeAppend, nil
-		}
-		// Fall through to the text path on a producer/start error.
-	}
-
-	// TEXT PATH (fallback): the pre-2b behavior — tee the pipe bytes into the
-	// artifact as the ui consumes them.
-	if re.Agent == nil {
-		return nil, nil, ModeAppend, ErrNotImplemented
-	}
-	stream, err := author.Wrapup(re.Req, runlog, re.Agent)
-	if err != nil {
-		return nil, nil, ModeAppend, err
-	}
-	if artifact := o.openSolutionArtifact(); artifact != nil {
-		stream = &teeCloser{ReadCloser: stream, w: artifact, extra: artifact}
-	}
-	appendKB()
-	return stream, nil, ModeAppend, nil
-}
-
-// openSolutionArtifact creates $DATA/solutions/<ctx>-<ts>.md, writes the front
-// matter (request / project_root / created_at), and returns the open file for the
-// streamed body to be tee'd into. Returns nil on any error (best-effort — the
-// shell tolerated a failed artifact and streamed anyway).
-func (o *Orchestrator) openSolutionArtifact() *os.File {
-	re := o.Reengage
-	dir := filepath.Join(re.dataRoot(), "solutions")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return nil
-	}
-	ts := time.Now().UTC().Format("20060102T150405Z")
-	ctx := re.CtxHash
-	if ctx == "" {
-		ctx = "session"
-	}
-	f, err := os.Create(filepath.Join(dir, ctx+"-"+ts+".md"))
-	if err != nil {
-		return nil
-	}
-	created := time.Now().UTC().Format("2006-01-02T15:04:05Z")
-	fmt.Fprintf(f, "---\nrequest: %s\nproject_root: %s\ncreated_at: %s\n---\n\n",
-		re.Req.UserRequest, re.Req.ProjectRoot, created)
-	return f
-}
-
-// wrapupKBFact derives one durable, reusable fact from the request for the KB
-// append. For a failure it records the failing command; otherwise "" (nothing
-// durable to distill from a general question). Never includes secrets/env dumps —
-// only the command text, which the user already typed.
-func wrapupKBFact(req capture.Request) string {
-	if req.Command == "" {
-		return ""
-	}
-	if req.Exit != "" && req.Exit != "0" {
-		return fmt.Sprintf("`%s` was troubleshooted here (exit %s); see the solution artifact.", req.Command, req.Exit)
-	}
-	return ""
 }
 
 // applyTimeout bounds a `git apply` run (small, local — far under the run default).

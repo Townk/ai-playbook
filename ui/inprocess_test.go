@@ -122,7 +122,7 @@ func TestInProcessCopyPlayNoResult(t *testing.T) {
 // Still-deferred kinds resolve to a statusMsg, never a crash, in in-process mode.
 func TestInProcessDeferredKindStatus(t *testing.T) {
 	m := newInProcModel(t)
-	for _, kind := range []string{"regenerate", "followup", "wrapup"} {
+	for _, kind := range []string{"regenerate", "followup"} {
 		cmd := m.emitAction(Button{Kind: kind, BlockID: "x"})
 		if cmd == nil {
 			t.Fatalf("%s: nil cmd", kind)
@@ -189,7 +189,6 @@ func TestKindOfMapping(t *testing.T) {
 		"diff": orchestrator.KindViewDiff, "view-diff": orchestrator.KindViewDiff,
 		"apply-diff": orchestrator.KindApplyDiff, "undo-diff": orchestrator.KindUndoDiff,
 		"regenerate": orchestrator.KindRegenerate, "followup": orchestrator.KindFollowup,
-		"wrapup": orchestrator.KindWrapup,
 	}
 	for s, want := range cases {
 		got, ok := kindOf(s)

@@ -120,8 +120,8 @@ func TestCopyPlayRecorded(t *testing.T) {
 func TestDeferredKindsNotImplemented(t *testing.T) {
 	o := New(newTestDriver(t), &recMux{})
 	// apply-diff / undo-diff / view-diff are implemented as of stage 4c-i; only
-	// regenerate / followup / wrapup remain deferred.
-	for _, k := range []Kind{KindRegenerate, KindFollowup, KindWrapup} {
+	// regenerate / followup remain deferred.
+	for _, k := range []Kind{KindRegenerate, KindFollowup} {
 		if _, err := o.Do(Action{Kind: k}); !errors.Is(err, ErrNotImplemented) {
 			t.Errorf("%s → err=%v (want ErrNotImplemented)", k, err)
 		}
@@ -280,7 +280,7 @@ func TestKindString(t *testing.T) {
 	cases := map[Kind]string{
 		KindCopy: "copy", KindPlay: "play", KindRun: "run", KindStop: "stop",
 		KindViewDiff: "view-diff", KindApplyDiff: "apply-diff", KindUndoDiff: "undo-diff",
-		KindRegenerate: "regenerate", KindFollowup: "followup", KindWrapup: "wrapup",
+		KindRegenerate: "regenerate", KindFollowup: "followup",
 	}
 	for k, want := range cases {
 		if got := k.String(); got != want {
