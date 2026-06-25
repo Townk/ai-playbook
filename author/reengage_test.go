@@ -14,13 +14,15 @@ func TestFollowupPrompt_CarriesFailedOutputAndTask(t *testing.T) {
 	sys := FollowupPrompt(req, failed)
 
 	wants := []string{
-		"did not work",               // the "fix didn't work" framing
-		"fix my broken build",        // original request
-		"make build",                 // failed command (also the verify re-run target)
-		failed,                       // the captured failed output IS present
-		"DIFFERENT",                  // "propose a DIFFERENT, corrected fix"
-		"{id=verify needs=<fix-id>}", // separate verify block
-		"another follow-up",          // offer another follow-up on failure
+		"did not work",          // the "fix didn't work" framing
+		"fix my broken build",   // original request
+		"make build",            // failed command (also the verify re-run target)
+		failed,                  // the captured failed output IS present
+		"DIFFERENT",             // "propose a DIFFERENT, corrected fix"
+		"{id=fix}",              // the fix block must be tagged exactly
+		"{id=verify needs=fix}", // separate verify block, exact id (runner keys on it)
+		"MANDATORY",             // the ids are stressed as required
+		"another follow-up",     // offer another follow-up on failure
 	}
 	for _, w := range wants {
 		if !strings.Contains(sys, w) {

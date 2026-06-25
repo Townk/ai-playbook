@@ -889,7 +889,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// verify failure — the re-armed playbook's verify, which leaves the block in
 		// "failed" — was suppressed as "already fired", so the loop never auto-repeated.
 		// The attempt counter replaces that guard.
-		if msg.ID == "verify" && msg.Exit != 0 &&
+		//
+		// verifyID is the agent's {id=verify} tag; if the agent drifted and left its
+		// blocks untagged (the parser then auto-names them), fall back to the LAST
+		// runnable block as the verify so success/follow-up detection still works.
+		verifyID := m.verifyBlockID()
+		if msg.ID == verifyID && msg.Exit != 0 &&
 			prevAction != "apply" && prevAction != "undo" {
 			switch {
 			case m.followups >= m.maxFollowups:
@@ -925,7 +930,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// new attempt and scroll once so it becomes the top visible row. Only the
 				// AUTO path narrates; the manual "try another fix" button does not.
 				m.announceFollowup(m.followups)
-				if cmd := m.beginFollowupStream("verify", m.blockCommand("verify")); cmd != nil {
+				if cmd := m.beginFollowupStream(verifyID, m.blockCommand(verifyID)); cmd != nil {
 					return m, cmd
 				}
 			}
@@ -939,7 +944,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// wrap-up loop). A deliberately stopped verify already returned above; exit 0
 		// is by definition neither signal-killed (>128) nor 127, so those guards are
 		// moot here. Requires in-process re-engagement (the live session path).
-		if msg.ID == "verify" && msg.Exit == 0 && !m.wrappedUp &&
+		if msg.ID == verifyID && msg.Exit == 0 && !m.wrappedUp &&
 			prevAction != "apply" && prevAction != "undo" &&
 			m.canReengageInProc() {
 			m.wrappedUp = true
@@ -1606,6 +1611,34 @@ func followupAnnouncement(attempt int) string {
 		i = len(followupAnnouncements) - 1
 	}
 	return followupAnnouncements[i]
+}
+
+// verifyBlockID returns the id the runner treats as the "verify" step: the agent's
+// {id=verify} tag when present, else (the agent drifted and left blocks untagged,
+// so the parser auto-named them) the LAST runnable block — which by the literate-
+// playbook convention IS the verification step. This keeps the verify-success →
+// "did this solve it?" confirmation and the verify-fail → follow-up working even
+// when the agent doesn't emit the exact {id=verify} tag.
+func (m model) verifyBlockID() string {
+	last, count, hasVerify := "", 0, false
+	for _, b := range m.blocks {
+		if b.ID == "verify" {
+			hasVerify = true
+		}
+		if (b.Type == "shell" || b.Type == "run") && !b.Static {
+			last = b.ID
+			count++
+		}
+	}
+	// The explicit {id=verify} tag always wins. Otherwise only treat the LAST
+	// runnable block as the verify when there are ≥2 runnable blocks — that's the
+	// fix-then-verify shape, so the last one is the verification step. With 0 or 1
+	// runnable blocks there is no implicit verify (a lone fix block's failure must
+	// show the manual follow-up button, not auto-fire), so keep the conventional id.
+	if hasVerify || count < 2 {
+		return "verify"
+	}
+	return last
 }
 
 // announceFollowup inserts the agent-voice narration line for an AUTO follow-up

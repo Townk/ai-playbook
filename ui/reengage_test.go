@@ -885,3 +885,35 @@ func TestAutoFollowupOneTimeScrollThenNoMovement(t *testing.T) {
 		t.Errorf("streamed content moved the viewport after the one-time scroll: yOff %d -> %d", pinned, m.yOff)
 	}
 }
+
+// verifyBlockID falls back to the LAST runnable block when the agent drifts and
+// leaves blocks untagged (the regression: a follow-up's blocks got auto-named ids
+// like auto-5, so the id=="verify" triggers never matched). The explicit tag and
+// the lone-fix cases must still behave.
+func TestVerifyBlockIDFallback(t *testing.T) {
+	// Two UNTAGGED runnable blocks → the last is the verify by convention.
+	m := newModel("T", "```bash\nmake fix\n```\n\n```bash\nmake build\n```\n")
+	m.width, m.height = 80, 24
+	m.reflow()
+	if len(m.blocks) < 2 {
+		t.Fatalf("expected 2 parsed blocks, got %d", len(m.blocks))
+	}
+	if want, got := m.blocks[len(m.blocks)-1].ID, m.verifyBlockID(); got != want {
+		t.Errorf("untagged: verifyBlockID()=%q, want last runnable %q", got, want)
+	}
+	// A single untagged block has NO implicit verify → keep the convention id
+	// (a lone fix block's failure shows the manual button, not auto-fire).
+	m1 := newModel("T", "```bash\nmake build\n```\n")
+	m1.width, m1.height = 80, 24
+	m1.reflow()
+	if got := m1.verifyBlockID(); got != "verify" {
+		t.Errorf("single block: verifyBlockID()=%q, want \"verify\"", got)
+	}
+	// Explicit {id=verify} always wins.
+	m2 := newModel("T", "```bash {id=fix}\nx\n```\n\n```bash {id=verify}\ny\n```\n")
+	m2.width, m2.height = 80, 24
+	m2.reflow()
+	if got := m2.verifyBlockID(); got != "verify" {
+		t.Errorf("tagged: verifyBlockID()=%q, want \"verify\"", got)
+	}
+}
