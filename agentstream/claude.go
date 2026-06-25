@@ -9,27 +9,46 @@ import (
 
 // claudeAdapter parses Claude Code's `--output-format stream-json --verbose
 // --include-partial-messages` output: one JSON object per line (NDJSON). It
-// normalizes that wire format into the shared Event model per the classification
-// rule documented in agentstream.go:
+// normalizes that wire format into the shared Event model.
 //
-//   - assistant message content: text → TextDelta, thinking → Reasoning,
-//     tool_use → ToolActivity (tool name + a short input rendering).
+// Dedup rule (the reason for the deltas-vs-assistant split below). With
+// --include-partial-messages, Claude Code emits each piece of output TWICE: once
+// as incremental `stream_event` content_block_delta chunks (the streaming source
+// of truth), and again as a full top-level `assistant` message that REPEATS the
+// COMPLETE text/thinking of the just-finished block. Emitting from both doubled
+// the playbook in the doc and — worse — that late full-text assistant message
+// reached the ui as a textEvent, flipping m.thinking off mid-work and killing the
+// spinner + activity line. So this adapter takes the deltas as the streaming
+// truth and pulls ONLY tool_use from the assistant message:
+//
 //   - stream_event content_block_delta: text_delta → TextDelta,
 //     thinking_delta → Reasoning. content_block_start/stop → ignored.
+//   - assistant message content: tool_use → ToolActivity (tool name + a short
+//     input rendering). The assistant message's text and thinking blocks are
+//     NOT re-emitted — they DUPLICATE the deltas. tool_use is taken from the
+//     assistant message because tool_use input is NOT reconstructable from the
+//     partial input_json_delta stream, so the assembled message is the right
+//     source for tools.
 //   - result → Final (the authoritative complete playbook text).
 //   - system and any unknown envelope type/field → ignored gracefully.
+//
+// Assumption: --include-partial-messages is set. Our owned invocation always
+// sets it, so the deltas are guaranteed to carry the text/thinking; the simple
+// rule above (never re-emit assistant text/thinking) is therefore safe. A
+// no-partial fallback would have no text_delta stream and would need to fall
+// back to the assistant message's text — out of scope here, since the owned
+// invocation guarantees partials.
 //
 // Robustness: blank and malformed lines are skipped, not fatal; very long lines
 // are handled (bufio.Reader, not a fixed-size Scanner buffer).
 //
-// Reasoning caveat: this adapter maps thinking / thinking_delta → Reasoning, but
-// Claude Code only EMITS thinking blocks when extended thinking is enabled. The
-// owned invocation enables it via MAX_THINKING_TOKENS (see author.events:
-// claudeThinkingTokens, driven by config [agent].thinking). Even then, in
-// `--print --output-format stream-json` Claude Code OMITS the thinking block
-// text (the readable summary is not surfaced), so Reasoning events fire — driving
-// the "model is reasoning" activity — but their Text is typically empty. pi
-// (--mode json, thinkingText) surfaces the reasoning text natively.
+// Empty-activity drop: Reasoning and ToolActivity events whose Text is
+// empty/whitespace are never emitted. Claude --print REDACTS thinking — the
+// thinking content_block emits only signature_delta (no thinking text), so the
+// thinking_delta path yields empty Reasoning that would otherwise clobber the
+// live activity line. Dropping it means that with claude the activity line shows
+// TOOL activity only; the model's reasoning text is not exposed by claude
+// --print. pi (--mode json, thinkingText) surfaces real reasoning later.
 type claudeAdapter struct{}
 
 // toolSummaryMaxCols bounds the single-line tool-activity summary width.
@@ -54,12 +73,14 @@ type claudeMessage struct {
 	Content []claudeContentBlock `json:"content,omitempty"`
 }
 
+// claudeContentBlock decodes only the fields the adapter uses from an assistant
+// message block. The assistant message is the source for tool_use ONLY (Name +
+// Input); its text/thinking are intentionally not decoded — they duplicate the
+// stream_event deltas (see the dedup rule on claudeAdapter).
 type claudeContentBlock struct {
-	Type     string          `json:"type"`
-	Text     string          `json:"text,omitempty"`
-	Thinking string          `json:"thinking,omitempty"`
-	Name     string          `json:"name,omitempty"`
-	Input    json.RawMessage `json:"input,omitempty"`
+	Type  string          `json:"type"`
+	Name  string          `json:"name,omitempty"`
+	Input json.RawMessage `json:"input,omitempty"`
 }
 
 type claudeStreamEvent struct {
@@ -105,15 +126,14 @@ func parseClaudeLine(line string, emit func(Event)) {
 		if l.Message == nil {
 			return
 		}
+		// ONLY tool_use is taken from the assembled assistant message; its text and
+		// thinking blocks DUPLICATE the stream_event deltas and are dropped (see the
+		// dedup rule on claudeAdapter). Empty/whitespace summaries are not emitted.
 		for _, b := range l.Message.Content {
-			switch b.Type {
-			case "text":
-				emit(Event{Kind: TextDelta, Text: b.Text})
-			case "thinking":
-				emit(Event{Kind: Reasoning, Text: b.Thinking})
-			case "tool_use":
-				emit(Event{Kind: ToolActivity, Text: toolSummary(b.Name, b.Input)})
+			if b.Type != "tool_use" {
+				continue
 			}
+			emitActivity(emit, ToolActivity, toolSummary(b.Name, b.Input))
 		}
 	case "stream_event":
 		if l.Event == nil || l.Event.Delta == nil {
@@ -121,14 +141,30 @@ func parseClaudeLine(line string, emit func(Event)) {
 		}
 		switch l.Event.Delta.Type {
 		case "text_delta":
+			// TextDelta is the playbook; emit it verbatim (empty deltas are harmless
+			// here — they neither double the doc nor clobber the activity line).
 			emit(Event{Kind: TextDelta, Text: l.Event.Delta.Text})
 		case "thinking_delta":
-			emit(Event{Kind: Reasoning, Text: l.Event.Delta.Thinking})
+			// claude --print redacts thinking (signature_delta only), so this is
+			// typically empty; emitActivity drops empty Reasoning so it can't clobber
+			// the tool-activity line.
+			emitActivity(emit, Reasoning, l.Event.Delta.Thinking)
 		}
 	case "result":
 		emit(Event{Kind: Final, Text: l.Result})
 	}
 	// "system" and any unknown type fall through → ignored.
+}
+
+// emitActivity emits a Reasoning/ToolActivity event only when text has
+// non-whitespace content. Empty/whitespace activity (notably claude's redacted
+// thinking, which yields empty Reasoning) is dropped so it never overwrites the
+// live activity line with nothing.
+func emitActivity(emit func(Event), kind EventKind, text string) {
+	if strings.TrimSpace(text) == "" {
+		return
+	}
+	emit(Event{Kind: kind, Text: text})
 }
 
 // toolSummary renders a one-line, width-bounded activity label for a tool_use.

@@ -80,32 +80,116 @@ func TestTextAdapter_EmptyEOF(t *testing.T) {
 }
 
 // claudeSession is a representative stream-json session: a system line (ignored),
-// partial text/thinking deltas, a full assistant message with a thinking block, a
-// tool_use for a `run` command, interim text, and a final result.
+// partial text/thinking deltas, a full assistant message that REPEATS the text +
+// thinking of the just-finished block and carries a tool_use for a `run` command,
+// a second assistant message repeating the next text block, and a final result.
+//
+// The duplication is exactly what Claude Code emits under
+// --include-partial-messages: the streaming deltas are the source of truth, and
+// the assembled `assistant` message repeats the complete text/thinking. The
+// adapter must dedup by taking the deltas and pulling ONLY tool_use from the
+// assistant message — never re-emitting the assistant message's text/thinking.
 const claudeSession = `{"type":"system","subtype":"init","session_id":"abc"}
 {"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"text"}}}
 {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Here'"}}}
 {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"s the plan"}}}
 {"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"thinking_delta","thinking":"let me check the logs"}}}
 {"type":"stream_event","event":{"type":"content_block_stop","index":0}}
-{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"I should run the build"},{"type":"text","text":"Running the build now."},{"type":"tool_use","name":"run","input":{"command":"make build"}}]}}
-{"type":"assistant","message":{"content":[{"type":"text","text":"Done."}]}}
+{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"I should run the build"},{"type":"text","text":"Here's the plan"},{"type":"tool_use","name":"run","input":{"command":"make build"}}]}}
+{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"Running the build now."}}}
+{"type":"assistant","message":{"content":[{"type":"text","text":"Running the build now."}]}}
 {"type":"result","result":"# Fix\n\nrun make build\n","is_error":false}
 `
 
 func TestClaudeAdapter_FullSession(t *testing.T) {
 	a, _ := Get("claude")
 	got := collect(t, a, strings.NewReader(claudeSession))
+	// Text comes ONLY from the deltas; the assistant messages' text/thinking are
+	// NOT re-emitted (no doubling). tool_use IS taken from the assistant message.
 	want := []Event{
 		{Kind: TextDelta, Text: "Here'"},
 		{Kind: TextDelta, Text: "s the plan"},
 		{Kind: Reasoning, Text: "let me check the logs"},
-		{Kind: Reasoning, Text: "I should run the build"},
-		{Kind: TextDelta, Text: "Running the build now."},
 		{Kind: ToolActivity, Text: "❯ make build"},
-		{Kind: TextDelta, Text: "Done."},
+		{Kind: TextDelta, Text: "Running the build now."},
 		{Kind: Final, Text: "# Fix\n\nrun make build\n"},
 	}
+	assertEvents(t, got, want)
+}
+
+// TestClaudeAdapter_DedupReplayedCapture replays the real captured shape from the
+// live `claude -p --output-format stream-json --include-partial-messages` run:
+// the SAME complete text streams as text_delta chunks AND is repeated in a full
+// top-level assistant[text] message, then again in result. The adapter must emit
+// the text ONCE (only from the deltas); the assistant text block must NOT be
+// re-emitted, and Final must equal the result text.
+func TestClaudeAdapter_DedupReplayedCapture(t *testing.T) {
+	a, _ := Get("claude")
+	const full = "At 60 mph for 2.5 hours: 60 × 2.5 = 150, so the train travels **150 miles**."
+	in := strings.Join([]string{
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":"At 60 mph for 2"}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"text_delta","text":".5 hours: 60 × 2.5 = 150, so the train travels **150 miles**."}}}`,
+		`{"type":"assistant","message":{"content":[{"type":"text","text":"` + full + `"}]}}`,
+		`{"type":"result","result":"` + full + `"}`,
+	}, "\n") + "\n"
+	got := collect(t, a, strings.NewReader(in))
+	want := []Event{
+		{Kind: TextDelta, Text: "At 60 mph for 2"},
+		{Kind: TextDelta, Text: ".5 hours: 60 × 2.5 = 150, so the train travels **150 miles**."},
+		{Kind: Final, Text: full},
+	}
+	assertEvents(t, got, want)
+
+	// Belt-and-suspenders: the playbook reconstructed from the TextDeltas equals the
+	// complete text exactly once — no doubling from the assistant message.
+	var sb strings.Builder
+	for _, e := range got {
+		if e.Kind == TextDelta {
+			sb.WriteString(e.Text)
+		}
+	}
+	if sb.String() != full {
+		t.Fatalf("reconstructed playbook = %q, want %q (deltas only, no double-emit)", sb.String(), full)
+	}
+}
+
+// TestClaudeAdapter_AssistantToolUseOnly: a full assistant message carrying a
+// thinking block, a text block, AND a tool_use must yield EXACTLY one
+// ToolActivity — the text and thinking blocks are dropped (they duplicate the
+// deltas).
+func TestClaudeAdapter_AssistantToolUseOnly(t *testing.T) {
+	a, _ := Get("claude")
+	in := `{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"deciding"},{"type":"text","text":"Running it."},{"type":"tool_use","name":"run","input":{"command":"make build"}}]}}` + "\n"
+	got := collect(t, a, strings.NewReader(in))
+	want := []Event{{Kind: ToolActivity, Text: "❯ make build"}}
+	assertEvents(t, got, want)
+}
+
+// TestClaudeAdapter_RedactedThinkingNoEmptyReasoning: the redacted-thinking shape
+// — a signature_delta (no text) on the stream and an assistant thinking block
+// with empty text — must produce NO Reasoning events at all. An empty Reasoning
+// would otherwise clobber the live tool-activity line.
+func TestClaudeAdapter_RedactedThinkingNoEmptyReasoning(t *testing.T) {
+	a, _ := Get("claude")
+	in := strings.Join([]string{
+		`{"type":"stream_event","event":{"type":"content_block_start","content_block":{"type":"thinking","thinking":"","signature":""}}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"abc123"}}}`,
+		`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"","signature":"abc123"}]}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"   "}}}`,
+	}, "\n") + "\n"
+	got := collect(t, a, strings.NewReader(in))
+	if len(got) != 0 {
+		t.Fatalf("redacted/empty thinking should emit nothing, got %+v", got)
+	}
+}
+
+// TestClaudeAdapter_ThinkingDeltaNonEmpty: a non-empty thinking_delta (the pi /
+// non-redacted path) yields exactly one Reasoning event with the text.
+func TestClaudeAdapter_ThinkingDeltaNonEmpty(t *testing.T) {
+	a, _ := Get("claude")
+	in := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"weighing the options"}}}` + "\n"
+	got := collect(t, a, strings.NewReader(in))
+	want := []Event{{Kind: Reasoning, Text: "weighing the options"}}
 	assertEvents(t, got, want)
 }
 
@@ -116,7 +200,7 @@ func TestClaudeAdapter_MalformedAndBlankLinesSkipped(t *testing.T) {
 	in := strings.Join([]string{
 		``,
 		`not json at all`,
-		`{"type":"assistant","message":{"content":[{"type":"text","text":"ok"}]}}`,
+		`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}}`,
 		`{"type":"assistant",`, // truncated/malformed JSON
 		``,
 		`{"type":"result","result":"final"}`,

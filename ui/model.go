@@ -367,11 +367,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case textEvent:
 				m.md += e.text // cheap append; reflow is coalesced (renderTickMsg)
 				m.dirty = true
-				m.thinking = false
-				// Real playbook content is arriving: the agent's tool-use phase is over,
-				// so clear the live activity line (it would otherwise linger over the
-				// rendered content).
-				m.activityLine = ""
+				// Real playbook content arriving ends the thinking phase: the spinner +
+				// activity line stop, and the activity line is cleared so it doesn't
+				// linger over the rendered content. Guard against an EMPTY/whitespace-only
+				// text event flipping thinking off — claude's stream can interleave empty
+				// text chunks during the work phase, and an empty chunk is not real
+				// playbook content. Only non-whitespace text ends thinking.
+				if strings.TrimSpace(e.text) != "" {
+					m.thinking = false
+					m.activityLine = ""
+				}
 			case thinkEvent:
 				label := e.label
 				if label == "" {
