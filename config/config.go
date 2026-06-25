@@ -31,16 +31,29 @@ type Mux struct {
 	TypeIntoPane     string `toml:"type-into-pane"`
 }
 
-// Harness is the per-harness invocation config. Structure only for this stage;
-// tools/invoke are filled in the next stage.
-type Harness struct {
-	Invoke string `toml:"invoke"`
+// Agent holds the user's harness SELECTION and a few value preferences. It does
+// NOT carry the invocation command: the harness invocation flags and the stream
+// parser are one matched contract owned in-tree (package author + agentstream),
+// so the user only picks WHICH harness plus these prefs.
+//
+//   - Harness: which shipped harness to drive ("claude"; pi/cursor are additive
+//     later). Each supported harness is a matched {owned invocation, stream
+//     adapter} pair.
+//   - Model: the model id to pass the harness (empty → harness default).
+//   - Bin: optional override for the harness executable path (empty → the
+//     harness name resolved on PATH).
+//   - Thinking: optional thinking/reasoning preference (empty → harness default).
+type Agent struct {
+	Harness  string `toml:"harness"`
+	Model    string `toml:"model"`
+	Bin      string `toml:"bin"`
+	Thinking string `toml:"thinking"`
 }
 
 // Config is the merged ai-playbook configuration.
 type Config struct {
-	Mux     Mux                `toml:"mux"`
-	Harness map[string]Harness `toml:"harness"`
+	Mux   Mux   `toml:"mux"`
+	Agent Agent `toml:"agent"`
 }
 
 // Default returns a fresh copy of the baked-in default profile. The mux defaults
@@ -60,7 +73,12 @@ func Default() *Config {
 			DumpScreen:     "zellij action dump-screen {panearg}",
 			TypeIntoPane:   "zellij action write-chars {text}",
 		},
-		Harness: map[string]Harness{},
+		Agent: Agent{
+			Harness:  "claude",
+			Model:    "",
+			Bin:      "",
+			Thinking: "",
+		},
 	}
 }
 
@@ -114,14 +132,10 @@ func loadFrom(base *Config, path string, data []byte) (*Config, error) {
 	mergeStr(&base.Mux.OpenDockedPane, user.Mux.OpenDockedPane)
 	mergeStr(&base.Mux.DumpScreen, user.Mux.DumpScreen)
 	mergeStr(&base.Mux.TypeIntoPane, user.Mux.TypeIntoPane)
-	for name, h := range user.Harness {
-		if base.Harness == nil {
-			base.Harness = map[string]Harness{}
-		}
-		existing := base.Harness[name]
-		mergeStr(&existing.Invoke, h.Invoke)
-		base.Harness[name] = existing
-	}
+	mergeStr(&base.Agent.Harness, user.Agent.Harness)
+	mergeStr(&base.Agent.Model, user.Agent.Model)
+	mergeStr(&base.Agent.Bin, user.Agent.Bin)
+	mergeStr(&base.Agent.Thinking, user.Agent.Thinking)
 	return base, nil
 }
 

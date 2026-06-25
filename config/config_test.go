@@ -21,6 +21,16 @@ func TestLoad_NoFile_Defaults(t *testing.T) {
 	if !strings.HasPrefix(cfg.Mux.DumpScreen, "zellij action dump-screen") {
 		t.Fatalf("dump-screen default = %q", cfg.Mux.DumpScreen)
 	}
+	// The agent defaults: harness "claude", everything else empty.
+	if cfg.Agent != def.Agent {
+		t.Fatalf("agent defaults differ:\n got %+v\nwant %+v", cfg.Agent, def.Agent)
+	}
+	if cfg.Agent.Harness != "claude" {
+		t.Fatalf("agent.harness default = %q, want claude", cfg.Agent.Harness)
+	}
+	if cfg.Agent.Model != "" || cfg.Agent.Bin != "" || cfg.Agent.Thinking != "" {
+		t.Fatalf("agent non-harness defaults should be empty: %+v", cfg.Agent)
+	}
 }
 
 // XDG path takes precedence; a present file's keys override the defaults.
@@ -50,7 +60,7 @@ func TestLoad_XDGPath(t *testing.T) {
 
 // loadFrom merges only non-empty keys over the base default (absent → default).
 func TestMerge_OnlyOverridesPresentKeys(t *testing.T) {
-	data := []byte("[mux]\nopen-floating-pane = \"wezterm spawn -- {cmd}\"\n\n[harness.claude]\ninvoke = \"claude -p\"\n")
+	data := []byte("[mux]\nopen-floating-pane = \"wezterm spawn -- {cmd}\"\n\n[agent]\nmodel = \"opus\"\nbin = \"/opt/claude\"\n")
 	cfg, err := loadFrom(Default(), "test.toml", data)
 	if err != nil {
 		t.Fatalf("loadFrom: %v", err)
@@ -61,8 +71,33 @@ func TestMerge_OnlyOverridesPresentKeys(t *testing.T) {
 	if cfg.Mux.DumpScreen != Default().Mux.DumpScreen {
 		t.Fatalf("dump-screen should keep default: %q", cfg.Mux.DumpScreen)
 	}
-	if cfg.Harness["claude"].Invoke != "claude -p" {
-		t.Fatalf("harness invoke: %q", cfg.Harness["claude"].Invoke)
+	// Present [agent] keys override; absent keys keep their defaults.
+	if cfg.Agent.Model != "opus" {
+		t.Fatalf("agent.model override: %q", cfg.Agent.Model)
+	}
+	if cfg.Agent.Bin != "/opt/claude" {
+		t.Fatalf("agent.bin override: %q", cfg.Agent.Bin)
+	}
+	if cfg.Agent.Harness != "claude" {
+		t.Fatalf("agent.harness should keep default: %q", cfg.Agent.Harness)
+	}
+	if cfg.Agent.Thinking != "" {
+		t.Fatalf("agent.thinking should keep empty default: %q", cfg.Agent.Thinking)
+	}
+}
+
+// A user [agent].harness overrides the default selection.
+func TestMerge_AgentHarnessOverride(t *testing.T) {
+	data := []byte("[agent]\nharness = \"pi\"\nthinking = \"high\"\n")
+	cfg, err := loadFrom(Default(), "test.toml", data)
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.Agent.Harness != "pi" {
+		t.Fatalf("agent.harness override: %q", cfg.Agent.Harness)
+	}
+	if cfg.Agent.Thinking != "high" {
+		t.Fatalf("agent.thinking override: %q", cfg.Agent.Thinking)
 	}
 }
 
