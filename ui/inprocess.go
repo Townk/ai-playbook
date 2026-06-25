@@ -17,6 +17,17 @@ import (
 // status bar until the next key/click and never crashes the UI.
 type statusMsg struct{ text string }
 
+// playbookCommittedMsg carries the outcome of a commitPlaybookCmd persist (auto-finish
+// baseline or a `w` re-persist, spec §D) back into the model. On success (err==nil)
+// the handler flips committed=true and shows "✓ saved playbook → <path>"; on failure
+// it shows the error and leaves committed=false (so `w`/the quit-guard still apply).
+// Carrying the outcome (vs an optimistic flip on the trigger) keeps committed tied to
+// the actual persist result.
+type playbookCommittedMsg struct {
+	path string
+	err  error
+}
+
 // fChangeMsg carries the outcome of the `f` request-input float back into the model
 // (spec §D, stage 5): the user's typed adjustment (value) and whether they submitted.
 // base is the pager content snapshotted when `f` was pressed — the AMEND base, so a
@@ -232,7 +243,13 @@ func (m *model) beginFinalPlaybookInProc() tea.Cmd {
 	// The troubleshoot content is the input the FINAL-PLAYBOOK prompt distills; grab
 	// it BEFORE the REPLACE reset clears m.md. The served base is independent of m.md
 	// (stashed on the cache-HIT serve), so it survives the reset.
-	return m.beginFinalPlaybookGenerate(m.servedBase, m.md)
+	cmd := m.beginFinalPlaybookGenerate(m.servedBase, m.md)
+	// This is a FINALIZE (confirm-yes / `w`-on-transcript), not an `f` amend: the
+	// stream-EOF handler must auto-persist a baseline so quitting before `w` still
+	// leaves a complete saved playbook with front matter (spec §D). The `f` amend path
+	// (fChangeMsg → beginFinalPlaybookGenerate directly) leaves this cleared.
+	m.persistOnFinish = true
+	return cmd
 }
 
 // beginFinalPlaybookGenerate is the shared REPLACE re-arm that both the confirm /
@@ -260,9 +277,13 @@ func (m *model) beginFinalPlaybookGenerate(base, change string) tea.Cmd {
 	// stays false so streaming content stays anchored at the top.
 	m.yOff = 0
 	m.pinTop = -1
-	// Mark the upcoming render a draft (not yet committed/persisted).
+	// Mark the upcoming render a draft (not yet committed/persisted). Default the
+	// auto-persist intent OFF: this shared re-arm is also the `f` AMEND path, which must
+	// NOT auto-persist (it leaves an unsaved tweak). The FINALIZE caller
+	// (beginFinalPlaybookInProc) re-sets persistOnFinish=true after this returns.
 	m.finalDraft = true
 	m.committed = false
+	m.persistOnFinish = false
 	m.reflow()
 	return tea.Batch(m.restartTick(), func() tea.Msg {
 		stream, activity, _, err := orch.FinalPlaybook(base, change)
@@ -270,13 +291,13 @@ func (m *model) beginFinalPlaybookGenerate(base, change string) tea.Cmd {
 	})
 }
 
-// commitPlaybookCmd (in-process, stage 3 / spec §E) persists the displayed final
-// playbook draft via orchestrator.CommitPlaybook (save the .md + cache-replace this
-// request's entry), OFF the event loop, and surfaces the outcome as a statusMsg:
-// "✓ saved playbook → <path>" on success, the error otherwise. The model already set
-// committed=true on the trigger (the commit is best-effort/deterministic); this cmd
-// only reports the result. body is the draft to commit (snapshotted on the trigger so
-// a later stream can't race it). Returns a no-op status when re-engagement is unwired.
+// commitPlaybookCmd (in-process, spec §D/§E) persists the displayed final playbook
+// draft via orchestrator.CommitPlaybook (save the .md + cache-replace this request's
+// entry, assembling+prepending front matter), OFF the event loop, and surfaces the
+// outcome as a playbookCommittedMsg. The handler flips committed=true on success and
+// shows "✓ saved playbook → <path>" / the error. body is the draft to commit
+// (snapshotted on the trigger so a later stream can't race it). Returns a no-op status
+// when re-engagement is unwired.
 func (m *model) commitPlaybookCmd(body string) tea.Cmd {
 	orch := m.orch
 	if orch == nil || orch.Reengage == nil {
@@ -284,10 +305,7 @@ func (m *model) commitPlaybookCmd(body string) tea.Cmd {
 	}
 	return func() tea.Msg {
 		path, err := orch.CommitPlaybook(body)
-		if err != nil {
-			return statusMsg{text: "commit: " + err.Error()}
-		}
-		return statusMsg{text: "✓ saved playbook → " + path}
+		return playbookCommittedMsg{path: path, err: err}
 	}
 }
 

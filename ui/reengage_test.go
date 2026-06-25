@@ -974,10 +974,11 @@ func TestManualWGeneratesFinalPlaybookDraft(t *testing.T) {
 	}
 }
 
-// Stage 3 (spec §E): `w` on an existing final-playbook DRAFT COMMITS it — it calls
-// orchestrator.CommitPlaybook (save + cache-replace), marks committed, shows the
-// "✓ saved playbook → <path>" status, and does NOT re-generate (the producer is not
-// called and the rendered draft is preserved, not reset).
+// Stage 4b (spec §D): `w` on a DIRTY final-playbook DRAFT (finalDraft && !committed)
+// re-persists it — it calls orchestrator.CommitPlaybook (save + cache-replace), shows
+// "finalizing…" while the metadata round-trip runs, and on success the
+// playbookCommittedMsg result flips committed=true and shows "✓ saved playbook → <path>".
+// It does NOT re-generate (the producer is not called and the draft is preserved).
 func TestWCommitsExistingDraft(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	m.md = "# Playbook — My Setup\n\nclean playbook\n"
@@ -989,10 +990,15 @@ func TestWCommitsExistingDraft(t *testing.T) {
 	nm, cmd := m.Update(key("w"))
 	m = nm.(model)
 	if cmd == nil {
-		t.Fatal("w on a draft must return the commit cmd")
+		t.Fatal("w on a dirty draft must return the commit cmd")
 	}
-	if !m.committed {
-		t.Error("w on a draft must mark committed=true")
+	// committed flips on the RESULT now (not optimistically at the trigger); meanwhile
+	// the transient "finalizing…" status covers the metadata round-trip.
+	if m.committed {
+		t.Error("w must not flip committed at the trigger — it flips on the persist result")
+	}
+	if m.status != "finalizing…" {
+		t.Errorf("w-commit must show the finalizing status, got %q", m.status)
 	}
 	// The draft must be PRESERVED (not REPLACE-reset like a generation) and not regenerated.
 	if !strings.Contains(m.md, "My Setup") {
@@ -1001,18 +1007,51 @@ func TestWCommitsExistingDraft(t *testing.T) {
 	if m.thinking {
 		t.Error("w-commit must NOT start a generation (thinking) — it just persists")
 	}
-	// Run the commit cmd: it persists via CommitPlaybook and yields the saved status.
+	// Run the commit cmd: it persists via CommitPlaybook and yields a playbookCommittedMsg.
 	msg := cmd()
-	sm, ok := msg.(statusMsg)
+	pc, ok := msg.(playbookCommittedMsg)
 	if !ok {
-		t.Fatalf("commit cmd must yield a statusMsg, got %T", msg)
+		t.Fatalf("commit cmd must yield a playbookCommittedMsg, got %T", msg)
 	}
-	if !strings.Contains(sm.text, "saved playbook") {
-		t.Errorf("commit status = %q, want a 'saved playbook' confirmation", sm.text)
+	if pc.err != nil {
+		t.Fatalf("commit must succeed, got %v", pc.err)
+	}
+	// Apply the result: committed flips true and the saved status shows.
+	nm2, _ := m.Update(pc)
+	m = nm2.(model)
+	if !m.committed {
+		t.Error("the commit result must flip committed=true")
+	}
+	if !strings.Contains(m.status, "saved playbook") {
+		t.Errorf("commit status = %q, want a 'saved playbook' confirmation", m.status)
 	}
 	// The producer (final-playbook generation) must NOT have been called.
 	if fe.calls != 0 {
 		t.Errorf("w-commit must not generate (producer calls = %d, want 0)", fe.calls)
+	}
+}
+
+// Stage 4b (spec §D efficiency): `w` on an ALREADY-SAVED draft (finalDraft && committed)
+// is a no-op — it does NOT call CommitPlaybook (no wasted metadata round-trip) and just
+// confirms "✓ already saved".
+func TestWAlreadySavedIsNoOp(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
+	m.md = "# Playbook — My Setup\n\nclean playbook\n"
+	m.finalDraft = true
+	m.committed = true // already persisted (baseline or a prior w)
+	m.inputFifoPath = ""
+	m.reflow()
+
+	nm, cmd := m.Update(key("w"))
+	m = nm.(model)
+	if cmd != nil {
+		t.Fatalf("w on an already-saved draft must be a no-op (no commit cmd), got %T", cmd())
+	}
+	if !strings.Contains(m.status, "already saved") {
+		t.Errorf("w on an already-saved draft must show 'already saved', got %q", m.status)
+	}
+	if fe.calls != 0 {
+		t.Errorf("w no-op must not generate (producer calls = %d, want 0)", fe.calls)
 	}
 }
 
@@ -1040,6 +1079,133 @@ func TestWGeneratesOnTranscript(t *testing.T) {
 	m = pumpReArm(t, m, cmd)
 	if fe.calls != 1 || fe.gotKind != orchestrator.KindReengageFinalPlaybook {
 		t.Errorf("w-generate must call the final-playbook producer once, got calls=%d kind=%v", fe.calls, fe.gotKind)
+	}
+}
+
+// Stage 4b (spec §D): confirm-Yes → generate → stream-EOF AUTO-persists a baseline.
+// The finalize generation is marked persistOnFinish, so at EOF the model fires the
+// commit (CommitPlaybook) and shows "finalizing…"; the playbookCommittedMsg result
+// flips committed=true. Quitting now leaves a complete saved playbook.
+func TestConfirmYesAutoPersistsBaselineAtEOF(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# Playbook — fix\nclean playbook\n", "# Playbook — fix\nclean playbook\n")
+	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	if !m.confirmResolved {
+		t.Fatal("setup: confirm not set")
+	}
+	nm2, cmd := m.Update(key("y"))
+	m = nm2.(model)
+	if cmd == nil {
+		t.Fatal("confirm Yes must trigger generation")
+	}
+	if !m.persistOnFinish {
+		t.Error("a FINALIZE (confirm-yes) generation must arm persistOnFinish")
+	}
+
+	// Drain to EOF and capture the auto-persist cmd the finalDraft branch returns.
+	m, eofCmd := pumpReArmEOFCmd(t, m, cmd)
+	if eofCmd == nil {
+		t.Fatal("stream-EOF on a persistOnFinish finalize must return the auto-persist cmd")
+	}
+	if m.persistOnFinish {
+		t.Error("persistOnFinish must be reset after the auto-persist fires (no re-persist)")
+	}
+	if m.status != "finalizing…" {
+		t.Errorf("auto-persist must show the finalizing status, got %q", m.status)
+	}
+	// committed flips on the RESULT, not at EOF.
+	if m.committed {
+		t.Error("committed must not flip before the persist result")
+	}
+	pc, ok := eofCmd().(playbookCommittedMsg)
+	if !ok {
+		t.Fatalf("auto-persist cmd must yield a playbookCommittedMsg (CommitPlaybook called), got %T", eofCmd())
+	}
+	if pc.err != nil {
+		t.Fatalf("auto-persist CommitPlaybook must succeed, got %v", pc.err)
+	}
+	nm3, _ := m.Update(pc)
+	m = nm3.(model)
+	if !m.committed {
+		t.Error("the auto-persist result must flip committed=true (the baseline)")
+	}
+	if !strings.Contains(m.status, "saved playbook") {
+		t.Errorf("auto-persist result must show the saved path, got %q", m.status)
+	}
+}
+
+// Stage 4b (spec §D): an `f` AMEND → generate → stream-EOF does NOT auto-persist. The
+// amend path leaves persistOnFinish cleared, so EOF fires no commit and committed stays
+// false (an unsaved tweak the `w`/quit-guard handle).
+func TestFAmendDoesNotAutoPersistAtEOF(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Playbook — tweaked\nrevised\n", "# Playbook — tweaked\nrevised\n")
+	// Start from a committed baseline (the auto-finish artifact) so the amend is the
+	// thing under test: it must make the doc dirty again.
+	m.md = "# Playbook — fix\n\nbody\n"
+	m.finalDraft = true
+	m.committed = true
+	m.inputFifoPath = ""
+	m.reflow()
+
+	// Drive the `f` amend directly via its message (the asker float is off in tests).
+	nm, cmd := m.Update(fChangeMsg{base: m.md, value: "add a cleanup step", submitted: true})
+	m = nm.(model)
+	if cmd == nil {
+		t.Fatal("a submitted f amend must trigger generation")
+	}
+	if m.persistOnFinish {
+		t.Error("an f amend must NOT arm persistOnFinish")
+	}
+	if m.committed {
+		t.Error("the amend re-arm must reset committed=false (an unsaved tweak)")
+	}
+
+	m, eofCmd := pumpReArmEOFCmd(t, m, cmd)
+	if eofCmd != nil {
+		t.Fatalf("an f-amend stream-EOF must NOT auto-persist, got cmd %T", eofCmd())
+	}
+	if m.committed {
+		t.Error("an f amend must leave committed=false after EOF (no auto-persist)")
+	}
+	if fe.calls != 1 || fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+		t.Errorf("f amend must call the final-playbook producer once, got calls=%d kind=%v", fe.calls, fe.gotKind)
+	}
+}
+
+// Stage 4b (spec §D): the quit guard fires when finalDraft && !committed (a post-baseline
+// `f` edit) and does NOT fire right after the auto-finish baseline (committed).
+func TestQuitGuardAfterBaselineVsAmend(t *testing.T) {
+	// After the baseline (committed): quit exits on the first press (no guard).
+	committed := newModel("T", "# Playbook — draft\n")
+	committed.width, committed.height = 80, 24
+	committed.finalDraft = true
+	committed.committed = true
+	committed.reflow()
+	_, cmd := committed.Update(key("q"))
+	if cmd == nil {
+		t.Fatal("quit on a committed baseline must exit")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Errorf("quit on a committed baseline must return tea.QuitMsg, got %T", cmd())
+	}
+
+	// After an `f` edit (dirty): quit warns instead of exiting.
+	dirty := newModel("T", "# Playbook — tweaked\n")
+	dirty.width, dirty.height = 80, 24
+	dirty.finalDraft = true
+	dirty.committed = false // an `f` amend made it dirty again
+	dirty.reflow()
+	nm, cmd2 := dirty.Update(key("q"))
+	dirty = nm.(model)
+	if cmd2 != nil {
+		t.Fatalf("quit on a dirty post-amend draft must warn, not exit (cmd=%T)", cmd2())
+	}
+	if !dirty.quitGuard || !strings.Contains(dirty.status, "uncommitted") {
+		t.Errorf("quit on a dirty draft must arm the guard + warn, got guard=%v status=%q", dirty.quitGuard, dirty.status)
 	}
 }
 
@@ -1092,9 +1258,18 @@ func TestQuitGuardClearedByCommit(t *testing.T) {
 	if !m.quitGuard {
 		t.Fatal("setup: first quit must arm the guard")
 	}
-	// `w` commits → clears the guard.
-	nm2, _ := m.Update(key("w"))
+	// `w` re-persists; the commit RESULT clears the guard + flips committed (spec §D).
+	nm2, cmd := m.Update(key("w"))
 	m = nm2.(model)
+	if cmd == nil {
+		t.Fatal("w on a dirty draft must return the commit cmd")
+	}
+	pc, ok := cmd().(playbookCommittedMsg)
+	if !ok {
+		t.Fatalf("w-commit must yield a playbookCommittedMsg, got %T", cmd())
+	}
+	nm3, _ := m.Update(pc)
+	m = nm3.(model)
 	if m.quitGuard {
 		t.Error("a w-commit must clear the quit guard")
 	}
@@ -1102,12 +1277,12 @@ func TestQuitGuardClearedByCommit(t *testing.T) {
 		t.Error("w must commit the draft")
 	}
 	// A following quit exits immediately (committed → no guard).
-	_, cmd := m.Update(key("q"))
-	if cmd == nil {
+	_, qcmd := m.Update(key("q"))
+	if qcmd == nil {
 		t.Fatal("quit after commit must exit")
 	}
-	if _, ok := cmd().(tea.QuitMsg); !ok {
-		t.Errorf("quit after commit must return tea.QuitMsg, got %T", cmd())
+	if _, ok := qcmd().(tea.QuitMsg); !ok {
+		t.Errorf("quit after commit must return tea.QuitMsg, got %T", qcmd())
 	}
 }
 
@@ -1221,6 +1396,54 @@ func pumpReArm(t *testing.T, m model, cmd tea.Cmd) model {
 	// Ensure settled for the test's next step.
 	m2, _ := m.Update(streamEventsMsg{eof: true})
 	return m2.(model)
+}
+
+// pumpReArmEOFCmd is like pumpReArm but captures the cmd the FIRST stream-EOF returns
+// (Stage 4b's auto-persist: the finalDraft+persistOnFinish branch returns a
+// commitPlaybookCmd). pumpReArm discards that cmd; this helper hands it back so a test
+// can assert/drive the auto-persist. Returns the settled model and the EOF cmd (nil if
+// the EOF branch did not fire a command — e.g. an `f` amend, which must NOT auto-persist).
+func pumpReArmEOFCmd(t *testing.T, m model, cmd tea.Cmd) (model, tea.Cmd) {
+	t.Helper()
+	var rearm reArmStreamMsg
+	var found bool
+	for _, msg := range collectMsgs(cmd) {
+		if rs, ok := msg.(reArmStreamMsg); ok {
+			rearm = rs
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatal("no reArmStreamMsg in trigger batch")
+	}
+	nm, c := m.Update(rearm)
+	m = nm.(model)
+	next := firstStreamCmd(c)
+	var eofCmd tea.Cmd
+	for i := 0; i < 1000 && next != nil; i++ {
+		msg := next()
+		ev, ok := msg.(streamEventsMsg)
+		if !ok {
+			break
+		}
+		nm2, c2 := m.Update(ev)
+		m = nm2.(model)
+		if ev.eof {
+			eofCmd = c2
+			break
+		}
+		next = firstStreamCmd(c2)
+	}
+	if eofCmd == nil {
+		// The drained stream never surfaced a natural eof frame; settle with an explicit
+		// one (mirrors pumpReArm's settle) and capture its cmd — this is the EOF the
+		// finalDraft auto-persist branch keys on.
+		m2, c := m.Update(streamEventsMsg{eof: true})
+		m = m2.(model)
+		eofCmd = c
+	}
+	return m, eofCmd
 }
 
 // firstStreamCmd flattens cmd's batch and returns the single tea.Cmd that yields a

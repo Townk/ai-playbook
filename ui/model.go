@@ -232,9 +232,18 @@ type model struct {
 
 	// finalDraft marks that the rendered playbook is a GENERATED final-playbook draft
 	// (the confirm "Yes" / `f` / `w`-on-transcript produced it). committed flips true
-	// once `w` persists it (save + cache-replace via orchestrator.CommitPlaybook).
+	// once it is persisted (save + cache-replace via orchestrator.CommitPlaybook) —
+	// either by the auto-finish baseline (spec §D) or a `w` re-persist.
 	finalDraft bool
 	committed  bool
+
+	// persistOnFinish marks that the in-flight final-playbook generation is a FINALIZE
+	// (confirm-yes / `w`-on-transcript) rather than an `f` AMEND (spec §D). It is set by
+	// beginFinalPlaybookInProc and cleared by the `f`-amend path (fChangeMsg). At
+	// stream-EOF the finalDraft branch reads it: persistOnFinish → auto-persist a
+	// baseline (commitPlaybookCmd; committed flips true on success) and reset the flag;
+	// an `f` amend leaves committed=false (an unsaved tweak the `w`/quit-guard handle).
+	persistOnFinish bool
 
 	// quitGuard is set when the user pressed quit (q/esc/ctrl+c) while an uncommitted
 	// draft was displayed (finalDraft && !committed): instead of quitting we show a
@@ -510,6 +519,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.reengageStream != nil {
 				_ = m.reengageStream.Close()
 				m.reengageStream = nil
+			}
+			// Auto-finish baseline (spec §D): a FINALIZE generation (confirm-yes /
+			// `w`-on-transcript, marked persistOnFinish) auto-persists at EOF so quitting
+			// before `w` still leaves a complete saved playbook with front matter. An `f`
+			// AMEND leaves persistOnFinish cleared → no auto-persist, committed stays
+			// false (an unsaved tweak the `w`/quit-guard handle). Show a transient
+			// "finalizing…" while the (slow) metadata round-trip runs; the commit result
+			// (statusMsg) replaces it with the saved/err line and committed flips true on
+			// success. Reset the flag so a subsequent stream-EOF doesn't re-persist.
+			if m.finalDraft && m.persistOnFinish {
+				m.persistOnFinish = false
+				m.status = "finalizing…"
+				return m, m.commitPlaybookCmd(m.md)
 			}
 			return m, nil
 		}
@@ -877,21 +899,28 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, tea.Quit
 		case "w":
-			// Stage 3 (spec §E): `w` is the single finalize/commit action. Only when
-			// settled (not streaming). Two branches:
-			//   - a final-playbook DRAFT already exists (finalDraft && !committed): `w`
-			//     COMMITS it (orchestrator.CommitPlaybook → save + cache-replace), marks
-			//     committed, clears the quit guard, and shows "✓ saved playbook → <path>".
-			//     It does NOT re-generate — the draft IS the finished playbook.
+			// `w` is the single finalize/commit action (spec §D/§E). Only when settled
+			// (not streaming). Three branches:
+			//   - a DIRTY draft (finalDraft && !committed): `w` re-persists the current
+			//     doc (orchestrator.CommitPlaybook → save + cache-replace), and the result
+			//     handler flips committed + clears the quit guard + shows the saved path.
+			//     "finalizing…" covers the (slow) metadata round-trip. This fires after an
+			//     `f` tweak; the auto-finish baseline already persisted the first cut.
+			//   - an ALREADY-SAVED draft (finalDraft && committed): no-op — the doc is
+			//     unchanged since the baseline/last `w`, so re-running the metadata call
+			//     would be wasted work (spec §D efficiency). Just confirm "✓ already saved".
 			//   - no draft (the pager holds a raw troubleshoot TRANSCRIPT): `w` generates
-			//     the final-playbook draft (the stage-2 behavior). committed stays false
-			//     so a following `w` commits it.
+			//     the final-playbook draft (which then auto-persists a baseline at EOF).
 			if !m.streaming {
+				if m.finalDraft && m.committed {
+					dbg("w: draft already saved (unchanged) — no-op")
+					m.status = "✓ already saved"
+					return m, nil
+				}
 				if m.finalDraft && !m.committed {
-					dbg("w: commit existing final-playbook draft")
+					dbg("w: re-persist dirty final-playbook draft")
 					m.confirmResolved = false
-					m.committed = true // persisted below; clears the uncommitted-draft quit guard
-					m.quitGuard = false
+					m.status = "finalizing…"
 					return m, m.commitPlaybookCmd(m.md)
 				}
 				dbg("w: manual finalize → generate final-playbook draft")
@@ -1128,6 +1157,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// status bar until the next key/click clears it. Never crashes the UI.
 		dbg("status: %s", msg.text)
 		m.status = msg.text
+		return m, nil
+	case playbookCommittedMsg:
+		// The auto-finish baseline (spec §D) or a `w` re-persist completed. On success
+		// flip committed=true (clears the uncommitted-draft quit guard — the baseline is
+		// now the guaranteed artifact; the guard then only fires on later `f` edits) and
+		// show the saved path; on failure leave committed=false so `w`/the quit-guard
+		// still apply. Replaces the transient "finalizing…" status either way.
+		if msg.err != nil {
+			dbg("commit failed: %v", msg.err)
+			m.status = "commit: " + msg.err.Error()
+			return m, nil
+		}
+		dbg("commit ok → %s", msg.path)
+		m.committed = true
+		m.quitGuard = false
+		m.status = "✓ saved playbook → " + msg.path
 		return m, nil
 	case fChangeMsg:
 		// Stage 5 (spec §D): the `f` request-input float returned. On a submitted,
