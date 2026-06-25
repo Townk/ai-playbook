@@ -56,6 +56,18 @@ var pendingActivity <-chan string
 // (the troubleshoot cached-replay path). Consumed (and cleared) by Main.
 func SetActivity(ch <-chan string) { pendingActivity = ch }
 
+// pendingServedBase is the served playbook body consumed by the next Main() call,
+// set by SetServedBase. On a cache HIT serveCachedPlaybook serves an existing
+// playbook; it stashes that body here (same os.Args-reshaped seam as the
+// driver/reengage/activity) so the model carries it as m.servedBase. Then a
+// failing step → troubleshoot → confirm/`w`-generate AMENDS the served playbook
+// (base=servedBase) rather than starting fresh (spec §C). "" → fresh.
+var pendingServedBase string
+
+// SetServedBase stashes the served playbook body for the next ui.Main() invocation
+// (the cache-HIT serve path). Consumed (and cleared) by Main.
+func SetServedBase(base string) { pendingServedBase = base }
+
 // Main is the entrypoint for the `ai-playbook run` subcommand. It parses flags
 // from os.Args[2:] (os.Args[1] is the "run" subcommand) and returns an exit
 // code; the caller is responsible for os.Exit.
@@ -196,9 +208,11 @@ func Main() int {
 		}
 	}
 	activity := pendingActivity
-	pendingReengage = nil // consume once, regardless of whether an orch was built
-	pendingDriver = nil   // ditto: the session owns the driver's lifecycle
-	pendingActivity = nil // ditto: the session owns the activity channel's lifecycle
+	servedBase := pendingServedBase
+	pendingReengage = nil  // consume once, regardless of whether an orch was built
+	pendingDriver = nil    // ditto: the session owns the driver's lifecycle
+	pendingActivity = nil  // ditto: the session owns the activity channel's lifecycle
+	pendingServedBase = "" // ditto: served-base amend stash is consume-once
 
 	// Force TrueColor: zellij's alt-screen pane underreports the color profile
 	// during bubbletea's auto-detection, causing colors to be downsampled.
@@ -216,6 +230,7 @@ func Main() int {
 	m.reader = bufio.NewReader(src)
 	m.parser = parser
 	m.activity = activity
+	m.servedBase = servedBase
 	prog := tea.NewProgram(
 		m,
 		tea.WithInput(tty),

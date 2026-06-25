@@ -787,6 +787,151 @@ func TestConfirmNoTriggersFollowup(t *testing.T) {
 	}
 }
 
+// Stage 4 (spec §C amend-on-rerun): when the session is SERVING an existing playbook
+// (m.servedBase set, a cache HIT), a verify-success confirm → Yes AMENDS the served
+// playbook — the producer is called with base==servedBase and change==the troubleshoot
+// content (which carries the resolved fix). The served playbook is the base; the
+// output is base+fix, re-cached under the same keys on `w` (never lost).
+func TestConfirmYesAmendsServedPlaybook(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Playbook — amended\nbase + fix\n", "# Playbook — amended\nbase + fix\n")
+	served := "# Playbook — My Setup\n\nstep 1\nstep 2\n"
+	troubleshoot := "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.servedBase = served // serving an existing playbook for this context
+	m.md = troubleshoot
+	m.inputFifoPath = ""
+	m.reflow()
+
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	if !m.confirmResolved {
+		t.Fatal("setup: confirm not set")
+	}
+
+	nm2, cmd := m.Update(key("y"))
+	m = nm2.(model)
+	if cmd == nil {
+		t.Fatal("confirm Yes must trigger the amend generation")
+	}
+	if !m.finalDraft || m.committed {
+		t.Errorf("amend must mark a draft (finalDraft=%v committed=%v)", m.finalDraft, m.committed)
+	}
+
+	m = pumpReArm(t, m, cmd)
+	if fe.calls != 1 {
+		t.Fatalf("producer calls = %d, want 1", fe.calls)
+	}
+	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+		t.Errorf("producer kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
+	}
+	if fe.gotBase != served {
+		t.Errorf("AMEND must thread the served playbook as base, got %q want %q", fe.gotBase, served)
+	}
+	if fe.gotChange != troubleshoot {
+		t.Errorf("AMEND must thread the troubleshoot content as change, got %q", fe.gotChange)
+	}
+}
+
+// Stage 4 (spec §C): without a served base (a FRESH troubleshoot / cache MISS), the
+// verify-success confirm → Yes generates a FRESH playbook (base==""), unchanged from
+// stage 2. This is the amend-vs-fresh branch scoped by whether a playbook was served.
+func TestConfirmYesFreshWhenNoServedBase(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Playbook — fresh\nnew\n", "# Playbook — fresh\nnew\n")
+	troubleshoot := "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.servedBase = "" // FRESH: no playbook served
+	m.md = troubleshoot
+	m.inputFifoPath = ""
+	m.reflow()
+
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	if !m.confirmResolved {
+		t.Fatal("setup: confirm not set")
+	}
+
+	nm2, cmd := m.Update(key("y"))
+	m = nm2.(model)
+	if cmd == nil {
+		t.Fatal("confirm Yes must trigger the fresh generation")
+	}
+	m = pumpReArm(t, m, cmd)
+	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+		t.Errorf("producer kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
+	}
+	if fe.gotBase != "" {
+		t.Errorf("FRESH must thread an empty base, got %q", fe.gotBase)
+	}
+	if fe.gotChange != troubleshoot {
+		t.Errorf("FRESH must thread the troubleshoot content as change, got %q", fe.gotChange)
+	}
+}
+
+// Stage 4 (spec §C): the `w`-generate (manual finalize on a transcript) also AMENDS
+// when serving — base==servedBase, change==the transcript content.
+func TestWGenerateAmendsServedPlaybook(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# amended\n", "# amended\n")
+	served := "# Playbook — Served\n\nstep A\n"
+	transcript := "# Troubleshoot transcript\n"
+	m.servedBase = served
+	m.md = transcript
+	m.finalDraft = false
+	m.committed = false
+	m.inputFifoPath = ""
+	m.reflow()
+
+	nm, cmd := m.Update(key("w"))
+	m = nm.(model)
+	if cmd == nil {
+		t.Fatal("w on a transcript must trigger generation")
+	}
+	m = pumpReArm(t, m, cmd)
+	if fe.gotBase != served {
+		t.Errorf("w-generate while serving must AMEND (base==servedBase), got %q want %q", fe.gotBase, served)
+	}
+	if fe.gotChange != transcript {
+		t.Errorf("w-generate must thread the transcript as change, got %q", fe.gotChange)
+	}
+}
+
+// Stage 4 (spec §C): the confirm wording differs by mode — amend prose when serving
+// an existing playbook (servedBase set), fresh prose otherwise.
+func TestConfirmWordingByMode(t *testing.T) {
+	// Fresh: no served base → "did this solve your problem?".
+	mf, _ := newReengageEventsModel(t, "# x\n", "# x\n")
+	mf.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	mf.servedBase = ""
+	mf.inputFifoPath = ""
+	mf.reflow()
+	nmf, _ := mf.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	mf = nmf.(model)
+	freshView := strip(mf.viewString())
+	if !strings.Contains(freshView, "did this solve your problem?") {
+		t.Errorf("fresh confirm must read the fresh prose:\n%s", freshView)
+	}
+	if strings.Contains(freshView, "Update the playbook?") {
+		t.Errorf("fresh confirm must NOT show the amend prose:\n%s", freshView)
+	}
+
+	// Amend: served base → "solved? Update the playbook?".
+	ma, _ := newReengageEventsModel(t, "# x\n", "# x\n")
+	ma.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	ma.servedBase = "# Playbook — served\n\nstep\n"
+	ma.inputFifoPath = ""
+	ma.reflow()
+	nma, _ := ma.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	ma = nma.(model)
+	amendView := strip(ma.viewString())
+	if !strings.Contains(amendView, "Update the playbook?") {
+		t.Errorf("amend confirm must read the amend prose:\n%s", amendView)
+	}
+	if strings.Contains(amendView, "did this solve your problem?") {
+		t.Errorf("amend confirm must NOT show the fresh prose:\n%s", amendView)
+	}
+	// The amend confirm's Yes/No buttons must still render + register for clicks.
+	if !strings.Contains(amendView, confirmYesLabel) || !strings.Contains(amendView, confirmNoLabel) {
+		t.Errorf("amend confirm Yes/No buttons missing:\n%s", amendView)
+	}
+}
+
 // Stage 2 (spec §A): a mouse click on the [ Yes ] / [ No ] buttons resolves the
 // confirm exactly like the y/n keys.
 func TestConfirmResolvesByClick(t *testing.T) {

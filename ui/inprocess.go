@@ -194,21 +194,36 @@ func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
 	})
 }
 
-// beginFinalPlaybookInProc (in-process, stage 2 / spec §A+§B) generates the clean
-// final-playbook and re-arms the parser with it in REPLACE mode: the rendered
-// troubleshoot is cleared and the fresh playbook streams in, like `run <file>.md`.
-// The current troubleshoot content (m.md) is passed as the change to fold in; base
-// is "" (stage 2 is fresh-only — amend-on-rerun is a later stage). The result is
-// marked a DRAFT (finalDraft=true, committed=false): stage 2 does NOT save or cache
-// it — persistence is stage 3. Returns nil when re-engagement isn't wired.
+// beginFinalPlaybookInProc (in-process, stage 2/4 / spec §A+§B+§C) generates the
+// clean final-playbook and re-arms the parser with it in REPLACE mode: the rendered
+// troubleshoot is cleared and the playbook streams in, like `run <file>.md`. The
+// current troubleshoot content (m.md) is passed as the change to fold in. The result
+// is marked a DRAFT (finalDraft=true, committed=false): generation does NOT save or
+// cache — persistence is the `w` commit (stage 3). Returns nil when re-engagement
+// isn't wired.
+//
+// AMEND vs FRESH (stage 4, spec §C) is selected by m.servedBase:
+//   - servedBase != "" → AMEND: the session is serving an existing playbook for this
+//     context (a cache HIT). base=servedBase, change=the troubleshoot content (which
+//     carries the resolved fix). The AMEND prompt integrates the new fix and PRESERVES
+//     the existing steps, so the served playbook is improved IN PLACE; the `w` commit
+//     re-caches it under the same keys (overwriting the served entry — never lost).
+//   - servedBase == "" → FRESH: a cache MISS / direct troubleshoot. base="" → a new
+//     playbook distilled from the troubleshoot content (unchanged stage-2 behavior).
+//
+// Amend-vs-fresh is naturally scoped by the cache key: a same-context failure serves
+// (servedBase set) → amends; a different context is a different cache entry → a miss
+// → authorPlaybook leaves servedBase "" → fresh. Unrelated playbooks never cross.
 func (m *model) beginFinalPlaybookInProc() tea.Cmd {
 	orch := m.orch
 	if orch == nil || orch.Reengage == nil {
 		return nil
 	}
 	// The troubleshoot content is the input the FINAL-PLAYBOOK prompt distills; grab
-	// it BEFORE the REPLACE reset clears m.md.
+	// it BEFORE the REPLACE reset clears m.md. The served base is independent of m.md
+	// (stashed on the cache-HIT serve), so it survives the reset.
 	change := m.md
+	base := m.servedBase
 	// REPLACE: reset the rendered content + thinking state (like regenerate).
 	m.md = ""
 	m.isCached = false
@@ -222,7 +237,7 @@ func (m *model) beginFinalPlaybookInProc() tea.Cmd {
 	m.committed = false
 	m.reflow()
 	return tea.Batch(m.restartTick(), func() tea.Msg {
-		stream, activity, _, err := orch.FinalPlaybook("", change)
+		stream, activity, _, err := orch.FinalPlaybook(base, change)
 		return reArmStreamMsg{reader: stream, activity: activity, err: err}
 	})
 }

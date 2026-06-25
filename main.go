@@ -817,6 +817,17 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session) 
 		ui.SetDriver(sess.drv)
 	}
 
+	// Stage 4 (spec §C amend-on-rerun): this is a cache HIT — we are SERVING an
+	// existing playbook for this context. Stash its body as the served base so a
+	// failing step → troubleshoot → confirm/`w`-generate AMENDS this playbook
+	// (base=servedBase) instead of starting fresh, and the improved version is
+	// re-cached under the SAME CtxHash/ReqHash (populated on the Reengage above) —
+	// the served entry is overwritten, never lost. Amend-vs-fresh is naturally scoped
+	// by the cache key: a same-context failure serves+amends this entry; a different
+	// context is a different cache entry → a cache MISS → authorPlaybook (servedBase
+	// stays "" → fresh). The base is the INPUT to the amend; the output is base+fix.
+	ui.SetServedBase(body)
+
 	// Reuse the `run` subcommand entrypoint in-process by shaping os.Args the way
 	// ui.Main() parses them (os.Args[1]="run", flags from os.Args[2:]).
 	argv := []string{os.Args[0], "run"}

@@ -207,6 +207,15 @@ type model struct {
 	// Set once on a verify-success (gated like the old wrap-up); cleared when answered.
 	confirmResolved bool
 
+	// servedBase is the playbook body served on a cache HIT (spec §C amend-on-rerun).
+	// When non-empty the session is SERVING an existing playbook for this context: a
+	// failing step → the follow-up loop troubleshoots it → the verify-success confirm /
+	// `w`-generate AMENDS the served playbook (base=servedBase) instead of starting
+	// fresh, so the served playbook is improved in place and re-cached under the same
+	// keys. Empty for a FRESH troubleshoot (authorPlaybook / cache MISS). Set by Main
+	// from the consume-once SetServedBase stash, threaded from serveCachedPlaybook.
+	servedBase string
+
 	// finalDraft marks that the rendered playbook is a GENERATED final-playbook draft
 	// (the confirm "Yes" / `f` / `w`-on-transcript produced it). committed flips true
 	// once `w` persists it (save + cache-replace via orchestrator.CommitPlaybook).
@@ -1344,8 +1353,23 @@ func (m model) statusBar() string {
 	return st.Render("\U000F1050: action • \U000F12B7: close • ?: keys")
 }
 
-// confirmPrompt is the leading prose of the native verify-success confirm row.
-const confirmPrompt = "✓ Verified — did this solve your problem?"
+// confirmPromptFresh / confirmPromptAmend are the leading prose of the native
+// verify-success confirm row. The mode is selected by m.servedBase: amend wording
+// ("Update the playbook?") when serving an existing playbook for this context (spec
+// §C), the fresh wording otherwise (spec §A).
+const (
+	confirmPromptFresh = "✓ Verified — did this solve your problem?"
+	confirmPromptAmend = "✓ Verified — solved? Update the playbook?"
+)
+
+// confirmPrompt returns the active confirm prose for this model's mode: the amend
+// wording when serving an existing playbook (servedBase set), else the fresh wording.
+func (m model) confirmPrompt() string {
+	if m.servedBase != "" {
+		return confirmPromptAmend
+	}
+	return confirmPromptFresh
+}
 
 // confirmYesLabel / confirmNoLabel are the two button labels (with padded brackets
 // so they read as clickable controls).
@@ -1362,7 +1386,7 @@ func (m model) confirmRowString() string {
 	if !m.confirmResolved {
 		return ""
 	}
-	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen)).Render(confirmPrompt)
+	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen)).Render(m.confirmPrompt())
 	yes := m.confirmButtonLabel(confirmYesLabel, "confirm-yes", colGreen)
 	no := m.confirmButtonLabel(confirmNoLabel, "confirm-no", colPeach)
 	return prompt + "  " + yes + "  " + no
@@ -1402,7 +1426,7 @@ func (m *model) appendConfirmButtons() {
 	}
 	// Col is the content column (buttonAt strips the 2-col left margin). The prompt is
 	// followed by 2 spaces, then Yes, 2 spaces, then No.
-	yesCol := lipgloss.Width(confirmPrompt) + 2
+	yesCol := lipgloss.Width(m.confirmPrompt()) + 2
 	noCol := yesCol + lipgloss.Width(confirmYesLabel) + 2
 	m.buttons = append(m.buttons,
 		Button{Line: row, Col: yesCol, Width: lipgloss.Width(confirmYesLabel), Kind: "confirm-yes", BlockID: "confirm", Screen: true},
