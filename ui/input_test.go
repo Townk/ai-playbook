@@ -105,6 +105,54 @@ func TestParserQuitEventWithSurroundingText(t *testing.T) {
 	}
 }
 
+// reconstructText concatenates the text of every textEvent in order.
+func reconstructText(events []streamEvent) string {
+	var sb strings.Builder
+	for _, e := range events {
+		if te, ok := e.(textEvent); ok {
+			sb.WriteString(te.text)
+		}
+	}
+	return sb.String()
+}
+
+// TestParserPreservesNewlines feeds RAW playbook text (no DLE control records,
+// which is what the fan-out delivers) in awkward chunk splits — including a
+// leading newline, a trailing newline, a chunk that ENDS at "\n" with the next
+// chunk starting the following line, and a split right around a closing ```
+// fence — and asserts the reconstructed text is byte-for-byte identical. The
+// streamParser was built for the old DLE think/quit protocol; this guards that
+// it never strips, merges, or eats a leading/trailing newline in raw text.
+func TestParserPreservesNewlines(t *testing.T) {
+	want := "\n```bash\ngg build\n```\nSDK is at /Users/x/sdk.\n"
+	splits := [][]string{
+		// Whole input in one feed.
+		{want},
+		// Split so a chunk ends exactly at "\n" and the next starts the new line.
+		{"\n```bash\n", "gg build\n", "```\n", "SDK is at /Users/x/sdk.\n"},
+		// Split right between the closing backticks and their newline.
+		{"\n```bash\ngg build\n```", "\nSDK is at /Users/x/sdk.\n"},
+		// Byte-at-a-time: the most adversarial boundary placement.
+		bytesAtATime(want),
+	}
+	for i, chunks := range splits {
+		got := reconstructText(collect(&streamParser{}, chunks...))
+		if got != want {
+			t.Fatalf("split %d: reconstructed %q, want %q", i, got, want)
+		}
+	}
+}
+
+// bytesAtATime splits s into one-byte chunks (multi-byte runes are fine: the
+// parser is byte-oriented for everything except the DLE sentinel).
+func bytesAtATime(s string) []string {
+	out := make([]string, len(s))
+	for i := 0; i < len(s); i++ {
+		out[i] = s[i : i+1]
+	}
+	return out
+}
+
 func TestReadStreamYieldsEventsThenEOF(t *testing.T) {
 	r := strings.NewReader("hi\x10tWork\x10")
 	p := &streamParser{}

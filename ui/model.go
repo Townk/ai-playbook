@@ -426,8 +426,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case spinTickMsg:
 		// Stale loop: a restartTick bumped the generation, so a newer loop now drives
-		// the spinner. Advance the frame once (so the animation never visibly stalls
-		// during the swap) but do NOT continue this loop — it self-cancels here,
+		// the spinner. Drop this tick WITHOUT advancing the frame or seconds (the
+		// live loop already does both) and do NOT continue — it self-cancels here,
 		// leaving exactly one live loop and no double-counted seconds.
 		if msg.gen != m.tickGen {
 			return m, nil

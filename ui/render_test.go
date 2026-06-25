@@ -1499,3 +1499,90 @@ func TestStoppedBlockNeutralNoFollowupButton(t *testing.T) {
 		t.Fatal("a stopped block run-region must read as 'stopped'")
 	}
 }
+
+// lineForSub returns the first Line whose stripped text contains sub, and true,
+// or a zero Line and false if none.
+func lineForSub(lines []Line, sub string) (Line, bool) {
+	for _, l := range lines {
+		if strings.Contains(strip(l.Text), sub) {
+			return l, true
+		}
+	}
+	return Line{}, false
+}
+
+// TestMalformedClosingFenceDoesNotNukeRender is the exact Bug A repro: a closing
+// ``` immediately followed by prose on the SAME line (no newline). Without the
+// fence normalizer goldmark treats "```SDK…" as an opening info-string fence and
+// renders the ENTIRE rest of the document as code. The normalizer must close the
+// block so the SDK prose and everything after render as text.
+func TestMalformedClosingFenceDoesNotNukeRender(t *testing.T) {
+	md := "Here is the build:\n\n" +
+		"```bash\n" +
+		"gg build\n" +
+		"```SDK is at `/Users/x/sdk`, but ANDROID_HOME is unset. Set it.\n\n" +
+		"## Next steps\n\n" +
+		"Run the tool again.\n"
+
+	lines, _, blocks := Render(md, 80, nil, "")
+
+	// Exactly ONE code block (the bash block), carrying only "gg build".
+	if len(blocks) != 1 {
+		t.Fatalf("want 1 code block, got %d: %+v", len(blocks), blocks)
+	}
+	if strings.TrimSpace(blocks[0].Payload) != "gg build" {
+		t.Fatalf("code block swallowed trailing text; payload = %q", blocks[0].Payload)
+	}
+
+	// The SDK prose must render as PROSE (not Code), and survive the render.
+	l, ok := lineForSub(lines, "ANDROID_HOME is unset")
+	if !ok {
+		t.Fatal("SDK prose was dropped from the render entirely")
+	}
+	if l.Code {
+		t.Fatalf("SDK prose rendered as code, not prose: %q", strip(l.Text))
+	}
+
+	// The rest of the document must survive too.
+	if !linesContain(lines, "Next steps") {
+		t.Fatal("heading after the malformed fence was lost")
+	}
+	if !linesContain(lines, "Run the tool again") {
+		t.Fatal("trailing paragraph after the malformed fence was lost")
+	}
+}
+
+// TestNormalizeFences_WellFormedUntouched: well-formed fences and fence content
+// (including a line that merely contains backticks mid-content) are not altered.
+func TestNormalizeFences_WellFormedUntouched(t *testing.T) {
+	cases := []string{
+		"```bash\ngg build\n```\nprose after\n",
+		"```\nplain code\n```\n",
+		"```python\nx = 1  # uses `backticks` in a comment\n```\n",
+		"no fences at all\njust prose\n",
+		"~~~\ntilde fence\n~~~\nprose\n",
+	}
+	for _, in := range cases {
+		if got := normalizeFences(in); got != in {
+			t.Errorf("normalizeFences altered well-formed input:\n in: %q\nout: %q", in, got)
+		}
+	}
+}
+
+// TestNormalizeFences_Repairs: the malformed-closer cases are split into a clean
+// closing fence + trailing prose, with newlines preserved.
+func TestNormalizeFences_Repairs(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"```bash\ngg build\n```SDK is here.\n", "```bash\ngg build\n```\nSDK is here.\n"},
+		{"```\ncode\n``` trailing\n", "```\ncode\n```\ntrailing\n"},
+		// Longer opener; closer must be >= opener length.
+		{"````\ncode\n````tail\n", "````\ncode\n````\ntail\n"},
+		// A "```" run shorter than the opener is content, not a closer.
+		{"````\n```\nstill code\n````\nprose\n", "````\n```\nstill code\n````\nprose\n"},
+	}
+	for _, c := range cases {
+		if got := normalizeFences(c.in); got != c.want {
+			t.Errorf("normalizeFences(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
