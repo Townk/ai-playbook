@@ -27,6 +27,7 @@ import (
 	"ai-playbook/config"
 	"ai-playbook/driver"
 	"ai-playbook/floatinput"
+	"ai-playbook/frontmatter"
 	"ai-playbook/input"
 	"ai-playbook/kb"
 	"ai-playbook/mcpserver"
@@ -851,6 +852,19 @@ func readRequestJSON(path string) (capture.Request, error) {
 // body, write it to a temp file, and reuse ui.Main() (which spins up the driver +
 // orchestrator and drives the playbook in-process), passing --cached for the
 // header badge and --cwd so runs execute in the request's project root.
+// strippedAmendBase returns the literate amend base for a served playbook: the
+// front-matter-stripped body. cache.Body has already removed the OUTER (cache)
+// front matter, so body still begins with the playbook's own front matter; amend
+// operates on the literate content (H1 + body), not the YAML (the front matter is
+// regenerated at persist), so we strip the playbook front matter here (§E/§F). A
+// body without front matter is returned unchanged.
+func strippedAmendBase(body string) string {
+	if _, stripped, ok := frontmatter.Parse(body); ok {
+		return stripped
+	}
+	return body
+}
+
 func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session) int {
 	raw, err := os.ReadFile(d.Path)
 	if err != nil {
@@ -920,7 +934,12 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session) 
 	// by the cache key: a same-context failure serves+amends this entry; a different
 	// context is a different cache entry → a cache MISS → authorPlaybook (servedBase
 	// stays "" → fresh). The base is the INPUT to the amend; the output is base+fix.
-	ui.SetServedBase(body)
+	//
+	// Stage 5 (spec §E/§F): cache.Body strips the OUTER (cache) layer, so `body`
+	// still begins with the playbook's own front matter. Amend operates on the
+	// literate content (H1 + body), not the YAML — the front matter is regenerated
+	// at persist — so strip the playbook front matter before stashing the base.
+	ui.SetServedBase(strippedAmendBase(body))
 
 	// Stage 5 (spec §D): stash the request-input-float asker so the served playbook's
 	// `f` keybind proactively amends it (base = the displayed content, change = the

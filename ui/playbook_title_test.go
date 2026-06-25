@@ -18,12 +18,15 @@ func TestLoadPlaybookSource_SetsTitleAndStrips(t *testing.T) {
 	if err := os.WriteFile(pb, []byte("intro preamble\n\n# Playbook — Y\n\nstep\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r, title, err := loadPlaybookSource(pb)
+	r, title, subtitle, err := loadPlaybookSource(pb)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if title != "Playbook — Y" {
 		t.Fatalf("title = %q, want %q", title, "Playbook — Y")
+	}
+	if subtitle != "" {
+		t.Fatalf("no front matter → subtitle must be empty, got %q", subtitle)
 	}
 	got, _ := io.ReadAll(r)
 	if !strings.HasPrefix(string(got), "# Playbook — Y") {
@@ -34,12 +37,15 @@ func TestLoadPlaybookSource_SetsTitleAndStrips(t *testing.T) {
 	if err := os.WriteFile(noH1, []byte("just a transcript\nno h1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r2, title2, err := loadPlaybookSource(noH1)
+	r2, title2, subtitle2, err := loadPlaybookSource(noH1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if title2 != "" {
 		t.Fatalf("no-H1 file must have empty title, got %q", title2)
+	}
+	if subtitle2 != "" {
+		t.Fatalf("no-H1 file must have empty subtitle, got %q", subtitle2)
 	}
 	got2, _ := io.ReadAll(r2)
 	if string(got2) != "just a transcript\nno h1\n" {
@@ -178,5 +184,137 @@ func TestRenderBodyDropsTitleWhenHeaderShowsIt(t *testing.T) {
 	m2 := newModel("agent", "# Heading\n\nbody\n")
 	if m2.renderBody() != m2.md {
 		t.Errorf("no title → renderBody must equal m.md")
+	}
+}
+
+// fmPlaybook is a finalized playbook document with a leading front-matter block
+// (name + description), then the H1 body — the shape served/run paths receive.
+const fmPlaybook = "---\n" +
+	"name: Playbook — Compiling an Android Application\n" +
+	"description: Compile the app and fix the SDK path\n" +
+	"category: Android / build\n" +
+	"---\n\n" +
+	"# Playbook — Compiling an Android Application\n\n## Step 1\nrun the build\n"
+
+// TestLoadPlaybookDocument_FrontMatter verifies the load-time parser strips the
+// front matter, takes the title from fm.Name, the subtitle from fm.Description,
+// and returns an FM-free body that still carries the H1.
+func TestLoadPlaybookDocument_FrontMatter(t *testing.T) {
+	title, subtitle, body := loadPlaybookDocument(fmPlaybook)
+	if title != "Playbook — Compiling an Android Application" {
+		t.Errorf("title = %q", title)
+	}
+	if subtitle != "Compile the app and fix the SDK path" {
+		t.Errorf("subtitle = %q", subtitle)
+	}
+	if strings.Contains(body, "---") || strings.Contains(body, "category:") {
+		t.Errorf("body must be FM-free, got %q", body)
+	}
+	if !strings.HasPrefix(body, "# Playbook — Compiling an Android Application") {
+		t.Errorf("body must start at the H1, got %q", body)
+	}
+}
+
+// TestLoadPlaybookDocument_NoFrontMatter verifies a document without front matter
+// degrades to H1-derived title and an empty subtitle (no regression).
+func TestLoadPlaybookDocument_NoFrontMatter(t *testing.T) {
+	doc := "preamble\n\n# Playbook — X\n\nstep\n"
+	title, subtitle, body := loadPlaybookDocument(doc)
+	if title != "Playbook — X" {
+		t.Errorf("title = %q, want H1-derived", title)
+	}
+	if subtitle != "" {
+		t.Errorf("no front matter → subtitle must be empty, got %q", subtitle)
+	}
+	if !strings.HasPrefix(body, "# Playbook — X") {
+		t.Errorf("body must start at the H1 (preamble stripped), got %q", body)
+	}
+}
+
+// TestLoadPlaybookSource_FrontMatter verifies the file loader surfaces the FM
+// title + subtitle and a body free of YAML and the H1 (renderBody hides the H1).
+func TestLoadPlaybookSource_FrontMatter(t *testing.T) {
+	dir := t.TempDir()
+	pb := filepath.Join(dir, "fm.md")
+	if err := os.WriteFile(pb, []byte(fmPlaybook), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	r, title, subtitle, err := loadPlaybookSource(pb)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if title != "Playbook — Compiling an Android Application" {
+		t.Errorf("title = %q", title)
+	}
+	if subtitle != "Compile the app and fix the SDK path" {
+		t.Errorf("subtitle = %q", subtitle)
+	}
+	got, _ := io.ReadAll(r)
+	if strings.Contains(string(got), "category:") {
+		t.Errorf("reader body must be FM-free, got %q", string(got))
+	}
+}
+
+// TestModelFromFMPlaybook_HidesYAMLAndH1 verifies that a model carrying an FM
+// playbook (title + subtitle set, body = FM-stripped) renders neither the raw
+// YAML nor (via renderBody) the H1, and the header region shows the subtitle.
+func TestModelFromFMPlaybook_HidesYAMLAndH1(t *testing.T) {
+	title, subtitle, body := loadPlaybookDocument(fmPlaybook)
+	m := newModel("agent", body)
+	m.title = title
+	m.subtitle = subtitle
+	m.width, m.height = 100, 24
+
+	rb := m.renderBody()
+	if strings.Contains(rb, "category:") || strings.Contains(rb, "description:") {
+		t.Errorf("renderBody must not contain raw YAML, got %q", rb)
+	}
+	if strings.Contains(rb, "# Playbook — Compiling") {
+		t.Errorf("renderBody must hide the leading H1, got %q", rb)
+	}
+	if !strings.Contains(rb, "Step 1") {
+		t.Errorf("renderBody must keep the content, got %q", rb)
+	}
+
+	// The rendered pane (header region) includes the subtitle caption.
+	out := strings.Join(m.normalLines(), "\n")
+	if !strings.Contains(out, "Compile the app and fix the SDK path") {
+		t.Errorf("rendered header must include the subtitle, got:\n%s", out)
+	}
+	if !strings.Contains(out, "Playbook — Compiling an Android Application") {
+		t.Errorf("rendered header must include the title")
+	}
+}
+
+// TestSubtitleRowString verifies the subtitle row renders the description when set
+// and is empty otherwise (no extra header row), and that subtitleRows tracks it.
+func TestSubtitleRowString(t *testing.T) {
+	m := newModel("agent", "")
+	if m.subtitleRowString() != "" || m.subtitleRows() != 0 {
+		t.Fatalf("no subtitle → empty row and 0 rows")
+	}
+	m.subtitle = "a one-line description"
+	if !strings.Contains(m.subtitleRowString(), "a one-line description") {
+		t.Fatalf("subtitle row must contain the description, got %q", m.subtitleRowString())
+	}
+	if m.subtitleRows() != 1 {
+		t.Fatalf("subtitle set → subtitleRows must be 1, got %d", m.subtitleRows())
+	}
+}
+
+// TestNoSubtitleNoExtraHeaderRow verifies a no-FM model emits no subtitle row in
+// the rendered pane and keeps the body height it would have without a subtitle.
+func TestNoSubtitleNoExtraHeaderRow(t *testing.T) {
+	m := newModel("agent", "# Playbook — X\n\nstep\n")
+	m.title = "Playbook — X"
+	m.width, m.height = 100, 24
+	withoutBody := m.body()
+
+	m.subtitle = "desc"
+	if m.body() != withoutBody-1 {
+		t.Fatalf("subtitle must consume one body row: with=%d without=%d", m.body(), withoutBody)
+	}
+	if m.bodyTop() != 4 { // leading(1)+header(1)+subtitle(1)+top-pad(1)
+		t.Fatalf("bodyTop with a subtitle (non-cached) = %d, want 4", m.bodyTop())
 	}
 }

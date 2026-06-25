@@ -82,16 +82,19 @@ var pendingAsker AskFunc
 func SetAsker(a AskFunc) { pendingAsker = a }
 
 // loadPlaybookSource reads a finalized-playbook file (run-from-file / cached-serve),
-// strips any preamble above the first H1 title, and returns a reader over the
-// stripped body plus the playbook title (for the pager header). A file with no H1 is
-// returned unchanged with an empty title (it's a transcript, not a playbook).
-func loadPlaybookSource(file string) (io.Reader, string, error) {
+// strips any leading YAML front matter AND any preamble above the first H1 title,
+// and returns a reader over the stripped body, the playbook title (front-matter
+// `name` when present, else the H1), and the front-matter `description` as a
+// subtitle (empty when the file carries no front-matter description). A file with
+// no front matter and no H1 is returned unchanged with empty title/subtitle (it's
+// a transcript, not a playbook).
+func loadPlaybookSource(file string) (r io.Reader, title, subtitle string, err error) {
 	raw, err := os.ReadFile(file)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
-	title, body := playbookHeading(string(raw))
-	return strings.NewReader(body), title, nil
+	title, subtitle, body := loadPlaybookDocument(string(raw))
+	return strings.NewReader(body), title, subtitle, nil
 }
 
 // Main is the entrypoint for the `ai-playbook run` subcommand. It parses flags
@@ -148,6 +151,10 @@ func Main() int {
 	// cached-serve). Empty for FIFO/stdin streams (an authoring transcript keeps the
 	// default "ai-assist — <harness>" header).
 	playbookTitle := ""
+	// playbookSubtitle is the front-matter `description` shown under the title for a
+	// finalized/served playbook that carries front matter. Empty for FIFO/stdin
+	// streams and for files without a front-matter description.
+	playbookSubtitle := ""
 	if inputFifo != "" {
 		f, err := os.OpenFile(inputFifo, os.O_RDONLY, 0)
 		if err != nil {
@@ -163,12 +170,13 @@ func Main() int {
 		// body is the document stream (saved playbooks are plain markdown, no control
 		// records). Stripping here also cleans EXISTING saved files that still carry
 		// preamble. A file with no H1 is left unchanged (title stays empty).
-		r, title, err := loadPlaybookSource(file)
+		r, title, subtitle, err := loadPlaybookSource(file)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", err)
 			return 1
 		}
 		playbookTitle = title
+		playbookSubtitle = subtitle
 		src = r
 	}
 	parser := &streamParser{}
@@ -197,6 +205,7 @@ func Main() int {
 		m.isCached = isCached
 		m.cachedAt = cachedAt
 		m.title = playbookTitle
+		m.subtitle = playbookSubtitle
 		fmt.Print(m.staticRender())
 		return 0
 	}
@@ -257,6 +266,7 @@ func Main() int {
 	// The UI targets a truecolor Catppuccin terminal, so we pin it explicitly.
 	m := newModel(harness, "")
 	m.title = playbookTitle
+	m.subtitle = playbookSubtitle
 	m.fifoPath = fifoPath
 	m.inputFifoPath = inputFifo
 	m.orch = orch

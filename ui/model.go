@@ -14,6 +14,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"ai-playbook/frontmatter"
 	"ai-playbook/orchestrator"
 )
 
@@ -116,7 +117,12 @@ type model struct {
 	// H1 (playbookHeading) when rendering a FINALIZED playbook (run-from-file,
 	// cached-serve, or an accepted final draft). Empty for a troubleshoot/authoring
 	// transcript, which keeps the default header.
-	title       string
+	title string
+	// subtitle is the playbook description (front-matter `description`) shown as a
+	// dim line directly under the ▓▓▓ <title> header. Set only when a finalized /
+	// served playbook carries front matter with a description; empty for drafts,
+	// transcripts, and old saved files without front matter (no subtitle row).
+	subtitle    string
 	md          string
 	lines       []Line
 	buttons     []Button
@@ -374,7 +380,8 @@ func (m *model) contentWidth() int {
 // Non-cached layout: leading(1) + header(1) + top-pad(1) + body + bot-pad(1) + hint(1) = H → body = H-5.
 // Cached layout:     leading(1) + header(1) + blank(1) + pill(1) + blank(1) + body + bot-pad(1) + hint(1) = H → body = H-7.
 func (m *model) body() int {
-	h := m.height - headerRows - hintRows - 3 - m.cachedRows() // subtract leading blank + top/bottom pads + cached extra rows
+	// subtract leading blank + top/bottom pads + cached extra rows + subtitle row
+	h := m.height - headerRows - hintRows - 3 - m.cachedRows() - m.subtitleRows()
 	if h < 1 {
 		h = 1
 	}
@@ -445,10 +452,10 @@ func (m *model) cachedRows() int {
 }
 
 // bodyTop returns the screen row (0-based) of the first body line.
-// Non-cached layout: leading blank(1) + header(1) + top-pad(1) = row 3.
-// Cached layout:     leading blank(1) + header(1) + blank(1) + pill(1) + blank(1) = row 5.
+// Non-cached layout: leading blank(1) + header(1) + [subtitle?] + top-pad(1) = row 3 (+1 with a subtitle).
+// Cached layout:     leading blank(1) + header(1) + [subtitle?] + blank(1) + pill(1) + blank(1) = row 5 (+1 with a subtitle).
 func (m *model) bodyTop() int {
-	return 1 + headerRows + 1 + m.cachedRows()
+	return 1 + headerRows + m.subtitleRows() + 1 + m.cachedRows()
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1295,6 +1302,31 @@ var h1Heading = regexp.MustCompile(`(?m)^#[ \t]+(.+?)[ \t]*$`)
 // inside fenced code blocks. A finalized playbook leads with its H1 title before
 // any fence, so in practice the title is matched first; a leading fenced `# foo`
 // would be a false positive, but that doesn't occur for our generated playbooks.
+// loadPlaybookDocument parses a finalized/served playbook document for display:
+// it strips any leading YAML front matter (frontmatter.Parse), then strips any
+// preamble above the H1 (playbookHeading) from the remaining body. It returns
+// the pager title (the front-matter `name` when present, else the H1 heading),
+// the front-matter `description` as the subtitle (empty when there is no front
+// matter / no description), and the front-matter-stripped body to render/stash.
+//
+// A document WITHOUT front matter degrades to the prior behavior: subtitle is
+// empty and the title comes from the H1 (a transcript with no H1 keeps an empty
+// title and an unchanged body).
+func loadPlaybookDocument(content string) (title, subtitle, body string) {
+	fm, rest, ok := frontmatter.Parse(content)
+	h1, stripped := playbookHeading(rest)
+	body = stripped
+	if ok {
+		subtitle = fm.Description
+		if fm.Name != "" {
+			title = fm.Name
+			return title, subtitle, body
+		}
+	}
+	title = h1
+	return title, subtitle, body
+}
+
 func playbookHeading(md string) (title, body string) {
 	loc := h1Heading.FindStringSubmatchIndex(md)
 	if loc == nil {
@@ -1333,6 +1365,30 @@ func (m model) header() string {
 	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve)).Bold(true).
 		Render(strings.Repeat("▓", 3) + " " + label)
+}
+
+// subtitleRowString returns the styled subtitle row (the front-matter
+// description) shown directly under the ▓▓▓ title for a finalized/served playbook
+// that carries one, with the standard 2-col left margin and indented to align
+// under the title text. It returns "" when there is no subtitle (so no extra
+// header row is emitted). The text is dim (subtext) so it reads as a caption.
+func (m model) subtitleRowString() string {
+	if m.subtitle == "" {
+		return ""
+	}
+	// 2-col pane margin + 4 cols (3 ▓ + 1 space) to align under the title text.
+	return "  " + lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).
+		Render("    "+m.subtitle)
+}
+
+// subtitleRows returns the number of extra header rows the subtitle occupies: 1
+// when a subtitle is present, 0 otherwise. Single source of truth for the layout
+// delta the subtitle introduces (mirrors cachedRows()).
+func (m *model) subtitleRows() int {
+	if m.subtitle != "" {
+		return 1
+	}
+	return 0
 }
 
 // relativeAge formats the age of cachedAt relative to now as a short string:
@@ -1784,6 +1840,9 @@ func (m model) viewString() string {
 		pos, size := vthumb(len(m.lines), m.body(), m.yOff)
 		sb.WriteString("\n")
 		sb.WriteString(m.titleLine(m.width) + "\n")
+		if m.subtitle != "" {
+			sb.WriteString(m.subtitleRowString() + "\n") // description caption under the title
+		}
 		if m.isCached {
 			// Float the regenerate button's hint label on the blank line above the
 			// pill, anchored to the reload-icon column (the flash anchor) — mirroring
@@ -1854,6 +1913,9 @@ func (m model) normalLines() []string {
 	out := make([]string, 0, m.height)
 	out = append(out, pad(""))                   // leading blank
 	out = append(out, pad(m.titleLine(m.width))) // title
+	if m.subtitle != "" {
+		out = append(out, pad(m.subtitleRowString())) // description caption under the title
+	}
 	if m.isCached {
 		out = append(out, pad(""))                 // blank above pill
 		out = append(out, pad(m.cachedBadgeRow())) // cached pill (left-aligned)
@@ -2172,6 +2234,9 @@ func (m model) staticRender() string {
 	lines, _, _ := Render(m.renderBody(), cw, m.blockStates, "")
 	var sb strings.Builder
 	sb.WriteString(m.titleLine(m.width) + "\n")
+	if m.subtitle != "" {
+		sb.WriteString(m.subtitleRowString() + "\n") // description caption under the title
+	}
 	if m.isCached {
 		sb.WriteString("\n")                      // blank above pill
 		sb.WriteString(m.cachedBadgeRow() + "\n") // cached pill (left-aligned)

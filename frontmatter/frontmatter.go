@@ -192,3 +192,76 @@ func Assemble(fm FrontMatter) string {
 func Prepend(fm FrontMatter, body string) string {
 	return Assemble(fm) + "\n" + body
 }
+
+// Parse splits a leading "---\n…\n---" front-matter block off the front of
+// content. When content begins with such a block, the fenced YAML is unmarshaled
+// into a FrontMatter and the remainder (after the closing fence and a single
+// following blank line, when present) is returned as body with ok=true. When
+// content does NOT begin with a front-matter fence (old saved files, fresh
+// drafts, or a "---" that only appears inside the body / a fenced code block),
+// Parse returns the zero FrontMatter, content unchanged, and ok=false.
+//
+// Only a block at the very start counts: the opening fence must be the first
+// line (a leading "---\n"), so a "---" sitting inside a fenced code block in the
+// body is never mistaken for front matter. Parse round-trips with
+// Assemble/Prepend.
+func Parse(content string) (fm FrontMatter, body string, ok bool) {
+	// The opening fence must be the very first line: "---" followed by a newline.
+	if !strings.HasPrefix(content, "---\n") {
+		return FrontMatter{}, content, false
+	}
+	rest := content[len("---\n"):]
+
+	// Find the closing fence: a line that is exactly "---". Scan line by line so
+	// the first such line terminates the block (cache.Body-compatible: stop at the
+	// first closing fence, leaving any inner playbook FM intact).
+	idx := indexClosingFence(rest)
+	if idx.yamlEnd < 0 {
+		// No closing fence → not a well-formed front-matter block.
+		return FrontMatter{}, content, false
+	}
+	yamlDoc := rest[:idx.yamlEnd]
+	body = rest[idx.bodyStart:]
+	// Drop a single blank line directly after the closing fence (the separator
+	// Prepend inserts), so the returned body starts at the real content.
+	body = strings.TrimPrefix(body, "\n")
+
+	if err := yaml.Unmarshal([]byte(yamlDoc), &fm); err != nil {
+		return FrontMatter{}, content, false
+	}
+	return fm, body, true
+}
+
+// fenceLoc records the YAML span end and the body start offset within the text
+// scanned after the opening fence.
+type fenceLoc struct {
+	yamlEnd   int // end of the YAML document (exclusive; before the closing fence)
+	bodyStart int // start of the body (after the closing fence line)
+}
+
+// indexClosingFence finds the first line equal to "---" in s and returns the
+// offsets bracketing it; it returns a sentinel with negative fields when none is
+// found. s is the text AFTER the opening fence.
+func indexClosingFence(s string) fenceLoc {
+	off := 0
+	for off <= len(s) {
+		nl := strings.IndexByte(s[off:], '\n')
+		var line string
+		var lineEnd int // offset just past this line's trailing newline (or len(s))
+		if nl < 0 {
+			line = s[off:]
+			lineEnd = len(s)
+		} else {
+			line = s[off : off+nl]
+			lineEnd = off + nl + 1
+		}
+		if line == "---" {
+			return fenceLoc{yamlEnd: off, bodyStart: lineEnd}
+		}
+		if nl < 0 {
+			break
+		}
+		off = lineEnd
+	}
+	return fenceLoc{yamlEnd: -1, bodyStart: -1}
+}

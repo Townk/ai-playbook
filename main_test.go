@@ -149,3 +149,22 @@ func after(ss []string, key string) string {
 	}
 	return ""
 }
+
+// TestStrippedAmendBase verifies the served-playbook amend base is FM-stripped:
+// a body that begins with playbook front matter is reduced to the literate content
+// (H1 + body); a body without front matter is returned unchanged.
+func TestStrippedAmendBase(t *testing.T) {
+	withFM := "---\nname: Playbook — X\ndescription: do x\n---\n\n# Playbook — X\n\nstep\n"
+	got := strippedAmendBase(withFM)
+	if strings.Contains(got, "description:") || strings.HasPrefix(got, "---") {
+		t.Errorf("amend base must be FM-stripped, got %q", got)
+	}
+	if got != "# Playbook — X\n\nstep\n" {
+		t.Errorf("amend base must be the literate body, got %q", got)
+	}
+
+	noFM := "# Playbook — Y\n\nstep\n"
+	if strippedAmendBase(noFM) != noFM {
+		t.Errorf("no-FM body must be unchanged, got %q", strippedAmendBase(noFM))
+	}
+}

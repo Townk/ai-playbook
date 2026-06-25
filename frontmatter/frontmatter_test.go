@@ -174,3 +174,112 @@ func TestPrepend(t *testing.T) {
 		t.Fatalf("Prepend must end with the body verbatim; out=%q", out)
 	}
 }
+
+// TestParse_StripsAndParses verifies Parse pulls a leading front-matter block off
+// the document, parses its scalar/slice/nested fields, and returns the FM-free
+// body (with the single Prepend separator blank line consumed).
+func TestParse_StripsAndParses(t *testing.T) {
+	content := "---\n" +
+		"name: Playbook — Android build\n" +
+		"description: Compile the app and fix the SDK path\n" +
+		"category: Android / build\n" +
+		"tags:\n  - android\n  - gradle\n" +
+		"env:\n" +
+		"  ANDROID_HOME:\n    value: /Users/x/Library/Android/sdk\n    why: SDK location\n" +
+		"---\n\n" +
+		"# Playbook — Android build\n\nDo the thing.\n"
+
+	fm, body, ok := Parse(content)
+	if !ok {
+		t.Fatalf("Parse must report ok for a leading front-matter block")
+	}
+	if fm.Name != "Playbook — Android build" {
+		t.Errorf("Name = %q", fm.Name)
+	}
+	if fm.Description != "Compile the app and fix the SDK path" {
+		t.Errorf("Description = %q", fm.Description)
+	}
+	if fm.Category != "Android / build" {
+		t.Errorf("Category = %q", fm.Category)
+	}
+	if !reflect.DeepEqual(fm.Tags, []string{"android", "gradle"}) {
+		t.Errorf("Tags = %v", fm.Tags)
+	}
+	got := fm.Env["ANDROID_HOME"]
+	if got.Value != "/Users/x/Library/Android/sdk" || got.Why != "SDK location" {
+		t.Errorf("nested env = %+v", got)
+	}
+	if body != "# Playbook — Android build\n\nDo the thing.\n" {
+		t.Fatalf("body must be FM-free starting at the H1, got %q", body)
+	}
+}
+
+// TestParse_RoundTripsPrepend verifies Prepend → Parse round-trips: the parsed
+// front matter equals the original and the parsed body equals the original body.
+func TestParse_RoundTripsPrepend(t *testing.T) {
+	fm := FrontMatter{
+		Name:        "Playbook — X",
+		Description: "one-line desc",
+		Category:    "cat",
+		Tags:        []string{"a", "b"},
+		Env:         map[string]EnvValue{"FOO": {Value: "bar", Why: "because"}},
+		Created:     "2026-06-25",
+		ProjectRoot: "/proj",
+		Request:     "do x",
+	}
+	body := "# Playbook — X\n\nDo the thing.\n"
+
+	gotFM, gotBody, ok := Parse(Prepend(fm, body))
+	if !ok {
+		t.Fatalf("round-trip Parse must report ok")
+	}
+	if !reflect.DeepEqual(gotFM, fm) {
+		t.Errorf("round-trip FM mismatch:\n got=%+v\nwant=%+v", gotFM, fm)
+	}
+	if gotBody != body {
+		t.Errorf("round-trip body mismatch:\n got=%q\nwant=%q", gotBody, body)
+	}
+}
+
+// TestParse_NoFrontMatter verifies content without a leading FM block returns
+// ok=false and the content unchanged (old saved files, fresh drafts).
+func TestParse_NoFrontMatter(t *testing.T) {
+	content := "# Playbook — X\n\nNo front matter here.\n"
+	fm, body, ok := Parse(content)
+	if ok {
+		t.Fatalf("content with no leading FM must report ok=false")
+	}
+	if body != content {
+		t.Fatalf("body must be unchanged, got %q", body)
+	}
+	if !reflect.DeepEqual(fm, FrontMatter{}) {
+		t.Fatalf("FM must be zero, got %+v", fm)
+	}
+}
+
+// TestParse_IgnoresFenceInsideCodeBlock verifies a "---" appearing inside a
+// fenced code block in the body is NOT mistaken for front matter: only a block at
+// the very start of the document counts.
+func TestParse_IgnoresFenceInsideCodeBlock(t *testing.T) {
+	content := "# Playbook — X\n\n```yaml\n---\nfoo: bar\n---\n```\n\nDone.\n"
+	_, body, ok := Parse(content)
+	if ok {
+		t.Fatalf("a --- inside a body code block must not be treated as front matter")
+	}
+	if body != content {
+		t.Fatalf("body must be unchanged when there is no leading FM, got %q", body)
+	}
+}
+
+// TestParse_UnterminatedIsNotFrontMatter verifies a leading "---\n" with no
+// closing fence is not treated as front matter (content returned unchanged).
+func TestParse_UnterminatedIsNotFrontMatter(t *testing.T) {
+	content := "---\nname: X\nno closing fence here\n"
+	_, body, ok := Parse(content)
+	if ok {
+		t.Fatalf("unterminated front matter must report ok=false")
+	}
+	if body != content {
+		t.Fatalf("body must be unchanged, got %q", body)
+	}
+}
