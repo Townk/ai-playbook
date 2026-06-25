@@ -158,3 +158,25 @@ func TestNonFinalDraftEOFDoesNotStrip(t *testing.T) {
 		t.Fatalf("non-finalDraft EOF must not strip md, got %q", got.md)
 	}
 }
+
+// renderBody drops the leading H1 (shown in the header) to avoid a double title,
+// while m.md keeps the H1 for commit/save.
+func TestRenderBodyDropsTitleWhenHeaderShowsIt(t *testing.T) {
+	m := newModel("agent", "# Playbook — X\n\nstep one\n")
+	m.title = "Playbook — X"
+	body := m.renderBody()
+	if strings.Contains(body, "# Playbook — X") {
+		t.Errorf("renderBody must drop the H1 title row; got %q", body)
+	}
+	if !strings.Contains(body, "step one") {
+		t.Errorf("renderBody must keep the content; got %q", body)
+	}
+	if !strings.Contains(m.md, "# Playbook — X") {
+		t.Errorf("m.md must keep the H1 for commit; got %q", m.md)
+	}
+	// No title set → render the doc unchanged.
+	m2 := newModel("agent", "# Heading\n\nbody\n")
+	if m2.renderBody() != m2.md {
+		t.Errorf("no title → renderBody must equal m.md")
+	}
+}

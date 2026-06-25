@@ -373,7 +373,7 @@ func (m *model) body() int {
 }
 
 func (m *model) reflow() {
-	m.lines, m.buttons, m.blocks = Render(m.md, m.contentWidth(), m.blockStates, m.flashKey)
+	m.lines, m.buttons, m.blocks = Render(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey)
 	m.appendCachedButton()
 	m.appendConfirmButtons()
 	m.clampScroll()
@@ -1263,6 +1263,27 @@ func playbookHeading(md string) (title, body string) {
 	return title, body
 }
 
+// renderBody is the document to RENDER in the scroll area. For a finalized playbook
+// the H1 title is shown in the pager header (m.title), so drop that leading H1 line
+// (and the blank lines after it) from the body to avoid a double title. m.md itself
+// keeps the H1 — it is what gets committed/saved. No title → render m.md as-is.
+func (m model) renderBody() string {
+	if m.title == "" {
+		return m.md
+	}
+	i := strings.IndexByte(m.md, '\n')
+	if i < 0 {
+		if h1Heading.MatchString(m.md) { // only the title, nothing below
+			return ""
+		}
+		return m.md
+	}
+	if h1Heading.MatchString(m.md[:i]) {
+		return strings.TrimLeft(m.md[i+1:], "\n")
+	}
+	return m.md // first line isn't the H1 (shouldn't happen for a finalized playbook)
+}
+
 func (m model) header() string {
 	label := "ai-assist — " + m.harness
 	if m.title != "" {
@@ -2129,7 +2150,7 @@ func (m model) View() tea.View {
 // the interactive View().
 func (m model) staticRender() string {
 	cw := m.contentWidth()
-	lines, _, _ := Render(m.md, cw, m.blockStates, "")
+	lines, _, _ := Render(m.renderBody(), cw, m.blockStates, "")
 	var sb strings.Builder
 	sb.WriteString(m.titleLine(m.width) + "\n")
 	if m.isCached {
