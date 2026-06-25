@@ -22,6 +22,7 @@ import (
 	"ai-playbook/author"
 	"ai-playbook/cache"
 	"ai-playbook/capture"
+	"ai-playbook/config"
 	"ai-playbook/driver"
 	"ai-playbook/floatinput"
 	"ai-playbook/input"
@@ -392,17 +393,10 @@ type session struct {
 	srv     *tools.Server
 	socket  string
 	selfExe string
-
-	// activity is the agent's live tool-call feed: the tools backend's OnActivity
-	// hook does a non-blocking send here (drop-if-full, so a slow ui never stalls a
-	// tool call), and the ui subscribes to render the latest summary next to the
-	// "Working…" spinner during the silent `claude --print` wait. Buffered so a
-	// brief ui stall doesn't drop the most recent activity. Closed in close().
-	activity chan string
 }
 
-// activityBuffer is the depth of the session's activity channel: enough to absorb
-// a brief ui stall without blocking a tool handler (OnActivity drops if full).
+// activityBuffer is the depth of the authoring fan-out's activity channel: enough
+// to absorb a brief ui stall without blocking the event pump (sends drop-if-full).
 const activityBuffer = 16
 
 // openSession creates the shared driver and starts the tools backend on a temp
@@ -437,27 +431,16 @@ func openSession(req capture.Request) *session {
 		ask = asker.Ask
 	}
 
-	// Activity feed: the tools backend reports each tool call here so the ui can show
-	// the agent's live activity during the silent authoring wait. The OnActivity hook
-	// MUST NOT block a tool handler, so the send is non-blocking (drop-if-full).
-	activity := make(chan string, activityBuffer)
-	onActivity := func(summary string) {
-		// A handler can still be in flight when the session tears down and closes the
-		// channel (srv.Close() stops accepting but doesn't drain in-flight conns), so a
-		// send on a closed channel is possible — recover from it (drop the summary).
-		defer func() { _ = recover() }()
-		select {
-		case activity <- summary:
-		default: // ui not draining fast enough; drop this one (best-effort, never block)
-		}
-	}
-
+	// The agent's live activity (reasoning + tool calls) is no longer surfaced via
+	// the tools backend's OnActivity hook — the normalized agentstream event stream
+	// (AuthorEvents → fanOut) now feeds the ui activity line directly. tools.Serve
+	// still runs the run/ask/remember execution the agent invokes; we just no longer
+	// observe it for DISPLAY.
 	srv, err := tools.Serve(socket, tools.Deps{
 		Driver:      drv,
 		ProjectRoot: req.ProjectRoot,
 		Cwd:         cwd,
 		Ask:         ask,
-		OnActivity:  onActivity,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: tools.Serve failed (%v); authoring without agent tools\n", err)
@@ -465,21 +448,16 @@ func openSession(req capture.Request) *session {
 		os.RemoveAll(dir)
 		return nil
 	}
-	return &session{drv: drv, srv: srv, socket: socket, selfExe: selfExe, activity: activity}
+	return &session{drv: drv, srv: srv, socket: socket, selfExe: selfExe}
 }
 
 // close tears down the tools backend, the shared driver, and the socket temp dir.
-// The activity channel is closed AFTER the tools server (so no handler can send to
-// a closed channel) — the closed channel signals the ui to stop subscribing.
 func (s *session) close() {
 	if s == nil {
 		return
 	}
 	if s.srv != nil {
 		s.srv.Close()
-	}
-	if s.activity != nil {
-		close(s.activity)
 	}
 	if s.drv != nil {
 		s.drv.Close()
@@ -499,6 +477,23 @@ func (s *session) authoringAgent() author.Agent {
 	return author.ClaudeAgentWithMCP(s.selfExe, s.socket)
 }
 
+// writeMCPConfig writes the claude --mcp-config pointing at this session's tools
+// backend and returns its path (and a removal func), so the owned AuthorEvents
+// invocation reaches the agent's run/ask/remember tools. Returns "" when the
+// session can't be wired (nil session, no selfExe, or a write failure) — the
+// caller then authors without tools. The removal func is always safe to call.
+func (s *session) writeMCPConfig() (path string, remove func()) {
+	if s == nil || s.selfExe == "" {
+		return "", func() {}
+	}
+	p, err := author.WriteMCPConfig(s.selfExe, s.socket)
+	if err != nil {
+		dbg("authorPlaybook: WriteMCPConfig failed (%v); authoring without agent tools", err)
+		return "", func() {}
+	}
+	return p, func() { os.Remove(p) }
+}
+
 // authorPlaybook handles a cache MISS (stage 4b): run the capable agent to author
 // a fresh playbook, stream it into the ui's in-process render+drive path (the same
 // path `run <file.md>` uses), and — when the cache wasn't disabled — persist the
@@ -511,27 +506,20 @@ func (s *session) authoringAgent() author.Agent {
 // the original request.json sidecar. Storing respects triage's decision: skipped
 // when the cache was disabled (unreliable key) or bypassed (no-cache).
 func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, sess *session) int {
-	agent := sess.authoringAgent()
-	stream, err := author.Author(req, agent)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: author: %v\n", err)
-		return 1
-	}
-	defer stream.Close()
-
 	cwd := req.ProjectRoot
 	if cwd == "" {
 		cwd = req.CWD
 	}
 
 	// Re-engagement context (stage 4c-ii): the in-process regenerate / followup /
-	// wrapup kinds re-invoke the author. regenerate re-stores the fresh playbook
+	// wrapup kinds re-invoke the author. They stay on the existing text path (the
+	// author.Agent), upgraded in part 2b. regenerate re-stores the fresh playbook
 	// (cache + keys), so it gets them; followup/wrapup only need the request +
 	// agent. When the cache is disabled/bypassed the keys are empty and regenerate
 	// authors-without-re-storing (matching the shell's cache-bypassed re-run).
 	reengage := &orchestrator.Reengage{
 		Req:         req,
-		Agent:       agent,
+		Agent:       sess.authoringAgent(),
 		Cache:       c,
 		RequestJSON: requestJSON(req),
 	}
@@ -540,16 +528,69 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		reengage.ReqHash = d.ReqHash
 	}
 
-	// Tee the produced playbook into a buffer as the ui consumes it, so we can
-	// persist it on completion. The ui reuses the SESSION's shared driver (the same
-	// shell the agent diagnosed in via its tools backend) when one is up; else it
-	// opens its own.
 	var sharedDrv *driver.Driver
-	var activity <-chan string
 	if sess != nil {
 		sharedDrv = sess.drv
-		activity = sess.activity
 	}
+
+	// INITIAL authoring runs the OWNED claude stream-json invocation (AuthorEvents):
+	// the normalized event stream is fanned into the ui's EXISTING reader-based
+	// playbook stream + activity line, so the wait shows the model's live REASONING
+	// + tool activity while the playbook still streams. The mcp-config wires the
+	// agent's run/ask/remember tools to this session's backend.
+	mcpPath, removeMCP := sess.writeMCPConfig()
+	cfg, _ := config.Load()
+	events, closeFn, err := author.AuthorEvents(req, author.AuthorOptions{
+		Cfg:           cfg,
+		MCPConfigPath: mcpPath,
+	})
+	if err != nil {
+		// Fallback: the harness binary may be missing or the harness unsupported.
+		// Author via the existing text path so authoring still works.
+		dbg("authorPlaybook: AuthorEvents failed (%v); falling back to text author path", err)
+		removeMCP()
+		return authorPlaybookText(req, d, c, noCache, reengage, cwd, sharedDrv)
+	}
+
+	// Fan the events into the playbook reader + activity feed; Body() holds the
+	// accumulated playbook for the cache once the reader hits EOF.
+	reader, activity, fo := fanOut(events, closeFn, activityBuffer)
+	defer reader.Close()
+	defer removeMCP()
+
+	code := ui.RunStream(reader, ui.StreamOptions{
+		Harness:  "Claude Code",
+		Cwd:      cwd,
+		Driver:   sharedDrv,
+		Reengage: reengage,
+		Activity: activity,
+	})
+
+	// Cache-store on completion — only when the cache wasn't disabled/bypassed and
+	// the keys are valid. The body comes from the fan-out (TextDelta accumulation,
+	// or Final's authoritative text). The disabled guard (failure with empty
+	// scrollback) and the no-cache bypass both leave the entry unstored.
+	body := fo.Body()
+	if !d.Disabled && !noCache && d.CtxHash != "" && d.ReqHash != "" && body != "" {
+		if _, serr := c.Store(d.CtxHash, d.ReqHash, "playbook", body, nil, requestJSON(req)); serr != nil {
+			fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: cache store: %v\n", serr)
+		}
+	}
+	return code
+}
+
+// authorPlaybookText is the fallback authoring path: it runs the existing
+// io.ReadCloser-based author.Author (the text harness invocation) when the owned
+// AuthorEvents stream can't start (harness binary missing / unsupported). It tees
+// the produced playbook into a buffer for the cache, exactly as before part 2a.
+func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, reengage *orchestrator.Reengage, cwd string, sharedDrv *driver.Driver) int {
+	stream, err := author.Author(req, reengage.Agent)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: author: %v\n", err)
+		return 1
+	}
+	defer stream.Close()
+
 	var body bytes.Buffer
 	code := ui.RunStream(stream, ui.StreamOptions{
 		Harness:  "Claude Code",
@@ -557,12 +598,8 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		Tee:      &body,
 		Driver:   sharedDrv,
 		Reengage: reengage,
-		Activity: activity,
 	})
 
-	// Cache-store on completion — only when the cache wasn't disabled/bypassed and
-	// the keys are valid. The disabled guard (failure with empty scrollback) and
-	// the no-cache bypass both leave the entry unstored, matching the shell.
 	if !d.Disabled && !noCache && d.CtxHash != "" && d.ReqHash != "" && body.Len() > 0 {
 		if _, serr := c.Store(d.CtxHash, d.ReqHash, "playbook", body.String(), nil, requestJSON(req)); serr != nil {
 			fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: cache store: %v\n", serr)
@@ -708,12 +745,11 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session) 
 
 	// Reuse the session's shared driver for the cached replay's run blocks (the
 	// same shell the re-engagement agent's tools backend drives), stashed for
-	// ui.Main to consume. nil session → ui.Main opens its own driver. The activity
-	// feed is stashed too so a re-engagement during the cached replay surfaces the
-	// agent's tool calls next to the spinner.
+	// ui.Main to consume. nil session → ui.Main opens its own driver. A re-engagement
+	// during the cached replay stays on the text author path (no live activity line
+	// until part 2b upgrades re-engagement to AuthorEvents).
 	if sess != nil {
 		ui.SetDriver(sess.drv)
-		ui.SetActivity(sess.activity)
 	}
 
 	// Reuse the `run` subcommand entrypoint in-process by shaping os.Args the way

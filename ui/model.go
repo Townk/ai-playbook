@@ -898,7 +898,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if m.thinking {
-			m.activityLine = msg.summary
+			// The feed now carries the model's live REASONING as well as tool
+			// summaries (agentstream Reasoning/ToolActivity). Reasoning can be long or
+			// multi-line, so collapse to ONE trimmed line; the render then truncates it
+			// to the column width.
+			m.activityLine = collapseLine(msg.summary)
 		}
 		return m, m.activityWaitCmd()
 	case reArmedMsg:

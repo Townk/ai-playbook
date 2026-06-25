@@ -3,9 +3,7 @@ package tools
 import (
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
-	"time"
 
 	"ai-playbook/driver"
 	"ai-playbook/floatinput"
@@ -210,80 +208,5 @@ func TestServe_UnknownTool(t *testing.T) {
 func TestServe_NilDriver(t *testing.T) {
 	if _, err := Serve(filepath.Join(t.TempDir(), "x.sock"), Deps{}); err == nil {
 		t.Errorf("Serve with nil driver should error")
-	}
-}
-
-// TestOnActivity verifies each tool call invokes the OnActivity hook with the
-// expected SHORT summary at the START of the handler (issue #2): run → "run: <cmd>",
-// ask → "ask: <prompt>", remember → "remember: noted".
-func TestOnActivity(t *testing.T) {
-	d := newTestDriver(t)
-	got := make(chan string, 8)
-	deps := Deps{
-		Driver: d,
-		KBRoot: t.TempDir(),
-		Ask: func(floatinput.Request) (floatinput.Result, error) {
-			return floatinput.Result{Submitted: true, Value: "ok"}, nil
-		},
-		OnActivity: func(s string) { got <- s },
-	}
-	socket := serveTest(t, deps)
-
-	recv := func() string {
-		select {
-		case s := <-got:
-			return s
-		case <-time.After(5 * time.Second):
-			t.Fatal("OnActivity not called within timeout")
-			return ""
-		}
-	}
-
-	if _, err := Dial(socket, Call{Tool: "run", Cmd: "print -r -- hi"}); err != nil {
-		t.Fatalf("Dial run: %v", err)
-	}
-	if s := recv(); s != "run: print -r -- hi" {
-		t.Errorf("run activity = %q, want %q", s, "run: print -r -- hi")
-	}
-
-	if _, err := Dial(socket, Call{Tool: "ask", Prompt: "which env?"}); err != nil {
-		t.Fatalf("Dial ask: %v", err)
-	}
-	if s := recv(); s != "ask: which env?" {
-		t.Errorf("ask activity = %q, want %q", s, "ask: which env?")
-	}
-
-	if _, err := Dial(socket, Call{Tool: "remember", Fact: "deploys via fly"}); err != nil {
-		t.Fatalf("Dial remember: %v", err)
-	}
-	if s := recv(); s != "remember: noted" {
-		t.Errorf("remember activity = %q, want %q", s, "remember: noted")
-	}
-}
-
-// TestOnActivityTruncates verifies a long, multi-line run command is collapsed to
-// one line and capped (with an ellipsis) in the activity summary.
-func TestOnActivityTruncates(t *testing.T) {
-	d := newTestDriver(t)
-	got := make(chan string, 1)
-	socket := serveTest(t, Deps{Driver: d, OnActivity: func(s string) { got <- s }})
-
-	long := "echo " + strings.Repeat("x", 200) + "\nsecond line"
-	if _, err := Dial(socket, Call{Tool: "run", Cmd: long}); err != nil {
-		t.Fatalf("Dial run: %v", err)
-	}
-	select {
-	case s := <-got:
-		if !strings.HasPrefix(s, "run: ") {
-			t.Errorf("summary must keep the run: prefix, got %q", s)
-		}
-		if !strings.HasSuffix(s, "…") {
-			t.Errorf("over-long summary must end with an ellipsis, got %q", s)
-		}
-		if strings.Contains(s, "\n") {
-			t.Errorf("summary must be a single line, got %q", s)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("OnActivity not called")
 	}
 }
