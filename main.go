@@ -17,6 +17,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"ai-playbook/agentstream"
@@ -541,21 +542,23 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 	// them; followup/finalplaybook only need the request + producer. When the cache is
 	// disabled/bypassed the keys are empty and regenerate authors-without-re-storing
 	// (matching the shell's cache-bypassed re-run).
+	var sharedDrv *driver.Driver
+	if sess != nil {
+		sharedDrv = sess.drv
+	}
+
 	reengage := &orchestrator.Reengage{
 		Req:         req,
 		Agent:       sess.authoringAgent(),
 		Events:      buildReengageEvents(req, sess),
 		Cache:       c,
 		RequestJSON: requestJSON(req),
+		Metadata:    buildMetadataSeam(sess),
+		EnvLookup:   buildEnvLookup(sharedDrv),
 	}
 	if !d.Disabled && !noCache {
 		reengage.CtxHash = d.CtxHash
 		reengage.ReqHash = d.ReqHash
-	}
-
-	var sharedDrv *driver.Driver
-	if sess != nil {
-		sharedDrv = sess.drv
 	}
 
 	// INITIAL authoring runs the OWNED claude stream-json invocation (AuthorEvents):
@@ -659,6 +662,74 @@ func buildReengageEvents(req capture.Request, sess *session) orchestrator.Events
 		return events, closeFn, nil
 	}
 }
+
+// buildMetadataSeam builds the orchestrator.Reengage.Metadata seam (spec §B):
+// CommitPlaybook calls it to classify the FINISHED playbook into description /
+// category / tags + per-var rationales. It lives in main (which imports author) so
+// the orchestrator stays free of an author import on the commit path. The mapping
+// flattens author.Metadata → orchestrator.PlaybookMeta, building EnvNotes
+// (name → why) from ImportantEnvVars. A classification failure is returned as an
+// error; CommitPlaybook then persists with empty model fields (never fails the
+// commit).
+func buildMetadataSeam(sess *session) func(doc string) (orchestrator.PlaybookMeta, error) {
+	return func(doc string) (orchestrator.PlaybookMeta, error) {
+		cfg, _ := config.Load()
+		meta, err := author.PlaybookMetadata(doc, author.AuthorOptions{Cfg: cfg})
+		if err != nil {
+			return orchestrator.PlaybookMeta{}, err
+		}
+		notes := make(map[string]string, len(meta.ImportantEnvVars))
+		for _, ev := range meta.ImportantEnvVars {
+			if ev.Name != "" {
+				notes[ev.Name] = ev.Why
+			}
+		}
+		return orchestrator.PlaybookMeta{
+			Description: meta.Description,
+			Category:    meta.Category,
+			Tags:        meta.Tags,
+			EnvNotes:    notes,
+		}, nil
+	}
+}
+
+// buildEnvLookup builds the orchestrator.Reengage.EnvLookup seam (spec §C): the
+// ground-truth environment lookup CommitPlaybook uses to fill (and redact) the
+// front-matter env values. It dumps the DRIVER shell's environment ONCE (lazily, on
+// first lookup) via `env` and caches the parsed map in the closure, so the snapshot
+// reflects the live session shell (PATH/ANDROID_HOME/etc. the user actually has).
+// A nil driver or a failed/empty dump yields an always-miss lookup (referenced vars
+// are simply omitted from the front matter). The orchestrator never calls the driver
+// directly — the dump is wired here so CommitPlaybook stays deterministically testable.
+func buildEnvLookup(d *driver.Driver) func(name string) (string, bool) {
+	var (
+		once sync.Once
+		envm map[string]string
+	)
+	load := func() {
+		envm = map[string]string{}
+		if d == nil {
+			return
+		}
+		res := d.Run("env", defaultEnvDumpTimeout)
+		if res.Exit != 0 {
+			return
+		}
+		for _, line := range strings.Split(res.Out, "\n") {
+			if i := strings.IndexByte(line, '='); i > 0 {
+				envm[line[:i]] = line[i+1:]
+			}
+		}
+	}
+	return func(name string) (string, bool) {
+		once.Do(load)
+		v, ok := envm[name]
+		return v, ok
+	}
+}
+
+// defaultEnvDumpTimeout bounds the one-shot driver `env` dump for the EnvLookup seam.
+const defaultEnvDumpTimeout = 10 * time.Second
 
 // authorPlaybookText is the fallback authoring path: it runs the existing
 // io.ReadCloser-based author.Author (the text harness invocation) when the owned
@@ -815,6 +886,10 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session) 
 	// ORIGINAL request in-process. regenerate re-stores the fresh playbook under the
 	// SAME keys so the next identical request hits the refreshed entry — matching
 	// ai-assist-regenerate. Stashed for ui.Main to attach to the orchestrator.
+	var replayDrv *driver.Driver
+	if sess != nil {
+		replayDrv = sess.drv
+	}
 	ui.SetReengage(&orchestrator.Reengage{
 		Req:         req,
 		Agent:       sess.authoringAgent(),
@@ -823,6 +898,8 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session) 
 		CtxHash:     d.CtxHash,
 		ReqHash:     d.ReqHash,
 		RequestJSON: requestJSON(req),
+		Metadata:    buildMetadataSeam(sess),
+		EnvLookup:   buildEnvLookup(replayDrv),
 	})
 
 	// Reuse the session's shared driver for the cached replay's run blocks (the

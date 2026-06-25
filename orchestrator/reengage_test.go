@@ -179,8 +179,16 @@ func TestCommitPlaybook_CacheReplaceAndFileSave(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read saved playbook: %v", err)
 	}
-	if string(saved) != body {
-		t.Errorf("saved file body = %q, want the full playbook body", saved)
+	// The saved asset is now FM + body: a leading ---…--- front-matter block with the
+	// programmatic name, followed by the body unchanged.
+	if !strings.HasPrefix(string(saved), "---\n") {
+		t.Errorf("saved file should begin with a front-matter block:\n%s", saved)
+	}
+	if !strings.Contains(string(saved), "name: Compile an Android Project") {
+		t.Errorf("saved FM missing the name field:\n%s", saved)
+	}
+	if !strings.HasSuffix(string(saved), body) {
+		t.Errorf("saved file should end with the body unchanged:\n%s", saved)
 	}
 }
 
@@ -210,8 +218,9 @@ func TestCommitPlaybook_NoKeysSavesFileOnly(t *testing.T) {
 	if path != wantPath {
 		t.Errorf("saved path = %q, want %q (ctx-hash slug fallback)", path, wantPath)
 	}
-	if saved, _ := os.ReadFile(path); string(saved) != body {
-		t.Errorf("saved file body = %q, want %q", saved, body)
+	if saved, _ := os.ReadFile(path); !strings.HasSuffix(string(saved), body) ||
+		!strings.HasPrefix(string(saved), "---\n") {
+		t.Errorf("saved file should be FM + body, got %q", saved)
 	}
 }
 
@@ -259,8 +268,10 @@ func TestCommitPlaybook_StripsPreambleIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(saved) != clean {
-		t.Errorf("saved body not stripped to the H1:\n got %q\nwant %q", saved, clean)
+	// The saved asset is FM + the stripped body: the body portion (after the FM)
+	// equals clean, with no preamble surviving.
+	if !strings.HasSuffix(string(saved), clean) {
+		t.Errorf("saved body not stripped to the H1:\n got %q\nwant suffix %q", saved, clean)
 	}
 	if strings.Contains(string(saved), "preamble prose") {
 		t.Errorf("saved body still has preamble:\n%s", saved)
@@ -279,8 +290,8 @@ func TestCommitPlaybook_StripsPreambleIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(saved2) != clean {
-		t.Errorf("already-clean body should be unchanged:\n got %q\nwant %q", saved2, clean)
+	if !strings.HasSuffix(string(saved2), clean) {
+		t.Errorf("already-clean body should be unchanged:\n got %q\nwant suffix %q", saved2, clean)
 	}
 }
 

@@ -23,6 +23,7 @@ import (
 	"ai-playbook/cache"
 	"ai-playbook/capture"
 	"ai-playbook/driver"
+	"ai-playbook/frontmatter"
 	"ai-playbook/mux"
 )
 
@@ -168,6 +169,35 @@ type Reengage struct {
 	ReqHash     string
 	RequestJSON string
 	DataRoot    string
+
+	// Metadata is the injected model-classification seam used by CommitPlaybook to
+	// fill the front-matter description/category/tags + per-var env rationales (spec
+	// §B). main.go wires it from author.PlaybookMetadata; tests inject a fake. It is
+	// nil-safe: a nil seam (or any error from it) means CommitPlaybook persists with
+	// empty model fields — metadata MUST NEVER fail the commit (the playbook must
+	// still persist). It is decoupled from the author package via PlaybookMeta.
+	Metadata func(doc string) (PlaybookMeta, error)
+
+	// EnvLookup is the injected ground-truth environment seam used by CommitPlaybook
+	// to fill (and redact) the front-matter env values (spec §C). main.go wires it to
+	// the driver shell's environment (dumped once, cached in the closure); tests
+	// inject a fake map lookup. nil-safe: a nil seam means no env VALUES are captured
+	// (referenced vars are simply omitted, since their values are unknown).
+	EnvLookup func(name string) (value string, ok bool)
+}
+
+// PlaybookMeta is the orchestrator-local mirror of the model's four classification
+// fields (spec §A/§B), decoupling the orchestrator from the author package on the
+// CommitPlaybook path. main.go maps author.Metadata → PlaybookMeta, building
+// EnvNotes (env-var-name → why) from author.Metadata.ImportantEnvVars.
+type PlaybookMeta struct {
+	Description string
+	Category    string
+	Tags        []string
+	// EnvNotes maps an env-var name to the model's one-line rationale (why). It feeds
+	// frontmatter.BuildEnv's notes argument: both a union source of var names and the
+	// per-var why recorded in the front matter (never redacted — a rationale).
+	EnvNotes map[string]string
 }
 
 // dataRoot resolves the data dir for wrap-up side effects: the explicit DataRoot,
@@ -363,6 +393,14 @@ func (o *Orchestrator) FinalPlaybook(base, change string) (io.ReadCloser, <-chan
 //     context hash (then "playbook") when no title is present. The directory is
 //     created. The saved path is returned so the ui can confirm it to the user.
 //
+// Front matter (spec §C/§E): the saved + cached asset is `FM + body`, not the bare
+// body. The front matter is ASSEMBLED here, never authored into the live draft —
+// `name`/`slug`/`created`/`project_root`/`request`/`env` are programmatic; only
+// description/category/tags + per-var rationales come from the injected Metadata
+// seam. Both seams (Metadata, EnvLookup) are nil-safe and best-effort: a missing or
+// erroring Metadata yields empty model fields, a missing EnvLookup yields no env
+// values — neither EVER fails the commit (the playbook must always persist).
+//
 // KB remember is DEFERRED (spec §E note): the final playbook + cache entry + saved
 // file are the durable assets; a KB fact is a later refinement and must not block the
 // commit. An empty body or a missing Reengage context is an error (nothing to commit).
@@ -380,23 +418,76 @@ func (o *Orchestrator) CommitPlaybook(body string) (string, error) {
 	// unchanged; a body with no H1 is left untouched.
 	body = stripPreamble(body)
 
+	// Assemble the §C/§E front matter and prepend it to the body. `full` is what we
+	// persist (file + cache) instead of the bare body.
+	full := frontmatter.Prepend(re.buildFrontMatter(body), body)
+
 	// (1) Cache-REPLACE — best-effort, skipped when keys/cache absent (no entry to
 	// replace). Mirrors Regenerate's restore: same keys + kind + request sidecar.
+	// The stored body now leads with the playbook FM; cache.Store wraps it in the
+	// cache's OWN technical FM, so the entry has two ---…--- layers (spec §F).
 	if re.Cache != nil && re.CtxHash != "" && re.ReqHash != "" {
-		_, _ = re.Cache.Store(re.CtxHash, re.ReqHash, "playbook", body, nil, re.RequestJSON)
+		_, _ = re.Cache.Store(re.CtxHash, re.ReqHash, "playbook", full, nil, re.RequestJSON)
 	}
 
-	// (2) Save the .md file under <DataRoot>/playbooks/<slug>.md.
+	// (2) Save the .md file under <DataRoot>/playbooks/<slug>.md (FM + body).
 	dir := filepath.Join(re.dataRoot(), "playbooks")
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
 	slug := playbookSlug(body, re.CtxHash)
 	path := filepath.Join(dir, slug+".md")
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+	if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
 		return "", err
 	}
 	return path, nil
+}
+
+// buildFrontMatter assembles the playbook front matter (spec §C/§E) for body: the
+// programmatic name (the H1) + provenance (created/project_root/request) we already
+// hold, the model's classification fields (description/category/tags + per-var why)
+// via the injected Metadata seam, and the redacted env map via frontmatter.BuildEnv
+// over the injected EnvLookup. Both seams are nil-safe and best-effort: a nil/erroring
+// Metadata leaves the model fields empty; a nil EnvLookup captures no env values.
+func (re *Reengage) buildFrontMatter(body string) frontmatter.FrontMatter {
+	// name: the playbook's H1 title (the model authored it; we just read it),
+	// matching playbookSlug's title source.
+	name := playbookTitle.FindStringSubmatch(body)
+	title := ""
+	if name != nil {
+		title = name[1]
+	} else if m := firstHeading.FindStringSubmatch(body); m != nil {
+		title = m[1]
+	}
+
+	// Model classification (best-effort): on a nil seam OR any error, continue with
+	// empty model fields — NEVER fail the commit over metadata.
+	var meta PlaybookMeta
+	if re.Metadata != nil {
+		if m, err := re.Metadata(body); err == nil {
+			meta = m
+		}
+	}
+
+	// env (spec §C): union of body-referenced vars and the model's importantEnvVars
+	// (EnvNotes keys), values filled + redacted from the injected ground-truth lookup.
+	// A nil lookup → an always-miss lookup so referenced vars are simply omitted.
+	lookup := re.EnvLookup
+	if lookup == nil {
+		lookup = func(string) (string, bool) { return "", false }
+	}
+	env := frontmatter.BuildEnv(frontmatter.ScanEnvRefs(body), meta.EnvNotes, lookup)
+
+	return frontmatter.FrontMatter{
+		Name:        title,
+		Description: meta.Description,
+		Category:    meta.Category,
+		Tags:        meta.Tags,
+		Env:         env,
+		Created:     time.Now().Format("2006-01-02"),
+		ProjectRoot: re.Req.ProjectRoot,
+		Request:     re.Req.UserRequest,
+	}
 }
 
 // playbookTitle matches the literate-config playbook heading `# Playbook — <title>`
