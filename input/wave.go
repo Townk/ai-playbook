@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -128,6 +129,47 @@ func WaveFrame(phase float64, cols, rows int, blue, red, magenta string) string 
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+// lerpHexColor linearly interpolates between two "#rrggbb" hex colors and returns
+// the result as "#rrggbb". t is clamped to [0,1]; t=0 → a, t=1 → b, t=0.5 → the
+// per-channel midpoint. A malformed input falls back to the other color (or "#000000"
+// if both are malformed) so a bad theme value never panics the render.
+func lerpHexColor(a, b string, t float64) string {
+	if t < 0 {
+		t = 0
+	}
+	if t > 1 {
+		t = 1
+	}
+	ar, ag, ab, aok := parseHexRGB(a)
+	br, bg, bb, bok := parseHexRGB(b)
+	switch {
+	case !aok && !bok:
+		return "#000000"
+	case !aok:
+		ar, ag, ab = br, bg, bb
+	case !bok:
+		br, bg, bb = ar, ag, ab
+	}
+	lerp := func(x, y int) int {
+		return int(math.Round(float64(x) + (float64(y)-float64(x))*t))
+	}
+	return fmt.Sprintf("#%02x%02x%02x", lerp(ar, br), lerp(ag, bg), lerp(ab, bb))
+}
+
+// parseHexRGB parses "#rrggbb" (case-insensitive, leading '#' optional) into its
+// 0..255 channels. ok is false for any malformed input.
+func parseHexRGB(s string) (r, g, b int, ok bool) {
+	s = strings.TrimPrefix(strings.TrimSpace(s), "#")
+	if len(s) != 6 {
+		return 0, 0, 0, false
+	}
+	v, err := strconv.ParseUint(s, 16, 32)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	return int(v>>16) & 0xff, int(v>>8) & 0xff, int(v) & 0xff, true
 }
 
 // waveTickMsg advances the wave animation one frame.

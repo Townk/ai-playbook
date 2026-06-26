@@ -244,7 +244,7 @@ func (s *Server) doAsk(req request) reply {
 	}
 	res, err := s.deps.Ask(floatinput.Request{
 		Type:   req.Type,
-		Title:  "ai-assist",
+		Title:  "ai-playbook",
 		Prompt: req.Prompt,
 		Cwd:    s.deps.Cwd,
 	})

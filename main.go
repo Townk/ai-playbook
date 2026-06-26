@@ -254,7 +254,7 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 	asker := floatinput.Asker{SelfExe: selfExe, Mux: m}
 	res, out, err := asker.AskThinking(floatinput.Request{
 		Type:    "text",
-		Title:   "ai-assist",
+		Title:   "ai-playbook",
 		Prompt:  "How can I help you today?",
 		Value:   prefillTemplate(req),
 		Cwd:     req.CWD,

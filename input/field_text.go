@@ -253,38 +253,25 @@ func (f *textField) viewWith(innerW int, st taStyle) string {
 	return box.Render(body)
 }
 
-// thinkingView renders the SAME rounded box chrome as viewWith — the rounded
-// border, the icon column, and (for multiline) the scroll-gap + scroll column —
-// but replaces the textarea body with a WaveFrame so the wave fills the box
-// interior at the box's EXACT inner text width × textarea height. innerW is the
-// width available inside the outer frame; blue/red/magenta are the wave palette.
+// thinkingView renders the rounded box with a WaveFrame filling the ENTIRE
+// interior — border-to-border. Unlike viewWith it drops the icon column, the left
+// padding, and the scroll gap/column: in the thinking state there is nothing to
+// type or scroll, so the wave spans the full interior width (only the rounded
+// border removed) at taHeight rows. innerW is the width available inside the outer
+// frame; blue/red/magenta are the wave palette. The border + border color match
+// the text box so the box the user typed into becomes the wave canvas.
 func (f *textField) thinkingView(innerW int, phase float64, blue, red, magenta string) string {
-	// Same inner-text width computation as viewWith/setWidth.
-	taW := innerW - boxBorder - boxPadL - iconCol
-	if !f.singleLine {
-		taW -= scrollGap + scrollCol
+	// Full interior width: only the rounded border (2 cols) removed — no icon col,
+	// no left padding, no scroll reserve, no trailing padding.
+	cols := innerW - boxBorder
+	if cols < 1 {
+		cols = 1
 	}
-	if taW < 1 {
-		taW = 1
-	}
-
-	wave := WaveFrame(phase, taW, f.taHeight, blue, red, magenta)
-	body := lipgloss.JoinHorizontal(lipgloss.Top,
-		iconColumnColored(f.taHeight, f.iconGlyph, f.theme.Accent, ""),
-		wave,
-	)
-	if !f.singleLine {
-		// Keep the gap + scroll columns so the box width matches the text box
-		// exactly; render them blank (nothing to scroll while thinking).
-		gap := strings.TrimRight(strings.Repeat(strings.Repeat(" ", scrollGap)+"\n", f.taHeight), "\n")
-		track := strings.TrimRight(strings.Repeat(strings.Repeat(" ", scrollCol)+"\n", f.taHeight), "\n")
-		body = lipgloss.JoinHorizontal(lipgloss.Top, body, gap, track)
-	}
+	wave := WaveFrame(phase, cols, f.taHeight, blue, red, magenta)
 	box := lipgloss.NewStyle().
 		BorderStyle(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(f.theme.FieldBorder)).
-		Padding(0, 0, 0, boxPadL)
-	return box.Render(body)
+		BorderForeground(lipgloss.Color(f.theme.FieldBorder))
+	return box.Render(wave)
 }
 
 func (f *textField) value() string { return f.ta.Value() }

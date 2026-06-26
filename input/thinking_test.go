@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // isQuit reports whether cmd, when executed, yields tea.QuitMsg{}.
@@ -152,6 +153,55 @@ func TestThinkingViewDims(t *testing.T) {
 	}
 	if waveRows != tf.taHeight {
 		t.Fatalf("thinkingView wave rows = %d, want taHeight %d", waveRows, tf.taHeight)
+	}
+	// Full-width: the wave fills the interior border-to-border — each rendered line
+	// is exactly innerW wide (cols == innerW - boxBorder, only the border removed,
+	// no icon col / padding / scroll reserve).
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w != m.innerW() {
+			t.Fatalf("thinkingView line width = %d, want innerW %d (full-width wave)\n%q", w, m.innerW(), l)
+		}
+	}
+	// And the prompt-icon glyph must NOT appear in the thinking interior.
+	if strings.Contains(plain, promptIcon) {
+		t.Fatalf("full-width thinkingView must drop the prompt-icon column (%q):\n%s", promptIcon, plain)
+	}
+}
+
+// TestThinkingRenderNoIcon: the full-width thinking render drops the prompt-icon
+// column entirely (the wave spans the whole interior).
+func TestThinkingRenderNoIcon(t *testing.T) {
+	m := newThinkingModel(t, "")
+	m.thinking = true
+	m.phase = 0.7
+	plain := strip(m.render())
+	if strings.Contains(plain, promptIcon) {
+		t.Fatalf("thinking render must not contain the prompt icon %q:\n%s", promptIcon, plain)
+	}
+}
+
+// TestLerpHexColor: endpoints and midpoint of the breathing interpolation.
+func TestLerpHexColor(t *testing.T) {
+	const a, b = "#000000", "#ffffff"
+	if got := lerpHexColor(a, b, 0); got != a {
+		t.Errorf("t=0 → %q, want %q", got, a)
+	}
+	if got := lerpHexColor(a, b, 1); got != b {
+		t.Errorf("t=1 → %q, want %q", got, b)
+	}
+	if got := lerpHexColor(a, b, 0.5); got != "#808080" {
+		t.Errorf("t=0.5 → %q, want #808080 (midpoint)", got)
+	}
+	// Per-channel midpoint between two real colors.
+	if got := lerpHexColor("#ffffff", "#fab387", 0.5); got != "#fdd9c3" {
+		t.Errorf("white↔peach midpoint = %q, want #fdd9c3", got)
+	}
+	// t is clamped; a malformed input falls back to the other color.
+	if got := lerpHexColor(a, b, 2); got != b {
+		t.Errorf("t>1 clamps to b: %q, want %q", got, b)
+	}
+	if got := lerpHexColor("garbage", b, 0); got != b {
+		t.Errorf("malformed a falls back to b: %q, want %q", got, b)
 	}
 }
 

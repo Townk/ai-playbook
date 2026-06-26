@@ -2,6 +2,7 @@ package input
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strings"
 
@@ -218,6 +219,25 @@ func (m model) render() string {
 // as the magenta overlap.
 const thinkingWaveRed = "#f38ba8"
 
+// The "Thinking…" prompt "breathes" its foreground between bright white and
+// catppuccin peach, synced to the wave phase (no extra tick).
+//   - thinkingBreatheBright / thinkingBreathePeach: the two LERP endpoints.
+//   - thinkingBreatheK: the pulse rate applied to phase. With phase += 0.35 per
+//     ~33ms tick (~10.5 phase/sec), the sine period 2π/k ≈ 20.9 phase-units ≈
+//     ~2.0s per full breath (in the spec's 1.5-2.5s band).
+const (
+	thinkingBreatheBright = "#ffffff"
+	thinkingBreathePeach  = "#fab387"
+	thinkingBreatheK      = 0.3
+)
+
+// thinkingPromptColor returns the breathing foreground for "Thinking…" at the
+// given phase: t = (sin(phase·k)+1)/2 LERPed bright-white ↔ peach.
+func thinkingPromptColor(phase float64) string {
+	t := (math.Sin(phase*thinkingBreatheK) + 1) / 2
+	return lerpHexColor(thinkingBreatheBright, thinkingBreathePeach, t)
+}
+
 // renderThinking draws the in-place thinking state: the prompt line becomes
 // "Thinking…", the input box interior becomes the wave canvas (SAME border + icon
 // column as the text box), and the hint line is dropped. Same row count as the
@@ -225,7 +245,7 @@ const thinkingWaveRed = "#f38ba8"
 func (m model) renderThinking() string {
 	iW := m.innerW()
 	sections := []string{
-		lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text)).Render("Thinking…"),
+		lipgloss.NewStyle().Foreground(lipgloss.Color(thinkingPromptColor(m.phase))).Render("Thinking…"),
 	}
 	if tf, ok := m.fld.(*textField); ok {
 		sections = append(sections, tf.thinkingView(iW, m.phase, m.theme.Border, thinkingWaveRed, m.theme.Accent))
