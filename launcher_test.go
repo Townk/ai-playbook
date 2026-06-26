@@ -8,10 +8,22 @@ import (
 	"time"
 
 	"ai-playbook/author"
+	"ai-playbook/cache"
 	"ai-playbook/capture"
 	"ai-playbook/input"
 	"ai-playbook/mux"
 )
+
+// isolateCache points the cache at a throwaway temp root (AI_PLAYBOOK_DATA_DIR)
+// so the launcher's cache-by-kind lookup/store touch an isolated store — never the
+// user's real ~/.local/share/ai-playbook. Returns the *cache.Cache rooted there so
+// HIT tests can pre-populate entries. Every launch-driving test calls this so a
+// MISS-path store (command/answer) writes into the temp dir, not the real cache.
+func isolateCache(t *testing.T) *cache.Cache {
+	t.Helper()
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir())
+	return cache.Open()
+}
 
 // fastFloatWait shrinks the waitFloatClosed seam so launcher tests run quickly and
 // never block on the live ~2s cap. Restored after the test. Every test that drives
@@ -163,6 +175,7 @@ func (m *launchMux) SpawnDocked(opts mux.SpawnOptions) error {
 // the submitted request.
 func TestLaunch_FloatThenDocked(t *testing.T) {
 	fastFloatWait(t)
+	isolateCache(t)
 	m := &launchMux{answer: "please fix it"}
 	req := capture.Request{
 		Kind:        "error",
@@ -238,6 +251,7 @@ func TestLaunch_FloatThenDocked(t *testing.T) {
 // (<out>.done written), and NO docked pane is spawned.
 func TestLaunch_CommandRoute(t *testing.T) {
 	fastFloatWait(t)
+	isolateCache(t)
 	m := &launchMux{answer: "list last week's commits"}
 	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj", PaneID: "terminal_7"}
 	classify := fakeClassify(author.Classification{Kind: author.KindCommand, Content: "git log --since='last week' -n 3"}, nil)
@@ -278,6 +292,7 @@ func TestLaunch_CommandRoute(t *testing.T) {
 // is closed, and NO session pane is spawned.
 func TestLaunch_AnswerRoute(t *testing.T) {
 	fastFloatWait(t)
+	isolateCache(t)
 	m := &launchMux{answer: "what is HEAD?"}
 	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
 	classify := fakeClassify(author.Classification{Kind: author.KindAnswer, Content: "HEAD is the current commit your working tree is based on."}, nil)
@@ -316,6 +331,7 @@ func TestLaunch_AnswerRoute(t *testing.T) {
 // to the answer pager as `--title <title>` (it becomes the pane header).
 func TestLaunch_AnswerRouteCarriesTitle(t *testing.T) {
 	fastFloatWait(t)
+	isolateCache(t)
 	m := &launchMux{answer: "what is HEAD?"}
 	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
 	classify := fakeClassify(author.Classification{Kind: author.KindAnswer, Content: "HEAD is the current commit.", Title: "What Is HEAD"}, nil)
@@ -335,6 +351,7 @@ func TestLaunch_AnswerRouteCarriesTitle(t *testing.T) {
 // passed to the docked session as `--title <title>` (the working pane header).
 func TestLaunch_EscalateRouteCarriesTitle(t *testing.T) {
 	fastFloatWait(t)
+	isolateCache(t)
 	m := &launchMux{answer: "fix the build"}
 	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
 	classify := fakeClassify(author.Classification{Kind: author.KindEscalate, Title: "Fix Gradle Build"}, nil)
@@ -354,6 +371,7 @@ func TestLaunch_EscalateRouteCarriesTitle(t *testing.T) {
 // flag entirely (the pane keeps its default/H1 header).
 func TestLaunch_NoTitleNoFlag(t *testing.T) {
 	fastFloatWait(t)
+	isolateCache(t)
 	m := &launchMux{answer: "fix it"}
 	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
 	if code := launch(m, "/bin/ai-playbook", req, escalateClassify()); code != 0 {
@@ -368,6 +386,7 @@ func TestLaunch_NoTitleNoFlag(t *testing.T) {
 // escalate route (a docked session pane), never blocking the user.
 func TestLaunch_ClassifyErrorEscalates(t *testing.T) {
 	fastFloatWait(t)
+	isolateCache(t)
 	m := &launchMux{answer: "do a thing"}
 	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
 	classify := fakeClassify(author.Classification{Kind: author.KindEscalate}, os.ErrDeadlineExceeded)
@@ -384,6 +403,7 @@ func TestLaunch_ClassifyErrorEscalates(t *testing.T) {
 // cleanly (0) and spawns NO docked session pane.
 func TestLaunch_CancelNoSession(t *testing.T) {
 	fastFloatWait(t)
+	isolateCache(t)
 	m := &launchMux{floatCancel: true}
 	code := launch(m, "/bin/ai-playbook", capture.Request{CWD: "/x"}, escalateClassify())
 	if code != 0 {
@@ -406,6 +426,7 @@ func TestLaunch_CancelNoSession(t *testing.T) {
 // cap and routes (never blocks the user). doneAtRoute holds; closedAtRoute is false.
 func TestLaunch_WaitTimeoutStillRoutes(t *testing.T) {
 	fastFloatWait(t)
+	isolateCache(t)
 	m := &launchMux{answer: "do a thing", noClose: true}
 	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
 
@@ -432,6 +453,7 @@ func TestLaunch_WaitTimeoutStillRoutes(t *testing.T) {
 // empty out) is a no-op: waitFloatClosed returns immediately, sleeping no margin.
 func TestWaitFloatClosed_EmptyPathNoWait(t *testing.T) {
 	fastFloatWait(t)
+	isolateCache(t)
 	start := time.Now()
 	waitFloatClosed("")
 	if waited := time.Since(start); waited > 50*time.Millisecond {
@@ -595,5 +617,234 @@ func TestExtractJSONContent(t *testing.T) {
 		if got := extractJSONContent(c.in); got != c.want {
 			t.Errorf("extractJSONContent(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// failClassify is a classifyFunc that fails the test if invoked — the cache-hit
+// (and no-cache-with-store-skip) paths must serve WITHOUT calling the haiku.
+func failClassify(t *testing.T) classifyFunc {
+	t.Helper()
+	return func(capture.Request, author.AuthorOptions) (author.Classification, error) {
+		t.Error("classify must NOT be called on a cache hit")
+		return author.Classification{Kind: author.KindEscalate}, nil
+	}
+}
+
+// launchKeys computes the (ctxHash, reqHash) the launcher's triage.Route would
+// derive for req with the given SUBMITTED request value (the float answer becomes
+// req.UserRequest, so the request hash keys on the submitted text, not req's).
+func launchKeys(req capture.Request, submitted string) (string, string) {
+	cr := cache.Request{
+		ProjectRoot: req.ProjectRoot,
+		CWD:         req.CWD,
+		CommandText: req.Command,
+		CommandExit: req.Exit,
+		Scrollback:  req.Scrollback,
+	}
+	return cache.ContextHash(cr), cache.RequestHash(submitted)
+}
+
+// TestLaunch_CacheHitCommand: a repeat request whose cached entry is kind=command
+// is served straight from the cache — classify is NOT called and the cached body
+// is typed into the origin pane (no docked pane).
+func TestLaunch_CacheHitCommand(t *testing.T) {
+	fastFloatWait(t)
+	c := isolateCache(t)
+	const submitted = "list last week's commits"
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj", PaneID: "terminal_7"}
+	ctx, rh := launchKeys(req, submitted)
+	if _, err := c.Store(ctx, rh, "command", "git log --since='last week' -n 3", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &launchMux{answer: submitted}
+	if code := launch(m, "/bin/ai-playbook", req, failClassify(t)); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	if m.typedCount != 1 {
+		t.Fatalf("expected 1 TypeInto from the cached command, got %d", m.typedCount)
+	}
+	if m.typedText != "git log --since='last week' -n 3" {
+		t.Errorf("typed text = %q, want the cached command body", m.typedText)
+	}
+	if m.typedPane != "terminal_7" {
+		t.Errorf("typed into pane %q, want origin terminal_7", m.typedPane)
+	}
+	if len(m.docked) != 0 {
+		t.Fatalf("cached command must spawn NO docked pane, got %d", len(m.docked))
+	}
+}
+
+// TestLaunch_CacheHitAnswer: a repeat request whose cached entry is kind=answer is
+// served straight from the cache — classify is NOT called, a docked pager renders
+// the cached body, and the pager carries --cached <created_at> (the badge pill).
+func TestLaunch_CacheHitAnswer(t *testing.T) {
+	fastFloatWait(t)
+	c := isolateCache(t)
+	const submitted = "what is HEAD?"
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
+	ctx, rh := launchKeys(req, submitted)
+	if _, err := c.Store(ctx, rh, "answer", "HEAD is the current commit.", map[string]string{"title": "What Is HEAD"}, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &launchMux{answer: submitted}
+	if code := launch(m, "/bin/ai-playbook", req, failClassify(t)); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	if m.typedCount != 0 {
+		t.Errorf("cached answer must not type into the origin, got %d", m.typedCount)
+	}
+	if len(m.docked) != 1 {
+		t.Fatalf("expected 1 docked pager pane, got %d", len(m.docked))
+	}
+	dargv := m.docked[0]
+	if dargv[0] != "/bin/ai-playbook" || dargv[1] != "run" {
+		t.Fatalf("docked argv prefix = %v, want [/bin/ai-playbook run …]", dargv[:2])
+	}
+	if !strings.Contains(m.dockedAnswer, "HEAD is the current commit") {
+		t.Errorf("answer md missing the cached body:\n%s", m.dockedAnswer)
+	}
+	if got := argAfter(dargv, "--cached"); got == "" {
+		t.Errorf("cached answer must carry --cached <created_at>\nargv: %v", dargv)
+	}
+	if got := argAfter(dargv, "--title"); got != "What Is HEAD" {
+		t.Errorf("cached answer --title = %q, want the stored title extra", got)
+	}
+}
+
+// TestLaunch_CacheHitPlaybook: a repeat request whose cached entry is kind=playbook
+// is served by spawning the docked SESSION pane (which re-runs triage.Route and
+// serves the cached playbook); classify is NOT called.
+func TestLaunch_CacheHitPlaybook(t *testing.T) {
+	fastFloatWait(t)
+	c := isolateCache(t)
+	const submitted = "fix the build"
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
+	ctx, rh := launchKeys(req, submitted)
+	if _, err := c.Store(ctx, rh, "playbook", "# Fix\n", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &launchMux{answer: submitted}
+	if code := launch(m, "/bin/ai-playbook", req, failClassify(t)); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	if m.typedCount != 0 {
+		t.Errorf("cached playbook must not type into the origin, got %d", m.typedCount)
+	}
+	if len(m.docked) != 1 || m.docked[0][1] != "session" {
+		t.Fatalf("cached playbook must spawn a docked session, got docked=%v", m.docked)
+	}
+}
+
+// TestLaunch_CacheMissStoresCommand: a MISS classified as command IS classified
+// (the haiku ran) and the result is stored so the next identical request hits.
+func TestLaunch_CacheMissStoresCommand(t *testing.T) {
+	fastFloatWait(t)
+	c := isolateCache(t)
+	const submitted = "show the git log"
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj", PaneID: "terminal_7"}
+	classify := fakeClassify(author.Classification{Kind: author.KindCommand, Content: "git log -n 3"}, nil)
+
+	m := &launchMux{answer: submitted}
+	if code := launch(m, "/bin/ai-playbook", req, classify); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	ctx, rh := launchKeys(req, submitted)
+	path, ok := c.Lookup(ctx, rh)
+	if !ok {
+		t.Fatal("command MISS must store a cache entry")
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	content := string(raw)
+	if kind, _ := cache.Field(content, "kind"); kind != "command" {
+		t.Errorf("stored kind = %q, want command", kind)
+	}
+	if body := cache.Body(content); body != "git log -n 3" {
+		t.Errorf("stored body = %q, want the classified command", body)
+	}
+}
+
+// TestLaunch_CacheMissStoresAnswer: a MISS classified as answer stores the answer
+// entry carrying the classify title as the `title` front-matter extra.
+func TestLaunch_CacheMissStoresAnswer(t *testing.T) {
+	fastFloatWait(t)
+	c := isolateCache(t)
+	const submitted = "explain HEAD"
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
+	classify := fakeClassify(author.Classification{Kind: author.KindAnswer, Content: "HEAD is the tip.", Title: "About HEAD"}, nil)
+
+	m := &launchMux{answer: submitted}
+	if code := launch(m, "/bin/ai-playbook", req, classify); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	ctx, rh := launchKeys(req, submitted)
+	path, ok := c.Lookup(ctx, rh)
+	if !ok {
+		t.Fatal("answer MISS must store a cache entry")
+	}
+	raw, _ := os.ReadFile(path)
+	content := string(raw)
+	if kind, _ := cache.Field(content, "kind"); kind != "answer" {
+		t.Errorf("stored kind = %q, want answer", kind)
+	}
+	if body := cache.Body(content); body != "HEAD is the tip." {
+		t.Errorf("stored body = %q, want the classified answer", body)
+	}
+	if title, _ := cache.Field(content, "title"); title != "About HEAD" {
+		t.Errorf("stored title extra = %q, want About HEAD", title)
+	}
+}
+
+// TestLaunch_CacheMissEscalateStoresNothing: a MISS classified as escalate writes
+// NOTHING from the launcher (the session owns the playbook entry).
+func TestLaunch_CacheMissEscalateStoresNothing(t *testing.T) {
+	fastFloatWait(t)
+	c := isolateCache(t)
+	const submitted = "diagnose the failure"
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
+
+	m := &launchMux{answer: submitted}
+	if code := launch(m, "/bin/ai-playbook", req, escalateClassify()); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	if len(m.docked) != 1 || m.docked[0][1] != "session" {
+		t.Fatalf("escalate must spawn a docked session, got docked=%v", m.docked)
+	}
+	ctx, rh := launchKeys(req, submitted)
+	if _, ok := c.Lookup(ctx, rh); ok {
+		t.Error("escalate MISS must NOT write a cache entry from the launcher")
+	}
+}
+
+// TestLaunch_NoCacheBypass: AI_ASSIST_NO_CACHE bypasses the lookup (classify runs)
+// and skips the store (no entry written), even for a command/answer classification.
+func TestLaunch_NoCacheBypass(t *testing.T) {
+	fastFloatWait(t)
+	c := isolateCache(t)
+	t.Setenv("AI_ASSIST_NO_CACHE", "1")
+	const submitted = "show the git log"
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj", PaneID: "terminal_7"}
+
+	classified := false
+	classify := func(capture.Request, author.AuthorOptions) (author.Classification, error) {
+		classified = true
+		return author.Classification{Kind: author.KindCommand, Content: "git log -n 3"}, nil
+	}
+
+	m := &launchMux{answer: submitted}
+	if code := launch(m, "/bin/ai-playbook", req, classify); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	if !classified {
+		t.Error("no-cache must still classify (lookup bypassed)")
+	}
+	ctx, rh := launchKeys(req, submitted)
+	if _, ok := c.Lookup(ctx, rh); ok {
+		t.Error("no-cache must NOT store the classified result")
 	}
 }

@@ -275,8 +275,50 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 	}
 	req.UserRequest = strings.TrimSpace(res.Value)
 
-	// CLASSIFY the submitted request on the cheap triage model. Any error routes to
-	// escalate (the safe default — never block the user on a classify failure).
+	// CACHE-BY-KIND: a repeat request (same context + request) is served straight
+	// from the cache, skipping the cheap classify ENTIRELY. triage.Route computes
+	// the same (ctxHash, reqHash) keys the session uses and does the lookup; on a
+	// hit we route by the stored `kind` with no model call. AI_ASSIST_NO_CACHE
+	// bypasses the lookup (matches runSession; the env rename is a separate task).
+	c := cache.Open()
+	noCache := os.Getenv("AI_ASSIST_NO_CACHE") != ""
+	d := triage.Route(req, c, noCache)
+	dbg("launch: triage outcome=%v noCache=%v disabled=%v", d.Outcome, noCache, d.Disabled)
+
+	if d.Outcome == triage.Hit {
+		if raw, rerr := os.ReadFile(d.Path); rerr == nil {
+			content := string(raw)
+			kind, _ := cache.Field(content, "kind")
+			body := cache.Body(content)
+			title, _ := cache.Field(content, "title")
+			created, _ := cache.Field(content, "created_at")
+			dbg("launch: cache HIT path=%q kind=%q bodyLen=%d", d.Path, kind, len(body))
+			// Close the thinking float BEFORE routing. There's no classify on a hit,
+			// but the float is still animating "Thinking…" — it must tear down first
+			// (same ordering rationale as the miss path) so the result pane docks
+			// against the origin tiled pane, not floating behind the thinking float.
+			closeFloat(out)
+			switch kind {
+			case "command":
+				dbg("launch: hit route=command pane=%q bodyLen=%d", req.PaneID, len(body))
+				if terr := m.TypeInto(req.PaneID, body); terr != nil {
+					dbg("launch: TypeInto origin pane failed: %v", terr)
+				}
+				return 0
+			case "answer":
+				dbg("launch: hit route=answer")
+				return spawnAnswer(m, selfExe, req, body, title, created)
+			default: // playbook / unknown → the session re-runs triage.Route and serves it
+				dbg("launch: hit route=session kind=%q", kind)
+				return spawnSession(m, selfExe, req, title)
+			}
+		}
+		dbg("launch: cache HIT but path %q unreadable; falling through to classify", d.Path)
+	}
+
+	// CACHE MISS / disabled / no-cache: CLASSIFY the submitted request on the cheap
+	// triage model. Any error routes to escalate (the safe default — never block the
+	// user on a classify failure).
 	cfg, _ := config.Load()
 	cls, cerr := classify(req, author.AuthorOptions{Cfg: cfg, OnText: newThinkingWriter(out)})
 	if cerr != nil {
@@ -293,11 +335,22 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 	// float (the confirmed bug). waitFloatClosed then blocks until the float has
 	// fully torn down (it writes <out>.closed on thinking-exit) plus a short margin
 	// for zellij to drop the floating pane and restore focus to the origin.
-	writeDoneFile(out)
-	waitFloatClosed(out)
+	closeFloat(out)
+
+	// Only command/answer classifications are cacheable here; escalate is stored by
+	// the session itself (the `playbook` entry). The disabled guard (failure with
+	// empty scrollback) and the no-cache bypass both leave the entry unstored.
+	cacheable := !d.Disabled && !noCache && d.CtxHash != "" && d.ReqHash != ""
 
 	switch cls.Kind {
 	case author.KindCommand:
+		// Store the classified command so the next identical request hits (best-effort:
+		// a store error is logged, never fatal; store BEFORE the route regardless).
+		if cacheable {
+			if _, serr := c.Store(d.CtxHash, d.ReqHash, "command", cls.Content, nil, requestJSON(req)); serr != nil {
+				dbg("launch: cache store (command) failed: %v", serr)
+			}
+		}
 		// Stage the command into the ORIGIN pane with NO trailing CR (mux.TypeInto →
 		// `zellij action write-chars --pane-id <pane>`), so it lands at the prompt for
 		// the user to review and run. The explicit pane id makes the write
@@ -308,13 +361,36 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 		}
 		return 0
 	case author.KindAnswer:
+		// Store the classified answer (carrying the title extra, when present) so the
+		// next identical request hits. Best-effort; store BEFORE the route.
+		if cacheable {
+			var extras map[string]string
+			if cls.Title != "" {
+				extras = map[string]string{"title": cls.Title}
+			}
+			if _, serr := c.Store(d.CtxHash, d.ReqHash, "answer", cls.Content, extras, requestJSON(req)); serr != nil {
+				dbg("launch: cache store (answer) failed: %v", serr)
+			}
+		}
 		// Render the short prose answer in a docked pager (no run blocks → just prose).
+		// A freshly-classified answer is not cached-served, so no --cached badge.
 		dbg("launch: route=answer")
-		return spawnAnswer(m, selfExe, req, cls.Content, cls.Title)
-	default: // escalate (incl. empty/unknown kind)
+		return spawnAnswer(m, selfExe, req, cls.Content, cls.Title, "")
+	default: // escalate (incl. empty/unknown kind) — the session writes the playbook entry
 		dbg("launch: route=escalate kind=%q", cls.Kind)
 		return spawnSession(m, selfExe, req, cls.Title)
 	}
+}
+
+// closeFloat tears the thinking float down BEFORE routing: it writes <out>.done
+// (the float polls for it and exits) then waits for the float to fully close
+// (<out>.closed) plus a margin, so zellij has restored focus to the origin tiled
+// pane and the result pane docks instead of opening floating behind the float.
+// Factored so BOTH the cache-hit and cache-miss paths close the float identically.
+// A no-op on an empty out path (the inline/off-zellij path has no float).
+func closeFloat(out string) {
+	writeDoneFile(out)
+	waitFloatClosed(out)
 }
 
 // floatClosePoll / floatCloseCap / floatCloseMargin tune waitFloatClosed: poll
@@ -492,7 +568,7 @@ func extractJSONContent(s string) string {
 // <answer.md>`. The pager just renders the prose (no run blocks, no authoring loop).
 // The temp file is read asynchronously by the spawned pane, so it is NOT removed
 // here (mirrors spawnSession's request-JSON hand-off).
-func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content, title string) int {
+func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content, title, created string) int {
 	f, err := os.CreateTemp("", "aapb-answer-*.md")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
@@ -515,6 +591,11 @@ func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content, title 
 		// The classify-supplied short label becomes the pager header (overrides the
 		// H1/front-matter title, which a prose answer has none of).
 		runCmd = append(runCmd, "--title", title)
+	}
+	if created != "" {
+		// A cached-served answer carries the entry's created_at so the pager shows the
+		// "cached Nm ago" badge pill (the `run` subcommand's --cached <iso> flag).
+		runCmd = append(runCmd, "--cached", created)
 	}
 	runCmd = append(runCmd, f.Name())
 	dbg("spawnAnswer: cwd=%q answerPath=%q cmd=%q", cwd, f.Name(), runCmd)
