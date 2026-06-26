@@ -14,8 +14,7 @@ your live shell context into **runnable, reusable playbooks**. Two entry verbs:
   full playbook; reactive to terminal failures; cache-served.
 - **`create`** — author a playbook directly (always fresh).
 
-A **playbook store** then makes playbooks browsable/searchable (via an external
-FZF pick), re-runnable with **adaptation to the current project**,
+A **playbook store** then makes playbooks browsable/searchable (via an external picker fed by a machine-readable list), re-runnable with **adaptation to the current project**,
 **composable** (dependencies), **safely executable** (assisted / unattended +
 rollback), and **lint-able** (`validate`).
 
@@ -34,14 +33,14 @@ with the **project-local store** below.
 
 ```
 assist [<prompt>]                      triage → command/answer/playbook;
-                                       cache badge; ZLE trigger
+                                       cache badge; interactive entry
 
 create <prompt> [--template <t>]       author a playbook directly
                                        (always fresh; writes store+cache)
 
 list   [--format human                 return all the playbook store in
-       | fuzzy-data-source             dufferent formats
-       | json] list the store
+       | fuzzy-data-source             different formats
+       | json]
 
 search <query> [--format ...]          filter the store
 
@@ -84,8 +83,8 @@ Block tags (on the fenced ``` language line):
 
 ## Foundations (shipped)
 
-- Go binary unifying + replacing the retired `ai-assist-*` shell stack; zellij
-  ZLE trigger; harness-agnostic design (Claude harness today).
+- Go binary unifying + replacing a retired shell-script stack; harness-agnostic
+  design (Claude harness today); invoked directly or bound to a shell key.
 - `assist` triage (command / answer / escalate) + routing; **cache-by-kind**
   (repeat command/answer/playbook served without re-classify); **cached-answer
   in-place invalidate** (reload re-runs the cheap classify).
@@ -102,15 +101,45 @@ Block tags (on the fenced ``` language line):
   heredocs).
 - Cleanup/rebrand: `AI_PLAYBOOK_*` env vars, `ai-playbook` labels + cache
   schema, corrected system-prompt tool refs (MCP run/ask/remember), dead-FIFO +
-  `--results-fifo` removal; chezmoi shell-glue purge + live input system
-  rebranded to `ai-playbook input`.
+  `--results-fifo` removal.
+
+---
+
+## Project infrastructure & distribution
+
+A cross-cutting track, independent of the feature phases (some near-term, some
+ongoing). Keeps ai-playbook a standalone, installable, well-documented Go tool;
+any wiring into a particular shell/dotfiles setup is separate and secondary.
+
+- **Repo layout** — adopt
+  [golang-standards/project-layout](https://github.com/golang-standards/project-layout):
+  `cmd/ai-playbook/` (the binary `main`), `internal/` (the private packages: ui,
+  author, driver, orchestrator, triage, cache, capture, mux, tools, input,
+  config), `pkg/` only for anything genuinely meant to be importable (candidate:
+  `store`). Foundational — do this FIRST (before Phase 1 adds the `store`
+  package), since it rewrites every import path. **[near-term]**
+- **README.md** — overview, install, quick start, the command surface, with
+  badges: CI status, **test coverage**, Go Report Card, latest release, license.
+- **CHANGELOG.md** — [Keep a Changelog](https://keepachangelog.com) format; one
+  entry per release, tied to tags.
+- **CI (GitHub Actions)** — `go test` (+race) + `vet` + `golangci-lint` +
+  coverage upload, on push and PR.
+- **Releases** — multi-platform binaries (linux/darwin/windows × amd64/arm64)
+  via [GoReleaser](https://goreleaser.com) on a version tag; checksums and an
+  optional Homebrew tap. CHANGELOG drives the release notes.
+- **zsh completion** — ship a full `_ai-playbook` completion: subcommands, all
+  flags, and **dynamic slug completion from the store** for `run` / `show` /
+  `edit` / `validate`. (This is the project's shell deliverable; a keybind/picker
+  on top is user config.)
+- **man + info pages** — generate man pages (per command) and GNU
+  texinfo/`info` files; include them in releases (and any Homebrew formula).
 
 ---
 
 ## Phase 1 — Store & entry verbs
 
 **Goal:** make the accumulating playbooks a browsable/searchable/editable
-library (via an external FZF pick), and split the entry verbs. **Status:** not
+library (via an external picker), and split the entry verbs. **Status:** not
 started.
 
 **Features**
@@ -119,8 +148,8 @@ started.
   `${PROJECT_ROOT}/.ai-playbook/playbooks/*`; parse front matter → `Meta`.
   Project-local entries get a **`proj:`**-prefixed slug. On-demand scan, no DB.
 - `list` / `search` with `--format human|fuzzy-data-source|json`.
-  - `fuzzy-data-source`: `<display>\x1f<slug>\x1f<path>` per line (FZF
-    `--with-nth 1`; ENTER → `run {2}`, ALT+ENTER → `edit {2}`).
+  - `fuzzy-data-source`: `<display>\x1f<slug>\x1f<path>` per line (for a picker
+    like fzf: show field 1, ENTER → `run {2}`, ALT+ENTER → `edit {2}`).
 - `show <slug>` (read-only), `edit <slug>` (`$EDITOR`).
 - **`assist`** (rename of `troubleshoot`) — the **only** triage entry; keeps the
   cache badge. **`create <prompt>`** — direct author, always fresh, writes
@@ -128,16 +157,17 @@ started.
   store search.
 - Add the **`workdir`** front-matter field (+ `finalize` backfill from
   provenance).
-- chezmoi (separate, `feat/ai-playbook-phase-b`): the FZF pick widget + repoint
-  the ZLE trigger `troubleshoot` → `assist`.
+- Shell integration (project deliverable): the `--format fuzzy-data-source`
+  output is the documented contract for any external picker; ship/extend the
+  `zsh` completion accordingly (see Infrastructure). Wiring a keybind + picker
+  into a particular shell config is user-side ergonomics (secondary).
 
 **Settled decisions:** `proj:`-prefixed = project, unprefixed = global. `create`
 writes store+cache but never _serves_ a cache hit. Cache badge gated to `assist`
 only. Detailed spec:
 `docs/superpowers/specs/2026-06-26-live-playbook-store-phase1.md` (ephemeral).
 
-**Open:** `create` runs in the invoking pane vs a docked pane. The exact FZF
-binding form (impl detail).
+**Open:** `create` runs in the invoking pane vs a docked pane.
 
 ---
 
@@ -180,7 +210,7 @@ location/ format.
 
 **Features**
 
-- **`dependencies: [slug, …]`** front-matter field. On `run`, resolve + run
+- **`depends_on: [slug, …]`** front-matter field. On `run`, resolve + run
   dependencies **fully, in topological order, before** the parent (in auto
   mode). A dependency failure aborts the chain (rollback per the active mode).
   **v1: always run** dependencies (lean on idempotency, which `validate`
