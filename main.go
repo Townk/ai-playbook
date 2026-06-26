@@ -220,6 +220,13 @@ func troubleshoot() int {
 	return runSession(req)
 }
 
+// requestHistoryPath is the JSONL request-history file for the troubleshoot
+// request float: <data-root>/request-history.jsonl. Only the request float wires
+// this (the ask tool + the `f` amend float pass no history per the spec scope).
+func requestHistoryPath() string {
+	return filepath.Join(cache.DefaultRoot(), "request-history.jsonl")
+}
+
 // launch is the testable launcher core: spawn the request input FLOAT (prefilled
 // from the captured context), read back the submitted request, and on submit
 // spawn the docked SESSION pane carrying the context. On cancel it exits cleanly
@@ -228,11 +235,12 @@ func troubleshoot() int {
 func launch(m mux.Mux, selfExe string, req capture.Request) int {
 	asker := floatinput.Asker{SelfExe: selfExe, Mux: m}
 	res, err := asker.Ask(floatinput.Request{
-		Type:   "text",
-		Title:  "ai-assist",
-		Prompt: "How can I help you today?",
-		Value:  prefillTemplate(req),
-		Cwd:    req.CWD,
+		Type:    "text",
+		Title:   "ai-assist",
+		Prompt:  "How can I help you today?",
+		Value:   prefillTemplate(req),
+		Cwd:     req.CWD,
+		History: requestHistoryPath(),
 	})
 	dbg("launch: Ask returned submitted=%v err=%v value=%q", res.Submitted, err, res.Value)
 	if err != nil {

@@ -143,6 +143,41 @@ func TestAsker_ChooseAppendsOptions(t *testing.T) {
 	}
 }
 
+// TestAsker_HistoryWiredOnlyWhenSet asserts the request float (History set on a
+// text Request) carries `--history <path>`, while the ask/`f` floats (History
+// empty) carry no --history at all — history is opt-in per invocation.
+func TestAsker_HistoryWiredOnlyWhenSet(t *testing.T) {
+	// Request float: History set on a text ask → --history present with the path.
+	m := &recordMux{answer: "x"}
+	a := Asker{SelfExe: "ai-playbook", Mux: m, poll: time.Millisecond}
+	if _, err := a.Ask(Request{Type: "text", History: "/data/request-history.jsonl"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := after(m.floats[0], "--history"); got != "/data/request-history.jsonl" {
+		t.Errorf("request-float --history = %q, want /data/request-history.jsonl", got)
+	}
+
+	// Ask/`f` float: History empty → NO --history flag.
+	m2 := &recordMux{answer: "x"}
+	a2 := Asker{SelfExe: "ai-playbook", Mux: m2, poll: time.Millisecond}
+	if _, err := a2.Ask(Request{Type: "text"}); err != nil {
+		t.Fatal(err)
+	}
+	if contains(m2.floats[0], "--history") {
+		t.Errorf("ask/`f` float must not pass --history\nargv: %v", m2.floats[0])
+	}
+
+	// Non-text float (e.g. choose) ignores History even if set.
+	m3 := &recordMux{answer: "b"}
+	a3 := Asker{SelfExe: "ai-playbook", Mux: m3, poll: time.Millisecond}
+	if _, err := a3.Ask(Request{Type: "choose", Choices: []string{"a", "b"}, History: "/data/h.jsonl"}); err != nil {
+		t.Fatal(err)
+	}
+	if contains(m3.floats[0], "--history") {
+		t.Errorf("non-text float must not pass --history\nargv: %v", m3.floats[0])
+	}
+}
+
 func TestAsker_CancelReturnsNotSubmitted(t *testing.T) {
 	m := &recordMux{cancel: true}
 	a := Asker{SelfExe: "ai-playbook", Mux: m, poll: time.Millisecond, Timeout: 50 * time.Millisecond}

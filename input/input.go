@@ -12,6 +12,38 @@ import (
 
 const promptIcon = "❯"
 
+// historyCap bounds the request-history file (newest historyCap entries kept).
+const historyCap = 1000
+
+// applyHistory loads the JSONL history at path into the model's text field for
+// UP/DOWN recall. It is a no-op when path is empty, when the field is not a text
+// field (only the text widget supports recall), or when the file is missing — so
+// non-text floats and the no-history case behave exactly as before. Extracted as
+// a seam so the load step is unit-testable without a live TTY.
+func applyHistory(m *model, path string) {
+	if path == "" {
+		return
+	}
+	tf, ok := m.fld.(*textField)
+	if !ok {
+		return
+	}
+	tf.SetHistory(LoadHistory(path))
+}
+
+// recordHistory appends a submitted value to the JSONL history at path (de-dup +
+// cap honored by AppendHistory). It is a no-op when path is empty. A write error
+// is reported to stderr but NON-FATAL — the submit/--out path must never block on
+// history. Extracted as a seam so the append step is unit-testable.
+func recordHistory(path, value string) {
+	if path == "" {
+		return
+	}
+	if err := AppendHistory(path, value, historyCap); err != nil {
+		fmt.Fprintf(os.Stderr, "ai-assist-input: --history: %v\n", err)
+	}
+}
+
 const (
 	boxBorder = 2 // inner rounded box, left + right
 	boxPadL   = 1 // inner box left padding
@@ -152,9 +184,11 @@ func writeCancelFile(outFile string) {
 	_ = os.WriteFile(outFile+CancelSuffix, nil, 0o600)
 }
 
-func runInput(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool, icon, outFile string) {
+func runInput(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool, icon, outFile, historyPath string) {
+	m := newInputModel(theme, variant, title, prompt, value, placeholder, height, padding, inset, singleLine, icon)
+	applyHistory(&m, historyPath)
 	fm, err := tea.NewProgram(
-		newInputModel(theme, variant, title, prompt, value, placeholder, height, padding, inset, singleLine, icon),
+		m,
 		tea.WithOutput(os.Stderr),
 		tea.WithColorProfile(colorprofile.TrueColor),
 	).Run()
@@ -167,6 +201,7 @@ func runInput(theme Theme, variant, title, prompt, value, placeholder string, he
 		if outFile != "" {
 			writeOutFile(outFile, res.fld.value())
 		}
+		recordHistory(historyPath, res.fld.value())
 		fmt.Print(res.fld.value())
 		os.Exit(0)
 	}
@@ -185,22 +220,24 @@ func runInput(theme Theme, variant, title, prompt, value, placeholder string, he
 // and switches it from inputModel to processingModel on submit, staying inside
 // the same tea.Program so the floating pane never closes.
 type rootModel struct {
-	current tea.Model
-	theme   Theme
-	title   string
-	width   int
-	outFifo string
-	inFifo  string
+	current     tea.Model
+	theme       Theme
+	title       string
+	width       int
+	outFifo     string
+	inFifo      string
+	historyPath string
 }
 
-func newRootModel(inner model, outFifo, inFifo string) rootModel {
+func newRootModel(inner model, outFifo, inFifo, historyPath string) rootModel {
 	return rootModel{
-		current: inner,
-		theme:   inner.theme,
-		title:   inner.title,
-		width:   inner.width,
-		outFifo: outFifo,
-		inFifo:  inFifo,
+		current:     inner,
+		theme:       inner.theme,
+		title:       inner.title,
+		width:       inner.width,
+		outFifo:     outFifo,
+		inFifo:      inFifo,
+		historyPath: historyPath,
 	}
 }
 
@@ -232,6 +269,7 @@ func (r rootModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if inputM.submitted {
 		// Write submit record to out-fifo and transition to processing.
 		writeOutFifo(r.outFifo, encodeRecord("submit", inputM.fld.value()))
+		recordHistory(r.historyPath, inputM.fld.value())
 		// Match the spinner frame to the input frame's exact rendered height (=
 		// the float pane height), so the processing state fills the SAME space —
 		// no shrink, no black gap below where the input box used to be.
@@ -257,9 +295,10 @@ func (r rootModel) View() tea.View {
 	return r.current.View()
 }
 
-func runInputWithFifo(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool, icon, outFifo, inFifo string) {
+func runInputWithFifo(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool, icon, outFifo, inFifo, historyPath string) {
 	inner := newInputModel(theme, variant, title, prompt, value, placeholder, height, padding, inset, singleLine, icon)
-	root := newRootModel(inner, outFifo, inFifo)
+	applyHistory(&inner, historyPath)
+	root := newRootModel(inner, outFifo, inFifo, historyPath)
 	_, err := tea.NewProgram(
 		root,
 		tea.WithOutput(os.Stderr),

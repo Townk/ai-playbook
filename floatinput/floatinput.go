@@ -47,6 +47,9 @@ type Request struct {
 	Cwd     string // working dir the float pane opens in
 	Choices []string
 	Multi   bool
+	History string // text only: --history JSONL path for UP/DOWN recall. Set ONLY
+	// by the troubleshoot request float; the ask tool + the `f` amend float leave
+	// it empty so they never recall or append (history is opt-in per the spec).
 }
 
 // Result is the outcome of a float-input. Submitted is true when the user
@@ -171,6 +174,11 @@ func (a Asker) buildCmd(req Request, out string) []string {
 	}
 	if req.Multi {
 		cmd = append(cmd, "--multi")
+	}
+	// History is opt-in and text-only: the request float sets it, the ask/`f`
+	// floats leave it empty (no recall, no append).
+	if req.History != "" && typ == "text" {
+		cmd = append(cmd, "--history", req.History)
 	}
 	if typ == "choose" {
 		cmd = append(cmd, req.Choices...)

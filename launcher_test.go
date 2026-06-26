@@ -93,6 +93,11 @@ func TestLaunch_FloatThenDocked(t *testing.T) {
 	if !strings.Contains(prefill, "gg build") || !strings.Contains(prefill, "exit 1") {
 		t.Errorf("float --value (prefill) = %q, want the error template", prefill)
 	}
+	// The request float carries --history <data-root>/request-history.jsonl so it
+	// recalls + appends. The ask/`f` floats must NOT (asserted separately).
+	if got, want := argAfter(fargv, "--history"), requestHistoryPath(); got != want {
+		t.Errorf("float --history = %q, want %q", got, want)
+	}
 
 	// 2) One docked session pane, carrying the context + submitted request.
 	if len(m.docked) != 1 {

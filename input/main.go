@@ -26,7 +26,7 @@ func Main() int {
 
 	fs := flag.NewFlagSet("input", flag.ExitOnError)
 	var typ, title, prompt, value, placeholder, variant, affirmative, negative, defaultSide, other, spec, icon string
-	var outFifo, inFifo, outFile string
+	var outFifo, inFifo, outFile, historyPath string
 	var height, padding, inset, width int
 	var danger, warning, multi, measure bool
 	fs.StringVar(&typ, "type", "text", "widget type: text|line|confirm|choose|form")
@@ -50,6 +50,7 @@ func Main() int {
 	fs.StringVar(&outFifo, "out-fifo", "", "path to output FIFO (submit/cancel records written here)")
 	fs.StringVar(&inFifo, "in-fifo", "", "path to input FIFO (status/close records read from here)")
 	fs.StringVar(&outFile, "out", "", "path to a one-shot output FILE: on submit the value is written here and the process exits 0; on cancel nothing is written and the process exits 130. Lets a FLOATED input (whose stdout is detached) hand its answer back to a polling launcher.")
+	fs.StringVar(&historyPath, "history", "", "text: path to a JSONL request-history file for UP/DOWN recall; the submitted value is appended (dedup + cap). Empty disables history. Only the troubleshoot request float sets this.")
 	fs.BoolVar(&measure, "measure", false, "print the rendered height and exit (no TUI)")
 	fs.IntVar(&width, "width", 50, "pane width for measurement/sizing")
 	theme := registerThemeFlags(fs)
@@ -132,15 +133,15 @@ func Main() int {
 		runConfirm(*theme, variant, title, prompt, affirmative, negative, defaultSide == "negative", padding, inset, outFile)
 	case "line":
 		if outFifo != "" && inFifo != "" {
-			runInputWithFifo(*theme, variant, title, prompt, value, placeholder, 1, padding, inset, true, icon, outFifo, inFifo)
+			runInputWithFifo(*theme, variant, title, prompt, value, placeholder, 1, padding, inset, true, icon, outFifo, inFifo, historyPath)
 		} else {
-			runInput(*theme, variant, title, prompt, value, placeholder, 1, padding, inset, true, icon, outFile)
+			runInput(*theme, variant, title, prompt, value, placeholder, 1, padding, inset, true, icon, outFile, historyPath)
 		}
 	case "text", "free":
 		if outFifo != "" && inFifo != "" {
-			runInputWithFifo(*theme, variant, title, prompt, value, "", height, padding, inset, false, icon, outFifo, inFifo)
+			runInputWithFifo(*theme, variant, title, prompt, value, "", height, padding, inset, false, icon, outFifo, inFifo, historyPath)
 		} else {
-			runInput(*theme, variant, title, prompt, value, "", height, padding, inset, false, icon, outFile)
+			runInput(*theme, variant, title, prompt, value, "", height, padding, inset, false, icon, outFile, historyPath)
 		}
 	case "choose":
 		runChoose(*theme, variant, title, prompt, fs.Args(), multi, other, padding, inset, outFile)
