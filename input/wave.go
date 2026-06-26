@@ -182,7 +182,6 @@ func (m waveDemoModel) render() string {
 	box := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color(m.theme.Border)).
-		Padding(0, 1).
 		Render(wave)
 	return lipgloss.JoinVertical(lipgloss.Left, caption, box)
 }
