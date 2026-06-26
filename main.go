@@ -14,6 +14,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -56,6 +57,8 @@ func main() {
 		os.Exit(sessionMain())
 	case "run":
 		os.Exit(ui.Main())
+	case "answer":
+		os.Exit(answerMain())
 	case "finalize":
 		os.Exit(finalize())
 	case "mcp":
@@ -72,7 +75,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ai-playbook {troubleshoot|session [--request <json>]|run <file.md>|finalize [--dry-run] <file.md>|mcp --socket <path>|input|selftest}")
+	fmt.Fprintln(os.Stderr, "usage: ai-playbook {troubleshoot|session [--request <json>]|run <file.md>|answer --request <json> --content <file> [--cached <iso>] [--title <t>] [--cwd <dir>]|finalize [--dry-run] <file.md>|mcp --socket <path>|input|selftest}")
 }
 
 // mcpMain is the `ai-playbook mcp --socket <path>` subcommand: an MCP stdio
@@ -564,10 +567,14 @@ func extractJSONContent(s string) string {
 }
 
 // spawnAnswer renders a SHORT prose answer (the classify "answer" route): write the
-// content to a temp markdown file and open it in a docked pager via `ai-playbook run
-// <answer.md>`. The pager just renders the prose (no run blocks, no authoring loop).
-// The temp file is read asynchronously by the spawned pane, so it is NOT removed
-// here (mirrors spawnSession's request-JSON hand-off).
+// content to a temp markdown file and open it in a docked pager via `ai-playbook
+// answer --request <json> --content <answer.md> …`. The `answer` subcommand renders
+// the prose (no run blocks, no authoring loop) AND wires the cached pill's reload to
+// re-run the cheap classify in place (re-caching the fresh prose) — so the request
+// JSON travels with the pane. The temp file is read asynchronously by the spawned
+// pane, so it is NOT removed here (mirrors spawnSession's request-JSON hand-off).
+// Both launcher answer routes (cache HIT and MISS) go through here; a freshly
+// classified answer has no --cached, so its badge only appears once re-cached.
 func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content, title, created string) int {
 	f, err := os.CreateTemp("", "aapb-answer-*.md")
 	if err != nil {
@@ -586,7 +593,7 @@ func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content, title,
 	if cwd == "" {
 		cwd = req.CWD
 	}
-	runCmd := []string{selfExe, "run"}
+	runCmd := []string{selfExe, "answer", "--request", requestJSON(req), "--content", f.Name()}
 	if title != "" {
 		// The classify-supplied short label becomes the pager header (overrides the
 		// H1/front-matter title, which a prose answer has none of).
@@ -594,10 +601,12 @@ func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content, title,
 	}
 	if created != "" {
 		// A cached-served answer carries the entry's created_at so the pager shows the
-		// "cached Nm ago" badge pill (the `run` subcommand's --cached <iso> flag).
+		// "cached Nm ago" badge pill (forwarded to the `run` entry's --cached <iso>).
 		runCmd = append(runCmd, "--cached", created)
 	}
-	runCmd = append(runCmd, f.Name())
+	if cwd != "" {
+		runCmd = append(runCmd, "--cwd", cwd)
+	}
 	dbg("spawnAnswer: cwd=%q answerPath=%q cmd=%q", cwd, f.Name(), runCmd)
 	if err := m.SpawnDocked(mux.SpawnOptions{
 		Cmd:  runCmd,
@@ -610,6 +619,100 @@ func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content, title,
 		return 1
 	}
 	return 0
+}
+
+// answerClassify is the cached-answer regenerate seam: the cheap-model triage pass
+// the reload re-runs to refresh the prose. It defaults to author.ClassifyRequest;
+// tests inject a fake (the closure calls the live model otherwise, which a unit test
+// can't drive). Mirrors launch's classifyFunc seam.
+var answerClassify classifyFunc = author.ClassifyRequest
+
+// answerRegenFunc builds the cached-ANSWER regenerate closure handed to
+// ui.SetAnswerRegen. When the reload pill is clicked it re-runs the cheap classify
+// on the ORIGINAL request, re-caches the fresh prose under the SAME (ctx,req) keys
+// with kind=answer (best-effort), and streams the prose back so the pager REPLACES
+// the stale content. The classify's returned Kind is ignored — this pane is prose,
+// and a kind change is a rare edge; we just show the refreshed content.
+func answerRegenFunc(req capture.Request) func() (io.ReadCloser, error) {
+	return func() (io.ReadCloser, error) {
+		cfg, _ := config.Load()
+		cls, err := answerClassify(req, author.AuthorOptions{Cfg: cfg})
+		if err != nil {
+			return nil, err
+		}
+		content := cls.Content
+		// Re-cache the refreshed prose under the original keys (best-effort — a store
+		// error must never block showing the fresh answer).
+		c := cache.Open()
+		ctxH := cache.ContextHash(cache.Request{
+			ProjectRoot: req.ProjectRoot,
+			CWD:         req.CWD,
+			CommandText: req.Command,
+			CommandExit: req.Exit,
+			Scrollback:  req.Scrollback,
+		})
+		reqH := cache.RequestHash(req.UserRequest)
+		var extras map[string]string
+		if cls.Title != "" {
+			extras = map[string]string{"title": cls.Title}
+		}
+		if _, serr := c.Store(ctxH, reqH, "answer", content, extras, requestJSON(req)); serr != nil {
+			dbg("answerRegen: re-cache failed: %v", serr)
+		}
+		return io.NopCloser(strings.NewReader(content)), nil
+	}
+}
+
+// answerMain is the `ai-playbook answer` subcommand: the docked prose pager for a
+// classify "answer" route (spawned by spawnAnswer). It carries the original request
+// so the cached pill's reload can re-run the cheap classify in place. It decodes
+// --request <json>, reads the prose from --content <file>, wires the cached-answer
+// regenerate seam (ui.SetAnswerRegen), then reshapes os.Args to the `run` entry and
+// returns ui.Main() — exactly like serveCachedPlaybook reshapes to `run`.
+func answerMain() int {
+	fs := flag.NewFlagSet("answer", flag.ExitOnError)
+	var requestJSONStr string
+	fs.StringVar(&requestJSONStr, "request", "", "the capture.Request as JSON (for the reload re-classify)")
+	var contentFile string
+	fs.StringVar(&contentFile, "content", "", "path to the prose markdown to render")
+	var cached string
+	fs.StringVar(&cached, "cached", "", "ISO-8601 timestamp: show the 'cached' badge (cache replay)")
+	var title string
+	fs.StringVar(&title, "title", "", "pager header title")
+	var cwd string
+	fs.StringVar(&cwd, "cwd", "", "working dir for the pager")
+	fs.Parse(os.Args[2:])
+
+	if contentFile == "" {
+		fmt.Fprintln(os.Stderr, "ai-playbook answer: --content <file> is required")
+		return 2
+	}
+
+	// Decode the request so the reload can re-classify it. A decode failure is
+	// non-fatal: the pager still renders the prose; only the reload seam is skipped.
+	if requestJSONStr != "" {
+		if req, err := decodeRequestJSON([]byte(requestJSONStr)); err != nil {
+			dbg("answerMain: request decode failed: %v", err)
+		} else {
+			ui.SetAnswerRegen(answerRegenFunc(req))
+		}
+	}
+
+	// Reshape os.Args to the `run` entrypoint (os.Args[1]="run", flags from [2:]),
+	// exactly like serveCachedPlaybook, and reuse ui.Main().
+	argv := []string{os.Args[0], "run"}
+	if cached != "" {
+		argv = append(argv, "--cached", cached)
+	}
+	if title != "" {
+		argv = append(argv, "--title", title)
+	}
+	if cwd != "" {
+		argv = append(argv, "--cwd", cwd)
+	}
+	argv = append(argv, contentFile)
+	os.Args = argv
+	return ui.Main()
 }
 
 // runInline is the off-Zellij / explicit-request path (no float, no panes): classify
@@ -1213,6 +1316,13 @@ func readRequestJSON(path string) (capture.Request, error) {
 	if err != nil {
 		return capture.Request{}, err
 	}
+	return decodeRequestJSON(data)
+}
+
+// decodeRequestJSON decodes the nested request JSON (the requestJSON shape:
+// origin/command/project objects) into a flat capture.Request. Shared by
+// readRequestJSON (file) and answerMain (the --request flag value).
+func decodeRequestJSON(data []byte) (capture.Request, error) {
 	var doc struct {
 		Kind   string `json:"kind"`
 		Origin struct {

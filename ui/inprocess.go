@@ -161,6 +161,31 @@ type reArmStreamMsg struct {
 // input FIFO. Returns nil when the orchestrator can't re-engage (no Reengage
 // wired) so the caller falls back to a flash-only no-op.
 func (m *model) beginRegenerate() tea.Cmd {
+	// Two regenerate paths share the one reload button (cachedBadge / appendCachedButton
+	// gate it on canRegenerate). For a cached ANSWER the answerRegen seam re-runs the
+	// cheap classify in place and re-caches the prose; this is preferred over the
+	// orchestrator's playbook-shaped Regenerate (front-matter authoring is wrong for
+	// prose). For a cached PLAYBOOK answerRegen is nil and we take the orchestrator path.
+	if m.answerRegen != nil {
+		regen := m.answerRegen
+		// REPLACE: same pane/spinner reset as the orchestrator path below.
+		m.md = ""
+		m.isCached = false
+		m.thinking = true
+		m.spinFrame = 0
+		m.spinTicks = 0
+		m.streaming = true
+		m.follow = false
+		m.yOff = 0
+		m.pinTop = -1
+		m.reflow()
+		return tea.Batch(m.restartTick(), func() tea.Msg {
+			r, err := regen()
+			// No live activity feed for the cheap re-classify (it's a bare model call);
+			// the spinner alone covers it.
+			return reArmStreamMsg{reader: r, activity: nil, err: err}
+		})
+	}
 	orch := m.orch
 	if orch == nil || orch.Reengage == nil {
 		return nil

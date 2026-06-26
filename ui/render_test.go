@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"io"
 	"os"
 	"strings"
 	"testing"
@@ -9,6 +10,14 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 )
+
+// fakeAnswerRegen wires a no-op cached-answer regenerate seam so canRegenerate is
+// true (the badge button + reload glyph render) without standing up an orchestrator.
+// Used by the cachedBadge render/registration tests, which only care that the reload
+// control renders — not which regenerate path runs on click.
+func fakeAnswerRegen() func() (io.ReadCloser, error) {
+	return func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader("")), nil }
+}
 
 func joinText(lines []Line) string {
 	parts := make([]string, len(lines))
@@ -964,6 +973,7 @@ func TestCachedBadgePillRow(t *testing.T) {
 	m.width = 120
 	m.isCached = true
 	m.cachedAt = time.Now().Add(-3 * time.Minute) // 3 minutes ago
+	m.answerRegen = fakeAnswerRegen()             // wire a regenerate path so the reload renders
 
 	row := m.cachedBadgeRow()
 	plain := strip(row)
@@ -993,6 +1003,7 @@ func TestCachedBadgeInNormalLines(t *testing.T) {
 	m.height = 24
 	m.isCached = true
 	m.cachedAt = time.Now().Add(-7 * time.Minute)
+	m.answerRegen = fakeAnswerRegen() // wire a regenerate path so the reload renders
 	m.reflow()
 
 	lines := m.normalLines()
@@ -1113,6 +1124,7 @@ func TestCachedReloadButtonRegistered(t *testing.T) {
 	m.height = 24
 	m.isCached = true
 	m.cachedAt = time.Now().Add(-5 * time.Minute)
+	m.answerRegen = fakeAnswerRegen() // wire a regenerate path so the reload renders
 	m.reflow()
 
 	var regenBtn *Button
@@ -1170,6 +1182,7 @@ func TestCachedReloadButtonHitTest(t *testing.T) {
 	m.height = 24
 	m.isCached = true
 	m.cachedAt = time.Now().Add(-2 * time.Minute)
+	m.answerRegen = fakeAnswerRegen() // wire a regenerate path so the reload renders
 	m.reflow()
 
 	var regenBtn *Button
@@ -1211,6 +1224,7 @@ func TestCachedRegenHintLabelRendered(t *testing.T) {
 	m.height = 24
 	m.isCached = true
 	m.cachedAt = time.Now()
+	m.answerRegen = fakeAnswerRegen() // wire a regenerate path so the reload renders
 	m.reflow()
 
 	var regen Button
@@ -1313,6 +1327,7 @@ func TestCachedBadgeFlashHighlightsWholePill(t *testing.T) {
 	m := newModel("agent", "hello")
 	m.isCached = true
 	m.cachedAt = time.Now().Add(-3 * time.Minute)
+	m.answerRegen = fakeAnswerRegen() // wire a regenerate path so the reload renders
 
 	const whiteBg = "48;2;255;255;255" // colFlashOn (#ffffff) as background
 	const peachBg = "48;2;250;179;135" // colPeach  (#fab387) as background

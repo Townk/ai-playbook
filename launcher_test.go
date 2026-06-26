@@ -158,9 +158,14 @@ func (m *launchMux) SpawnDocked(opts mux.SpawnOptions) error {
 			}
 		}
 	}
-	// Snapshot the answer markdown the launcher wrote for the `run <answer.md>`
-	// route (the docked pager reads it asynchronously).
-	if len(opts.Cmd) >= 3 && opts.Cmd[1] == "run" {
+	// Snapshot the answer markdown the launcher wrote. The `answer` subcommand passes
+	// it via --content <file>; the legacy `run <answer.md>` route passes it as the last
+	// positional. Read whichever applies (the docked pager reads it asynchronously).
+	if c := argAfter(opts.Cmd, "--content"); c != "" {
+		if b, err := os.ReadFile(c); err == nil {
+			m.dockedAnswer = string(b)
+		}
+	} else if len(opts.Cmd) >= 3 && opts.Cmd[1] == "run" {
 		if b, err := os.ReadFile(opts.Cmd[len(opts.Cmd)-1]); err == nil {
 			m.dockedAnswer = string(b)
 		}
@@ -307,11 +312,16 @@ func TestLaunch_AnswerRoute(t *testing.T) {
 		t.Fatalf("expected 1 docked pager pane, got %d", len(m.docked))
 	}
 	dargv := m.docked[0]
-	if dargv[0] != "/bin/ai-playbook" || dargv[1] != "run" {
-		t.Fatalf("docked argv prefix = %v, want [/bin/ai-playbook run …]", dargv[:2])
+	if dargv[0] != "/bin/ai-playbook" || dargv[1] != "answer" {
+		t.Fatalf("docked argv prefix = %v, want [/bin/ai-playbook answer …]", dargv[:2])
 	}
-	if contains(dargv, "--request") {
-		t.Errorf("answer route must NOT spawn a session (--request), got %v", dargv)
+	if contains(dargv, "session") {
+		t.Errorf("answer route must NOT spawn a session, got %v", dargv)
+	}
+	// The `answer` pane carries the request JSON so the cached pill's reload can
+	// re-run the cheap classify in place.
+	if argAfter(dargv, "--request") == "" {
+		t.Errorf("answer route must pass --request <json> (for the reload re-classify), got %v", dargv)
 	}
 	if !strings.Contains(m.dockedAnswer, "HEAD is the current commit") {
 		t.Errorf("answer md missing the prose content:\n%s", m.dockedAnswer)
@@ -699,8 +709,8 @@ func TestLaunch_CacheHitAnswer(t *testing.T) {
 		t.Fatalf("expected 1 docked pager pane, got %d", len(m.docked))
 	}
 	dargv := m.docked[0]
-	if dargv[0] != "/bin/ai-playbook" || dargv[1] != "run" {
-		t.Fatalf("docked argv prefix = %v, want [/bin/ai-playbook run …]", dargv[:2])
+	if dargv[0] != "/bin/ai-playbook" || dargv[1] != "answer" {
+		t.Fatalf("docked argv prefix = %v, want [/bin/ai-playbook answer …]", dargv[:2])
 	}
 	if !strings.Contains(m.dockedAnswer, "HEAD is the current commit") {
 		t.Errorf("answer md missing the cached body:\n%s", m.dockedAnswer)

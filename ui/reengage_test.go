@@ -136,6 +136,55 @@ func TestInProcessRegenerateReArmsReplace(t *testing.T) {
 	}
 }
 
+// TestInProcessAnswerRegenReArmsReplace verifies the cached-ANSWER reload path:
+// when m.answerRegen is wired, beginRegenerate takes the answer seam (NOT the
+// orchestrator), does the REPLACE/spinner reset, and streams the fresh prose from the
+// seam's reader into m.md. No orchestrator is needed — answerRegen alone drives it.
+func TestInProcessAnswerRegenReArmsReplace(t *testing.T) {
+	m := newModel("agent", "STALE ANSWER\n")
+	m.width, m.height = 80, 24
+	m.isCached = true
+
+	called := 0
+	m.answerRegen = func() (io.ReadCloser, error) {
+		called++
+		return io.NopCloser(strings.NewReader("FRESH ANSWER PROSE\n")), nil
+	}
+	m.reflow()
+
+	// The cached pill's reload renders because answerRegen makes regeneration possible.
+	if !m.canRegenerate() {
+		t.Fatal("canRegenerate must be true with answerRegen wired")
+	}
+
+	cmd := m.beginRegenerate()
+	if cmd == nil {
+		t.Fatal("beginRegenerate returned nil cmd with answerRegen wired")
+	}
+	// REPLACE/spinner setup on the trigger (the answer path mirrors the orch path).
+	if m.md != "" {
+		t.Errorf("REPLACE did not reset m.md → %q", m.md)
+	}
+	if m.isCached {
+		t.Error("answer regen must clear isCached (it's fresh once re-run)")
+	}
+	if !m.thinking {
+		t.Error("answer regen must set thinking=true (spinner)")
+	}
+	if !m.streaming {
+		t.Error("answer regen must set streaming=true")
+	}
+
+	m = pumpStream(t, m, cmd)
+
+	if called != 1 {
+		t.Fatalf("answerRegen calls = %d, want 1", called)
+	}
+	if !strings.Contains(m.md, "FRESH ANSWER PROSE") {
+		t.Errorf("answer regen did not stream the fresh prose into m.md → %q", m.md)
+	}
+}
+
 // A failed VERIFY result must AUTO-fire the in-process follow-up when Reengage is
 // wired but there is NO input FIFO — the live session path. This is the stage-4c-ii
 // regression: the resultMsg guard previously suppressed the auto-fire whenever

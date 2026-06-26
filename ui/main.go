@@ -81,6 +81,21 @@ var pendingAsker AskFunc
 // Consumed (and cleared) by Main.
 func SetAsker(a AskFunc) { pendingAsker = a }
 
+// pendingAnswerRegen is the cached-ANSWER regenerate seam consumed by the next
+// Main() call, set by SetAnswerRegen. The `answer` cached-serve path reshapes
+// os.Args to the `run` entry (like serveCachedPlaybook) and can't pass a closure
+// through that seam, so it stashes the regenerate function here; Main attaches it to
+// the model (m.answerRegen) and clears it. When set, the cached pill's reload re-runs
+// the cheap classify in place and replaces the prose (instead of the orchestrator's
+// playbook-shaped Regenerate). nil → the answer path is not wired (the orchestrator
+// path, or a flash-only no-op, applies).
+var pendingAnswerRegen func() (io.ReadCloser, error)
+
+// SetAnswerRegen stashes the cached-answer regenerate function for the next
+// ui.Main() invocation (the `answer` cached-serve path). Consumed (and cleared) by
+// Main. The returned reader streams the fresh prose; the closure also re-caches it.
+func SetAnswerRegen(fn func() (io.ReadCloser, error)) { pendingAnswerRegen = fn }
+
 // loadPlaybookSource reads a finalized-playbook file (run-from-file / cached-serve),
 // strips any leading YAML front matter AND any preamble above the first H1 title,
 // and returns a reader over the stripped body, the playbook title (front-matter
@@ -268,11 +283,13 @@ func Main() int {
 	activity := pendingActivity
 	servedBase := pendingServedBase
 	askerFn := pendingAsker
-	pendingReengage = nil  // consume once, regardless of whether an orch was built
-	pendingDriver = nil    // ditto: the session owns the driver's lifecycle
-	pendingActivity = nil  // ditto: the session owns the activity channel's lifecycle
-	pendingServedBase = "" // ditto: served-base amend stash is consume-once
-	pendingAsker = nil     // ditto: the `f` asker stash is consume-once
+	answerRegen := pendingAnswerRegen
+	pendingReengage = nil    // consume once, regardless of whether an orch was built
+	pendingDriver = nil      // ditto: the session owns the driver's lifecycle
+	pendingActivity = nil    // ditto: the session owns the activity channel's lifecycle
+	pendingServedBase = ""   // ditto: served-base amend stash is consume-once
+	pendingAsker = nil       // ditto: the `f` asker stash is consume-once
+	pendingAnswerRegen = nil // ditto: the cached-answer regenerate stash is consume-once
 
 	// Force TrueColor: zellij's alt-screen pane underreports the color profile
 	// during bubbletea's auto-detection, causing colors to be downsampled.
@@ -294,6 +311,7 @@ func Main() int {
 	m.activity = activity
 	m.servedBase = servedBase
 	m.asker = askerFn
+	m.answerRegen = answerRegen
 	prog := tea.NewProgram(
 		m,
 		tea.WithInput(tty),

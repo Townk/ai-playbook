@@ -104,44 +104,27 @@ func TestRegenerateClickWithFifoPath(t *testing.T) {
 	}
 }
 
-// TestRegenerateClickNoFifoPath verifies that clicking the regenerate button
-// when inputFifoPath is "" still flashes/emits and does NOT panic or clear md.
-func TestRegenerateClickNoFifoPath(t *testing.T) {
+// TestRegenerateButtonAbsentWhenNoPathWired verifies the defense gate: a cached
+// result with NO regenerate path wired (no orchestrator re-engagement, no
+// answerRegen seam, no FIFO) is NOT clickable — canRegenerate is false, so
+// appendCachedButton adds no button and the dead reload is never shown. This is the
+// fix for the pre-seam answer pane, whose reload no-op'd.
+func TestRegenerateButtonAbsentWhenNoPathWired(t *testing.T) {
 	m := newModel("T", "# Previous result\n")
 	m.width, m.height = 80, 24
 	m.isCached = true
 	m.cachedAt = time.Now().Add(-5 * time.Minute)
 	m.inputFifoPath = "" // no fifo
+	// no orch, no answerRegen, no fifoPath → nothing wired
 	m.reflow()
 
-	var regenBtn *Button
-	for i := range m.buttons {
-		if m.buttons[i].Kind == "regenerate" {
-			regenBtn = &m.buttons[i]
-			break
+	if m.canRegenerate() {
+		t.Fatal("canRegenerate must be false with no regenerate path wired")
+	}
+	for _, b := range m.buttons {
+		if b.Kind == "regenerate" {
+			t.Fatalf("no regenerate button must be registered when nothing is wired, got %+v", b)
 		}
-	}
-	if regenBtn == nil {
-		t.Fatal("regenerate button not found")
-	}
-
-	clickX := regenBtn.Col + 2
-	clickY := regenBtn.Line
-	m2, cmd := m.Update(tea.MouseClickMsg{
-		Button: tea.MouseLeft,
-		X:      clickX,
-		Y:      clickY,
-	})
-	m3 := m2.(model)
-
-	// Without fifo: md must NOT be cleared, isCached stays as-is (we didn't re-arm).
-	// The flash must be set.
-	if m3.flashKey != "cached:regenerate" {
-		t.Errorf("flashKey = %q, want cached:regenerate", m3.flashKey)
-	}
-	// Must return a non-nil flashCmd.
-	if cmd == nil {
-		t.Error("regenerate click without fifo must still return a non-nil cmd (flash)")
 	}
 }
 

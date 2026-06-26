@@ -8,9 +8,65 @@ import (
 	"testing"
 	"time"
 
+	"ai-playbook/author"
+	"ai-playbook/cache"
 	"ai-playbook/capture"
 	"ai-playbook/tools"
 )
+
+// TestAnswerRegenReCachesAnswer exercises the cached-ANSWER reload closure
+// (answerRegenFunc): it re-runs the cheap classify (faked via the answerClassify
+// seam), streams the fresh prose back, AND re-caches it under the SAME (ctx,req)
+// keys with kind=answer. AI_PLAYBOOK_DATA_DIR isolates the store.
+//
+// NOTE: this uses the answerClassify package var as an injection seam so the closure
+// can run without the live triage model (flag for review).
+func TestAnswerRegenReCachesAnswer(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", dir)
+
+	orig := answerClassify
+	t.Cleanup(func() { answerClassify = orig })
+	answerClassify = func(req capture.Request, opts author.AuthorOptions) (author.Classification, error) {
+		return author.Classification{Kind: author.KindAnswer, Content: "FRESH PROSE ANSWER", Title: "Fresh Title"}, nil
+	}
+
+	req := capture.Request{
+		ProjectRoot: "/proj",
+		CWD:         "/proj/sub",
+		UserRequest: "what is HEAD?",
+	}
+	r, err := answerRegenFunc(req)()
+	if err != nil {
+		t.Fatalf("answerRegenFunc closure err = %v", err)
+	}
+	body, _ := io.ReadAll(r)
+	if string(body) != "FRESH PROSE ANSWER" {
+		t.Errorf("closure reader = %q, want the fresh content", string(body))
+	}
+
+	// The fresh prose must be re-cached under the SAME (ctx,req) keys, kind=answer.
+	ctxH := cache.ContextHash(cache.Request{
+		ProjectRoot: req.ProjectRoot, CWD: req.CWD,
+		CommandText: req.Command, CommandExit: req.Exit, Scrollback: req.Scrollback,
+	})
+	reqH := cache.RequestHash(req.UserRequest)
+	entry := filepath.Join(dir, "cache", ctxH, reqH+".md")
+	raw, err := os.ReadFile(entry)
+	if err != nil {
+		t.Fatalf("re-cached entry not found at %s: %v", entry, err)
+	}
+	content := string(raw)
+	if kind, _ := cache.Field(content, "kind"); kind != "answer" {
+		t.Errorf("re-cached kind = %q, want answer", kind)
+	}
+	if got := cache.Body(content); !strings.Contains(got, "FRESH PROSE ANSWER") {
+		t.Errorf("re-cached body = %q, want the fresh content", got)
+	}
+	if title, _ := cache.Field(content, "title"); title != "Fresh Title" {
+		t.Errorf("re-cached title = %q, want Fresh Title", title)
+	}
+}
 
 // minimalZDOTDIR points the driver at a controlled rc (no p10k/mise) so
 // openSession's shared driver comes up deterministically in the test environment.

@@ -195,6 +195,13 @@ type model struct {
 	// --actions-fifo is given.
 	orch *orchestrator.Orchestrator
 
+	// answerRegen is the cached-ANSWER regenerate seam (set by Main from
+	// SetAnswerRegen). When non-nil, the cached pill's reload re-runs the cheap
+	// classify on the original request, streams the fresh prose back (the returned
+	// reader), and re-caches it — INSTEAD of the orchestrator's playbook-shaped
+	// Regenerate. nil → the orchestrator path (playbooks) or a flash-only no-op.
+	answerRegen func() (io.ReadCloser, error)
+
 	// status is a transient one-line message shown in the status bar (e.g. when
 	// an in-process action is not yet implemented). Cleared on the next key/click.
 	status string
@@ -1533,9 +1540,20 @@ func (m model) cachedBadge() string {
 		Bold(bold)
 
 	const reloadIcon = "\U0010F1DA"
+	// The reload glyph renders only when regeneration is actually POSSIBLE (an
+	// orchestrator re-engagement OR the cached-answer seam). With neither wired the
+	// pill stays informational (db-icon + "cached · <age>") and shows no dead reload.
 	prefix := "\U0000F1C0 cached · " + relativeAge(m.cachedAt) + " "
+	bodyText := prefix
+	if m.canRegenerate() {
+		bodyText += reloadIcon
+	} else {
+		// Drop the single trailing pad space that separated the age from the glyph so
+		// the pill isn't left with a dangling space when the reload is omitted.
+		bodyText = strings.TrimRight(bodyText, " ")
+	}
 	capL := capStyle.Render("\U0000E0B6")
-	body := bodyStyle.Render(prefix + reloadIcon)
+	body := bodyStyle.Render(bodyText)
 	capR := capStyle.Render("\U0000E0B4")
 	return capL + body + capR + " "
 }
@@ -1548,7 +1566,10 @@ func (m model) cachedBadge() string {
 // indent IS that margin). Width is the pill's visible width minus the trailing
 // space. Screen=true so buttonAt resolves it by absolute Y, not content line.
 func (m *model) appendCachedButton() {
-	if !m.isCached {
+	// Only add the clickable regenerate button when regeneration is actually possible
+	// (an orchestrator re-engagement OR the cached-answer seam). With neither wired the
+	// reload glyph isn't rendered (see cachedBadge), so a click target would be dead.
+	if !m.canRegenerate() {
 		return
 	}
 	pillRow := m.bodyTop() - 2
@@ -2322,6 +2343,27 @@ func (m *model) resolveConfirm(yes bool) tea.Cmd {
 // This is the live session path (file/stdin input, no FIFO, Reengage set).
 func (m *model) canReengageInProc() bool {
 	return m.orch != nil && m.orch.Reengage != nil
+}
+
+// canRegenerate reports whether the cached pill's reload can actually do something —
+// i.e. a regenerate mechanism is wired:
+//   - the orchestrator's in-process re-engagement (playbook regenerate), OR
+//   - the cached-answer seam (answerRegen, the prose re-classify), OR
+//   - a FIFO/broker re-arm (legacy: inputFifoPath re-opens the stream, fifoPath emits
+//     a regenerate action) — retained so the broker handler branches stay live.
+//
+// The badge only renders the clickable button + reload glyph when this is true, so a
+// wired reload is always live and a dead reload (e.g. the pre-fix answer pane: cached
+// but no regenerate path) is hidden — the defense that kills the no-op reload. isCached
+// is the outer gate (a non-cached result has no badge at all).
+func (m model) canRegenerate() bool {
+	if !m.isCached {
+		return false
+	}
+	return m.orch != nil && m.orch.Reengage != nil ||
+		m.answerRegen != nil ||
+		m.inputFifoPath != "" ||
+		m.fifoPath != ""
 }
 
 func (m *model) beginFollowupStream(blockID, command string) tea.Cmd {
