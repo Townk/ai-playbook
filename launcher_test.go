@@ -726,7 +726,11 @@ func TestLaunch_CacheHitAnswer(t *testing.T) {
 // TestLaunch_CacheHitPlaybook: a repeat request whose cached entry is kind=playbook
 // is served by spawning the docked SESSION pane (which re-runs triage.Route and
 // serves the cached playbook); classify is NOT called.
-func TestLaunch_CacheHitPlaybook(t *testing.T) {
+// A cached PLAYBOOK is NOT short-circuited: the launcher re-classifies (the same
+// request classifies differently across contexts, so a frozen playbook must not pop
+// a pane for a prompt the user now wants as a command). When the re-classification
+// is still escalate, the session re-serves this cached playbook.
+func TestLaunch_CacheHitPlaybookReclassifies(t *testing.T) {
 	fastFloatWait(t)
 	c := isolateCache(t)
 	const submitted = "fix the build"
@@ -736,15 +740,46 @@ func TestLaunch_CacheHitPlaybook(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	called := false
+	classify := func(capture.Request, author.AuthorOptions) (author.Classification, error) {
+		called = true
+		return author.Classification{Kind: author.KindEscalate}, nil
+	}
 	m := &launchMux{answer: submitted}
-	if code := launch(m, "/bin/ai-playbook", req, failClassify(t)); code != 0 {
+	if code := launch(m, "/bin/ai-playbook", req, classify); code != 0 {
 		t.Fatalf("launch exit = %d, want 0", code)
 	}
-	if m.typedCount != 0 {
-		t.Errorf("cached playbook must not type into the origin, got %d", m.typedCount)
+	if !called {
+		t.Error("a cached PLAYBOOK hit must re-classify, not short-circuit")
 	}
 	if len(m.docked) != 1 || m.docked[0][1] != "session" {
-		t.Fatalf("cached playbook must spawn a docked session, got docked=%v", m.docked)
+		t.Fatalf("re-classified escalate must spawn a docked session, got docked=%v", m.docked)
+	}
+}
+
+// The regression fix: a request previously cached as a PLAYBOOK, but which the
+// classify now decides is a COMMAND, must type the command into the origin pane —
+// NOT pop the stale playbook's session pane.
+func TestLaunch_CacheHitPlaybookButCommandNow(t *testing.T) {
+	fastFloatWait(t)
+	c := isolateCache(t)
+	const submitted = "fix the build"
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj", PaneID: "terminal_7"}
+	ctx, rh := launchKeys(req, submitted)
+	if _, err := c.Store(ctx, rh, "playbook", "# Fix\n", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	classify := fakeClassify(author.Classification{Kind: author.KindCommand, Content: "make build"}, nil)
+	m := &launchMux{answer: submitted}
+	if code := launch(m, "/bin/ai-playbook", req, classify); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	if m.typedCount != 1 || m.typedText != "make build" {
+		t.Fatalf("a playbook-cached prompt now classified as command must type it, got count=%d text=%q", m.typedCount, m.typedText)
+	}
+	if len(m.docked) != 0 {
+		t.Fatalf("no pane should spawn on a command, got docked=%v", m.docked)
 	}
 }
 

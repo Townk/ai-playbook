@@ -296,27 +296,33 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 			title, _ := cache.Field(content, "title")
 			created, _ := cache.Field(content, "created_at")
 			dbg("launch: cache HIT path=%q kind=%q bodyLen=%d", d.Path, kind, len(body))
-			// Close the thinking float BEFORE routing. There's no classify on a hit,
-			// but the float is still animating "Thinking…" — it must tear down first
-			// (same ordering rationale as the miss path) so the result pane docks
-			// against the origin tiled pane, not floating behind the thinking float.
-			closeFloat(out)
+			// Short-circuit ONLY the cheap, launcher-owned kinds (command/answer). A
+			// cached PLAYBOOK is deliberately NOT served straight from here: the SAME
+			// request classifies differently across contexts (command in one, escalate
+			// in another — both observed in the on-disk cache), so serving a frozen
+			// playbook pops a side pane for a prompt the user now expects as a command.
+			// For a playbook/unknown hit, fall through to the classify (it re-decides the
+			// kind); if it's still escalate, the session re-runs triage.Route and serves
+			// THIS cached playbook (no re-author). The float is closed here only on a
+			// short-circuit; the fall-through lets the classify path close it as usual.
 			switch kind {
 			case "command":
+				closeFloat(out)
 				dbg("launch: hit route=command pane=%q bodyLen=%d", req.PaneID, len(body))
 				if terr := m.TypeInto(req.PaneID, body); terr != nil {
 					dbg("launch: TypeInto origin pane failed: %v", terr)
 				}
 				return 0
 			case "answer":
+				closeFloat(out)
 				dbg("launch: hit route=answer")
 				return spawnAnswer(m, selfExe, req, body, title, created)
-			default: // playbook / unknown → the session re-runs triage.Route and serves it
-				dbg("launch: hit route=session kind=%q", kind)
-				return spawnSession(m, selfExe, req, title)
+			default: // playbook / unknown → re-classify (don't serve a frozen playbook)
+				dbg("launch: hit kind=%q not short-circuited; re-classifying", kind)
 			}
+		} else {
+			dbg("launch: cache HIT but path %q unreadable; falling through to classify", d.Path)
 		}
-		dbg("launch: cache HIT but path %q unreadable; falling through to classify", d.Path)
 	}
 
 	// CACHE MISS / disabled / no-cache: CLASSIFY the submitted request on the cheap
