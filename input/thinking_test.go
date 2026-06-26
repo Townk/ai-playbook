@@ -239,6 +239,23 @@ func TestDonePollSignalsOnFile(t *testing.T) {
 	}
 }
 
+// TestWriteClosedFileWritesMarker: the thinking-exit marker write (writeClosedFile,
+// called on the thinking exit path in runInput before os.Exit) creates
+// <out>.closed so the launcher can detect the float has fully torn down. An empty
+// path is a no-op.
+func TestWriteClosedFileWritesMarker(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "req")
+	writeClosedFile(out)
+	if _, err := os.Stat(out + ClosedSuffix); err != nil {
+		t.Fatalf("writeClosedFile must create %s%s: %v", out, ClosedSuffix, err)
+	}
+	if ClosedSuffix != ".closed" {
+		t.Errorf("ClosedSuffix = %q, want .closed (the launcher shares this contract)", ClosedSuffix)
+	}
+	// Empty path is a no-op (must not panic / create stray files).
+	writeClosedFile("")
+}
+
 // TestThinkingBackstopQuits: the backstop msg quits a thinking float, and the
 // backstop cmd fires the message after its (shortened) duration.
 func TestThinkingBackstopQuits(t *testing.T) {

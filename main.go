@@ -241,12 +241,14 @@ type classifyFunc func(req capture.Request, opts author.AuthorOptions) (author.C
 //   - answer   → a short prose answer is rendered in a docked pager (`run <md>`).
 //   - escalate → the full docked SESSION pane (the current author/serve flow).
 //
-// The float STAYS OPEN animating "Thinking…" during the classify; after routing,
-// the launcher writes <out>.done to close it (the float also self-times-out at 60s).
-// On cancel it exits cleanly (0) with nothing written and no route taken. A classify
-// error degrades to escalate (never block the user). selfExe + m + classify are
-// injected so it is unit-testable with a fake mux + fake classify (no live zellij,
-// no live model).
+// The float STAYS OPEN animating "Thinking…" during the classify; once classified
+// the launcher writes <out>.done to close it and WAITS for the float to fully tear
+// down (waitFloatClosed) BEFORE routing — so the result pane spawns with the origin
+// tiled pane focused, not the floating thinking pane (else `new-pane` would open the
+// "docked" pane floating behind the float). On cancel it exits cleanly (0) with
+// nothing written and no route taken. A classify error degrades to escalate (never
+// block the user). selfExe + m + classify are injected so it is unit-testable with a
+// fake mux + fake classify (no live zellij, no live model).
 func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFunc) int {
 	if classify == nil {
 		classify = author.ClassifyRequest
@@ -282,32 +284,71 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 	}
 	dbg("launch: classify kind=%q contentLen=%d", cls.Kind, len(cls.Content))
 
-	var code int
+	// CLOSE the thinking float BEFORE routing. The float, animating, polls for
+	// <out>.done and exits; writing it now (not after the route) means the spawn
+	// runs with the ORIGIN tiled pane focused — not the floating thinking pane. If
+	// we spawned first, `zellij action new-pane` would inherit the focused float's
+	// FLOATING context and the "docked" result pane would open floating behind the
+	// float (the confirmed bug). waitFloatClosed then blocks until the float has
+	// fully torn down (it writes <out>.closed on thinking-exit) plus a short margin
+	// for zellij to drop the floating pane and restore focus to the origin.
+	writeDoneFile(out)
+	waitFloatClosed(out)
+
 	switch cls.Kind {
 	case author.KindCommand:
 		// Stage the command into the ORIGIN pane with NO trailing CR (mux.TypeInto →
 		// `zellij action write-chars --pane-id <pane>`), so it lands at the prompt for
 		// the user to review and run. The explicit pane id makes the write
-		// focus-independent (the focused pane is the closing thinking float). No
-		// docked/floating pane is opened.
+		// focus-independent. No docked/floating pane is opened.
 		dbg("launch: route=command pane=%q contentLen=%d", req.PaneID, len(cls.Content))
 		if terr := m.TypeInto(req.PaneID, cls.Content); terr != nil {
 			dbg("launch: TypeInto origin pane failed: %v", terr)
 		}
-		code = 0
+		return 0
 	case author.KindAnswer:
 		// Render the short prose answer in a docked pager (no run blocks → just prose).
 		dbg("launch: route=answer")
-		code = spawnAnswer(m, selfExe, req, cls.Content)
+		return spawnAnswer(m, selfExe, req, cls.Content)
 	default: // escalate (incl. empty/unknown kind)
 		dbg("launch: route=escalate kind=%q", cls.Kind)
-		code = spawnSession(m, selfExe, req)
+		return spawnSession(m, selfExe, req)
 	}
+}
 
-	// Close the thinking float after routing (mirrors writeCancelFile). The float
-	// polls for this marker and exits; the 60s backstop covers a launcher crash.
-	writeDoneFile(out)
-	return code
+// floatClosePoll / floatCloseCap / floatCloseMargin tune waitFloatClosed: poll
+// every floatClosePoll for the float's <out>.closed marker up to floatCloseCap,
+// then sleep floatCloseMargin so zellij finishes dropping the floating pane and
+// restores focus to the origin tiled pane before the route spawns. Package-level
+// vars so tests shrink them (the live values give the float ~2s to tear down).
+var (
+	floatClosePoll   = 25 * time.Millisecond
+	floatCloseCap    = 2 * time.Second
+	floatCloseMargin = 150 * time.Millisecond
+)
+
+// waitFloatClosed blocks until the thinking float has fully torn down — it polls
+// for the float's <out>.closed marker (written on thinking-exit, after the tea
+// program returns) every floatClosePoll up to floatCloseCap. Once seen (or on the
+// cap), it sleeps floatCloseMargin so zellij has dropped the floating pane and
+// returned focus to the origin tiled pane BEFORE the caller spawns the result
+// pane (so `new-pane` docks instead of inheriting the float's floating context).
+// A no-op (no poll, no margin) on an empty path — the inline/off-zellij path has
+// no float.
+func waitFloatClosed(out string) {
+	if out == "" {
+		return
+	}
+	marker := out + input.ClosedSuffix
+	deadline := time.Now().Add(floatCloseCap)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(marker); err == nil {
+			dbg("waitFloatClosed: float closed (marker present)")
+			break
+		}
+		time.Sleep(floatClosePoll)
+	}
+	time.Sleep(floatCloseMargin)
 }
 
 // writeDoneFile writes the thinking float's <out>.done close marker (an empty file,

@@ -4,11 +4,28 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"ai-playbook/author"
 	"ai-playbook/capture"
+	"ai-playbook/input"
 	"ai-playbook/mux"
 )
+
+// fastFloatWait shrinks the waitFloatClosed seam so launcher tests run quickly and
+// never block on the live ~2s cap. Restored after the test. Every test that drives
+// launch through a submit (which now writes <out>.done then waits for <out>.closed)
+// calls this.
+func fastFloatWait(t *testing.T) {
+	t.Helper()
+	sp, sc, sm := floatClosePoll, floatCloseCap, floatCloseMargin
+	floatClosePoll = time.Millisecond
+	floatCloseCap = 200 * time.Millisecond
+	floatCloseMargin = time.Millisecond
+	t.Cleanup(func() {
+		floatClosePoll, floatCloseCap, floatCloseMargin = sp, sc, sm
+	})
+}
 
 // fakeClassify builds a classifyFunc that always returns the given Classification
 // (and error), so the routing tests drive each kind deterministically without a
@@ -42,6 +59,28 @@ type launchMux struct {
 	typedCount   int    // number of TypeInto calls
 	answer       string
 	floatCancel  bool
+	noClose      bool // when true, the simulated float never writes <out>.closed
+	// (so the launcher's waitFloatClosed exercises the timeout/cap path).
+
+	out string // the float's --out path (recorded on SpawnInputFloat)
+	// Snapshots taken when the ROUTE fires (SpawnDocked / TypeInto), proving the
+	// launcher closed + waited for the float BEFORE routing: doneAtRoute = was
+	// <out>.done written, closedAtRoute = had the float written <out>.closed.
+	doneAtRoute   bool
+	closedAtRoute bool
+}
+
+// snapshotRoute records, at the moment a route fires, whether the float's <out>.done
+// (written by writeDoneFile before the wait) and <out>.closed (written by the
+// simulated float once it sees .done) exist — proving done→wait-closed→route order.
+func (m *launchMux) snapshotRoute() {
+	if m.out == "" {
+		return
+	}
+	_, derr := os.Stat(m.out + input.DoneSuffix)
+	_, cerr := os.Stat(m.out + input.ClosedSuffix)
+	m.doneAtRoute = derr == nil
+	m.closedAtRoute = cerr == nil
 }
 
 func (m *launchMux) DumpScreen(string) (string, error) { return "", nil }
@@ -51,6 +90,7 @@ func (m *launchMux) SpawnFloat(mux.SpawnOptions) error { return nil }
 // TypeInto records the command route's no-CR origin-pane write (mux.TypeInto →
 // `zellij action write-chars`): the command is staged at the prompt for the user.
 func (m *launchMux) TypeInto(pane, text string) error {
+	m.snapshotRoute()
 	m.typedCount++
 	m.typedPane = pane
 	m.typedText = text
@@ -58,24 +98,43 @@ func (m *launchMux) TypeInto(pane, text string) error {
 }
 
 // SpawnInputFloat is the launcher's request-float seam (Asker.Ask now spawns the
-// borderless input float through it). It records the argv and simulates the
-// floated `input --out <file>` writing the submitted value (or cancel marker).
+// borderless input float through it). It records the argv, simulates the floated
+// `input --out <file>` writing the submitted value (or cancel marker), and — on a
+// submit — simulates the REAL thinking float's teardown: a goroutine waits for the
+// launcher's <out>.done close signal, then writes <out>.closed (the torn-down
+// marker the launcher's waitFloatClosed polls for). This makes the launcher's
+// close→wait handshake observable + deterministic.
 func (m *launchMux) SpawnInputFloat(opts mux.SpawnOptions) error {
 	m.floats = append(m.floats, opts.Cmd)
-	for i, a := range opts.Cmd {
-		if a == "--out" && i+1 < len(opts.Cmd) {
-			if m.floatCancel {
-				// Simulate the float writing the cancel marker on dismiss.
-				_ = os.WriteFile(opts.Cmd[i+1]+".cancel", nil, 0o600)
-			} else {
-				_ = os.WriteFile(opts.Cmd[i+1], []byte(m.answer), 0o600)
-			}
-		}
+	out := argAfter(opts.Cmd, "--out")
+	m.out = out
+	if out == "" {
+		return nil
 	}
+	if m.floatCancel {
+		// Simulate the float writing the cancel marker on dismiss (no .closed: the
+		// cancel path never enters the thinking/close handshake).
+		_ = os.WriteFile(out+input.CancelSuffix, nil, 0o600)
+		return nil
+	}
+	_ = os.WriteFile(out, []byte(m.answer), 0o600)
+	if m.noClose {
+		return nil
+	}
+	go func() {
+		for {
+			if _, err := os.Stat(out + input.DoneSuffix); err == nil {
+				_ = os.WriteFile(out+input.ClosedSuffix, nil, 0o600)
+				return
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}()
 	return nil
 }
 
 func (m *launchMux) SpawnDocked(opts mux.SpawnOptions) error {
+	m.snapshotRoute()
 	m.docked = append(m.docked, opts.Cmd)
 	m.dockedCwd = opts.Cwd
 	// Snapshot the request file the launcher wrote (the session reads + removes it).
@@ -102,6 +161,7 @@ func (m *launchMux) SpawnDocked(opts mux.SpawnOptions) error {
 // `ai-playbook session --request <json>` command carrying the captured context +
 // the submitted request.
 func TestLaunch_FloatThenDocked(t *testing.T) {
+	fastFloatWait(t)
 	m := &launchMux{answer: "please fix it"}
 	req := capture.Request{
 		Kind:        "error",
@@ -158,9 +218,17 @@ func TestLaunch_FloatThenDocked(t *testing.T) {
 	if !strings.Contains(m.dockedReq, "please fix it") {
 		t.Errorf("docked request JSON missing submitted request:\n%s", m.dockedReq)
 	}
-	// 3) The launcher wrote <out>.done to close the thinking float after routing.
+	// 3) The launcher wrote <out>.done to close the thinking float, then WAITED for
+	// the float to tear down (<out>.closed), and ONLY THEN routed (SpawnDocked) —
+	// so the result pane spawns with the origin tiled pane focused, not the float.
 	if out := argAfter(fargv, "--out"); !fileExists(out + ".done") {
 		t.Errorf("escalate route must write %s.done to close the float", out)
+	}
+	if !m.doneAtRoute {
+		t.Error("launcher must write <out>.done BEFORE routing (escalate)")
+	}
+	if !m.closedAtRoute {
+		t.Error("launcher must wait for <out>.closed (float torn down) BEFORE routing (escalate)")
 	}
 }
 
@@ -168,6 +236,7 @@ func TestLaunch_FloatThenDocked(t *testing.T) {
 // typed into the ORIGIN pane (no CR, via TypeInto/write-chars), the float is closed
 // (<out>.done written), and NO docked pane is spawned.
 func TestLaunch_CommandRoute(t *testing.T) {
+	fastFloatWait(t)
 	m := &launchMux{answer: "list last week's commits"}
 	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj", PaneID: "terminal_7"}
 	classify := fakeClassify(author.Classification{Kind: author.KindCommand, Content: "git log --since='last week' -n 3"}, nil)
@@ -193,12 +262,21 @@ func TestLaunch_CommandRoute(t *testing.T) {
 	if out := argAfter(m.floats[0], "--out"); !fileExists(out + ".done") {
 		t.Errorf("command route must write %s.done to close the float", out)
 	}
+	// The command route also closes + waits for the float BEFORE typing into the
+	// origin, so focus is back on the origin tiled pane when write-chars lands.
+	if !m.doneAtRoute {
+		t.Error("command route must write <out>.done BEFORE typing into the origin")
+	}
+	if !m.closedAtRoute {
+		t.Error("command route must wait for <out>.closed BEFORE typing into the origin")
+	}
 }
 
 // TestLaunch_AnswerRoute asserts the classify "answer" route: a docked pager renders
 // the prose via `ai-playbook run <answer.md>` (the md holds the content), the float
 // is closed, and NO session pane is spawned.
 func TestLaunch_AnswerRoute(t *testing.T) {
+	fastFloatWait(t)
 	m := &launchMux{answer: "what is HEAD?"}
 	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
 	classify := fakeClassify(author.Classification{Kind: author.KindAnswer, Content: "HEAD is the current commit your working tree is based on."}, nil)
@@ -225,11 +303,18 @@ func TestLaunch_AnswerRoute(t *testing.T) {
 	if out := argAfter(m.floats[0], "--out"); !fileExists(out + ".done") {
 		t.Errorf("answer route must write %s.done to close the float", out)
 	}
+	if !m.doneAtRoute {
+		t.Error("answer route must write <out>.done BEFORE spawning the pager")
+	}
+	if !m.closedAtRoute {
+		t.Error("answer route must wait for <out>.closed BEFORE spawning the pager")
+	}
 }
 
 // TestLaunch_ClassifyErrorEscalates asserts a classify error degrades to the
 // escalate route (a docked session pane), never blocking the user.
 func TestLaunch_ClassifyErrorEscalates(t *testing.T) {
+	fastFloatWait(t)
 	m := &launchMux{answer: "do a thing"}
 	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
 	classify := fakeClassify(author.Classification{Kind: author.KindEscalate}, os.ErrDeadlineExceeded)
@@ -245,6 +330,7 @@ func TestLaunch_ClassifyErrorEscalates(t *testing.T) {
 // TestLaunch_CancelNoSession asserts that cancelling the request float exits
 // cleanly (0) and spawns NO docked session pane.
 func TestLaunch_CancelNoSession(t *testing.T) {
+	fastFloatWait(t)
 	m := &launchMux{floatCancel: true}
 	code := launch(m, "/bin/ai-playbook", capture.Request{CWD: "/x"}, escalateClassify())
 	if code != 0 {
@@ -259,6 +345,44 @@ func TestLaunch_CancelNoSession(t *testing.T) {
 	// On cancel the launcher writes NO .done (the float exits itself on its .cancel).
 	if out := argAfter(m.floats[0], "--out"); fileExists(out + ".done") {
 		t.Errorf("cancel must NOT write %s.done", out)
+	}
+}
+
+// TestLaunch_WaitTimeoutStillRoutes asserts the wait is bounded: if the float
+// never writes <out>.closed (a crash/stall), the launcher still proceeds past the
+// cap and routes (never blocks the user). doneAtRoute holds; closedAtRoute is false.
+func TestLaunch_WaitTimeoutStillRoutes(t *testing.T) {
+	fastFloatWait(t)
+	m := &launchMux{answer: "do a thing", noClose: true}
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
+
+	start := time.Now()
+	if code := launch(m, "/bin/ai-playbook", req, escalateClassify()); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	if len(m.docked) != 1 {
+		t.Fatalf("timeout path must still route (1 docked), got %d", len(m.docked))
+	}
+	if !m.doneAtRoute {
+		t.Error("launcher must still write <out>.done before routing on the timeout path")
+	}
+	if m.closedAtRoute {
+		t.Error("no <out>.closed was written; closedAtRoute should be false on the timeout path")
+	}
+	// The cap (200ms in fastFloatWait) bounds the wait — far under the live 2s.
+	if waited := time.Since(start); waited > time.Second {
+		t.Errorf("wait took %v, want bounded by the (shrunk) cap", waited)
+	}
+}
+
+// TestWaitFloatClosed_EmptyPathNoWait asserts the inline/off-zellij case (no float,
+// empty out) is a no-op: waitFloatClosed returns immediately, sleeping no margin.
+func TestWaitFloatClosed_EmptyPathNoWait(t *testing.T) {
+	fastFloatWait(t)
+	start := time.Now()
+	waitFloatClosed("")
+	if waited := time.Since(start); waited > 50*time.Millisecond {
+		t.Errorf("empty-path waitFloatClosed took %v, want ~0 (no-op)", waited)
 	}
 }
 

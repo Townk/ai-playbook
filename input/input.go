@@ -298,6 +298,26 @@ func writeCancelFile(outFile string) {
 // shares the contract, mirroring CancelSuffix.
 const DoneSuffix = ".done"
 
+// ClosedSuffix is appended to an --out path to form the torn-down marker the
+// THINKING float writes just before it exits (after it has observed <out>.done
+// and the tea program has returned). The launcher polls for it so it can wait
+// until the float process is actually gone — and zellij has returned focus to
+// the origin tiled pane — BEFORE spawning the result pane. Without this wait the
+// "docked" result pane inherits the still-focused float's FLOATING context and
+// opens floating behind the float. Exported so the launcher shares the contract,
+// mirroring DoneSuffix / CancelSuffix.
+const ClosedSuffix = ".closed"
+
+// writeClosedFile creates the torn-down marker for outFile (best-effort). Called
+// from the THINKING-mode exit path just before the process exits, so the launcher
+// learns the float has fully torn down. A no-op on an empty path.
+func writeClosedFile(outFile string) {
+	if outFile == "" {
+		return
+	}
+	_ = os.WriteFile(outFile+ClosedSuffix, nil, 0o600)
+}
+
 func runInput(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool, icon, outFile, historyPath string, thinkingEnabled bool) {
 	m := newInputModel(theme, variant, title, prompt, value, placeholder, height, padding, inset, singleLine, icon)
 	m.thinkingEnabled = thinkingEnabled
@@ -319,6 +339,10 @@ func runInput(theme Theme, variant, title, prompt, value, placeholder string, he
 	// (still-unwritten) history append remains.
 	if res.thinking {
 		recordHistory(historyPath, res.fld.value())
+		// Signal the launcher the float has fully torn down (the tea program has
+		// returned). The launcher waits for this marker before spawning the result
+		// pane so the docked pane isn't created in the float's floating context.
+		writeClosedFile(outFile)
 		os.Exit(0)
 	}
 	if res.submitted {
