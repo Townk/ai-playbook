@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"ai-playbook/agentstream"
 	"ai-playbook/capture"
@@ -636,6 +637,7 @@ func TestVerifySuccessRendersConfirmRow(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# resolved?\n", "# Playbook\n")
 	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
 	m.inputFifoPath = ""
+	m.width = 100 // wide enough that the prompt fits on a single line (no wrap split)
 	m.reflow()
 
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -665,70 +667,124 @@ func TestVerifySuccessRendersConfirmRow(t *testing.T) {
 	}
 }
 
-// fix(ui): the confirm renders on TWO rows — the QUESTION prose on its own row and the
-// [ Yes ] [ No ] buttons on a SEPARATE row directly below it. The buttons must NOT
-// share the prompt line (the old single-row layout pushed them off the pane edge).
+// fix(ui): the confirm renders the QUESTION prose (wrapped to the pane's content width)
+// on its OWN row(s) and the Yes / No buttons on a SEPARATE row directly below it. The
+// buttons must NOT share the question line(s), and they stay pinned at m.height-3 no
+// matter how many lines the question wraps to. Covered at a WIDE width (single question
+// line) and a NARROW width (the question wraps to 2+ lines, none overflowing the pane).
 func TestConfirmRendersButtonsOnSeparateRow(t *testing.T) {
-	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\n")
-	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
-	m.reflow()
-	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
-	m = nm.(model)
-	if !m.confirmResolved {
-		t.Fatal("setup: confirm not set")
+	newConfirm := func(width int) model {
+		m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\n")
+		m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
+		m.inputFifoPath = ""
+		m.width = width
+		m.reflow()
+		nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+		m = nm.(model)
+		if !m.confirmResolved {
+			t.Fatal("setup: confirm not set")
+		}
+		return m
+	}
+	blank := func(s string) bool { return strings.TrimSpace(s) == "" }
+	buttonsRow := func(lines []string) int {
+		for i, ln := range lines {
+			if strings.Contains(ln, confirmYesLabel) && strings.Contains(ln, confirmNoLabel) {
+				return i
+			}
+		}
+		return -1
 	}
 
-	// confirmRowString is now the QUESTION only — no button labels on it.
-	q := strip(m.confirmRowString())
-	if !strings.Contains(q, "Generate a playbook for this solution?") {
-		t.Errorf("question row must carry the prompt prose, got %q", q)
-	}
-	if strings.Contains(q, confirmYesLabel) || strings.Contains(q, confirmNoLabel) {
-		t.Errorf("buttons must NOT be on the question row, got %q", q)
-	}
-	// The buttons live on their own row (both labels there).
-	btns := strip(m.confirmButtonsRowString())
-	if !strings.Contains(btns, confirmYesLabel) || !strings.Contains(btns, confirmNoLabel) {
-		t.Errorf("buttons row must carry both labels, got %q", btns)
+	// The question row(s) never carry the button labels; the buttons row carries both.
+	assertSplit := func(m model) {
+		t.Helper()
+		for _, q := range m.confirmQuestionRows() {
+			if strings.Contains(strip(q), confirmYesLabel) || strings.Contains(strip(q), confirmNoLabel) {
+				t.Errorf("buttons must NOT be on a question row, got %q", strip(q))
+			}
+		}
+		btns := strip(m.confirmButtonsRowString())
+		if !strings.Contains(btns, confirmYesLabel) || !strings.Contains(btns, confirmNoLabel) {
+			t.Errorf("buttons row must carry both labels, got %q", btns)
+		}
 	}
 
-	// The confirm block is FIVE rows above the status bar: blank, prompt, blank,
-	// buttons, blank. Locate the prompt and buttons rows in the full rendered view and
-	// assert the blank spacers around them.
-	lines := strings.Split(strip(m.viewString()), "\n")
-	promptLine, buttonLine := -1, -1
-	for i, ln := range lines {
-		if strings.Contains(ln, "Generate a playbook for this solution?") {
-			promptLine = i
+	// WIDE: the prompt fits on ONE line. Layout: blank, question, blank, buttons, blank.
+	t.Run("wide single line", func(t *testing.T) {
+		m := newConfirm(100)
+		if got := m.confirmQuestionLines(); got != 1 {
+			t.Fatalf("wide width must keep the question on a single line, got %d", got)
 		}
-		if strings.Contains(ln, confirmYesLabel) && strings.Contains(ln, confirmNoLabel) {
-			buttonLine = i
+		assertSplit(m)
+		lines := strings.Split(strip(m.viewString()), "\n")
+		promptLine := -1
+		for i, ln := range lines {
+			if strings.Contains(ln, "Generate a playbook for this solution?") {
+				promptLine = i
+			}
 		}
-	}
-	if promptLine < 0 || buttonLine < 0 {
-		t.Fatalf("could not find both rows: prompt=%d buttons=%d", promptLine, buttonLine)
-	}
-	if promptLine == buttonLine {
-		t.Error("the prompt prose and the buttons must render on SEPARATE rows")
-	}
-	// Layout: blank(prompt-1), prompt, blank(prompt+1), buttons(prompt+2), blank(prompt+3), status.
-	if buttonLine != promptLine+2 {
-		t.Errorf("buttons row must sit two rows below the question (a blank between): prompt=%d buttons=%d", promptLine, buttonLine)
-	}
-	blank := func(i string) bool { return strings.TrimSpace(i) == "" }
-	if promptLine-1 < 0 || !blank(lines[promptLine-1]) {
-		t.Errorf("a blank row must sit ABOVE the prompt (row %d)", promptLine-1)
-	}
-	if !blank(lines[promptLine+1]) {
-		t.Errorf("a blank row must sit BETWEEN the prompt and the buttons (row %d)", promptLine+1)
-	}
-	if buttonLine+1 >= len(lines) || !blank(lines[buttonLine+1]) {
-		t.Errorf("a blank row must sit BELOW the buttons (row %d)", buttonLine+1)
-	}
-	if strings.Contains(lines[buttonLine], "Generate a playbook for this solution?") {
-		t.Error("buttons row must not contain the prompt prose")
-	}
+		buttonLine := buttonsRow(lines)
+		if promptLine < 0 || buttonLine < 0 {
+			t.Fatalf("could not find both rows: prompt=%d buttons=%d", promptLine, buttonLine)
+		}
+		if buttonLine != m.height-3 {
+			t.Errorf("buttons must render on m.height-3 (%d), got %d", m.height-3, buttonLine)
+		}
+		// Layout: blank(prompt-1), prompt, blank(prompt+1), buttons(prompt+2), blank, status.
+		if buttonLine != promptLine+2 {
+			t.Errorf("buttons must sit two rows below the question (a blank between): prompt=%d buttons=%d", promptLine, buttonLine)
+		}
+		if promptLine-1 < 0 || !blank(lines[promptLine-1]) {
+			t.Errorf("a blank row must sit ABOVE the question (row %d)", promptLine-1)
+		}
+		if !blank(lines[promptLine+1]) {
+			t.Errorf("a blank row must sit BETWEEN the question and the buttons (row %d)", promptLine+1)
+		}
+		if buttonLine+1 >= len(lines) || !blank(lines[buttonLine+1]) {
+			t.Errorf("a blank row must sit BELOW the buttons (row %d)", buttonLine+1)
+		}
+	})
+
+	// NARROW: the prompt WRAPS to 2+ lines, each fitting inside the content width (no
+	// overflow past the right margin), and the buttons stay pinned at m.height-3.
+	t.Run("narrow wraps", func(t *testing.T) {
+		m := newConfirm(60)
+		n := m.confirmQuestionLines()
+		if n < 2 {
+			t.Fatalf("narrow width must wrap the question to 2+ lines, got %d", n)
+		}
+		assertSplit(m)
+		// Each wrapped question row fits within the content inner width — nothing runs to
+		// the pane's right edge (a trailing margin is left).
+		for i, q := range m.confirmQuestionRows() {
+			if w := lipgloss.Width(q); w > m.contentWidth() {
+				t.Errorf("wrapped question row %d width %d overflows content width %d", i, w, m.contentWidth())
+			}
+		}
+		lines := strings.Split(strip(m.viewString()), "\n")
+		buttonLine := buttonsRow(lines)
+		if buttonLine != m.height-3 {
+			t.Errorf("buttons must stay pinned on m.height-3 (%d) even when the question wraps, got %d", m.height-3, buttonLine)
+		}
+		// The N question lines occupy m.height-4-N .. m.height-5, with a blank above the
+		// first and the blank/buttons/blank fixed below.
+		firstQ := m.height - 4 - n
+		if firstQ-1 < 0 || !blank(lines[firstQ-1]) {
+			t.Errorf("a blank row must sit ABOVE the first question line (row %d)", firstQ-1)
+		}
+		if !blank(lines[m.height-4]) {
+			t.Errorf("a blank row must sit BETWEEN the question and the buttons (row %d)", m.height-4)
+		}
+		if !blank(lines[m.height-2]) {
+			t.Errorf("a blank row must sit BELOW the buttons (row %d)", m.height-2)
+		}
+		for r := firstQ; r <= m.height-5; r++ {
+			if blank(lines[r]) {
+				t.Errorf("question row %d must carry prose, got blank", r)
+			}
+		}
+	})
 }
 
 // fix(ui): the confirm buttons register on the BUTTONS row (m.height-2), left-aligned
@@ -929,7 +985,7 @@ func TestConfirmYesGeneratesFinalPlaybookReplaceDraft(t *testing.T) {
 
 // Answering "No" (the `n` key) DISMISSES the confirm and does nothing else: the command
 // already succeeded, so there is no follow-up and no generation. The user can still
-// press `c` to generate later (covered by TestCKeyGeneratesAfterSolution).
+// press `c` to bring the confirm back (covered by TestCKeyReshowsConfirmAfterNoDismiss).
 func TestConfirmNoDismisses(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Revised\n", "# Revised fix\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
@@ -1079,6 +1135,7 @@ func TestConfirmWordingByMode(t *testing.T) {
 	mf.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	mf.servedBase = ""
 	mf.inputFifoPath = ""
+	mf.width = 100 // wide enough to keep the prose on a single line (assert the full string)
 	mf.reflow()
 	nmf, _ := mf.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	mf = nmf.(model)
@@ -1095,6 +1152,7 @@ func TestConfirmWordingByMode(t *testing.T) {
 	ma.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	ma.servedBase = "# Playbook — served\n\nstep\n"
 	ma.inputFifoPath = ""
+	ma.width = 100 // wide enough to keep the prose on a single line (assert the full string)
 	ma.reflow()
 	nma, _ := ma.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	ma = nma.(model)
@@ -2347,10 +2405,11 @@ func TestResolveConfirmYesGeneratesNoDismisses(t *testing.T) {
 	}
 }
 
-// `c` generates the playbook for a reached solution — both while the confirm is still
-// showing AND after it was dismissed with No.
-func TestCKeyGeneratesAfterSolution(t *testing.T) {
-	// While the confirm is still showing.
+// `c` RE-SHOWS the solution confirm (it does NOT generate blindly) — an accidental
+// keypress can't trigger generation; the user still confirms via the buttons. Pressing
+// `c` while the confirm is already showing keeps it shown and resets focus to Yes,
+// without invoking the generate path.
+func TestCKeyReshowsConfirmAfterSolution(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\nclean\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	m.inputFifoPath = ""
@@ -2360,24 +2419,29 @@ func TestCKeyGeneratesAfterSolution(t *testing.T) {
 	if !m.confirmResolved || !m.wrappedUp {
 		t.Fatal("setup: confirm/wrappedUp not set")
 	}
+	m.confirmFocus = 1 // move focus to No so we can see `c` reset it
 	nm2, cmd := m.Update(key("c"))
 	m = nm2.(model)
-	if cmd == nil {
-		t.Fatal("c while the confirm shows must trigger generation")
+	if cmd != nil {
+		t.Fatal("c must NOT trigger generation — it re-shows the confirm")
 	}
-	if m.confirmResolved {
-		t.Error("c must clear the confirm")
+	if !m.confirmResolved {
+		t.Error("c must keep the confirm shown")
 	}
-	if !m.finalDraft {
-		t.Error("c must mark a finalDraft")
+	if m.confirmFocus != 0 {
+		t.Errorf("c must reset focus to Yes: confirmFocus=%d", m.confirmFocus)
 	}
-	m = pumpReArm(t, m, cmd)
-	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
-		t.Errorf("c kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
+	if m.finalDraft {
+		t.Error("c must NOT mark a finalDraft (no generation)")
+	}
+	if fe.calls != 0 {
+		t.Errorf("c must NOT invoke the generate path: calls=%d", fe.calls)
 	}
 }
 
-func TestCKeyGeneratesAfterNoDismiss(t *testing.T) {
+// `c` after a No dismiss brings the confirm BACK (re-shows it) rather than generating,
+// so a user who declined can reconsider and confirm via the buttons.
+func TestCKeyReshowsConfirmAfterNoDismiss(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\nclean\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	m.inputFifoPath = ""
@@ -2393,18 +2457,20 @@ func TestCKeyGeneratesAfterNoDismiss(t *testing.T) {
 	if !m.wrappedUp {
 		t.Fatal("setup: wrappedUp must remain set after a No dismiss")
 	}
-	// `c` still generates.
+	// `c` re-shows the confirm instead of generating.
 	nm2, cmd := m.Update(key("c"))
 	m = nm2.(model)
-	if cmd == nil {
-		t.Fatal("c after a No dismiss must still trigger generation")
+	if cmd != nil {
+		t.Fatal("c must NOT trigger generation after a No dismiss — it re-shows the confirm")
 	}
-	if !m.finalDraft {
-		t.Error("c must mark a finalDraft")
+	if !m.confirmResolved {
+		t.Error("c after a No dismiss must re-show the confirm")
 	}
-	m = pumpReArm(t, m, cmd)
-	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
-		t.Errorf("c kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
+	if m.confirmFocus != 0 {
+		t.Errorf("c must reset focus to Yes: confirmFocus=%d", m.confirmFocus)
+	}
+	if m.finalDraft || fe.calls != 0 {
+		t.Errorf("c must NOT generate: finalDraft=%v calls=%d", m.finalDraft, fe.calls)
 	}
 }
 

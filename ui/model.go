@@ -217,7 +217,7 @@ type model struct {
 	// [ Yes ] [ No ] buttons — answerable by mouse-click on the buttons or the `y`/`n`
 	// keys. It replaces the old agent-ask wrap-up: Yes generates the final playbook
 	// (REPLACE draft); No simply dismisses (the command already succeeded — the user can
-	// quit or press `c` to generate later). Set once on a verify-success (gated like the
+	// quit or press `c` to bring the confirm back). Set once on a verify-success (gated like the
 	// old wrap-up); cleared when answered.
 	confirmResolved bool
 
@@ -384,9 +384,13 @@ func (m *model) body() int {
 	// subtract leading blank + top/bottom pads + cached extra rows + subtitle row
 	h := m.height - headerRows - hintRows - 3 - m.cachedRows() - m.subtitleRows()
 	if m.confirmResolved {
-		// The confirm reserves FIVE bottom rows (blank, prompt, blank, buttons, blank),
-		// four more than the single bottom-pad it replaces, so it never overlaps content.
-		h -= 4
+		// The confirm block is questionLines+4 bottom rows (blank, the wrapped question's
+		// N lines, blank, buttons, blank). It REPLACES the single bottom-pad already
+		// counted in the base formula above, so body() reduces by questionLines+3 (= the
+		// block minus that one pad) — for a single-line question this is the prior fixed
+		// 4. This keeps the buttons pinned on m.height-3 and the question always fully fits
+		// without overlapping content.
+		h -= m.confirmQuestionLines() + 3
 	}
 	if h < 1 {
 		h = 1
@@ -978,8 +982,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "n":
 			// Confirm "No": the command already succeeded, so No simply DISMISSES the
-			// confirm — nothing to re-fix. The user can still quit or press `c` to generate
-			// the playbook later. Only meaningful while the confirm row is shown.
+			// confirm — nothing to re-fix. The user can still quit or press `c` to bring the
+			// confirm back. Only meaningful while the confirm row is shown.
 			if m.confirmResolved {
 				if cmd := m.resolveConfirm(false); cmd != nil {
 					return m, cmd
@@ -988,16 +992,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "c":
-			// `c` generates the playbook for the reached solution — the SAME path as
-			// confirm-Yes (clear any showing confirm, then beginFinalPlaybookInProc). It
-			// works WHETHER the confirm is still showing OR was dismissed with No, so a user
-			// who declined (or dismissed) can still generate. Guarded: only after a solution
+			// `c` RE-SHOWS the solution confirm (it does NOT generate blindly) so an
+			// accidental keypress can't trigger generation — the user still confirms via
+			// the buttons. Works whether the confirm was dismissed with No or never shown,
+			// so a user who declined can bring it back. Guarded: only after a solution
 			// (m.wrappedUp) and never while a stream is in flight.
 			if m.wrappedUp && !m.streaming {
-				m.confirmResolved = false
-				if cmd := m.beginFinalPlaybookInProc(); cmd != nil {
-					return m, cmd
-				}
+				m.confirmResolved = true
+				m.confirmFocus = 0
 				m.reflow()
 			}
 			return m, nil
@@ -1164,8 +1166,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// means the fix verified — render the NATIVE in-pager confirm row INSTEAD of the
 		// old agent-ask wrap-up. The ui owns the branch: Yes generates the final-playbook
 		// draft (REPLACE); No dismisses the confirm (the command already succeeded, so
-		// there is nothing to re-fix — the user can quit or press `c` to generate the
-		// playbook later). Gated on m.wrappedUp so it shows
+		// there is nothing to re-fix — the user can quit or press `c` to bring the
+		// confirm back). Gated on m.wrappedUp so it shows
 		// ONCE per resolution — a re-rendered or re-run verify-0 must not re-prompt. A
 		// deliberately stopped verify already returned above; exit 0 is by definition
 		// neither signal-killed (>128) nor 127. Requires in-process re-engagement (the
@@ -1650,11 +1652,12 @@ func (m model) confirmPrompt() string {
 	return confirmPromptFresh
 }
 
-// confirmYesLabel / confirmNoLabel are the two button labels (with padded brackets
-// so they read as clickable controls).
+// confirmYesLabel / confirmNoLabel are the two button labels. No bracket chars —
+// the filled background + Padding(0,2) (confirmButtonLabel) is what reads them as
+// clickable controls, like the ask-tool buttons.
 const (
-	confirmYesLabel = "[ Yes ]"
-	confirmNoLabel  = "[ No ]"
+	confirmYesLabel = "Yes"
+	confirmNoLabel  = "No"
 )
 
 // confirmButtonIndent is the content column of the leftmost (Yes) confirm button on
@@ -1674,16 +1677,41 @@ const (
 // (appendConfirmButtons) registers that same padded width so clicks land on the cell.
 const confirmButtonPad = 2
 
-// confirmRowString builds the styled QUESTION row: the green confirm prompt prose on
-// its own row. The Yes/No buttons render on a SEPARATE row below it
-// (confirmButtonsRowString), so a long prompt never pushes the buttons off the pane
-// edge. Rendered inside the pager pane (NOT a mux float). Returns "" when the confirm
-// state is not active.
+// confirmRowString builds the styled QUESTION block: the green confirm prompt prose
+// SOFT-WRAPPED (lipgloss .Width) to the pager's content inner width (m.contentWidth() —
+// the same usable width the body content uses, pane width minus the left+right margins).
+// A long prompt becomes 1+ visual lines instead of overflowing the right edge; the
+// returned string carries one "\n" per wrap. normalLines applies the SAME 2-col left
+// indent the body uses, and the .Width fit leaves the matching trailing margin, so the
+// wrapped lines line up with the body content and never run to the pane edge. The Yes/No
+// buttons render on a SEPARATE row below it (confirmButtonsRowString). Rendered inside
+// the pager pane (NOT a mux float). Returns "" when the confirm state is not active.
 func (m model) confirmRowString() string {
 	if !m.confirmResolved {
 		return ""
 	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen)).Render(m.confirmPrompt())
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(colGreen)).
+		Width(m.contentWidth()).
+		Render(m.confirmPrompt())
+}
+
+// confirmQuestionRows returns the wrapped confirm question as one styled row string per
+// visual line (split on the "\n" boundaries lipgloss inserted in confirmRowString).
+// normalLines emits each with the body's 2-col left indent. Returns nil when inactive.
+func (m model) confirmQuestionRows() []string {
+	if !m.confirmResolved {
+		return nil
+	}
+	return strings.Split(m.confirmRowString(), "\n")
+}
+
+// confirmQuestionLines is the number of visual rows the wrapped confirm question
+// occupies (the "\n" count + 1; >=1 while active, 0 otherwise). body() reserves
+// confirmQuestionLines()+4 bottom rows for the whole block and normalLines emits this
+// many question rows above the buttons.
+func (m model) confirmQuestionLines() int {
+	return len(m.confirmQuestionRows())
 }
 
 // confirmButtonsRowString builds the styled BUTTONS row: the [ Yes ] [ No ] labels,
@@ -1726,16 +1754,18 @@ func (m model) confirmButtonLabel(label, kind, accent string, focused bool) stri
 }
 
 // confirmButtonsScreenRow returns the absolute screen row the confirm BUTTONS row
-// occupies. The confirm block is FIVE rows above the status bar: blank (m.height-6),
-// prompt (m.height-5), blank (m.height-4), buttons (m.height-3), blank (m.height-2),
-// then the status bar (m.height-1). So the buttons sit on m.height-3. -1 when the
-// confirm is not shown.
+// occupies. The confirm block is questionLines+4 rows above the status bar: a blank, the
+// wrapped question (N lines, m.height-4-N .. m.height-5), a blank (m.height-4), the
+// buttons (m.height-3), a blank (m.height-2), then the status bar (m.height-1). The
+// buttons stay PINNED on m.height-3 regardless of how many lines the question wraps to,
+// so the hit-test below matches the drawn cells. -1 when the confirm is not shown.
 func (m model) confirmButtonsScreenRow() int {
 	if !m.confirmResolved {
 		return -1
 	}
-	// normalLines layout ends with: blank (m.height-6), prompt (m.height-5), blank
-	// (m.height-4), buttons (m.height-3), blank (m.height-2), status (m.height-1).
+	// The block bottom is fixed: blank (m.height-4), buttons (m.height-3), blank
+	// (m.height-2), status (m.height-1). The question's N lines wrap ABOVE the blank at
+	// m.height-4, so the buttons row is always m.height-3.
 	return m.height - 3
 }
 
@@ -2045,14 +2075,17 @@ func (m model) normalLines() []string {
 			out = append(out, pad(""))
 		}
 	}
-	// The confirm (when shown) occupies the FIVE bottom rows directly above the status
-	// bar (spec §A: inline rows in the pane, not a mux float): a blank, the prompt prose,
-	// a blank, the [ Yes ] [ No ] buttons on their own row, then a blank — so the block
-	// reads with breathing room above/below the prompt and buttons. body() reserves these
-	// rows so the confirm never overlaps real content. Otherwise a single bottom-pad row.
+	// The confirm (when shown) occupies the questionLines+4 bottom rows directly above the
+	// status bar (spec §A: inline rows in the pane, not a mux float): a blank, the wrapped
+	// question (N lines, each with the body's 2-col left indent so it stays inside the
+	// pane), a blank, the Yes / No buttons on their own row, then a blank — so the block
+	// reads with breathing room and the buttons stay pinned at m.height-3. body() reserves
+	// these rows so the confirm never overlaps real content. Otherwise a single bottom pad.
 	if m.confirmResolved {
-		out = append(out, pad(""))                               // blank   (m.height-6)
-		out = append(out, pad("  "+m.confirmRowString()))        // prompt  (m.height-5)
+		out = append(out, pad("")) // blank above the question
+		for _, q := range m.confirmQuestionRows() {
+			out = append(out, pad("  "+q)) // wrapped question line(s)
+		}
 		out = append(out, pad(""))                               // blank   (m.height-4)
 		out = append(out, pad("  "+m.confirmButtonsRowString())) // buttons (m.height-3)
 		out = append(out, pad(""))                               // blank   (m.height-2)
@@ -2203,7 +2236,7 @@ func (m *model) announceFollowup(attempt int) {
 // resolveConfirm answers the native verify-success confirm: yes → generate the
 // final-playbook draft (REPLACE); no → just DISMISS the confirm and do nothing (the
 // command already succeeded, so there is nothing to re-fix). After a No the user can
-// still quit or press `c` to generate the playbook later. It clears the confirm state
+// still quit or press `c` to bring the confirm back. It clears the confirm state
 // and returns the trigger cmd (nil for No, or when re-engagement is unwired).
 func (m *model) resolveConfirm(yes bool) tea.Cmd {
 	if !m.confirmResolved {
