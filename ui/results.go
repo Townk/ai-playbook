@@ -1,14 +1,5 @@
 package ui
 
-import (
-	"bufio"
-	"io"
-	"strconv"
-	"strings"
-
-	tea "charm.land/bubbletea/v2"
-)
-
 type resultMsg struct {
 	ID      string
 	Exit    int
@@ -29,29 +20,4 @@ type blockRunState struct {
 	// (it auto-fires), but past the cap auto-firing stops and the button is shown so
 	// the user can keep iterating by hand. See render.go's failed-block button gate.
 	FollowupExhausted bool
-}
-
-// parseResults reads <id>\x1f<exit>\x1f<logpath>\x1e records until EOF, calling
-// send(resultMsg) for each. Runs in main's goroutine; send is Program.Send.
-func parseResults(r io.Reader, send func(tea.Msg)) {
-	sc := bufio.NewScanner(r)
-	sc.Split(func(data []byte, atEOF bool) (int, []byte, error) {
-		for i, b := range data {
-			if b == 0x1e {
-				return i + 1, data[:i], nil
-			}
-		}
-		if atEOF && len(data) > 0 {
-			return len(data), data, nil
-		}
-		return 0, nil, nil
-	})
-	for sc.Scan() {
-		f := strings.SplitN(sc.Text(), "\x1f", 3)
-		if len(f) != 3 {
-			continue
-		}
-		code, _ := strconv.Atoi(f[1])
-		send(resultMsg{ID: f[0], Exit: code, Logpath: f[2]})
-	}
 }

@@ -1,22 +1,10 @@
 package ui
 
 import (
-	"os"
-	"strings"
-	"syscall"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 )
-
-func TestParseResultsEmitsPerRecord(t *testing.T) {
-	in := strings.NewReader("fix\x1f0\x1f/tmp/log1\x1ebad\x1f2\x1f/tmp/log2\x1e")
-	var got []resultMsg
-	parseResults(in, func(m tea.Msg) { got = append(got, m.(resultMsg)) })
-	if len(got) != 2 || got[0].ID != "fix" || got[0].Exit != 0 || got[1].Exit != 2 || got[1].Logpath != "/tmp/log2" {
-		t.Fatalf("parse = %+v", got)
-	}
-}
 
 func TestReviewingStateShownThenClearedByResult(t *testing.T) {
 	m := newModel("T", "```diff {id=d}\n--- a\n+++ b\n```\n")
@@ -44,86 +32,6 @@ func TestUpdateResultMsgSetsBlockState(t *testing.T) {
 	m3, _ := m2.(model).Update(resultMsg{ID: "z", Exit: 1, Logpath: "/l"})
 	if m3.(model).blockStates["z"].Status != "failed" {
 		t.Fatalf("nonzero exit must be failed")
-	}
-}
-
-// TestParseResultsSurvivesWriterReopen verifies that a reader opened O_RDWR
-// (rather than O_RDONLY) survives the broker's per-write open→write→close
-// pattern, receiving ALL records across separate writer open/close cycles.
-//
-// With O_RDONLY the reader would see EOF after the first writer closes, so
-// only the first record would arrive; with O_RDWR the pager itself is always
-// a writer on the pipe so no EOF is generated between broker cycles.
-func TestParseResultsSurvivesWriterReopen(t *testing.T) {
-	dir := t.TempDir()
-	fifo := dir + "/results"
-	if err := syscall.Mkfifo(fifo, 0o600); err != nil {
-		t.Fatalf("mkfifo: %v", err)
-	}
-
-	// Open the fifo O_RDWR — this is the fix we're testing.
-	r, err := os.OpenFile(fifo, os.O_RDWR, 0)
-	if err != nil {
-		t.Fatalf("open rdwr: %v", err)
-	}
-
-	// got receives results from parseResults via send; capacity 4 so send
-	// never blocks (parseResults calls send synchronously inside the scan loop).
-	got := make(chan resultMsg, 4)
-
-	// After exactly 2 records are delivered, the send callback writes a sentinel
-	// record separator to the write side of the fifo — using r itself (which is
-	// opened O_RDWR, so it can write). This wakes up the blocking scanner with
-	// real data, and parseResults processes the empty-looking token and loops
-	// back. The send callback then closes r on the second call, which causes
-	// the next Read in the scanner to return an error and parseResults to return.
-	// We rely on the fact that closing r from within the send callback (called
-	// synchronously by parseResults in the same goroutine) is safe — parseResults
-	// won't call Read again until send returns, so there's no concurrent read.
-	count := 0
-	send := func(m tea.Msg) {
-		got <- m.(resultMsg)
-		count++
-		if count >= 2 {
-			r.Close() // safe: called from within parseResults, before next Scan
-		}
-	}
-
-	// Simulate the broker: two separate open→write→close cycles.
-	go func() {
-		// First record.
-		w1, err := os.OpenFile(fifo, os.O_WRONLY, 0)
-		if err != nil {
-			return
-		}
-		w1.WriteString("a\x1f0\x1f/l1\x1e")
-		w1.Close()
-
-		// Second record — new open/close cycle: this is what kills an O_RDONLY reader.
-		w2, err := os.OpenFile(fifo, os.O_WRONLY, 0)
-		if err != nil {
-			return
-		}
-		w2.WriteString("b\x1f1\x1f/l2\x1e")
-		w2.Close()
-	}()
-
-	parseResults(r, send)
-	close(got)
-
-	var results []resultMsg
-	for rm := range got {
-		results = append(results, rm)
-	}
-
-	if len(results) != 2 {
-		t.Fatalf("want 2 results, got %d: %+v", len(results), results)
-	}
-	if results[0].ID != "a" || results[0].Exit != 0 {
-		t.Errorf("record 0: want {a 0}, got {%s %d}", results[0].ID, results[0].Exit)
-	}
-	if results[1].ID != "b" || results[1].Exit != 1 {
-		t.Errorf("record 1: want {b 1}, got {%s %d}", results[1].ID, results[1].Exit)
 	}
 }
 

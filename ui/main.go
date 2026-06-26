@@ -183,8 +183,6 @@ func Main() int {
 	fs.StringVar(&titleFlag, "title", "", "explicit pane header title (overrides the H1/front-matter title)")
 	var thinkingLabel string
 	fs.StringVar(&thinkingLabel, "thinking-label", "Working…", "default spinner label")
-	var resultsFifo string
-	fs.StringVar(&resultsFifo, "results-fifo", "", "FIFO of run-result records (consumed in Stage 2b; drained here)")
 	var cachedStr string
 	fs.StringVar(&cachedStr, "cached", "", "ISO-8601 timestamp: when set, show a 'cached' badge pill in the header (cache replay)")
 	var cwd string
@@ -359,19 +357,6 @@ func Main() int {
 		tea.WithOutput(tty),
 		tea.WithColorProfile(colorprofile.TrueColor),
 	)
-	// Start the results reader goroutine after the program is constructed so we
-	// can call prog.Send. The blocking os.Open is fine inside a goroutine — the
-	// UI is unaffected until the broker opens the write end.
-	if resultsFifo != "" {
-		go func() {
-			f, err := os.OpenFile(resultsFifo, os.O_RDWR, 0)
-			if err != nil {
-				return
-			}
-			defer f.Close()
-			parseResults(f, prog.Send)
-		}()
-	}
 	if _, err := prog.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", err)
 		return 1

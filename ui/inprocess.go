@@ -148,10 +148,9 @@ func (m model) orchCmd(b Button) tea.Cmd {
 		switch k {
 		case orchestrator.KindRun, orchestrator.KindApplyDiff, orchestrator.KindUndoDiff:
 			// These return a real driver.Result. Bridge it to the model's resultMsg
-			// via a temp logfile (the same {id, exit, logpath} shape parseResults
-			// produces from the FIFO: stdout then stderr). The model's resultMsg
-			// handler then flips the apply⇄undo toggle / re-gates dependents off
-			// st.Action + res.Exit (set on the click), exactly as in fifo mode.
+			// via a temp logfile holding the {id, exit, logpath} shape (stdout then
+			// stderr). The model's resultMsg handler then flips the apply⇄undo toggle
+			// / re-gates dependents off st.Action + res.Exit (set on the click).
 			logpath := writeRunLog(b.BlockID, res.Out, res.Err)
 			return resultMsg{ID: b.BlockID, Exit: res.Exit, Logpath: logpath}
 		default:
