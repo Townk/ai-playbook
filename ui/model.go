@@ -382,6 +382,11 @@ func (m *model) contentWidth() int {
 func (m *model) body() int {
 	// subtract leading blank + top/bottom pads + cached extra rows + subtitle row
 	h := m.height - headerRows - hintRows - 3 - m.cachedRows() - m.subtitleRows()
+	if m.confirmResolved {
+		// The confirm reserves TWO bottom rows (the question prose + the Yes/No
+		// buttons on their own row), one more than the single bottom-pad it replaces.
+		h--
+	}
 	if h < 1 {
 		h = 1
 	}
@@ -1636,18 +1641,41 @@ const (
 	confirmNoLabel  = "[ No ]"
 )
 
-// confirmRowString builds the styled confirm row: the prompt prose followed by the
-// Yes/No button labels. When flash is set for a button it highlights bright. The
-// row is rendered inside the pager pane (NOT a mux float), like the run/copy button
-// rows. Returns "" when the confirm state is not active.
+// confirmButtonIndent is the content column of the leftmost (Yes) confirm button on
+// the buttons row — the same left edge as block content. confirmButtonGap is the
+// number of spaces drawn between the Yes and No labels. Both are shared by the
+// renderer (confirmButtonsRowString) and the hit-test (appendConfirmButtons) so the
+// registered click columns land exactly on the drawn button cells, independent of the
+// prompt width.
+const (
+	confirmButtonIndent = 0
+	confirmButtonGap    = 2
+)
+
+// confirmRowString builds the styled QUESTION row: the green confirm prompt prose on
+// its own row. The Yes/No buttons render on a SEPARATE row below it
+// (confirmButtonsRowString), so a long prompt never pushes the buttons off the pane
+// edge. Rendered inside the pager pane (NOT a mux float). Returns "" when the confirm
+// state is not active.
 func (m model) confirmRowString() string {
 	if !m.confirmResolved {
 		return ""
 	}
-	prompt := lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen)).Render(m.confirmPrompt())
+	return lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen)).Render(m.confirmPrompt())
+}
+
+// confirmButtonsRowString builds the styled BUTTONS row: the [ Yes ] [ No ] labels,
+// left-aligned at the content's left edge (confirmButtonIndent) with confirmButtonGap
+// spaces between them. The focused button carries the highlight and the other is
+// dimmed; a mouse-click flash wins. The fixed left-aligned positions mirror the
+// click hit-test (appendConfirmButtons). Returns "" when the confirm is not active.
+func (m model) confirmButtonsRowString() string {
+	if !m.confirmResolved {
+		return ""
+	}
 	yes := m.confirmButtonLabel(confirmYesLabel, "confirm-yes", colGreen, m.confirmFocus == 0)
 	no := m.confirmButtonLabel(confirmNoLabel, "confirm-no", colPeach, m.confirmFocus == 1)
-	return prompt + "  " + yes + "  " + no
+	return strings.Repeat(" ", confirmButtonIndent) + yes + strings.Repeat(" ", confirmButtonGap) + no
 }
 
 // confirmButtonLabel renders one confirm button label. A mouse-click flash always
@@ -1668,33 +1696,35 @@ func (m model) confirmButtonLabel(label, kind, accent string, focused bool) stri
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).Render(label)
 }
 
-// confirmRowScreenRow returns the absolute screen row the confirm row occupies: one
-// row above the status bar (the last body+pad region), so it sits at the bottom of
-// the pane regardless of scroll. -1 when the confirm is not shown.
-func (m model) confirmRowScreenRow() int {
+// confirmButtonsScreenRow returns the absolute screen row the confirm BUTTONS row
+// occupies: directly above the status bar (m.height-2), so it sits at the bottom of
+// the pane regardless of scroll. The question prose sits one row above it
+// (m.height-3). -1 when the confirm is not shown.
+func (m model) confirmButtonsScreenRow() int {
 	if !m.confirmResolved {
 		return -1
 	}
-	// normalLines layout ends with: bottom-pad, status bar. The confirm row replaces
-	// the bottom-pad row (m.height-2), directly above the status bar (m.height-1).
+	// normalLines layout ends with: question row (m.height-3), buttons row
+	// (m.height-2), status bar (m.height-1).
 	return m.height - 2
 }
 
-// appendConfirmButtons registers the two Screen-fixed confirm buttons (Yes/No) on
-// the confirm row so a mouse click resolves them. Their columns track the visible
-// width of the prompt prose + gaps, mirroring how block tab buttons compute Col.
+// appendConfirmButtons registers the two Screen-fixed confirm buttons (Yes/No) on the
+// BUTTONS row so a mouse click resolves them. The buttons are left-aligned at the
+// content edge (confirmButtonIndent), No after Yes by confirmButtonGap — the SAME
+// constants the renderer (confirmButtonsRowString) draws with, so the click columns
+// land exactly on the drawn cells regardless of the prompt's length.
 func (m *model) appendConfirmButtons() {
 	if !m.confirmResolved {
 		return
 	}
-	row := m.confirmRowScreenRow()
+	row := m.confirmButtonsScreenRow()
 	if row < 0 {
 		return
 	}
-	// Col is the content column (buttonAt strips the 2-col left margin). The prompt is
-	// followed by 2 spaces, then Yes, 2 spaces, then No.
-	yesCol := lipgloss.Width(m.confirmPrompt()) + 2
-	noCol := yesCol + lipgloss.Width(confirmYesLabel) + 2
+	// Col is the content column (buttonAt strips the 2-col left margin).
+	yesCol := confirmButtonIndent
+	noCol := yesCol + lipgloss.Width(confirmYesLabel) + confirmButtonGap
 	m.buttons = append(m.buttons,
 		Button{Line: row, Col: yesCol, Width: lipgloss.Width(confirmYesLabel), Kind: "confirm-yes", BlockID: "confirm", Screen: true},
 		Button{Line: row, Col: noCol, Width: lipgloss.Width(confirmNoLabel), Kind: "confirm-no", BlockID: "confirm", Screen: true},
@@ -1979,10 +2009,14 @@ func (m model) normalLines() []string {
 			out = append(out, pad(""))
 		}
 	}
-	// The confirm row (when shown) replaces the bottom-pad row, sitting directly
-	// above the status bar (spec §A: an inline row in the pane, not a mux float).
+	// The confirm (when shown) occupies the TWO bottom rows directly above the status
+	// bar (spec §A: inline rows in the pane, not a mux float): the question prose on
+	// m.height-3 and the [ Yes ] [ No ] buttons on their OWN row at m.height-2,
+	// left-aligned at the content edge. body() reserves the extra row so neither
+	// overlaps real content. Otherwise a single bottom-pad row.
 	if m.confirmResolved {
-		out = append(out, pad("  "+m.confirmRowString()))
+		out = append(out, pad("  "+m.confirmRowString()))        // question (m.height-3)
+		out = append(out, pad("  "+m.confirmButtonsRowString())) // buttons  (m.height-2)
 	} else {
 		out = append(out, pad("")) // bottom pad
 	}

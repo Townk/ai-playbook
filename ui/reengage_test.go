@@ -665,6 +665,189 @@ func TestVerifySuccessRendersConfirmRow(t *testing.T) {
 	}
 }
 
+// fix(ui): the confirm renders on TWO rows — the QUESTION prose on its own row and the
+// [ Yes ] [ No ] buttons on a SEPARATE row directly below it. The buttons must NOT
+// share the prompt line (the old single-row layout pushed them off the pane edge).
+func TestConfirmRendersButtonsOnSeparateRow(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\n")
+	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	if !m.confirmResolved {
+		t.Fatal("setup: confirm not set")
+	}
+
+	// confirmRowString is now the QUESTION only — no button labels on it.
+	q := strip(m.confirmRowString())
+	if !strings.Contains(q, "did this solve your problem?") {
+		t.Errorf("question row must carry the prompt prose, got %q", q)
+	}
+	if strings.Contains(q, confirmYesLabel) || strings.Contains(q, confirmNoLabel) {
+		t.Errorf("buttons must NOT be on the question row, got %q", q)
+	}
+	// The buttons live on their own row (both labels there).
+	btns := strip(m.confirmButtonsRowString())
+	if !strings.Contains(btns, confirmYesLabel) || !strings.Contains(btns, confirmNoLabel) {
+		t.Errorf("buttons row must carry both labels, got %q", btns)
+	}
+
+	// In the full rendered view the prompt line and the button line are distinct, and
+	// the buttons sit directly below the question.
+	lines := strings.Split(strip(m.viewString()), "\n")
+	promptLine, buttonLine := -1, -1
+	for i, ln := range lines {
+		if strings.Contains(ln, "did this solve your problem?") {
+			promptLine = i
+		}
+		if strings.Contains(ln, confirmYesLabel) && strings.Contains(ln, confirmNoLabel) {
+			buttonLine = i
+		}
+	}
+	if promptLine < 0 || buttonLine < 0 {
+		t.Fatalf("could not find both rows: prompt=%d buttons=%d", promptLine, buttonLine)
+	}
+	if promptLine == buttonLine {
+		t.Error("the prompt prose and the buttons must render on SEPARATE rows")
+	}
+	if buttonLine != promptLine+1 {
+		t.Errorf("buttons row must sit directly below the question: prompt=%d buttons=%d", promptLine, buttonLine)
+	}
+	if strings.Contains(lines[buttonLine], "did this solve your problem?") {
+		t.Error("buttons row must not contain the prompt prose")
+	}
+}
+
+// fix(ui): the confirm buttons register on the BUTTONS row (m.height-2), left-aligned
+// at the content edge — Yes at the left, No after it by the shared gap. The drawn
+// label positions (content col 0 → screen col 2 under the 2-col margin) must match
+// the registered click cells.
+func TestAppendConfirmButtonsLeftAligned(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\n")
+	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+
+	var yes, no Button
+	var fy, fn bool
+	for _, b := range m.buttons {
+		switch b.Kind {
+		case "confirm-yes":
+			yes, fy = b, true
+		case "confirm-no":
+			no, fn = b, true
+		}
+	}
+	if !fy || !fn {
+		t.Fatal("confirm buttons not registered")
+	}
+	wantRow := m.height - 2
+	if yes.Line != wantRow || no.Line != wantRow {
+		t.Errorf("buttons must be on the buttons row %d: yes.Line=%d no.Line=%d", wantRow, yes.Line, no.Line)
+	}
+	if yes.Col != confirmButtonIndent {
+		t.Errorf("Yes must be left-aligned at content edge %d, got %d", confirmButtonIndent, yes.Col)
+	}
+	wantNoCol := confirmButtonIndent + len(confirmYesLabel) + confirmButtonGap
+	if no.Col != wantNoCol {
+		t.Errorf("No col must follow Yes by the shared gap: got %d want %d", no.Col, wantNoCol)
+	}
+	// A click at each button's drawn cell (content col + 2-col margin) round-trips
+	// through buttonAt back to the same button.
+	if got, ok := buttonAt(m.buttons, yes.Col+2, yes.Line, m.yOff, m.bodyTop()); !ok || got.Kind != "confirm-yes" {
+		t.Fatalf("buttonAt at the Yes cell must hit Yes: ok=%v kind=%q", ok, got.Kind)
+	}
+	if got, ok := buttonAt(m.buttons, no.Col+2, no.Line, m.yOff, m.bodyTop()); !ok || got.Kind != "confirm-no" {
+		t.Fatalf("buttonAt at the No cell must hit No: ok=%v kind=%q", ok, got.Kind)
+	}
+}
+
+// fix(ui): the button columns are INDEPENDENT of the prompt width. The old layout put
+// Yes at width(prompt)+2 (and No further right), so a long prompt pushed the buttons
+// toward / past the pane edge — unreachable. The new left-aligned layout keeps both
+// buttons at the content edge, well to the LEFT of the old width(prompt)+2 position,
+// regardless of the prompt mode (fresh / amend).
+func TestConfirmButtonColsIndependentOfPromptWidth(t *testing.T) {
+	colsFor := func(servedBase string) (yesCol, noCol, promptW int) {
+		m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\n")
+		m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
+		m.inputFifoPath = ""
+		m.servedBase = servedBase
+		m.reflow()
+		nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+		m = nm.(model)
+		promptW = len(strip(m.confirmRowString()))
+		for _, b := range m.buttons {
+			if b.Kind == "confirm-yes" {
+				yesCol = b.Col
+			}
+			if b.Kind == "confirm-no" {
+				noCol = b.Col
+			}
+		}
+		return
+	}
+	fy, fn, fw := colsFor("")                    // fresh prompt
+	ay, an, aw := colsFor("# served playbook\n") // amend prompt
+	wantNoCol := confirmButtonIndent + len(confirmYesLabel) + confirmButtonGap
+	for _, c := range []struct {
+		name             string
+		yes, no, promptW int
+	}{{"fresh", fy, fn, fw}, {"amend", ay, an, aw}} {
+		if c.yes != confirmButtonIndent {
+			t.Errorf("%s: Yes must stay at the left edge %d, got %d", c.name, confirmButtonIndent, c.yes)
+		}
+		if c.no != wantNoCol {
+			t.Errorf("%s: No col must be the shared-constant value %d, got %d", c.name, wantNoCol, c.no)
+		}
+		// The OLD layout would have put Yes at promptW+2 / No further right; the new
+		// columns sit well to the left of that, so the prompt width can't push them off.
+		if c.no >= c.promptW {
+			t.Errorf("%s: No col %d must be left of the old width(prompt)+2 position (promptW=%d)", c.name, c.no, c.promptW)
+		}
+	}
+	// Independence: the columns are identical across the two prompt modes.
+	if fy != ay || fn != an {
+		t.Errorf("button cols must not change with the prompt: fresh=(%d,%d) amend=(%d,%d)", fy, fn, ay, an)
+	}
+}
+
+// fix(ui): a mouse click at the drawn No button cell resolves "No" (the re-author
+// path). Yes-by-click is covered by TestConfirmResolvesByClick; this covers No and the
+// drawn-cell round-trip that was previously unreachable.
+func TestConfirmClickNoResolves(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
+	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	if !m.confirmResolved {
+		t.Fatal("setup: confirm not set")
+	}
+	var no Button
+	var found bool
+	for _, b := range m.buttons {
+		if b.Kind == "confirm-no" {
+			no, found = b, true
+		}
+	}
+	if !found {
+		t.Fatal("confirm-no button not registered")
+	}
+	nm2, cmd := m.Update(tea.MouseClickMsg{X: no.Col + 2, Y: no.Line, Button: tea.MouseLeft})
+	m = nm2.(model)
+	if cmd == nil {
+		t.Fatal("clicking No must trigger the re-author (follow-up) path")
+	}
+	if m.confirmResolved {
+		t.Error("clicking No must clear the confirm state")
+	}
+}
+
 // Stage 2 (spec §A): answering "Yes" (the `y` key) generates the FINAL-PLAYBOOK in
 // REPLACE mode as a DRAFT — the producer is called with KindReengageFinalPlaybook,
 // the rendered content is reset, thinking starts, and finalDraft is set / committed
@@ -2056,22 +2239,23 @@ func TestConfirmFocusHighlightInRender(t *testing.T) {
 	m = nm.(model)
 
 	// Default focus Yes: the Yes label must carry a background highlight (the focus
-	// ring), distinct from the No label. We compare the raw (un-stripped) ANSI.
-	rowYes := m.confirmRowString()
+	// ring), distinct from the No label. We compare the raw (un-stripped) ANSI of the
+	// BUTTONS row (the buttons live on their own row now, not the prompt row).
+	rowYes := m.confirmButtonsRowString()
 	yesFocused := m.confirmButtonLabel(confirmYesLabel, "confirm-yes", colGreen, true)
 	if !strings.Contains(rowYes, yesFocused) {
-		t.Errorf("with Yes focused, the row must contain the highlighted Yes label")
+		t.Errorf("with Yes focused, the buttons row must contain the highlighted Yes label")
 	}
 	// Move focus to No; now No carries the highlight and Yes is dimmed.
 	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	m = nm.(model)
-	rowNo := m.confirmRowString()
+	rowNo := m.confirmButtonsRowString()
 	noFocused := m.confirmButtonLabel(confirmNoLabel, "confirm-no", colPeach, true)
 	if !strings.Contains(rowNo, noFocused) {
-		t.Errorf("with No focused, the row must contain the highlighted No label")
+		t.Errorf("with No focused, the buttons row must contain the highlighted No label")
 	}
 	if rowYes == rowNo {
-		t.Error("moving focus must change the rendered confirm row (highlight moved)")
+		t.Error("moving focus must change the rendered buttons row (highlight moved)")
 	}
 }
 
