@@ -96,6 +96,13 @@ func FinalPlaybookPrompt(req capture.Request, base, context string) string {
 	b.WriteString("EXACTLY, the runner keys success detection on `{id=verify}`. Earlier runnable\n")
 	b.WriteString("blocks get `{id=fix}` or unique short ids. Untagged blocks get auto-named ids\n")
 	b.WriteString("and silently break that, so always include the {id=...} tag.\n\n")
+	b.WriteString("OUTPUT THE COMPLETE PLAYBOOK as your ENTIRE response — the full document,\n")
+	b.WriteString("starting with the `# Playbook — <task>` title. NEVER refer to a playbook\n")
+	b.WriteString("\"above\", \"already shown\", or \"in the context\", and never merely acknowledge or\n")
+	b.WriteString("summarize one: REPRODUCE the whole document here (every line of prose and every\n")
+	b.WriteString("runnable block), even if the material above already looks like a playbook. Your\n")
+	b.WriteString("response IS the saved playbook file and must stand entirely on its own; a reply\n")
+	b.WriteString("that points at an existing playbook instead of reproducing it is a failure.\n\n")
 	b.WriteString("Be concise: spend your words on the steps, keep the prose tight.\n")
 	return b.String()
 }
