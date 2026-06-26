@@ -68,6 +68,31 @@ func (m model) activityWaitCmd() tea.Cmd {
 	}
 }
 
+// orchReadyMsg delivers the background-opened orchestrator into the model on the
+// async-startup path (the OrchReady read off readyCh). The handler installs the
+// orchestrator (and asker), clears driverPending — re-enabling the shell-action
+// buttons — and reflows. A nil Orch (the background open failed) still clears
+// driverPending so the UI degrades to "no shell" (buttons stay disabled) rather
+// than hanging.
+type orchReadyMsg struct{ OrchReady }
+
+// orchReadyWaitCmd blocks (inside the tea.Cmd goroutine, off the event loop) on the
+// single OrchReady delivered by the async-startup path and reports it as an
+// orchReadyMsg. It returns nil when no ready-channel is wired (the sync path), so the
+// subscription simply never starts. A closed channel yields a zero OrchReady (nil
+// Orch), which the handler treats as a failed/abandoned open — driverPending clears,
+// buttons stay disabled, no hang.
+func (m model) orchReadyWaitCmd() tea.Cmd {
+	ch := m.readyCh
+	if ch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		r := <-ch // zero value (nil Orch) on a closed channel
+		return orchReadyMsg{OrchReady: r}
+	}
+}
+
 // kindOf maps a UI button kind string to the orchestrator's typed Kind. The
 // second result is false for kinds that have no orchestrator action (e.g.
 // "toggle", which is pager-local and never reaches emitAction in in-process use).

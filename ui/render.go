@@ -83,6 +83,11 @@ type renderer struct {
 	blocks   []Block
 	states   map[string]blockRunState
 	flashKey string // non-empty while a button is briefly highlighted; "<blockID>:<kind>"
+	// shellDisabled dims the shell-action button glyphs (run/play/stop/diff/apply/undo)
+	// to the muted overlay color during the async-startup window (model.driverPending),
+	// when the background shell isn't open yet. Copy is never dimmed. The buttons keep
+	// their positions/width (only the color changes), so nothing jumps when they enable.
+	shellDisabled bool
 }
 
 // Render parses markdown and returns tagged, laid-out lines, a button
@@ -91,14 +96,22 @@ type renderer struct {
 // is the identity of the button currently being flash-highlighted
 // ("<blockID>:<kind>"); pass "" when no flash is active. Callers that don't
 // need blocks can discard the third value with _.
-func Render(md string, width int, states map[string]blockRunState, flashKey string) ([]Line, []Button, []Block) {
+// The optional shellDisabled argument (used by model.reflow on the async-startup
+// path) dims the shell-action button glyphs to the muted overlay color while the
+// background shell is still opening; existing 4-arg callers (tests, the static
+// block-count path) leave it false.
+func Render(md string, width int, states map[string]blockRunState, flashKey string, shellDisabled ...bool) ([]Line, []Button, []Block) {
 	if width < 1 {
 		width = 1
+	}
+	disabled := false
+	for _, d := range shellDisabled {
+		disabled = disabled || d
 	}
 	src := []byte(normalizeFences(md))
 	gm := goldmark.New(goldmark.WithExtensions(extension.GFM))
 	doc := gm.Parser().Parse(text.NewReader(src))
-	r := &renderer{src: src, width: width, states: states, flashKey: flashKey}
+	r := &renderer{src: src, width: width, states: states, flashKey: flashKey, shellDisabled: disabled}
 	r.block(doc, 0)
 	r.blocks = assignIDs(r.blocks)
 	return r.lines, r.buttons, r.blocks
@@ -205,6 +218,12 @@ func openFence(line string) (ch byte, n int, ok bool) {
 // key matches r.flashKey. bg is the base code-block background style used to
 // keep the tab line uniform outside the glyph cell.
 func (r *renderer) buttonGlyph(blockID, kind, glyph, fgColor string, bg lipgloss.Style) string {
+	if r.shellDisabled && isShellActionKind(kind) {
+		// Async startup: this shell-backed button is inert until the orchestrator lands.
+		// Render it in the muted overlay color (the codebase's de-emphasis fg) and skip
+		// the flash pulse. Same glyph/cell, so the position never moves when it enables.
+		return bg.Foreground(lipgloss.Color(colOverlay0)).Render(glyph)
+	}
 	key := blockID + ":" + kind
 	if r.flashKey != "" && r.flashKey == key {
 		// Flash feedback WITHOUT a background. A background applied to the glyph cell

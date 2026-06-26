@@ -96,6 +96,31 @@ var pendingAnswerRegen func() (io.ReadCloser, error)
 // Main. The returned reader streams the fresh prose; the closure also re-caches it.
 func SetAnswerRegen(fn func() (io.ReadCloser, error)) { pendingAnswerRegen = fn }
 
+// OrchReady carries the lazily-opened orchestrator (and its request-input asker)
+// delivered on the pendingReady channel by the async-startup path: main.go opens
+// the shell driver + builds the orchestrator in the BACKGROUND while ui.Main
+// renders the playbook IMMEDIATELY, then sends a single OrchReady once it is live.
+// The Asker is the same AskFunc the `f` keybind uses (the float spawner), or nil.
+// A nil Orch signals the background open FAILED: the UI clears the pending state
+// and stays degraded (shell buttons remain disabled) rather than hanging.
+type OrchReady struct {
+	Orch  *orchestrator.Orchestrator
+	Asker AskFunc
+}
+
+// pendingReady, when non-nil, switches ui.Main onto the ASYNC-orchestrator path:
+// instead of opening the driver synchronously, Main renders the playbook first
+// (shell buttons dimmed + inert via driverPending) and reads the single OrchReady
+// off this channel through a startup tea.Cmd, enabling the buttons once it lands.
+// Set by SetPendingReady; consumed (and cleared) by Main.
+var pendingReady <-chan OrchReady
+
+// SetPendingReady stashes the orchestrator-ready channel for the next ui.Main()
+// invocation (the async-startup path). Consumed (and cleared) by Main. When set,
+// Main does NOT open a driver / build an orch synchronously — it renders first and
+// waits for the orchestrator on the channel. Mirrors SetReengage/SetDriver.
+func SetPendingReady(ch <-chan OrchReady) { pendingReady = ch }
+
 // loadPlaybookSource reads a finalized-playbook file (run-from-file / cached-serve),
 // strips any leading YAML front matter AND any preamble above the first H1 title,
 // and returns a reader over the stripped body, the playbook title (front-matter
@@ -246,12 +271,25 @@ func Main() int {
 	// with a logged note rather than crashing. Done only on the interactive path
 	// (after a real TTY) so render-only invocations never spawn a shell.
 	var orch *orchestrator.Orchestrator
+	// Async-orchestrator path (consume-once): when a ready-channel is stashed, do NOT
+	// open a driver or build an orch synchronously. Render the playbook IMMEDIATELY
+	// with the shell-action buttons disabled (driverPending), and let a startup
+	// tea.Cmd read the background-opened orchestrator off readyCh → orchReadyMsg, which
+	// enables the buttons. Keeps blank-pane startup off the critical path entirely.
+	readyCh := pendingReady
+	pendingReady = nil // consume once
+	driverPending := false
 	// Skip the shell driver entirely for a cached ANSWER (pendingAnswerRegen set): an
 	// answer has no run blocks and its reload is a cheap-model call (ClassifyRequest),
 	// not a shell command. Opening a driver here spawns a shell that sources the user's
 	// full profile — seconds of blank-pane startup — for nothing. (The cached-PLAYBOOK
 	// path reuses the session's already-open driver, so it never pays this.)
-	if fifoPath == "" && inputFifo == "" && pendingAnswerRegen == nil {
+	if readyCh != nil {
+		// ASYNC: the orchestrator is delivered later on readyCh. Leave orch nil and mark
+		// the driver pending; the OTHER pending seams (servedBase/asker/answerRegen/…)
+		// are still consumed below — they don't need the driver.
+		driverPending = true
+	} else if fifoPath == "" && inputFifo == "" && pendingAnswerRegen == nil {
 		if file := fs.Arg(0); file != "" {
 			// Reuse the session's shared driver when stashed (the troubleshoot
 			// cached-replay path), so run blocks execute in the shell the tools
@@ -305,6 +343,8 @@ func Main() int {
 	m.fifoPath = fifoPath
 	m.inputFifoPath = inputFifo
 	m.orch = orch
+	m.driverPending = driverPending
+	m.readyCh = readyCh
 	m.defaultLabel = thinkingLabel
 	m.thinkLabel = thinkingLabel
 	m.isCached = isCached

@@ -195,6 +195,22 @@ type model struct {
 	// --actions-fifo is given.
 	orch *orchestrator.Orchestrator
 
+	// driverPending marks the ASYNC-startup window: the playbook renders IMMEDIATELY
+	// while the shell driver + orchestrator open in the BACKGROUND. While true the
+	// shell-action buttons (run ▶ / run-in-assistant-shell / view-diff / apply / undo /
+	// stop and the cached regenerate pill) render DIMMED and are INERT (their click /
+	// hint / key path is a no-op); the copy-to-clipboard button stays fully enabled and
+	// normally colored throughout. Cleared by orchReadyMsg once the orchestrator lands
+	// (or its background open failed). False on the sync path (orch already built). See
+	// shellActionsReady.
+	driverPending bool
+
+	// readyCh delivers the background-opened orchestrator on the async-startup path
+	// (set by Main from the consume-once SetPendingReady stash). Init subscribes to it
+	// via a tea.Cmd that reads the single OrchReady → orchReadyMsg. nil on the sync
+	// path (the orchestrator was built before the program started).
+	readyCh <-chan OrchReady
+
 	// answerRegen is the cached-ANSWER regenerate seam (set by Main from
 	// SetAnswerRegen). When non-nil, the cached pill's reload re-runs the cheap
 	// classify on the original request, streams the fresh prose back (the returned
@@ -337,6 +353,27 @@ func (m model) emitAction(b Button) tea.Cmd {
 	return nil
 }
 
+// shellActionsReady reports whether the shell-backed buttons may render enabled and
+// dispatch. It is false ONLY during the async-startup window (driverPending), while
+// the background orchestrator is still opening; in that window the shell-action
+// buttons render dimmed and are inert. Once the orchestrator lands (orchReadyMsg)
+// this is true and the buttons render/behave exactly as before. The copy button
+// never consults this — it needs no shell.
+func (m model) shellActionsReady() bool { return !m.driverPending }
+
+// isShellActionKind reports whether a button kind needs the shell driver /
+// orchestrator to act: run (▶), play (run-in-assistant-shell), stop, (view-)diff,
+// apply-diff, undo-diff, and the cached regenerate pill. These are the buttons gated
+// off shellActionsReady on the async-startup path. Copy (clipboard) and pager-local
+// kinds (toggle / confirm / followup) are NOT gated.
+func isShellActionKind(kind string) bool {
+	switch kind {
+	case "run", "play", "stop", "diff", "view-diff", "apply-diff", "undo-diff", "regenerate":
+		return true
+	}
+	return false
+}
+
 func newModel(harness, md string) model {
 	return model{
 		harness:      harness,
@@ -375,6 +412,13 @@ func (m model) Init() tea.Cmd {
 	// without a tools backend. Started even when there's no stream reader so the
 	// feed is live for the whole session.
 	if c := m.activityWaitCmd(); c != nil {
+		cmds = append(cmds, c)
+	}
+	// Async-startup: subscribe to the background-opened orchestrator. The cmd reads the
+	// single OrchReady off readyCh (off the event loop) → orchReadyMsg, which installs
+	// the orchestrator and re-enables the shell buttons. nil readyCh (the sync path)
+	// returns nil, so this is a no-op there.
+	if c := m.orchReadyWaitCmd(); c != nil {
 		cmds = append(cmds, c)
 	}
 	if m.reader == nil {
@@ -432,7 +476,7 @@ func (m *model) body() int {
 }
 
 func (m *model) reflow() {
-	m.lines, m.buttons, m.blocks = Render(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey)
+	m.lines, m.buttons, m.blocks = Render(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey, m.driverPending)
 	m.appendCachedButton()
 	m.appendConfirmButtons()
 	m.clampScroll()
@@ -615,6 +659,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renderScheduled = false
 		m.flushRender()
 		return m, nil
+	case orchReadyMsg:
+		// Async-startup: the background-opened orchestrator landed. Install it (and the
+		// asker, when supplied), clear the pending state, and reflow so the now-enabled
+		// shell buttons re-render normally colored + live. A nil Orch (background open
+		// failed) leaves m.orch nil but still clears driverPending — the buttons stay
+		// disabled (degraded, no shell) rather than hanging.
+		m.orch = msg.Orch
+		if msg.Asker != nil {
+			m.asker = msg.Asker
+		}
+		m.driverPending = false
+		m.reflow()
+		return m, nil
 	case flashTickMsg:
 		m.flashKey = ""
 		m.reflow()
@@ -667,6 +724,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.status = ""
 		if msg.Button == tea.MouseLeft {
 			if b, ok := buttonAt(m.buttons, msg.X, msg.Y, m.yOff, m.bodyTop()); ok {
+				// Async startup: the shell isn't open yet — the shell-action buttons are
+				// dimmed and INERT (no flash, no dispatch). Copy stays live (not gated).
+				if isShellActionKind(b.Kind) && !m.shellActionsReady() {
+					return m, nil
+				}
 				m.flashKey = b.BlockID + ":" + b.Kind
 				if b.Kind == "toggle" {
 					m = m.handleToggle(b.BlockID) // handleToggle already calls reflow
@@ -824,6 +886,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.hintLabels = nil
 			default:
 				if b, ok := m.hintLabels[msg.String()]; ok {
+					// Async startup: shell-action buttons are inert until the orchestrator
+					// lands — close the hint overlay without dispatching. Copy is not gated.
+					if isShellActionKind(b.Kind) && !m.shellActionsReady() {
+						m.hintMode = false
+						m.hintLabels = nil
+						return m, nil
+					}
 					m.flashKey = b.BlockID + ":" + b.Kind
 					m.hintMode = false
 					m.hintLabels = nil
@@ -1529,13 +1598,19 @@ func (m model) cachedBadge() string {
 	if !m.isCached {
 		return ""
 	}
-	capFg, bodyBg, bold := colPeach, colPeach, false
+	capFg, bodyBg, bodyFg, bold := colPeach, colPeach, colBase, false
+	if m.driverPending {
+		// Async startup: the reload is inert until the orchestrator lands — render the
+		// whole pill muted (grey caps + grey body with overlay text) so it reads as
+		// disabled. Same geometry, so it doesn't jump when it enables.
+		capFg, bodyBg, bodyFg = colSurface1, colSurface1, colOverlay0
+	}
 	if m.flashKey == "cached:regenerate" {
-		capFg, bodyBg, bold = colFlashOn, colFlashOn, true
+		capFg, bodyBg, bodyFg, bold = colFlashOn, colFlashOn, colBase, true
 	}
 	capStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(capFg))
 	bodyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(colBase)).
+		Foreground(lipgloss.Color(bodyFg)).
 		Background(lipgloss.Color(bodyBg)).
 		Bold(bold)
 
@@ -2359,6 +2434,12 @@ func (m *model) canReengageInProc() bool {
 func (m model) canRegenerate() bool {
 	if !m.isCached {
 		return false
+	}
+	// Async startup: the orchestrator is still opening. Show the reload pill NOW (it
+	// renders dimmed + inert via driverPending) so it doesn't pop in later — it goes
+	// live once orchReadyMsg installs the orchestrator.
+	if m.driverPending {
+		return true
 	}
 	return m.orch != nil && m.orch.Reengage != nil ||
 		m.answerRegen != nil ||
