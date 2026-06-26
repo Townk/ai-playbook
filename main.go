@@ -677,6 +677,10 @@ func buildMetadataSeam(sess *session) func(doc string) (orchestrator.PlaybookMet
 		cfg, _ := config.Load()
 		meta, err := author.PlaybookMetadata(doc, author.AuthorOptions{Cfg: cfg})
 		if err != nil {
+			// Non-fatal: CommitPlaybook persists a metadata-less front matter (name +
+			// env + provenance) rather than failing the commit. Log so a classifier
+			// outage is visible instead of silently dropping description/tags/category.
+			dbg("playbook metadata classification failed; persisting without model fields: %v", err)
 			return orchestrator.PlaybookMeta{}, err
 		}
 		notes := make(map[string]string, len(meta.ImportantEnvVars))
