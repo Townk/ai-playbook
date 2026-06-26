@@ -173,13 +173,13 @@ func TestBody_NoFrontMatter(t *testing.T) {
 }
 
 func TestDefaultRoot(t *testing.T) {
-	t.Setenv("AI_ASSIST_DATA_DIR", "/custom/root")
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", "/custom/root")
 	if DefaultRoot() != "/custom/root" {
-		t.Fatalf("AI_ASSIST_DATA_DIR not honored: %s", DefaultRoot())
+		t.Fatalf("AI_PLAYBOOK_DATA_DIR not honored: %s", DefaultRoot())
 	}
-	t.Setenv("AI_ASSIST_DATA_DIR", "")
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", "")
 	t.Setenv("XDG_DATA_HOME", "/xdg")
-	if DefaultRoot() != "/xdg/ai-assist" {
+	if DefaultRoot() != "/xdg/ai-playbook" {
 		t.Fatalf("XDG_DATA_HOME not honored: %s", DefaultRoot())
 	}
 }

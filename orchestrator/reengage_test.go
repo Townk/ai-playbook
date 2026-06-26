@@ -41,7 +41,7 @@ func sampleReq() capture.Request {
 // Regenerate returns the fake agent's fresh stream (ModeReplace) and was called
 // with the standard authoring prompt (cache-bypassed re-author).
 func TestRegenerate_StreamsAndMode(t *testing.T) {
-	t.Setenv("AI_ASSIST_DATA_DIR", t.TempDir()) // no KB folded in
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir()) // no KB folded in
 	fa := &fakeAgent{canned: "# Fresh playbook\n"}
 	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
 		Req:   sampleReq(),
@@ -72,7 +72,7 @@ func TestRegenerate_StreamsAndMode(t *testing.T) {
 // keys are present (matching ai-assist-regenerate's re-store).
 func TestRegenerate_ReStoresFreshPlaybook(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("AI_ASSIST_DATA_DIR", root)
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
 	fa := &fakeAgent{canned: "# Regenerated body\n"}
 	c := cache.Open()
 	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
@@ -135,7 +135,7 @@ func TestFollowup_StreamsWithFailedOutput(t *testing.T) {
 // from the `# Playbook — <title>` heading.
 func TestCommitPlaybook_CacheReplaceAndFileSave(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("AI_ASSIST_DATA_DIR", root)
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
 	c := cache.Open()
 	// Seed a stale cached troubleshoot so we can assert the commit REPLACES it.
 	if _, err := c.Store("ctxhash", "reqhash", "playbook", "# stale troubleshoot\n", nil, ""); err != nil {
@@ -244,7 +244,7 @@ func TestCommitPlaybook_StripsPreambleIdempotent(t *testing.T) {
 	commit := func(t *testing.T, body string) (savedPath, root string) {
 		t.Helper()
 		root = t.TempDir()
-		t.Setenv("AI_ASSIST_DATA_DIR", root)
+		t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
 		c := cache.Open()
 		o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
 			Req:         sampleReq(),

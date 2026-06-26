@@ -54,7 +54,7 @@ func TestAuthorEventsFanOut_Integration(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("fake-harness shell script requires a POSIX shell")
 	}
-	t.Setenv("AI_ASSIST_DATA_DIR", t.TempDir()) // deterministic empty KB
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir()) // deterministic empty KB
 
 	dir := t.TempDir()
 	bin := filepath.Join(dir, "fake-claude")

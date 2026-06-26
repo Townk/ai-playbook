@@ -58,7 +58,7 @@ func splitFM(t *testing.T, content string) (parsedFM, string) {
 // for the model-noted one); the body follows.
 func TestCommitPlaybook_AssemblesFrontMatter(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("AI_ASSIST_DATA_DIR", root)
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
 	c := cache.Open()
 
 	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
@@ -231,7 +231,7 @@ func TestCommitPlaybook_RedactsSecretValue(t *testing.T) {
 // check): cache.Body strips ONLY the outer cache FM, leaving playbook-FM + body.
 func TestCommitPlaybook_CacheBodyPreservesInnerFM(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("AI_ASSIST_DATA_DIR", root)
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
 	c := cache.Open()
 	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
 		Req:      sampleReq(),

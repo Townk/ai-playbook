@@ -8,13 +8,12 @@
 //
 //	$root/projects/<project_key>/knowledge.md
 //
-// where project_key = SHA-1 (lowercase hex) of the project-root path string
-// (shell: `print -rn -- "$1" | shasum -a 1`) and $root is the same data dir the
-// cache uses: AI_ASSIST_DATA_DIR, else ${XDG_DATA_HOME:-$HOME/.local/share}/ai-assist.
+// where project_key = SHA-1 (lowercase hex) of the project-root path string and
+// $root is the same data dir the cache uses: AI_PLAYBOOK_DATA_DIR, else
+// ${XDG_DATA_HOME:-$HOME/.local/share}/ai-playbook.
 //
-// Stage 4c-ii lands the WRITE path: Append ports `ai-assist-remember`, appending
-// a distilled "- <fact>" line to the per-project knowledge.md (the wrap-up flow's
-// KB distillation).
+// Append appends a distilled "- <fact>" line to the per-project knowledge.md
+// (the `remember` tool's KB write).
 package kb
 
 import (
@@ -29,11 +28,11 @@ import (
 // file. Empty when the project has no KB file or the file is empty.
 type KnowledgeBase string
 
-// DefaultRoot resolves the data-dir root exactly as the shell ASSIST_DATA_DIR:
-// AI_ASSIST_DATA_DIR, else ${XDG_DATA_HOME:-$HOME/.local/share}/ai-assist. It
-// matches cache.DefaultRoot so the cache and KB live under the same tree.
+// DefaultRoot resolves the data-dir root: AI_PLAYBOOK_DATA_DIR, else
+// ${XDG_DATA_HOME:-$HOME/.local/share}/ai-playbook. It matches cache.DefaultRoot
+// so the cache and KB live under the same tree.
 func DefaultRoot() string {
-	if v := os.Getenv("AI_ASSIST_DATA_DIR"); v != "" {
+	if v := os.Getenv("AI_PLAYBOOK_DATA_DIR"); v != "" {
 		return v
 	}
 	xdg := os.Getenv("XDG_DATA_HOME")
@@ -41,7 +40,7 @@ func DefaultRoot() string {
 		home, _ := os.UserHomeDir()
 		xdg = filepath.Join(home, ".local", "share")
 	}
-	return filepath.Join(xdg, "ai-assist")
+	return filepath.Join(xdg, "ai-playbook")
 }
 
 // projectKey reproduces assist::project_key: the lowercase hex SHA-1 of the

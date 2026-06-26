@@ -7,17 +7,17 @@ import (
 )
 
 func TestDefaultRoot_DataDirOverride(t *testing.T) {
-	t.Setenv("AI_ASSIST_DATA_DIR", "/explicit/data")
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", "/explicit/data")
 	if got := DefaultRoot(); got != "/explicit/data" {
 		t.Fatalf("DefaultRoot = %q, want /explicit/data", got)
 	}
 }
 
 func TestDefaultRoot_XDG(t *testing.T) {
-	t.Setenv("AI_ASSIST_DATA_DIR", "")
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", "")
 	t.Setenv("XDG_DATA_HOME", "/xdg")
-	if got := DefaultRoot(); got != filepath.Join("/xdg", "ai-assist") {
-		t.Fatalf("DefaultRoot = %q, want /xdg/ai-assist", got)
+	if got := DefaultRoot(); got != filepath.Join("/xdg", "ai-playbook") {
+		t.Fatalf("DefaultRoot = %q, want /xdg/ai-playbook", got)
 	}
 }
 
@@ -58,7 +58,7 @@ func TestLoadFrom_ReadsFile(t *testing.T) {
 
 func TestLoad_DefaultRootRoundTrip(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("AI_ASSIST_DATA_DIR", root)
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
 	const project = "/Users/me/widget"
 	p := Path(root, project)
 	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
@@ -117,7 +117,7 @@ func TestAppendTo_EmptyFactIsNoop(t *testing.T) {
 // Append round-trips with Load: an appended fact is read back by the loader.
 func TestAppend_LoadRoundTrip(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("AI_ASSIST_DATA_DIR", root)
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
 	const project = "/Users/me/widget"
 	if err := Append(project, "deploys via fly.io"); err != nil {
 		t.Fatal(err)

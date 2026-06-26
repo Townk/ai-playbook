@@ -87,7 +87,7 @@ func wantActivity(t *testing.T, ch <-chan string, wantDelta string) {
 // the body (Final-authoritative) drives the cache re-store on close.
 func TestRegenerate_EventPath_StreamsActivityAndReStores(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("AI_ASSIST_DATA_DIR", root)
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
 	fe := &fakeEvents{delta: "# Fresh\n", final: "# Fresh regenerated body\n"}
 	c := cache.Open()
 	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
@@ -264,7 +264,7 @@ func TestFinalPlaybook_AmendThreadsBase(t *testing.T) {
 // When Events is nil the methods fall back to the text Agent path unchanged: a nil
 // activity channel and the Agent's canned stream.
 func TestReengage_FallsBackToTextWhenNoEvents(t *testing.T) {
-	t.Setenv("AI_ASSIST_DATA_DIR", t.TempDir())
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir())
 	fa := &fakeAgent{canned: "# Text fallback\n"}
 	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
 		Req:   sampleReq(),

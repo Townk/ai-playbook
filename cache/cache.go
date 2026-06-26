@@ -8,10 +8,10 @@
 //	$root/cache/<context_hash>/<request_hash>.md            — entry (YAML front matter + body)
 //	$root/cache/<context_hash>/<request_hash>.request.json  — sidecar (original request.json)
 //
-// The store root mirrors the shell:
+// The store root:
 //
-//	AI_ASSIST_DATA_DIR                                   (highest priority)
-//	${XDG_DATA_HOME:-$HOME/.local/share}/ai-assist       (default)
+//	AI_PLAYBOOK_DATA_DIR                                  (highest priority)
+//	${XDG_DATA_HOME:-$HOME/.local/share}/ai-playbook      (default)
 package cache
 
 import (
@@ -41,15 +41,15 @@ type Cache struct {
 	Root string
 }
 
-// Open returns a Cache rooted at the same directory the shell uses:
-// AI_ASSIST_DATA_DIR, else ${XDG_DATA_HOME:-$HOME/.local/share}/ai-assist.
+// Open returns a Cache rooted at the data dir:
+// AI_PLAYBOOK_DATA_DIR, else ${XDG_DATA_HOME:-$HOME/.local/share}/ai-playbook.
 func Open() *Cache {
 	return &Cache{Root: DefaultRoot()}
 }
 
-// DefaultRoot resolves the store root exactly as the shell helper does.
+// DefaultRoot resolves the store root.
 func DefaultRoot() string {
-	if v := os.Getenv("AI_ASSIST_DATA_DIR"); v != "" {
+	if v := os.Getenv("AI_PLAYBOOK_DATA_DIR"); v != "" {
 		return v
 	}
 	xdg := os.Getenv("XDG_DATA_HOME")
@@ -57,7 +57,7 @@ func DefaultRoot() string {
 		home, _ := os.UserHomeDir()
 		xdg = filepath.Join(home, ".local", "share")
 	}
-	return filepath.Join(xdg, "ai-assist")
+	return filepath.Join(xdg, "ai-playbook")
 }
 
 // sha256hex returns the lowercase hex sha256 of s.

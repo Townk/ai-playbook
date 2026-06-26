@@ -153,7 +153,7 @@ func writeFakeHarness(t *testing.T) string {
 // (a script emitting canned stream-json), asserting the normalized events arrive
 // and the process is reaped. No real claude is used.
 func TestAuthorEvents_FakeHarness(t *testing.T) {
-	t.Setenv("AI_ASSIST_DATA_DIR", t.TempDir()) // deterministic empty KB
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir()) // deterministic empty KB
 	bin := writeFakeHarness(t)
 
 	cfg := config.Default()
@@ -193,7 +193,7 @@ func TestAuthorEvents_FakeHarness(t *testing.T) {
 // is launched via a caller-built *exec.Cmd, and the resolved bin + owned argv are
 // captured for assertion.
 func TestAuthorEvents_CommandSeam(t *testing.T) {
-	t.Setenv("AI_ASSIST_DATA_DIR", t.TempDir())
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir())
 	bin := writeFakeHarness(t)
 
 	cfg := config.Default()

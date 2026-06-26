@@ -83,7 +83,7 @@ func (f *fakeAgent) agent(systemPrompt, userMessage string) (io.ReadCloser, erro
 func TestAuthor_UsesEmbeddedPromptAndAssembledMessage(t *testing.T) {
 	// Point the KB data dir at an empty temp dir so kb.Load (called inside Author)
 	// returns no KB and the system prompt is deterministic for this assertion.
-	t.Setenv("AI_ASSIST_DATA_DIR", t.TempDir())
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir())
 	req := sampleFailure()
 	fa := &fakeAgent{canned: "# Fix your build\n\n```bash {id=fix}\nmake clean\n```\n"}
 
@@ -120,7 +120,7 @@ func TestAuthor_UsesEmbeddedPromptAndAssembledMessage(t *testing.T) {
 // system prompt Author hands the agent (the "## What we already know" section).
 func TestAuthor_FoldsInOnDiskKB(t *testing.T) {
 	root := t.TempDir()
-	t.Setenv("AI_ASSIST_DATA_DIR", root)
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
 	req := sampleFailure()
 	const facts = "deploys via fly.io, not docker"
 	p := kb.Path(root, req.ProjectRoot)
