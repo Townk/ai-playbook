@@ -141,8 +141,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		// Refresh the dark-grey thinking line from the launcher's live model-output
-		// tail (<out>.thinking); absent → empty (left blank).
-		m.thinkingLine = msg.thinking
+		// tail (<out>.thinking) WHEN present; keep the current line (the generic
+		// "preparing" text, or the last tail) while the tail is still empty.
+		if msg.thinking != "" {
+			m.thinkingLine = msg.thinking
+		}
 		if msg.done {
 			return m, tea.Quit
 		}
@@ -182,6 +185,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// it while we animate; (b) start the wave tick; (c) poll for the
 			// launcher's <outFile>.done close signal; (d) arm the safety backstop.
 			m.thinking = true
+			// Seed the activity line with a generic "preparing" message until the
+			// launcher's live model-output tail starts arriving.
+			m.thinkingLine = thinkingPrepLine
 			return m, tea.Batch(
 				writeOutCmd(m.outFile, m.fld.value()),
 				waveTick(),
@@ -228,6 +234,10 @@ func (m model) render() string {
 // as the magenta overlap.
 const thinkingWaveRed = "#f38ba8"
 
+// thinkingPrepLine is the generic activity line shown the moment thinking starts,
+// before the launcher's live model-output tail begins arriving.
+const thinkingPrepLine = "Deciding how to handle this…"
+
 // The "Thinking…" prompt "breathes" its foreground between bright white and
 // catppuccin peach, synced to the wave phase (no extra tick).
 //   - thinkingBreatheBright / thinkingBreathePeach: the two LERP endpoints.
@@ -261,17 +271,13 @@ func (m model) renderThinking() string {
 	} else {
 		sections = append(sections, m.fld.view(iW, true))
 	}
-	// hint = "" → no submit/newline/cancel line while thinking.
-	frame := renderFrame(m.theme, m.variant, m.title, sections, "", m.width, m.padding, m.inset)
-	// A LOOK preview: one dark-grey line BELOW the box, separated from the box's
-	// bottom border by ONE blank line. Truncated to the box inner width (no wrap,
-	// ellipsis when too long). Only drawn when set — an empty line adds nothing.
-	if m.thinkingLine != "" {
-		line := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).
-			Render(truncateToWidth(m.thinkingLine, iW))
-		frame = frame + "\n\n" + line
-	}
-	return frame
+	// The model-activity line goes in the HINT slot — inside the MODAL, two lines
+	// above the modal's bottom border (an inset blank above it, the padding blank
+	// below it), i.e. three lines below the input box. Dark grey, truncated to the
+	// modal inner width. (The waves stay full inside the input box.)
+	activity := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).
+		Render(truncateToWidth(m.thinkingLine, iW))
+	return renderFrame(m.theme, m.variant, m.title, sections, activity, m.width, m.padding, m.inset)
 }
 
 // truncateToWidth shortens s to at most w display columns (rune/width-safe, no

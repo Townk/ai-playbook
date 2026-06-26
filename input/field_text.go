@@ -262,7 +262,8 @@ func (f *textField) viewWith(innerW int, st taStyle) string {
 // the text box so the box the user typed into becomes the wave canvas.
 func (f *textField) thinkingView(innerW int, phase float64, blue, red, magenta string) string {
 	// Full interior width: only the rounded border (2 cols) removed — no icon col,
-	// no left padding, no scroll reserve, no trailing padding.
+	// no left padding, no scroll reserve, no trailing padding. The waves fill the
+	// whole interior (the model-activity line lives in the MODAL frame, not here).
 	cols := innerW - boxBorder
 	if cols < 1 {
 		cols = 1

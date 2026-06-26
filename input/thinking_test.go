@@ -66,6 +66,34 @@ func TestSubmitEntersThinkingWhenEnabled(t *testing.T) {
 	}
 }
 
+// TestThinkingPrepLineSeededOnSubmit: entering thinking seeds the generic prep
+// line; an empty-tail doneSignalMsg keeps it, a non-empty tail replaces it.
+func TestThinkingPrepLineSeededOnSubmit(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "req")
+	m := newThinkingModel(t, out)
+
+	res, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	rm := res.(model)
+	if !rm.thinking {
+		t.Fatal("submit with --thinking must enter the thinking state")
+	}
+	if rm.thinkingLine != thinkingPrepLine {
+		t.Fatalf("submit must seed the generic prep line, got %q want %q", rm.thinkingLine, thinkingPrepLine)
+	}
+
+	// An empty-tail done signal must NOT clear the generic line.
+	res, _ = rm.Update(doneSignalMsg{thinking: ""})
+	if got := res.(model).thinkingLine; got != thinkingPrepLine {
+		t.Fatalf("empty tail must keep the prep line, got %q", got)
+	}
+
+	// A non-empty tail replaces it.
+	res, _ = res.(model).Update(doneSignalMsg{thinking: "running git log"})
+	if got := res.(model).thinkingLine; got != "running git log" {
+		t.Fatalf("non-empty tail must replace the prep line, got %q", got)
+	}
+}
+
 // TestSubmitQuitsWithoutThinking: the non-thinking path is unchanged — submit
 // quits and does not enter the thinking state.
 func TestSubmitQuitsWithoutThinking(t *testing.T) {
@@ -129,30 +157,33 @@ func TestThinkingRender(t *testing.T) {
 	}
 }
 
-// TestThinkingViewDims: thinkingView produces the box with a WaveFrame interior —
-// rounded border present, and exactly taHeight wave rows.
+// TestThinkingViewDims: thinkingView produces the box with a WaveFrame filling the
+// FULL interior — all taHeight rows are Braille wave rows (no activity line inside
+// the box; that lives in the modal hint slot). Rounded border present, full interior
+// width, no prompt-icon column.
 func TestThinkingViewDims(t *testing.T) {
 	m := newThinkingModel(t, "")
 	tf := m.fld.(*textField)
 	out := tf.thinkingView(m.innerW(), 0.3, m.theme.Border, thinkingWaveRed, m.theme.Accent)
 	plain := strip(out)
 	lines := strings.Split(plain, "\n")
-	// border top + taHeight body rows + border bottom.
+	// border top + taHeight wave rows + border bottom.
 	if want := tf.taHeight + boxBorder; len(lines) != want {
 		t.Fatalf("thinkingView has %d lines, want %d (taHeight=%d + border)", len(lines), want, tf.taHeight)
 	}
 	if !strings.HasPrefix(lines[0], "╭") || !strings.HasPrefix(lines[len(lines)-1], "╰") {
 		t.Fatal("thinkingView must keep the rounded border")
 	}
-	// Count interior rows that carry Braille — should equal taHeight.
+	// Every interior row carries Braille — the wave fills the FULL taHeight (no
+	// activity line is rendered inside the input box).
 	waveRows := 0
 	for _, l := range lines {
 		if hasBraille(l) {
 			waveRows++
 		}
 	}
-	if waveRows != tf.taHeight {
-		t.Fatalf("thinkingView wave rows = %d, want taHeight %d", waveRows, tf.taHeight)
+	if want := tf.taHeight; waveRows != want {
+		t.Fatalf("thinkingView wave rows = %d, want full taHeight %d (waves fill the whole interior)", waveRows, want)
 	}
 	// Full-width: the wave fills the interior border-to-border — each rendered line
 	// is exactly innerW wide (cols == innerW - boxBorder, only the border removed,
@@ -273,14 +304,15 @@ func TestPollPicksUpThinkingLine(t *testing.T) {
 		t.Errorf("thinkingLine = %q, want the polled content adopted", got)
 	}
 
-	// A subsequent tick with the file removed clears the line back to empty.
+	// A subsequent tick with the file removed (empty tail) does NOT clear the line —
+	// the last real tail is retained until a non-empty tail replaces it.
 	if err := os.Remove(out + ThinkingSuffix); err != nil {
 		t.Fatal(err)
 	}
 	msg = pollDoneCmd(out)().(doneSignalMsg)
 	nm, _ = nm.(model).Update(msg)
-	if got := nm.(model).thinkingLine; got != "" {
-		t.Errorf("thinkingLine = %q, want empty once .thinking is gone", got)
+	if got := nm.(model).thinkingLine; got != "weighing command vs answer" {
+		t.Errorf("thinkingLine = %q, want the last tail retained once .thinking is gone (empty tail keeps it)", got)
 	}
 }
 
