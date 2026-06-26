@@ -234,14 +234,17 @@ func (m model) render() string {
 // as the magenta overlap.
 const thinkingWaveRed = "#f38ba8"
 
-// waveStep is the per-frame phase advance for the sine animation. It MUST be an
-// exact 2π/integer so one full cycle (phase advances 2π, when the wave repeats)
-// lands on a WHOLE number of frames — otherwise the cycle overshoots 2π slightly
-// each loop and the animation hitches once per cycle (a near-duplicate frame at the
-// loop point). waveLoopFrames=18 keeps ~the prior speed: the old fixed 0.35 step was
-// 2π/17.95 (the non-integer that caused the constant-rate frame skip).
+// waveStep is the per-frame phase advance for the sine animation. waveLoopFrames is
+// the number of DISTINCT frames in one seamless cycle: the phase advances exactly 2π
+// over that many frames, so frame N is identical to frame 0 (the next cycle's start —
+// a clean loop, NOT a duplicate; the N→0 transition is a normal single step). It MUST
+// be an exact 2π/integer or the cycle overshoots 2π each loop and hitches.
+//
+// Larger N = slower scroll AND the identical-image recurrence comes around less often.
+// At ~30fps (tea.Every 33ms): N=18 ≈ 0.6s/cycle read as a periodic "beat"; N=36 ≈ 1.2s
+// is calm enough that the recurrence stops registering as a pause.
 const (
-	waveLoopFrames = 18
+	waveLoopFrames = 36
 	waveStep       = 2 * math.Pi / waveLoopFrames
 )
 
