@@ -239,6 +239,51 @@ func TestDonePollSignalsOnFile(t *testing.T) {
 	}
 }
 
+// TestPollPicksUpThinkingLine: pollDoneCmd reads <out>.thinking into the carried
+// signal, and a thinking model adopts it into thinkingLine on the tick; an absent
+// file leaves the line empty.
+func TestPollPicksUpThinkingLine(t *testing.T) {
+	saved := donePollInterval
+	donePollInterval = time.Millisecond
+	defer func() { donePollInterval = saved }()
+
+	out := filepath.Join(t.TempDir(), "req")
+
+	// Absent .thinking → empty carried content, and the model's line stays empty.
+	msg := pollDoneCmd(out)().(doneSignalMsg)
+	if msg.thinking != "" {
+		t.Fatalf("absent .thinking must carry empty content, got %q", msg.thinking)
+	}
+	if ThinkingSuffix != ".thinking" {
+		t.Errorf("ThinkingSuffix = %q, want .thinking (the launcher shares this contract)", ThinkingSuffix)
+	}
+
+	// Present .thinking → its trimmed content is carried and adopted into the line.
+	if err := os.WriteFile(out+ThinkingSuffix, []byte("  weighing command vs answer  \n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	msg = pollDoneCmd(out)().(doneSignalMsg)
+	if msg.thinking != "weighing command vs answer" {
+		t.Fatalf("thinking content = %q, want trimmed line", msg.thinking)
+	}
+	m := newThinkingModel(t, out)
+	m.thinking = true
+	nm, _ := m.Update(msg)
+	if got := nm.(model).thinkingLine; got != "weighing command vs answer" {
+		t.Errorf("thinkingLine = %q, want the polled content adopted", got)
+	}
+
+	// A subsequent tick with the file removed clears the line back to empty.
+	if err := os.Remove(out + ThinkingSuffix); err != nil {
+		t.Fatal(err)
+	}
+	msg = pollDoneCmd(out)().(doneSignalMsg)
+	nm, _ = nm.(model).Update(msg)
+	if got := nm.(model).thinkingLine; got != "" {
+		t.Errorf("thinkingLine = %q, want empty once .thinking is gone", got)
+	}
+}
+
 // TestWriteClosedFileWritesMarker: the thinking-exit marker write (writeClosedFile,
 // called on the thinking exit path in runInput before os.Exit) creates
 // <out>.closed so the launcher can detect the float has fully torn down. An empty

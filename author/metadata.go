@@ -122,6 +122,11 @@ func runMetadataOnce(systemPrompt, userMessage string, opts AuthorOptions) (stri
 			haveFinal = true
 		case agentstream.TextDelta:
 			deltas.WriteString(e.Text)
+			// Live tap: surface the accumulating assistant text as it streams (the
+			// classify pass feeds this to the float's thinking line). nil → no-op.
+			if opts.OnText != nil {
+				opts.OnText(deltas.String())
+			}
 		}
 	}
 	if werr := wait(); werr != nil {

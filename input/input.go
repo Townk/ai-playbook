@@ -140,6 +140,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if !m.thinking {
 			return m, nil
 		}
+		// Refresh the dark-grey thinking line from the launcher's live model-output
+		// tail (<out>.thinking); absent → empty (left blank).
+		m.thinkingLine = msg.thinking
 		if msg.done {
 			return m, tea.Quit
 		}
@@ -324,6 +327,14 @@ func writeCancelFile(outFile string) {
 // polls for it and exits when it appears. Exported so the launcher (stage C)
 // shares the contract, mirroring CancelSuffix.
 const DoneSuffix = ".done"
+
+// ThinkingSuffix is appended to an --out path to form the live-output file the
+// launcher rewrites (a single-line, whitespace-collapsed sliding tail of the
+// classify model's streamed text) WHILE the thinking float animates. The float,
+// while polling for <out>.done, also reads this file each tick into its dark-grey
+// thinking line. Exported so the launcher shares the contract, mirroring
+// DoneSuffix / ClosedSuffix. Absent file → the thinking line is left empty.
+const ThinkingSuffix = ".thinking"
 
 // ClosedSuffix is appended to an --out path to form the torn-down marker the
 // THINKING float writes just before it exits (after it has observed <out>.done

@@ -2,7 +2,10 @@ package author
 
 import (
 	"encoding/json"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"unicode/utf8"
@@ -227,6 +230,103 @@ func TestClassifyRequest_UnknownKind(t *testing.T) {
 	}
 	if cls.Kind != KindEscalate {
 		t.Errorf("kind = %q, want escalate (unknown normalized)", cls.Kind)
+	}
+}
+
+// The triage classify uses the BARE quick-model argv: --system-prompt (REPLACE,
+// not --append-system-prompt), --strict-mcp-config, and
+// --exclude-dynamic-system-prompt-sections, with no --mcp-config.
+func TestClassifyRequest_BareArgv(t *testing.T) {
+	const out = `{"kind":"answer","content":"ok"}`
+	_, err, args := runClassify(t, sampleClassifyRequest(), out, "")
+	if err != nil {
+		t.Fatalf("ClassifyRequest: %v", err)
+	}
+	has := func(tok string) bool {
+		for _, a := range args {
+			if a == tok {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("--system-prompt") || has("--append-system-prompt") {
+		t.Errorf("bare classify must use --system-prompt (replace), not --append-system-prompt: %v", args)
+	}
+	if !has("--strict-mcp-config") || !has("--exclude-dynamic-system-prompt-sections") {
+		t.Errorf("bare classify must add --strict-mcp-config + --exclude-dynamic-system-prompt-sections: %v", args)
+	}
+	if has("--mcp-config") {
+		t.Errorf("bare classify must NOT attach --mcp-config: %v", args)
+	}
+}
+
+// fakeStreamHarness writes a fake claude emitting each string in deltas as a
+// stream-json text_delta event (and NO result line → the deltas fallback supplies
+// the body), so the OnText live-tap can be exercised end to end.
+func fakeStreamHarness(t *testing.T, deltas []string) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-harness shell script requires a POSIX shell")
+	}
+	var b strings.Builder
+	b.WriteString("#!/bin/sh\ncat <<'NDJSON'\n")
+	for _, d := range deltas {
+		line, err := json.Marshal(map[string]any{
+			"type": "stream_event",
+			"event": map[string]any{
+				"type":  "content_block_delta",
+				"delta": map[string]any{"type": "text_delta", "text": d},
+			},
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		b.Write(line)
+		b.WriteByte('\n')
+	}
+	b.WriteString("NDJSON\n")
+	dir := t.TempDir()
+	p := filepath.Join(dir, "fake-claude-stream")
+	if err := os.WriteFile(p, []byte(b.String()), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// OnText is called with the ACCUMULATING assistant text as each delta arrives.
+func TestClassifyRequest_OnTextAccumulates(t *testing.T) {
+	deltas := []string{`{"kind":`, `"answer",`, `"content":"ok"}`}
+	bin := fakeStreamHarness(t, deltas)
+	cfg := config.Default()
+	cfg.Agent.Harness = "claude"
+
+	var got []string
+	cls, err := ClassifyRequest(sampleClassifyRequest(), AuthorOptions{
+		Cfg:    cfg,
+		OnText: func(acc string) { got = append(got, acc) },
+		Command: func(b string, args []string) *exec.Cmd {
+			return exec.Command(bin, args...)
+		},
+	})
+	if err != nil {
+		t.Fatalf("ClassifyRequest: %v", err)
+	}
+	if cls.Kind != KindAnswer {
+		t.Errorf("kind = %q, want answer", cls.Kind)
+	}
+	want := []string{
+		`{"kind":`,
+		`{"kind":"answer",`,
+		`{"kind":"answer","content":"ok"}`,
+	}
+	if len(got) != len(want) {
+		t.Fatalf("OnText calls = %d (%q), want %d", len(got), got, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("OnText[%d] = %q, want %q", i, got[i], want[i])
+		}
 	}
 }
 

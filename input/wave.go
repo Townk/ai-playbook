@@ -175,9 +175,14 @@ func parseHexRGB(s string) (r, g, b int, ok bool) {
 // waveTickMsg advances the wave animation one frame.
 type waveTickMsg struct{}
 
-// doneSignalMsg carries the result of one <outFile>.done poll: done=true means
-// the launcher's close signal appeared and the thinking float should exit.
-type doneSignalMsg struct{ done bool }
+// doneSignalMsg carries the result of one poll tick: done=true means the
+// launcher's <outFile>.done close signal appeared and the thinking float should
+// exit; thinking is the current trimmed content of <outFile>.thinking (the live
+// model output tail), empty when that file is absent.
+type doneSignalMsg struct {
+	done     bool
+	thinking string
+}
 
 // thinkingBackstopMsg fires after the max thinking duration — a safety net so a
 // dead launcher (one that never writes .done) can't hang the float forever.
@@ -221,13 +226,29 @@ func doneExists(outFile string) bool {
 	return err == nil
 }
 
-// pollDoneCmd waits one interval then reports whether <outFile>.done exists. The
-// model re-arms it on a "not yet" result, forming the poll loop, and quits on a
-// "done" result. Driveable directly in tests (it blocks one interval, then stats).
+// readThinkingLine returns the trimmed content of <outFile>.thinking (the live
+// model output tail the launcher writes during the classify), or "" when the file
+// is absent/unreadable or outFile is empty.
+func readThinkingLine(outFile string) string {
+	if outFile == "" {
+		return ""
+	}
+	b, err := os.ReadFile(outFile + ThinkingSuffix)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(b))
+}
+
+// pollDoneCmd waits one interval then reports whether <outFile>.done exists AND the
+// current <outFile>.thinking content. The model re-arms it on a "not yet" result,
+// forming the poll loop, quits on a "done" result, and refreshes its thinking line
+// from the carried content each tick. Driveable directly in tests (it blocks one
+// interval, then stats + reads).
 func pollDoneCmd(outFile string) tea.Cmd {
 	return func() tea.Msg {
 		time.Sleep(donePollInterval)
-		return doneSignalMsg{done: doneExists(outFile)}
+		return doneSignalMsg{done: doneExists(outFile), thinking: readThinkingLine(outFile)}
 	}
 }
 

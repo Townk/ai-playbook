@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -501,4 +502,78 @@ func argAfter(ss []string, key string) string {
 func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
+}
+
+// TestThinkingTail: collapses whitespace runs to single spaces and returns the
+// LAST maxRunes runes (a sliding tail), rune-safe.
+func TestThinkingTail(t *testing.T) {
+	if got := thinkingTail("  a\t b\n\nc  ", 200); got != "a b c" {
+		t.Errorf("collapse = %q, want %q", got, "a b c")
+	}
+	// Tail window: the last N runes of the collapsed text.
+	if got := thinkingTail("one two three four", 9); got != "hree four" {
+		t.Errorf("tail = %q, want %q", got, "hree four")
+	}
+	// Rune-safe: a multi-byte tail is cut on a rune boundary, count == maxRunes.
+	got := thinkingTail(strings.Repeat("é ", 300), thinkingTailRunes)
+	if n := len([]rune(got)); n > thinkingTailRunes {
+		t.Errorf("tail rune count = %d, want ≤ %d", n, thinkingTailRunes)
+	}
+	if strings.Contains(got, "�") {
+		t.Errorf("tail corrupted a multi-byte rune: %q", got)
+	}
+}
+
+// TestNewThinkingWriter: the onDelta callback writes a single-line, ≤thinkingTailRunes,
+// whitespace-collapsed tail to <out>.thinking; an empty out path yields a nil callback.
+func TestNewThinkingWriter(t *testing.T) {
+	if newThinkingWriter("") != nil {
+		t.Error("empty out path must yield a nil (no-op) callback")
+	}
+
+	out := filepath.Join(t.TempDir(), "req")
+	// Shrink the throttle so the second call writes promptly in the test.
+	saved := thinkingWriteEvery
+	thinkingWriteEvery = 0
+	defer func() { thinkingWriteEvery = saved }()
+
+	w := newThinkingWriter(out)
+	w("step one\nstep two   step three")
+	b, err := os.ReadFile(out + input.ThinkingSuffix)
+	if err != nil {
+		t.Fatalf("thinking file not written: %v", err)
+	}
+	if got := string(b); got != "step one step two step three" {
+		t.Errorf("thinking line = %q, want collapsed single line", got)
+	}
+	if strings.ContainsAny(string(b), "\n\t") {
+		t.Errorf("thinking line must be single-line: %q", b)
+	}
+
+	// A long accumulation is tailed to ≤ thinkingTailRunes.
+	w(strings.Repeat("x", 1000))
+	b, _ = os.ReadFile(out + input.ThinkingSuffix)
+	if n := len([]rune(string(b))); n > thinkingTailRunes {
+		t.Errorf("written tail = %d runes, want ≤ %d", n, thinkingTailRunes)
+	}
+}
+
+// TestNewThinkingWriter_Throttle: with a wide throttle window, only the FIRST call
+// writes; a rapid second call is skipped (the file keeps the first content).
+func TestNewThinkingWriter_Throttle(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "req")
+	saved := thinkingWriteEvery
+	thinkingWriteEvery = time.Hour // effectively never re-write within the test
+	defer func() { thinkingWriteEvery = saved }()
+
+	w := newThinkingWriter(out)
+	w("first")
+	w("second") // throttled out
+	b, err := os.ReadFile(out + input.ThinkingSuffix)
+	if err != nil {
+		t.Fatalf("first write missing: %v", err)
+	}
+	if got := string(b); got != "first" {
+		t.Errorf("throttled content = %q, want the first write %q", got, "first")
+	}
 }

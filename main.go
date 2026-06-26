@@ -277,7 +277,7 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 	// CLASSIFY the submitted request on the cheap triage model. Any error routes to
 	// escalate (the safe default — never block the user on a classify failure).
 	cfg, _ := config.Load()
-	cls, cerr := classify(req, author.AuthorOptions{Cfg: cfg})
+	cls, cerr := classify(req, author.AuthorOptions{Cfg: cfg, OnText: newThinkingWriter(out)})
 	if cerr != nil {
 		dbg("launch: classify failed (%v); escalating", cerr)
 		cls = author.Classification{Kind: author.KindEscalate}
@@ -359,6 +359,65 @@ func writeDoneFile(outFile string) {
 		return
 	}
 	_ = os.WriteFile(outFile+input.DoneSuffix, nil, 0o600)
+}
+
+// thinkingTailRunes bounds the sliding-tail window written to <out>.thinking — the
+// float renders ONE line under the box, so only the most recent runes matter.
+const thinkingTailRunes = 200
+
+// thinkingWriteEvery throttles how often the classify stream's onDelta rewrites
+// <out>.thinking, so a chatty token stream doesn't hammer the FS. A package var so
+// tests can adjust it.
+var thinkingWriteEvery = 60 * time.Millisecond
+
+// thinkingTail collapses every whitespace run in s to a single space and returns
+// the LAST maxRunes runes (a sliding tail window), so the float's one-line thinking
+// display shows the most recent model output without growing unbounded. Rune-safe:
+// the cut lands on a rune boundary, never mid-rune.
+func thinkingTail(s string, maxRunes int) string {
+	collapsed := strings.Join(strings.Fields(s), " ")
+	r := []rune(collapsed)
+	if maxRunes >= 0 && len(r) > maxRunes {
+		r = r[len(r)-maxRunes:]
+	}
+	return string(r)
+}
+
+// writeThinkingFile atomically (temp+rename) writes line to <out>.thinking, which
+// the thinking float polls into its dark-grey line. Best-effort: a write error is
+// swallowed (the live line is cosmetic; it must never block the classify).
+func writeThinkingFile(out, line string) {
+	if out == "" {
+		return
+	}
+	path := out + input.ThinkingSuffix
+	tmp := path + ".tmp"
+	if err := os.WriteFile(tmp, []byte(line), 0o600); err != nil {
+		return
+	}
+	if err := os.Rename(tmp, path); err != nil {
+		_ = os.Remove(tmp)
+	}
+}
+
+// newThinkingWriter returns an OnText callback that writes a single-line,
+// whitespace-collapsed sliding tail (≤ thinkingTailRunes) of the accumulated
+// classify model output to <out>.thinking, throttled to at most one write per
+// thinkingWriteEvery (the first call always writes). A no-op on an empty out path
+// (the inline/off-zellij path has no float). Runs while the float is still up.
+func newThinkingWriter(out string) func(string) {
+	if out == "" {
+		return nil
+	}
+	var last time.Time
+	return func(accumulated string) {
+		now := time.Now()
+		if !last.IsZero() && now.Sub(last) < thinkingWriteEvery {
+			return
+		}
+		last = now
+		writeThinkingFile(out, thinkingTail(accumulated, thinkingTailRunes))
+	}
 }
 
 // spawnAnswer renders a SHORT prose answer (the classify "answer" route): write the
