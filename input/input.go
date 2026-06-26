@@ -240,11 +240,13 @@ const thinkingWaveRed = "#f38ba8"
 // a clean loop, NOT a duplicate; the N→0 transition is a normal single step). It MUST
 // be an exact 2π/integer or the cycle overshoots 2π each loop and hitches.
 //
-// Larger N = slower scroll AND the identical-image recurrence comes around less often.
-// At ~30fps (tea.Every 33ms): N=18 ≈ 0.6s/cycle read as a periodic "beat"; N=36 ≈ 1.2s
-// is calm enough that the recurrence stops registering as a pause.
+// N trades off two ways and the sweet spot is at the FAST end: slower (large N) gives
+// the eye time to recognize the recurring image, so the loop reads as a "beat" (N=18 ≈
+// 0.6s and N=36 ≈ 1.2s both did). Faster (small N) flies the recurrence past before the
+// eye can lock onto it. At ~30fps (tea.Every 33ms): N=12 ≈ 0.4s/cycle, ~1.5× the
+// original 2π/17.95 step.
 const (
-	waveLoopFrames = 36
+	waveLoopFrames = 12
 	waveStep       = 2 * math.Pi / waveLoopFrames
 )
 
