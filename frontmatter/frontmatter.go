@@ -121,6 +121,43 @@ func looksLikeSecret(value string) bool {
 	return classes >= 3
 }
 
+// nonPortableEnv is the set of env-var names that are never shareable playbook
+// config: they are machine-, user-, session-, or shell-specific and would leak
+// or mislead when a playbook is read on another team member's machine. BuildEnv
+// SKIPS any name in this set unconditionally — even when it was referenced in
+// the body or flagged in the model's notes. HOME is the motivating case: it must
+// never appear in a shared playbook.
+var nonPortableEnv = map[string]struct{}{
+	"HOME":    {},
+	"USER":    {},
+	"LOGNAME": {},
+	"SHELL":   {},
+	"PWD":     {},
+	"OLDPWD":  {},
+	"TERM":    {},
+	"PATH":    {},
+	"TMPDIR":  {},
+}
+
+// NormalizeHome rewrites a LEADING home-directory path prefix in s to "~" for
+// portability: when s equals home it returns "~"; when s begins with home+"/" it
+// returns "~" followed by the remainder (preserving the separator); otherwise s
+// is returned unchanged. Only a leading path prefix is rewritten — a home string
+// that merely appears mid-string is left intact. An empty home disables
+// normalization (s is returned unchanged).
+func NormalizeHome(s, home string) string {
+	if home == "" {
+		return s
+	}
+	if s == home {
+		return "~"
+	}
+	if strings.HasPrefix(s, home+"/") {
+		return "~" + s[len(home):]
+	}
+	return s
+}
+
 // EnvValue is one entry in the front-matter env map: the (possibly redacted)
 // value and an optional model-supplied rationale. Why is omitted for vars
 // discovered only by the body scan.
@@ -135,7 +172,14 @@ type EnvValue struct {
 // ground-truth value; names absent from the env are omitted. Values are passed
 // through Redact, and Why is taken from notes (empty for scan-only vars, where
 // omitempty drops it on marshal).
-func BuildEnv(refNames []string, notes map[string]string, lookup func(string) (string, bool)) map[string]EnvValue {
+//
+// Non-portable/universal vars (nonPortableEnv: HOME/USER/PATH/…) are SKIPPED
+// unconditionally — even when referenced in the body or flagged in notes — since
+// playbooks are shared across team members and those values are never shareable
+// config. Each captured value is then passed through NormalizeHome(value, home)
+// so a leading home-dir path becomes "~/…" for portability; an empty home
+// disables that rewrite (the denylist still applies).
+func BuildEnv(refNames []string, notes map[string]string, lookup func(string) (string, bool), home string) map[string]EnvValue {
 	names := map[string]struct{}{}
 	for _, n := range refNames {
 		names[n] = struct{}{}
@@ -146,11 +190,15 @@ func BuildEnv(refNames []string, notes map[string]string, lookup func(string) (s
 
 	env := make(map[string]EnvValue, len(names))
 	for name := range names {
+		if _, deny := nonPortableEnv[name]; deny {
+			continue // non-portable/universal var: never shareable playbook config
+		}
 		raw, ok := lookup(name)
 		if !ok {
 			continue // a var absent from the env is omitted (§C)
 		}
 		value, _ := Redact(name, raw)
+		value = NormalizeHome(value, home)
 		env[name] = EnvValue{Value: value, Why: notes[name]}
 	}
 	if len(env) == 0 {

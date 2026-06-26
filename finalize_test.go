@@ -39,7 +39,7 @@ func TestFinalizeDoc_BackfillsFreshFrontMatter(t *testing.T) {
 	}
 	lookup := fakeLookup(map[string]string{"ANDROID_HOME": "/Users/me/Library/Android/sdk"})
 
-	full, err := finalizeDoc(raw, metaFn, lookup, "2026-06-25", "/home/me/proj")
+	full, err := finalizeDoc(raw, metaFn, lookup, "2026-06-25", "/home/me/proj", "")
 	if err != nil {
 		t.Fatalf("finalizeDoc returned error: %v", err)
 	}
@@ -100,7 +100,7 @@ func TestFinalizeDoc_MetadataErrorStillAssembles(t *testing.T) {
 	}
 	lookup := fakeLookup(map[string]string{"ANDROID_HOME": "/sdk"})
 
-	full, err := finalizeDoc(raw, metaFn, lookup, "2026-06-25", "/home/me/proj")
+	full, err := finalizeDoc(raw, metaFn, lookup, "2026-06-25", "/home/me/proj", "")
 	if err == nil {
 		t.Fatal("expected the metadata error to be surfaced")
 	}
@@ -128,7 +128,7 @@ func TestFinalizeDoc_NoHeading(t *testing.T) {
 	raw := "just a transcript, no heading here.\n"
 	metaFn := func(string) (author.Metadata, error) { return author.Metadata{}, nil }
 
-	full, err := finalizeDoc(raw, metaFn, fakeLookup(nil), "2026-06-25", "/home/me/proj")
+	full, err := finalizeDoc(raw, metaFn, fakeLookup(nil), "2026-06-25", "/home/me/proj", "")
 	if err != nil {
 		t.Fatalf("finalizeDoc returned error: %v", err)
 	}

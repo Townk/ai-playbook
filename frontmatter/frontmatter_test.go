@@ -79,7 +79,7 @@ func TestBuildEnv(t *testing.T) {
 		"GITHUB_TOKEN": "auth token the publish step uses",
 	}
 
-	got := BuildEnv(refs, notes, lookup)
+	got := BuildEnv(refs, notes, lookup, "")
 
 	want := map[string]EnvValue{
 		"ANDROID_HOME": {Value: "/Users/thiago/Library/Android/sdk", Why: "SDK location the Gradle build resolves against"},
@@ -95,7 +95,7 @@ func TestBuildEnv(t *testing.T) {
 func TestBuildEnv_ScanOnlyHasNoWhy(t *testing.T) {
 	env := map[string]string{"ANDROID_HOME": "/sdk"}
 	lookup := func(n string) (string, bool) { v, ok := env[n]; return v, ok }
-	got := BuildEnv([]string{"ANDROID_HOME"}, nil, lookup)
+	got := BuildEnv([]string{"ANDROID_HOME"}, nil, lookup, "")
 	if got["ANDROID_HOME"].Why != "" {
 		t.Fatalf("scan-only var should have empty Why, got %q", got["ANDROID_HOME"].Why)
 	}
@@ -103,8 +103,95 @@ func TestBuildEnv_ScanOnlyHasNoWhy(t *testing.T) {
 
 func TestBuildEnv_EmptyIsNil(t *testing.T) {
 	lookup := func(string) (string, bool) { return "", false }
-	if got := BuildEnv([]string{"NOPE"}, nil, lookup); got != nil {
+	if got := BuildEnv([]string{"NOPE"}, nil, lookup, ""); got != nil {
 		t.Fatalf("BuildEnv with no resolvable vars = %v, want nil", got)
+	}
+}
+
+// TestBuildEnv_SkipsNonPortable verifies the denylist: referenced/noted
+// non-portable vars (HOME, PATH) are SKIPPED even when present in the env, while
+// portable vars ($ANDROID_HOME/$JAVA_HOME) are still captured.
+func TestBuildEnv_SkipsNonPortable(t *testing.T) {
+	env := map[string]string{
+		"HOME":         "/Users/thiago",
+		"PATH":         "/usr/bin:/bin",
+		"ANDROID_HOME": "/opt/android",
+		"JAVA_HOME":    "/opt/jdk17",
+	}
+	lookup := func(n string) (string, bool) { v, ok := env[n]; return v, ok }
+
+	// HOME referenced in the body; PATH flagged in notes; both must be dropped.
+	refs := []string{"HOME", "ANDROID_HOME", "JAVA_HOME"}
+	notes := map[string]string{"PATH": "the search path", "JAVA_HOME": "the JDK"}
+
+	got := BuildEnv(refs, notes, lookup, "")
+
+	if _, ok := got["HOME"]; ok {
+		t.Errorf("HOME must be skipped (non-portable), got %+v", got["HOME"])
+	}
+	if _, ok := got["PATH"]; ok {
+		t.Errorf("PATH must be skipped even when flagged in notes, got %+v", got["PATH"])
+	}
+	want := map[string]EnvValue{
+		"ANDROID_HOME": {Value: "/opt/android"},
+		"JAVA_HOME":    {Value: "/opt/jdk17", Why: "the JDK"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("BuildEnv = %#v, want %#v", got, want)
+	}
+}
+
+// TestBuildEnv_NormalizesHomeValues verifies captured VALUES get a leading
+// home-dir prefix rewritten to "~"; an exact-home value becomes "~"; a non-home
+// value is untouched; an empty home disables normalization.
+func TestBuildEnv_NormalizesHomeValues(t *testing.T) {
+	const home = "/Users/thiago"
+	env := map[string]string{
+		"JAVA_HOME":    home + "/.local/share/mise/x",
+		"ANDROID_HOME": "/opt/android",
+		"GEM_HOME":     home,
+	}
+	lookup := func(n string) (string, bool) { v, ok := env[n]; return v, ok }
+	refs := []string{"JAVA_HOME", "ANDROID_HOME", "GEM_HOME"}
+
+	got := BuildEnv(refs, nil, lookup, home)
+	want := map[string]EnvValue{
+		"JAVA_HOME":    {Value: "~/.local/share/mise/x"},
+		"ANDROID_HOME": {Value: "/opt/android"},
+		"GEM_HOME":     {Value: "~"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("BuildEnv (home=%q) = %#v, want %#v", home, got, want)
+	}
+
+	// Empty home: values are left exactly as the lookup returns them.
+	gotRaw := BuildEnv(refs, nil, lookup, "")
+	if gotRaw["JAVA_HOME"].Value != home+"/.local/share/mise/x" {
+		t.Errorf("empty home must disable normalization, got %q", gotRaw["JAVA_HOME"].Value)
+	}
+	if gotRaw["GEM_HOME"].Value != home {
+		t.Errorf("empty home must leave exact-home value, got %q", gotRaw["GEM_HOME"].Value)
+	}
+}
+
+// TestNormalizeHome covers equal, prefix, non-match, empty home, and a value that
+// merely CONTAINS home mid-string (which must NOT be rewritten).
+func TestNormalizeHome(t *testing.T) {
+	const home = "/Users/thiago"
+	cases := []struct {
+		s, home, want string
+	}{
+		{home, home, "~"}, // exact equal
+		{home + "/.config/foo", home, "~/.config/foo"},       // leading prefix
+		{"/opt/android", home, "/opt/android"},               // non-match
+		{home + "/.config", "", home + "/.config"},           // empty home: unchanged
+		{"/data" + home + "/x", home, "/data" + home + "/x"}, // home mid-string: unchanged
+		{home + "x/y", home, home + "x/y"},                   // prefix without "/" boundary: unchanged
+	}
+	for _, c := range cases {
+		if got := NormalizeHome(c.s, c.home); got != c.want {
+			t.Errorf("NormalizeHome(%q,%q) = %q, want %q", c.s, c.home, got, c.want)
+		}
 	}
 }
 

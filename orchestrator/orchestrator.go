@@ -470,7 +470,10 @@ func (re *Reengage) buildFrontMatter(body string) frontmatter.FrontMatter {
 	if lookup == nil {
 		lookup = func(string) (string, bool) { return "", false }
 	}
-	env := frontmatter.BuildEnv(frontmatter.ScanEnvRefs(body), meta.EnvNotes, lookup)
+	// home anchors home-dir → "~" normalization for portability (shared playbooks).
+	// An os.UserHomeDir error yields "" → no normalization (still safe).
+	home, _ := os.UserHomeDir()
+	env := frontmatter.BuildEnv(frontmatter.ScanEnvRefs(body), meta.EnvNotes, lookup, home)
 
 	return frontmatter.FrontMatter{
 		Name:        title,
@@ -479,7 +482,7 @@ func (re *Reengage) buildFrontMatter(body string) frontmatter.FrontMatter {
 		Tags:        meta.Tags,
 		Env:         env,
 		Created:     time.Now().Format("2006-01-02"),
-		ProjectRoot: re.Req.ProjectRoot,
+		ProjectRoot: frontmatter.NormalizeHome(re.Req.ProjectRoot, home),
 		Request:     re.Req.UserRequest,
 	}
 }

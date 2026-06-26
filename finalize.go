@@ -36,12 +36,14 @@ import (
 //   - lookup supplies ground-truth env values (driver-backed in the CLI); a miss
 //     omits that var (frontmatter.BuildEnv).
 //
-// created and projectRoot are the programmatic provenance fields.
+// created and projectRoot are the programmatic provenance fields. home anchors
+// home-dir → "~" normalization (BuildEnv values + projectRoot) for portability;
+// an empty home disables it.
 func finalizeDoc(
 	raw string,
 	metaFn func(body string) (author.Metadata, error),
 	lookup func(string) (string, bool),
-	created, projectRoot string,
+	created, projectRoot, home string,
 ) (full string, err error) {
 	// (1) Drop any existing front matter (idempotency) then strip preamble above
 	// the first H1, so we re-assemble from the literate body only.
@@ -74,7 +76,7 @@ func finalizeDoc(
 	if lookup == nil {
 		lookup = func(string) (string, bool) { return "", false }
 	}
-	env := frontmatter.BuildEnv(frontmatter.ScanEnvRefs(body), notes, lookup)
+	env := frontmatter.BuildEnv(frontmatter.ScanEnvRefs(body), notes, lookup, home)
 
 	fm := frontmatter.FrontMatter{
 		Name:        name,
@@ -83,7 +85,7 @@ func finalizeDoc(
 		Tags:        meta.Tags,
 		Env:         env,
 		Created:     created,
-		ProjectRoot: projectRoot,
+		ProjectRoot: frontmatter.NormalizeHome(projectRoot, home),
 	}
 	return frontmatter.Prepend(fm, body), err
 }
@@ -133,8 +135,11 @@ func finalize() int {
 
 	created := time.Now().Format("2006-01-02")
 	projectRoot, _ := os.Getwd()
+	// home anchors home-dir → "~" normalization; an os.UserHomeDir error → "" → no
+	// normalization (still safe).
+	home, _ := os.UserHomeDir()
 
-	full, metaErr := finalizeDoc(string(raw), metaFn, lookup, created, projectRoot)
+	full, metaErr := finalizeDoc(string(raw), metaFn, lookup, created, projectRoot, home)
 	if metaErr != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook finalize: metadata classification failed (%v); writing front matter without model fields\n", metaErr)
 	}
