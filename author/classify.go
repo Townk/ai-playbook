@@ -159,6 +159,10 @@ func ClassifyRequest(req capture.Request, opts AuthorOptions) (Classification, e
 	opts.MCPConfigPath = ""
 	// Run on the triage model, not the authoring model.
 	opts.ModelOverride = triageModel(opts.Cfg)
+	// BARE quick-model call: REPLACE the system prompt (--system-prompt) + strict
+	// MCP + drop the dynamic machine sections, so the triage runs without CLAUDE.md
+	// auto-discovery, auto-memory, global MCP, or cwd/env/git-status sections.
+	opts.Bare = true
 
 	sys := ClassifyPrompt(req)
 

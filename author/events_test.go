@@ -13,7 +13,7 @@ import (
 )
 
 func TestClaudeArgs_OwnedInvocation(t *testing.T) {
-	args := ClaudeArgs("opus", "/tmp/mcp.json", "SYS", "USER")
+	args := ClaudeArgs("opus", "/tmp/mcp.json", "SYS", "USER", false)
 	joined := strings.Join(args, "\x00")
 	for _, want := range []string{
 		"-p",
@@ -28,6 +28,14 @@ func TestClaudeArgs_OwnedInvocation(t *testing.T) {
 			t.Errorf("argv missing %q\n got: %v", want, args)
 		}
 	}
+	// The authoring path uses none of the bare flags.
+	for _, bad := range []string{"--system-prompt", "--strict-mcp-config", "--exclude-dynamic-system-prompt-sections"} {
+		for _, a := range args {
+			if a == bad {
+				t.Errorf("authoring argv must not contain bare flag %q: %v", bad, args)
+			}
+		}
+	}
 	// userMessage is the trailing positional arg.
 	if args[len(args)-1] != "USER" {
 		t.Errorf("last arg = %q, want USER", args[len(args)-1])
@@ -35,13 +43,47 @@ func TestClaudeArgs_OwnedInvocation(t *testing.T) {
 }
 
 func TestClaudeArgs_OmitsEmptyModelAndMCP(t *testing.T) {
-	args := ClaudeArgs("", "", "SYS", "USER")
+	args := ClaudeArgs("", "", "SYS", "USER", false)
 	joined := strings.Join(args, "\x00")
 	if strings.Contains(joined, "--model") {
 		t.Errorf("empty model should be omitted: %v", args)
 	}
 	if strings.Contains(joined, "--mcp-config") {
 		t.Errorf("empty mcp-config should be omitted: %v", args)
+	}
+}
+
+// TestClaudeArgs_Bare: the bare quick-model call REPLACES the system prompt
+// (--system-prompt, NOT --append-system-prompt), adds --strict-mcp-config and
+// --exclude-dynamic-system-prompt-sections, and (since classify passes no
+// mcp-config) carries no --mcp-config.
+func TestClaudeArgs_Bare(t *testing.T) {
+	args := ClaudeArgs("haiku", "", "SYS", "USER", true)
+	has := func(tok string) bool {
+		for _, a := range args {
+			if a == tok {
+				return true
+			}
+		}
+		return false
+	}
+	if !has("--system-prompt") {
+		t.Errorf("bare argv must use --system-prompt (replace): %v", args)
+	}
+	if has("--append-system-prompt") {
+		t.Errorf("bare argv must NOT use --append-system-prompt: %v", args)
+	}
+	if !has("--strict-mcp-config") {
+		t.Errorf("bare argv must include --strict-mcp-config: %v", args)
+	}
+	if !has("--exclude-dynamic-system-prompt-sections") {
+		t.Errorf("bare argv must include --exclude-dynamic-system-prompt-sections: %v", args)
+	}
+	if has("--mcp-config") {
+		t.Errorf("bare classify passes no mcp-config: %v", args)
+	}
+	if args[len(args)-1] != "USER" {
+		t.Errorf("last arg = %q, want USER", args[len(args)-1])
 	}
 }
 

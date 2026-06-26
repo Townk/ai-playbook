@@ -24,7 +24,18 @@ import (
 //	       --append-system-prompt <systemPrompt> <userMessage>
 //
 // model and mcpConfigPath are optional (omitted when empty).
-func ClaudeArgs(model, mcpConfigPath, systemPrompt, userMessage string) []string {
+//
+// When bare is set (the cheap CLASSIFY pass), the call is stripped to a BARE
+// quick-model invocation: it REPLACES the default system prompt with
+// --system-prompt (instead of --append-system-prompt) — which, per `claude
+// --help`, drops Claude's auto-discovery of CLAUDE.md, sync/attribution, and
+// auto-memory — and adds --strict-mcp-config (confine MCP to --mcp-config, which
+// classify never passes → no global MCP) and
+// --exclude-dynamic-system-prompt-sections (drop the cwd/env/git-status/memory
+// machine sections). All three flags are present in the current claude build
+// (verified against `claude --help`). The authoring path (bare=false) keeps
+// --append-system-prompt and Claude's full default context, unchanged.
+func ClaudeArgs(model, mcpConfigPath, systemPrompt, userMessage string, bare bool) []string {
 	args := []string{
 		"-p",
 		"--output-format", "stream-json",
@@ -36,6 +47,15 @@ func ClaudeArgs(model, mcpConfigPath, systemPrompt, userMessage string) []string
 	}
 	if mcpConfigPath != "" {
 		args = append(args, "--mcp-config", mcpConfigPath)
+	}
+	if bare {
+		args = append(args,
+			"--strict-mcp-config",
+			"--exclude-dynamic-system-prompt-sections",
+			"--system-prompt", systemPrompt,
+			userMessage,
+		)
+		return args
 	}
 	args = append(args, "--append-system-prompt", systemPrompt, userMessage)
 	return args
@@ -85,6 +105,17 @@ type AuthorOptions struct {
 	// run on the triage model without disturbing the authoring path (which keeps
 	// using cfg [agent].Model). Empty → the configured Model is used as before.
 	ModelOverride string
+	// Bare, when true, strips the owned claude argv to a BARE quick-model call: it
+	// REPLACES the default system prompt (--system-prompt, not --append-system-prompt)
+	// and adds --strict-mcp-config + --exclude-dynamic-system-prompt-sections, so the
+	// classify pass runs without CLAUDE.md auto-discovery, auto-memory, global MCP, or
+	// the dynamic machine sections. The AUTHORING path leaves this false (full context).
+	Bare bool
+	// OnText, when non-nil, is called with the ACCUMULATED assistant text as each
+	// stream-json TEXT delta arrives (a live tap of the model output, used by the
+	// classify pass to surface its reasoning on the float's thinking line). nil →
+	// no-op; behavior unchanged.
+	OnText func(accumulated string)
 	// Command overrides process construction for tests. It receives the resolved
 	// bin and owned argv and returns the *exec.Cmd to run. nil → exec.Command.
 	Command func(bin string, args []string) *exec.Cmd
@@ -149,7 +180,7 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 		if opts.ModelOverride != "" {
 			model = opts.ModelOverride
 		}
-		args = ClaudeArgs(model, opts.MCPConfigPath, sys, userMessage)
+		args = ClaudeArgs(model, opts.MCPConfigPath, sys, userMessage, opts.Bare)
 		adapterName = "claude"
 		// Enable thinking so the claude adapter's Reasoning mapping has blocks to
 		// emit; off → no env var (no thinking). See claudeThinkingTokens.
