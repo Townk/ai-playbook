@@ -130,7 +130,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case waveTickMsg:
 		// Advance the wave ONLY while thinking; re-tick to keep animating.
 		if m.thinking {
-			m.phase += 0.35
+			m.phase += waveStep
 			return m, waveTick()
 		}
 		return m, nil
@@ -234,6 +234,17 @@ func (m model) render() string {
 // as the magenta overlap.
 const thinkingWaveRed = "#f38ba8"
 
+// waveStep is the per-frame phase advance for the sine animation. It MUST be an
+// exact 2π/integer so one full cycle (phase advances 2π, when the wave repeats)
+// lands on a WHOLE number of frames — otherwise the cycle overshoots 2π slightly
+// each loop and the animation hitches once per cycle (a near-duplicate frame at the
+// loop point). waveLoopFrames=18 keeps ~the prior speed: the old fixed 0.35 step was
+// 2π/17.95 (the non-integer that caused the constant-rate frame skip).
+const (
+	waveLoopFrames = 18
+	waveStep       = 2 * math.Pi / waveLoopFrames
+)
+
 // thinkingPrepLine is the generic activity line shown the moment thinking starts,
 // before the launcher's live model-output tail begins arriving.
 const thinkingPrepLine = "Deciding how to handle this…"
@@ -241,7 +252,7 @@ const thinkingPrepLine = "Deciding how to handle this…"
 // The "Thinking…" prompt "breathes" its foreground between bright white and
 // catppuccin peach, synced to the wave phase (no extra tick).
 //   - thinkingBreatheBright / thinkingBreathePeach: the two LERP endpoints.
-//   - thinkingBreatheK: the pulse rate applied to phase. With phase += 0.35 per
+//   - thinkingBreatheK: the pulse rate applied to phase. With phase += waveStep (≈0.349) per
 //     ~33ms tick (~10.5 phase/sec), the sine period 2π/k ≈ 20.9 phase-units ≈
 //     ~2.0s per full breath (in the spec's 1.5-2.5s band).
 const (
