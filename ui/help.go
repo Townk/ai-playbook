@@ -25,6 +25,7 @@ var helpSections = []helpSection{
 			{"󰳽", "mouse clicks activate buttons"},
 			{"f", "follow-up with agent manually"},
 			{"w", "wrap-up work in the playbook"},
+			{"c", "generate a playbook for the solution"},
 			{"?", "toggle this help"},
 			{"q / 󱊷", "quit/dismiss"},
 		}},

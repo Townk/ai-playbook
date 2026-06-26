@@ -644,7 +644,7 @@ func TestVerifySuccessRendersConfirmRow(t *testing.T) {
 		t.Fatal("verify exit 0 must set confirmResolved")
 	}
 	view := strip(m.viewString())
-	if !strings.Contains(view, "did this solve your problem?") {
+	if !strings.Contains(view, "Generate a playbook for this solution?") {
 		t.Errorf("confirm prompt prose missing from view:\n%s", view)
 	}
 	if !strings.Contains(view, confirmYesLabel) || !strings.Contains(view, confirmNoLabel) {
@@ -681,7 +681,7 @@ func TestConfirmRendersButtonsOnSeparateRow(t *testing.T) {
 
 	// confirmRowString is now the QUESTION only — no button labels on it.
 	q := strip(m.confirmRowString())
-	if !strings.Contains(q, "did this solve your problem?") {
+	if !strings.Contains(q, "Generate a playbook for this solution?") {
 		t.Errorf("question row must carry the prompt prose, got %q", q)
 	}
 	if strings.Contains(q, confirmYesLabel) || strings.Contains(q, confirmNoLabel) {
@@ -693,12 +693,13 @@ func TestConfirmRendersButtonsOnSeparateRow(t *testing.T) {
 		t.Errorf("buttons row must carry both labels, got %q", btns)
 	}
 
-	// In the full rendered view the prompt line and the button line are distinct, and
-	// the buttons sit directly below the question.
+	// The confirm block is FIVE rows above the status bar: blank, prompt, blank,
+	// buttons, blank. Locate the prompt and buttons rows in the full rendered view and
+	// assert the blank spacers around them.
 	lines := strings.Split(strip(m.viewString()), "\n")
 	promptLine, buttonLine := -1, -1
 	for i, ln := range lines {
-		if strings.Contains(ln, "did this solve your problem?") {
+		if strings.Contains(ln, "Generate a playbook for this solution?") {
 			promptLine = i
 		}
 		if strings.Contains(ln, confirmYesLabel) && strings.Contains(ln, confirmNoLabel) {
@@ -711,10 +712,21 @@ func TestConfirmRendersButtonsOnSeparateRow(t *testing.T) {
 	if promptLine == buttonLine {
 		t.Error("the prompt prose and the buttons must render on SEPARATE rows")
 	}
-	if buttonLine != promptLine+1 {
-		t.Errorf("buttons row must sit directly below the question: prompt=%d buttons=%d", promptLine, buttonLine)
+	// Layout: blank(prompt-1), prompt, blank(prompt+1), buttons(prompt+2), blank(prompt+3), status.
+	if buttonLine != promptLine+2 {
+		t.Errorf("buttons row must sit two rows below the question (a blank between): prompt=%d buttons=%d", promptLine, buttonLine)
 	}
-	if strings.Contains(lines[buttonLine], "did this solve your problem?") {
+	blank := func(i string) bool { return strings.TrimSpace(i) == "" }
+	if promptLine-1 < 0 || !blank(lines[promptLine-1]) {
+		t.Errorf("a blank row must sit ABOVE the prompt (row %d)", promptLine-1)
+	}
+	if !blank(lines[promptLine+1]) {
+		t.Errorf("a blank row must sit BETWEEN the prompt and the buttons (row %d)", promptLine+1)
+	}
+	if buttonLine+1 >= len(lines) || !blank(lines[buttonLine+1]) {
+		t.Errorf("a blank row must sit BELOW the buttons (row %d)", buttonLine+1)
+	}
+	if strings.Contains(lines[buttonLine], "Generate a playbook for this solution?") {
 		t.Error("buttons row must not contain the prompt prose")
 	}
 }
@@ -744,16 +756,25 @@ func TestAppendConfirmButtonsLeftAligned(t *testing.T) {
 	if !fy || !fn {
 		t.Fatal("confirm buttons not registered")
 	}
-	wantRow := m.height - 2
+	wantRow := m.height - 3
 	if yes.Line != wantRow || no.Line != wantRow {
 		t.Errorf("buttons must be on the buttons row %d: yes.Line=%d no.Line=%d", wantRow, yes.Line, no.Line)
 	}
 	if yes.Col != confirmButtonIndent {
 		t.Errorf("Yes must be left-aligned at content edge %d, got %d", confirmButtonIndent, yes.Col)
 	}
-	wantNoCol := confirmButtonIndent + len(confirmYesLabel) + confirmButtonGap
+	// Each button cell is the label width plus the Padding(0, confirmButtonPad) on both
+	// sides; No follows the Yes cell plus the shared gap.
+	wantYesW := len(confirmYesLabel) + 2*confirmButtonPad
+	if yes.Width != wantYesW {
+		t.Errorf("Yes cell width must include the padding: got %d want %d", yes.Width, wantYesW)
+	}
+	if no.Width != len(confirmNoLabel)+2*confirmButtonPad {
+		t.Errorf("No cell width must include the padding: got %d want %d", no.Width, len(confirmNoLabel)+2*confirmButtonPad)
+	}
+	wantNoCol := confirmButtonIndent + wantYesW + confirmButtonGap
 	if no.Col != wantNoCol {
-		t.Errorf("No col must follow Yes by the shared gap: got %d want %d", no.Col, wantNoCol)
+		t.Errorf("No col must follow the Yes cell by the shared gap: got %d want %d", no.Col, wantNoCol)
 	}
 	// A click at each button's drawn cell (content col + 2-col margin) round-trips
 	// through buttonAt back to the same button.
@@ -792,7 +813,7 @@ func TestConfirmButtonColsIndependentOfPromptWidth(t *testing.T) {
 	}
 	fy, fn, fw := colsFor("")                    // fresh prompt
 	ay, an, aw := colsFor("# served playbook\n") // amend prompt
-	wantNoCol := confirmButtonIndent + len(confirmYesLabel) + confirmButtonGap
+	wantNoCol := confirmButtonIndent + len(confirmYesLabel) + 2*confirmButtonPad + confirmButtonGap
 	for _, c := range []struct {
 		name             string
 		yes, no, promptW int
@@ -815,9 +836,9 @@ func TestConfirmButtonColsIndependentOfPromptWidth(t *testing.T) {
 	}
 }
 
-// fix(ui): a mouse click at the drawn No button cell resolves "No" (the re-author
-// path). Yes-by-click is covered by TestConfirmResolvesByClick; this covers No and the
-// drawn-cell round-trip that was previously unreachable.
+// fix(ui): a mouse click at the drawn No button cell DISMISSES the confirm (the command
+// already succeeded — nothing to re-fix) and does NOT start a generation. Yes-by-click is
+// covered by TestConfirmResolvesByClick; this covers No and the drawn-cell round-trip.
 func TestConfirmClickNoResolves(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
@@ -838,13 +859,13 @@ func TestConfirmClickNoResolves(t *testing.T) {
 	if !found {
 		t.Fatal("confirm-no button not registered")
 	}
-	nm2, cmd := m.Update(tea.MouseClickMsg{X: no.Col + 2, Y: no.Line, Button: tea.MouseLeft})
+	nm2, _ := m.Update(tea.MouseClickMsg{X: no.Col + 2, Y: no.Line, Button: tea.MouseLeft})
 	m = nm2.(model)
-	if cmd == nil {
-		t.Fatal("clicking No must trigger the re-author (follow-up) path")
-	}
 	if m.confirmResolved {
-		t.Error("clicking No must clear the confirm state")
+		t.Error("clicking No must dismiss (clear) the confirm state")
+	}
+	if m.finalDraft {
+		t.Error("clicking No must NOT start a playbook generation")
 	}
 }
 
@@ -906,9 +927,10 @@ func TestConfirmYesGeneratesFinalPlaybookReplaceDraft(t *testing.T) {
 	}
 }
 
-// Stage 2 (spec §A): answering "No" (the `n` key) falls back to the follow-up loop
-// (another fix), NOT the final-playbook generation.
-func TestConfirmNoTriggersFollowup(t *testing.T) {
+// Answering "No" (the `n` key) DISMISSES the confirm and does nothing else: the command
+// already succeeded, so there is no follow-up and no generation. The user can still
+// press `c` to generate later (covered by TestCKeyGeneratesAfterSolution).
+func TestConfirmNoDismisses(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Revised\n", "# Revised fix\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	m.inputFifoPath = ""
@@ -923,8 +945,8 @@ func TestConfirmNoTriggersFollowup(t *testing.T) {
 
 	nm2, cmd := m.Update(key("n"))
 	m = nm2.(model)
-	if cmd == nil {
-		t.Fatal("confirm No (n) must trigger a follow-up")
+	if cmd != nil {
+		t.Fatal("confirm No (n) must NOT trigger a follow-up or generation (dismiss only)")
 	}
 	if m.confirmResolved {
 		t.Error("answering No must clear the confirm state")
@@ -932,14 +954,15 @@ func TestConfirmNoTriggersFollowup(t *testing.T) {
 	if m.finalDraft {
 		t.Error("No must NOT mark a finalDraft")
 	}
-	// APPEND (follow-up): the existing content is kept.
-	if !strings.Contains(m.md, originalMd) {
-		t.Errorf("No (follow-up) must keep the existing content (APPEND), got %q", m.md)
+	if m.thinking || m.streaming {
+		t.Error("No must not start any stream")
 	}
-
-	m = pumpReArm(t, m, cmd)
-	if fe.gotKind != orchestrator.KindReengageFollowup {
-		t.Errorf("No must select the followup kind, got %v", fe.gotKind)
+	// Content is untouched (no APPEND, no REPLACE).
+	if m.md != originalMd {
+		t.Errorf("No must leave the content untouched, got %q want %q", m.md, originalMd)
+	}
+	if fe.calls != 0 {
+		t.Errorf("No must not invoke the producer, got %d calls", fe.calls)
 	}
 }
 
@@ -1051,7 +1074,7 @@ func TestWGenerateAmendsServedPlaybook(t *testing.T) {
 // Stage 4 (spec §C): the confirm wording differs by mode — amend prose when serving
 // an existing playbook (servedBase set), fresh prose otherwise.
 func TestConfirmWordingByMode(t *testing.T) {
-	// Fresh: no served base → "did this solve your problem?".
+	// Fresh: no served base → "Generate a playbook for this solution?".
 	mf, _ := newReengageEventsModel(t, "# x\n", "# x\n")
 	mf.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	mf.servedBase = ""
@@ -1060,14 +1083,14 @@ func TestConfirmWordingByMode(t *testing.T) {
 	nmf, _ := mf.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	mf = nmf.(model)
 	freshView := strip(mf.viewString())
-	if !strings.Contains(freshView, "did this solve your problem?") {
+	if !strings.Contains(freshView, "Generate a playbook for this solution?") {
 		t.Errorf("fresh confirm must read the fresh prose:\n%s", freshView)
 	}
-	if strings.Contains(freshView, "Update the playbook?") {
+	if strings.Contains(freshView, "Update the playbook with this solution?") {
 		t.Errorf("fresh confirm must NOT show the amend prose:\n%s", freshView)
 	}
 
-	// Amend: served base → "solved? Update the playbook?".
+	// Amend: served base → "Update the playbook with this solution?".
 	ma, _ := newReengageEventsModel(t, "# x\n", "# x\n")
 	ma.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	ma.servedBase = "# Playbook — served\n\nstep\n"
@@ -1076,10 +1099,10 @@ func TestConfirmWordingByMode(t *testing.T) {
 	nma, _ := ma.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	ma = nma.(model)
 	amendView := strip(ma.viewString())
-	if !strings.Contains(amendView, "Update the playbook?") {
+	if !strings.Contains(amendView, "Update the playbook with this solution?") {
 		t.Errorf("amend confirm must read the amend prose:\n%s", amendView)
 	}
-	if strings.Contains(amendView, "did this solve your problem?") {
+	if strings.Contains(amendView, "Generate a playbook for this solution?") {
 		t.Errorf("amend confirm must NOT show the fresh prose:\n%s", amendView)
 	}
 	// The amend confirm's Yes/No buttons must still render + register for clicks.
@@ -2121,8 +2144,8 @@ func TestConfirmFocusArrowsMove(t *testing.T) {
 	}
 }
 
-// Enter selects the FOCUSED button: with focus on No, Enter must resolve "No" (a
-// follow-up), not Yes (the final-playbook generation).
+// Enter selects the FOCUSED button: with focus on No, Enter must DISMISS the confirm
+// (No = dismiss now), not generate or follow up.
 func TestConfirmEnterSelectsFocused(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# delta\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
@@ -2131,13 +2154,13 @@ func TestConfirmEnterSelectsFocused(t *testing.T) {
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
 
-	// Move focus to No, then Enter → a follow-up (not the final playbook).
+	// Move focus to No, then Enter → dismiss (no follow-up, no generation).
 	nm, _ = m.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	m = nm.(model)
 	nm2, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	m = nm2.(model)
-	if cmd == nil {
-		t.Fatal("Enter on focused No must trigger a follow-up")
+	if cmd != nil {
+		t.Fatal("Enter on focused No must dismiss (no follow-up, no generation)")
 	}
 	if m.confirmResolved {
 		t.Error("Enter must clear the confirm state")
@@ -2145,9 +2168,8 @@ func TestConfirmEnterSelectsFocused(t *testing.T) {
 	if m.finalDraft {
 		t.Error("Enter on No must NOT mark a finalDraft (that's the Yes path)")
 	}
-	m = pumpReArm(t, m, cmd)
-	if fe.gotKind != orchestrator.KindReengageFollowup {
-		t.Errorf("Enter-on-No kind = %v, want KindReengageFollowup", fe.gotKind)
+	if fe.calls != 0 {
+		t.Errorf("Enter on No must not invoke the producer, got %d calls", fe.calls)
 	}
 }
 
@@ -2256,6 +2278,161 @@ func TestConfirmFocusHighlightInRender(t *testing.T) {
 	}
 	if rowYes == rowNo {
 		t.Error("moving focus must change the rendered buttons row (highlight moved)")
+	}
+}
+
+// The confirm buttons render as ask-style FILLED controls: the focused one carries a
+// GREEN background, the unfocused one a muted (surface) background, and a click-flash
+// (bright) wins over both. Each button is a padded cell (label width + 2*pad).
+func TestConfirmButtonStyling(t *testing.T) {
+	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
+	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+
+	focused := m.confirmButtonLabel(confirmYesLabel, "confirm-yes", colGreen, true)
+	if !strings.Contains(focused, bgANSI(colGreen)) {
+		t.Errorf("focused confirm button must carry the green background")
+	}
+	unfocused := m.confirmButtonLabel(confirmNoLabel, "confirm-no", colPeach, false)
+	if !strings.Contains(unfocused, bgANSI(colSurface1)) {
+		t.Errorf("unfocused confirm button must carry the muted surface background")
+	}
+	if strings.Contains(unfocused, bgANSI(colGreen)) {
+		t.Errorf("unfocused confirm button must NOT be green")
+	}
+	// Both render as PADDED cells: label width + 2*confirmButtonPad.
+	if w := len([]rune(strip(focused))); w != len(confirmYesLabel)+2*confirmButtonPad {
+		t.Errorf("focused cell width = %d, want %d", w, len(confirmYesLabel)+2*confirmButtonPad)
+	}
+	// A click-flash wins over both the focused and unfocused styling (no fill bg).
+	m.flashKey = "confirm:confirm-yes"
+	flashed := m.confirmButtonLabel(confirmYesLabel, "confirm-yes", colGreen, true)
+	if strings.Contains(flashed, bgANSI(colGreen)) || strings.Contains(flashed, bgANSI(colSurface1)) {
+		t.Errorf("the click-flash must win over the fill backgrounds")
+	}
+}
+
+// resolveConfirm: Yes generates the final-playbook draft; No DISMISSES and returns nil
+// (the command already succeeded, so there is nothing to re-fix).
+func TestResolveConfirmYesGeneratesNoDismisses(t *testing.T) {
+	// No → dismiss, nil, no generation.
+	mn, fn := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
+	mn.md = "# Troubleshoot\n"
+	mn.confirmResolved = true
+	if cmd := mn.resolveConfirm(false); cmd != nil {
+		t.Errorf("resolveConfirm(false) must return nil (dismiss only)")
+	}
+	if mn.confirmResolved {
+		t.Error("resolveConfirm(false) must clear the confirm state")
+	}
+	if mn.finalDraft || fn.calls != 0 {
+		t.Error("resolveConfirm(false) must not generate")
+	}
+	// Yes → generate.
+	my, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
+	my.md = "# Troubleshoot\n"
+	my.confirmResolved = true
+	cmd := my.resolveConfirm(true)
+	if cmd == nil {
+		t.Fatal("resolveConfirm(true) must generate")
+	}
+	if my.confirmResolved {
+		t.Error("resolveConfirm(true) must clear the confirm state")
+	}
+	if !my.finalDraft {
+		t.Error("resolveConfirm(true) must mark a finalDraft")
+	}
+}
+
+// `c` generates the playbook for a reached solution — both while the confirm is still
+// showing AND after it was dismissed with No.
+func TestCKeyGeneratesAfterSolution(t *testing.T) {
+	// While the confirm is still showing.
+	m, fe := newReengageEventsModel(t, "# Playbook\nclean\n", "# Playbook\nclean\n")
+	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	if !m.confirmResolved || !m.wrappedUp {
+		t.Fatal("setup: confirm/wrappedUp not set")
+	}
+	nm2, cmd := m.Update(key("c"))
+	m = nm2.(model)
+	if cmd == nil {
+		t.Fatal("c while the confirm shows must trigger generation")
+	}
+	if m.confirmResolved {
+		t.Error("c must clear the confirm")
+	}
+	if !m.finalDraft {
+		t.Error("c must mark a finalDraft")
+	}
+	m = pumpReArm(t, m, cmd)
+	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+		t.Errorf("c kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
+	}
+}
+
+func TestCKeyGeneratesAfterNoDismiss(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Playbook\nclean\n", "# Playbook\nclean\n")
+	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.inputFifoPath = ""
+	m.reflow()
+	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
+	m = nm.(model)
+	// Dismiss with No.
+	nm, _ = m.Update(key("n"))
+	m = nm.(model)
+	if m.confirmResolved {
+		t.Fatal("setup: No must dismiss the confirm")
+	}
+	if !m.wrappedUp {
+		t.Fatal("setup: wrappedUp must remain set after a No dismiss")
+	}
+	// `c` still generates.
+	nm2, cmd := m.Update(key("c"))
+	m = nm2.(model)
+	if cmd == nil {
+		t.Fatal("c after a No dismiss must still trigger generation")
+	}
+	if !m.finalDraft {
+		t.Error("c must mark a finalDraft")
+	}
+	m = pumpReArm(t, m, cmd)
+	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+		t.Errorf("c kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
+	}
+}
+
+// `c` is a no-op before a solution is reached and while a stream is in flight.
+func TestCKeyNoOpBeforeSolutionOrWhileStreaming(t *testing.T) {
+	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\n")
+	m.md = "# Troubleshoot\n"
+	m.inputFifoPath = ""
+	m.reflow()
+	// Before a solution (wrappedUp false).
+	nm, cmd := m.Update(key("c"))
+	m = nm.(model)
+	if cmd != nil {
+		t.Error("c before a solution must be a no-op")
+	}
+	if m.finalDraft || fe.calls != 0 {
+		t.Error("c before a solution must not generate")
+	}
+	// A solution reached but a stream is in flight.
+	m.wrappedUp = true
+	m.streaming = true
+	nm2, cmd2 := m.Update(key("c"))
+	m = nm2.(model)
+	if cmd2 != nil {
+		t.Error("c while streaming must be a no-op")
+	}
+	if fe.calls != 0 {
+		t.Error("c while streaming must not generate")
 	}
 }
 

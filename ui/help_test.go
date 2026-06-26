@@ -26,6 +26,7 @@ func TestBuildHelpLines(t *testing.T) {
 		"down one line", "half page down / up", "left / right half-width",
 		"hint mode for keyboard-only click", "mouse clicks activate buttons",
 		"follow-up with agent manually", "wrap-up work in the playbook",
+		"generate a playbook for the solution",
 		"toggle this help", "quit/dismiss",
 		"copy block to clipboard", "run entire block in origin shell",
 		"invalidate cache re-run prompt",
