@@ -157,7 +157,10 @@ func newWaveDemoModel(theme Theme) waveDemoModel {
 }
 
 func waveTick() tea.Cmd {
-	return tea.Tick(40*time.Millisecond, func(time.Time) tea.Msg { return waveTickMsg{} })
+	// tea.Every aligns ticks to the wall clock, so the cadence is steady regardless
+	// of per-frame render time. tea.Tick re-schedules from "now" AFTER each frame, so
+	// its interval = d + render time and jitters frame to frame. ~33ms ≈ 30fps.
+	return tea.Every(33*time.Millisecond, func(time.Time) tea.Msg { return waveTickMsg{} })
 }
 
 func (m waveDemoModel) Init() tea.Cmd { return waveTick() }
