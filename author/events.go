@@ -111,6 +111,13 @@ type AuthorOptions struct {
 	// classify pass runs without CLAUDE.md auto-discovery, auto-memory, global MCP, or
 	// the dynamic machine sections. The AUTHORING path leaves this false (full context).
 	Bare bool
+	// NoThinking, when true, forces MAX_THINKING_TOKENS=0 for THIS invocation,
+	// disabling extended thinking regardless of cfg [agent].Thinking. The quick
+	// structured calls (classify, metadata) set it: a triage/JSON decision needs no
+	// reasoning, and leaving thinking on costs ~4-6s of latency (haiku thinks by
+	// default). The AUTHORING path leaves this false so its reasoning streams as
+	// live activity.
+	NoThinking bool
 	// OnText, when non-nil, is called with the ACCUMULATED assistant text as each
 	// stream-json TEXT delta arrives (a live tap of the model output, used by the
 	// classify pass to surface its reasoning on the float's thinking line). nil →
@@ -182,10 +189,20 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 		}
 		args = ClaudeArgs(model, opts.MCPConfigPath, sys, userMessage, opts.Bare)
 		adapterName = "claude"
-		// Enable thinking so the claude adapter's Reasoning mapping has blocks to
-		// emit; off → no env var (no thinking). See claudeThinkingTokens.
-		if tok := claudeThinkingTokens(cfg.Agent.Thinking); tok > 0 {
+		// MAX_THINKING_TOKENS must be set EXPLICITLY both ways. A budget (>0) enables
+		// thinking so the claude adapter's Reasoning mapping has blocks to emit; 0
+		// DISABLES it. Crucially, OMITTING the var does NOT disable thinking — Claude
+		// Code defaults thinking ON — so "off" (and opts.NoThinking) must emit
+		// MAX_THINKING_TOKENS=0, not skip the var. Disabling thinking cuts a quick
+		// classify/metadata call from ~7s to ~2.6s (haiku thinks by default).
+		thinking := cfg.Agent.Thinking
+		if opts.NoThinking {
+			thinking = "off"
+		}
+		if tok := claudeThinkingTokens(thinking); tok > 0 {
 			extraEnv = append(extraEnv, "MAX_THINKING_TOKENS="+strconv.Itoa(tok))
+		} else {
+			extraEnv = append(extraEnv, "MAX_THINKING_TOKENS=0")
 		}
 	default:
 		return nil, nil, fmt.Errorf("harness %q not yet supported", harness)

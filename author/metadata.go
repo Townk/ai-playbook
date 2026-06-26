@@ -85,6 +85,8 @@ func MetadataPrompt(doc string) string {
 func PlaybookMetadata(doc string, opts AuthorOptions) (Metadata, error) {
 	// A classification call needs no tools backend; never attach --mcp-config.
 	opts.MCPConfigPath = ""
+	// Structured one-shot JSON — no reasoning needed; disable thinking (cuts ~4-6s).
+	opts.NoThinking = true
 	sys := MetadataPrompt(doc)
 	const user = "Classify the playbook above. Respond with the JSON object only."
 

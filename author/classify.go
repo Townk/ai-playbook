@@ -163,6 +163,10 @@ func ClassifyRequest(req capture.Request, opts AuthorOptions) (Classification, e
 	// MCP + drop the dynamic machine sections, so the triage runs without CLAUDE.md
 	// auto-discovery, auto-memory, global MCP, or cwd/env/git-status sections.
 	opts.Bare = true
+	// Triage is a one-shot JSON decision — no reasoning needed. Disabling thinking
+	// (MAX_THINKING_TOKENS=0) cuts the classify from ~7s to ~2.6s (haiku thinks by
+	// default; the budget value doesn't matter — only on-vs-off does).
+	opts.NoThinking = true
 
 	sys := ClassifyPrompt(req)
 

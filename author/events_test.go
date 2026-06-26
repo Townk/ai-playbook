@@ -112,19 +112,22 @@ func TestClaudeThinkingTokens(t *testing.T) {
 	}
 }
 
-// TestRunHarnessEvents_ThinkingEnvWired: a non-off thinking preference sets
-// MAX_THINKING_TOKENS on the harness process env; "off" leaves it unset.
+// TestRunHarnessEvents_ThinkingEnvWired: MAX_THINKING_TOKENS is ALWAYS set
+// explicitly — a budget when thinking is on, 0 to disable. "off" (and the
+// NoThinking option) emit 0, NOT an unset var: omitting it would leave Claude
+// Code's default thinking ON (the old bug). NoThinking overrides cfg.Thinking.
 func TestRunHarnessEvents_ThinkingEnvWired(t *testing.T) {
 	bin := writeFakeHarness(t)
 
-	check := func(thinking string, want string) {
+	check := func(thinking string, noThinking bool, want string) {
 		cfg := config.Default()
 		cfg.Agent.Harness = "claude"
 		cfg.Agent.Thinking = thinking
 
 		var cmd *exec.Cmd
 		events, wait, err := RunHarnessEvents("SYS", "USER", AuthorOptions{
-			Cfg: cfg,
+			Cfg:        cfg,
+			NoThinking: noThinking,
 			Command: func(b string, args []string) *exec.Cmd {
 				cmd = exec.Command(bin, args...) // captured; Env set by RunHarnessEvents after this returns
 				return cmd
@@ -137,19 +140,20 @@ func TestRunHarnessEvents_ThinkingEnvWired(t *testing.T) {
 		}
 		_ = wait()
 
-		var got string
+		got := "<unset>"
 		for _, kv := range cmd.Env {
 			if strings.HasPrefix(kv, "MAX_THINKING_TOKENS=") {
 				got = strings.TrimPrefix(kv, "MAX_THINKING_TOKENS=")
 			}
 		}
 		if got != want {
-			t.Errorf("thinking %q: MAX_THINKING_TOKENS=%q, want %q", thinking, got, want)
+			t.Errorf("thinking=%q noThinking=%v: MAX_THINKING_TOKENS=%q, want %q", thinking, noThinking, got, want)
 		}
 	}
-	check("medium", "8000")
-	check("high", "16000")
-	check("off", "") // unset → no MAX_THINKING_TOKENS in env
+	check("medium", false, "8000")
+	check("high", false, "16000")
+	check("off", false, "0")   // off → EXPLICIT 0 (omitting leaves Claude's default thinking ON)
+	check("medium", true, "0") // NoThinking forces 0 regardless of cfg.Thinking
 }
 
 // TestAuthorEvents_UnsupportedHarness: pi/cursor → a clear error, no process.
