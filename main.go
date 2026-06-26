@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -416,8 +417,74 @@ func newThinkingWriter(out string) func(string) {
 			return
 		}
 		last = now
-		writeThinkingFile(out, thinkingTail(accumulated, thinkingTailRunes))
+		// Show only the classify JSON's "content" value as it forms (the answer /
+		// command text), not the raw {"kind":…,"content":"…} envelope.
+		writeThinkingFile(out, thinkingTail(extractJSONContent(accumulated), thinkingTailRunes))
 	}
+}
+
+// extractJSONContent returns the (possibly still-streaming) value of the "content"
+// field from a partial JSON object, decoding JSON string escapes best-effort. It
+// returns "" until the content value has begun — so the thinking line shows just the
+// answer/command text forming, not the JSON envelope. Robust to truncated input (a
+// dangling escape or incomplete \u at the stream tail stops cleanly).
+func extractJSONContent(s string) string {
+	k := strings.Index(s, `"content"`)
+	if k < 0 {
+		return ""
+	}
+	rest := s[k+len(`"content"`):]
+	colon := strings.IndexByte(rest, ':')
+	if colon < 0 {
+		return ""
+	}
+	rest = rest[colon+1:]
+	open := strings.IndexByte(rest, '"')
+	if open < 0 {
+		return ""
+	}
+	rest = rest[open+1:]
+	var b strings.Builder
+	for j := 0; j < len(rest); j++ {
+		c := rest[j]
+		if c == '"' {
+			break // closing quote of the value
+		}
+		if c != '\\' {
+			b.WriteByte(c)
+			continue
+		}
+		if j+1 >= len(rest) {
+			break // dangling escape at the stream tail
+		}
+		j++
+		switch rest[j] {
+		case 'n':
+			b.WriteByte('\n')
+		case 't':
+			b.WriteByte('\t')
+		case 'r':
+			b.WriteByte('\r')
+		case 'b':
+			b.WriteByte('\b')
+		case 'f':
+			b.WriteByte('\f')
+		case '"', '\\', '/':
+			b.WriteByte(rest[j])
+		case 'u':
+			if j+4 < len(rest) {
+				if v, err := strconv.ParseUint(rest[j+1:j+5], 16, 32); err == nil {
+					b.WriteRune(rune(v))
+				}
+				j += 4
+			} else {
+				j = len(rest) // incomplete \uXXXX at the tail
+			}
+		default:
+			b.WriteByte(rest[j])
+		}
+	}
+	return b.String()
 }
 
 // spawnAnswer renders a SHORT prose answer (the classify "answer" route): write the

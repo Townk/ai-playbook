@@ -538,7 +538,9 @@ func TestNewThinkingWriter(t *testing.T) {
 	defer func() { thinkingWriteEvery = saved }()
 
 	w := newThinkingWriter(out)
-	w("step one\nstep two   step three")
+	// Input is the streaming classify JSON; the writer surfaces only the "content"
+	// value (decoding \n) and collapses it to a single line.
+	w(`{"kind":"answer","content":"step one\nstep two   step three"`)
 	b, err := os.ReadFile(out + input.ThinkingSuffix)
 	if err != nil {
 		t.Fatalf("thinking file not written: %v", err)
@@ -550,8 +552,8 @@ func TestNewThinkingWriter(t *testing.T) {
 		t.Errorf("thinking line must be single-line: %q", b)
 	}
 
-	// A long accumulation is tailed to ≤ thinkingTailRunes.
-	w(strings.Repeat("x", 1000))
+	// A long content value is tailed to ≤ thinkingTailRunes.
+	w(`{"content":"` + strings.Repeat("x", 1000))
 	b, _ = os.ReadFile(out + input.ThinkingSuffix)
 	if n := len([]rune(string(b))); n > thinkingTailRunes {
 		t.Errorf("written tail = %d runes, want ≤ %d", n, thinkingTailRunes)
@@ -567,13 +569,31 @@ func TestNewThinkingWriter_Throttle(t *testing.T) {
 	defer func() { thinkingWriteEvery = saved }()
 
 	w := newThinkingWriter(out)
-	w("first")
-	w("second") // throttled out
+	w(`{"content":"first`)
+	w(`{"content":"second`) // throttled out
 	b, err := os.ReadFile(out + input.ThinkingSuffix)
 	if err != nil {
 		t.Fatalf("first write missing: %v", err)
 	}
 	if got := string(b); got != "first" {
 		t.Errorf("throttled content = %q, want the first write %q", got, "first")
+	}
+}
+
+// extractJSONContent shows just the streaming "content" value (the answer/command
+// text forming), decoding escapes, robust to truncated/streaming input.
+func TestExtractJSONContent(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{`{"kind":"answer","content":"Git merge`, "Git merge"},                         // still streaming, unclosed
+		{`{"kind":"answer","content":"Use \"git log\"","title":"X"}`, `Use "git log"`}, // escapes + closed
+		{`{"kind":"answer","content":"a\nb"}`, "a\nb"},                                 // \n decoded
+		{`{"kind":"answer",`, ""},                                                      // content not started yet
+		{`{"kind":"command","content":"git log","title"`, "git log"},                   // value closed, trailing JSON
+		{`{"kind":"answer","content":"tail\`, "tail"},                                  // dangling escape at the tail
+	}
+	for _, c := range cases {
+		if got := extractJSONContent(c.in); got != c.want {
+			t.Errorf("extractJSONContent(%q) = %q, want %q", c.in, got, c.want)
+		}
 	}
 }
