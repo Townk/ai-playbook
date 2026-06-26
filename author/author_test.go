@@ -159,10 +159,9 @@ func TestSystemPrompt_LoadBearingSections(t *testing.T) {
 		"{id=verify needs=<fix-id>}",                  // separate verify block
 		"re-run the original failed",                  // verify re-runs original command
 		"Do NOT fold the re-run into the fix block",   // C3a no-fold rule
-		"{static}",      // static (non-runnable) tag
-		"unified diff",  // diff block schema
-		"set -e",        // shell block semantics
-		"ai-assist-run", // helper tool
+		"{static}",     // static (non-runnable) tag
+		"unified diff", // diff block schema
+		"set -e",       // shell block semantics
 	}
 	for _, w := range wants {
 		if !strings.Contains(sys, w) {

@@ -42,7 +42,7 @@ func recordHistory(path, value string) {
 		return
 	}
 	if err := AppendHistory(path, value, historyCap); err != nil {
-		fmt.Fprintf(os.Stderr, "ai-assist-input: --history: %v\n", err)
+		fmt.Fprintf(os.Stderr, "ai-playbook input: --history: %v\n", err)
 	}
 }
 
@@ -323,11 +323,11 @@ func (m model) View() tea.View {
 func writeOutFile(path, val string) bool {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(val), 0o600); err != nil {
-		fmt.Fprintf(os.Stderr, "ai-assist-input: --out: %v\n", err)
+		fmt.Fprintf(os.Stderr, "ai-playbook input: --out: %v\n", err)
 		return false
 	}
 	if err := os.Rename(tmp, path); err != nil {
-		fmt.Fprintf(os.Stderr, "ai-assist-input: --out: %v\n", err)
+		fmt.Fprintf(os.Stderr, "ai-playbook input: --out: %v\n", err)
 		_ = os.Remove(tmp)
 		return false
 	}
@@ -389,7 +389,7 @@ func runInput(theme Theme, variant, title, prompt, value, placeholder string, he
 		tea.WithColorProfile(colorprofile.TrueColor),
 	).Run()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ai-assist-input: error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "ai-playbook input: error: %v\n", err)
 		os.Exit(1)
 	}
 	res := fm.(model)
@@ -513,7 +513,7 @@ func runInputWithFifo(theme Theme, variant, title, prompt, value, placeholder st
 		tea.WithColorProfile(colorprofile.TrueColor),
 	).Run()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ai-assist-input: error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "ai-playbook input: error: %v\n", err)
 		os.Exit(1)
 	}
 	// In fifo mode the outcome is communicated via the fifo protocol, not stdout.

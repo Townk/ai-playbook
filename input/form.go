@@ -316,14 +316,14 @@ func runForm(theme Theme, title, spec string, padding, inset int) {
 	if spec != "" {
 		data, err := os.ReadFile(spec)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "ai-assist-input: --spec: %v\n", err)
+			fmt.Fprintf(os.Stderr, "ai-playbook input: --spec: %v\n", err)
 			os.Exit(1)
 		}
 		raw = string(data)
 	} else {
 		data, err := os.ReadFile("/dev/stdin")
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "ai-assist-input: reading stdin: %v\n", err)
+			fmt.Fprintf(os.Stderr, "ai-playbook input: reading stdin: %v\n", err)
 			os.Exit(1)
 		}
 		raw = string(data)
@@ -331,7 +331,7 @@ func runForm(theme Theme, title, spec string, padding, inset int) {
 
 	parsed, err := parseFormSpec(raw)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ai-assist-input: %v\n", err)
+		fmt.Fprintf(os.Stderr, "ai-playbook input: %v\n", err)
 		os.Exit(1)
 	}
 
@@ -341,7 +341,7 @@ func runForm(theme Theme, title, spec string, padding, inset int) {
 		tea.WithColorProfile(colorprofile.TrueColor),
 	).Run()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ai-assist-input: error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "ai-playbook input: error: %v\n", err)
 		os.Exit(1)
 	}
 

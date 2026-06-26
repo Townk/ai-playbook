@@ -60,7 +60,7 @@ func outFromArgv(argv []string) string {
 func TestAsker_BuildsInputCommand(t *testing.T) {
 	m := &recordMux{answer: "fix the build"}
 	a := Asker{SelfExe: "/path/ai-playbook", Mux: m, poll: time.Millisecond}
-	res, err := a.Ask(Request{Type: "text", Title: "ai-assist", Prompt: "How can I help?", Value: "seed", Cwd: "/proj"})
+	res, err := a.Ask(Request{Type: "text", Title: "ai-playbook", Prompt: "How can I help?", Value: "seed", Cwd: "/proj"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestAsker_BuildsInputCommand(t *testing.T) {
 	if argv[0] != "/path/ai-playbook" || argv[1] != "input" {
 		t.Fatalf("argv prefix = %v, want [/path/ai-playbook input …]", argv[:2])
 	}
-	for _, want := range []string{"--type", "text", "--out", "--title", "ai-assist", "--prompt", "How can I help?", "--value", "seed"} {
+	for _, want := range []string{"--type", "text", "--out", "--title", "ai-playbook", "--prompt", "How can I help?", "--value", "seed"} {
 		if !contains(argv, want) {
 			t.Errorf("argv missing %q\nargv: %v", want, argv)
 		}
@@ -92,7 +92,7 @@ func TestAsker_BuildsInputCommand(t *testing.T) {
 func TestAsker_InputFloatAbsoluteGeometry(t *testing.T) {
 	m := &recordMux{answer: "x"}
 	a := Asker{SelfExe: "/path/ai-playbook", Mux: m, poll: time.Millisecond}
-	if _, err := a.Ask(Request{Type: "text", Title: "ai-assist", Prompt: "How?"}); err != nil {
+	if _, err := a.Ask(Request{Type: "text", Title: "ai-playbook", Prompt: "How?"}); err != nil {
 		t.Fatal(err)
 	}
 	if m.lastOpts.WidthCols != floatCols {

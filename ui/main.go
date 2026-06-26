@@ -217,7 +217,7 @@ func Main() int {
 	// playbookTitle is the finalized-playbook title for the pager header (▓▓▓
 	// <title>), set when the input is a saved playbook file (run-from-file /
 	// cached-serve). Empty for FIFO/stdin streams (an authoring transcript keeps the
-	// default "ai-assist — <harness>" header).
+	// default "ai-playbook — <harness>" header).
 	playbookTitle := ""
 	// playbookSubtitle is the front-matter `description` shown under the title for a
 	// finalized/served playbook that carries front matter. Empty for FIFO/stdin

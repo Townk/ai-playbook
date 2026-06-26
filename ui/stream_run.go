@@ -26,7 +26,7 @@ type StreamOptions struct {
 	// Title, when set, is the WORKING pane header shown while the playbook is being
 	// authored (the classify-supplied short label for an escalated request). A later
 	// finalized-playbook H1 (on stream EOF) may still update it. Empty → the default
-	// "ai-assist — <harness>" header.
+	// "ai-playbook — <harness>" header.
 	Title string
 	Cwd   string    // working dir for the in-process driver (default $PWD)
 	Tee   io.Writer // if non-nil, every byte read from Src is mirrored here

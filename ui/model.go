@@ -133,7 +133,7 @@ func (m model) reArmReaderCmd() tea.Cmd {
 type model struct {
 	harness string
 	// title is the finalized-playbook title shown in the pager header (▓▓▓ <title>)
-	// in place of the default "ai-assist — <harness>". Set from the playbook's first
+	// in place of the default "ai-playbook — <harness>". Set from the playbook's first
 	// H1 (playbookHeading) when rendering a FINALIZED playbook (run-from-file,
 	// cached-serve, or an accepted final draft). Empty for a troubleshoot/authoring
 	// transcript, which keeps the default header.
@@ -599,7 +599,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Finalized-playbook draft: strip any preamble above the H1 title and set
 			// the pager header to the playbook title. Gated on finalDraft so a
 			// troubleshoot transcript (non-finalDraft EOF) is left untouched (default
-			// "ai-assist — <harness>" header, no stripping).
+			// "ai-playbook — <harness>" header, no stripping).
 			if m.finalDraft {
 				title, body := playbookHeading(m.md)
 				// Safety guard: occasionally the model NARRATES instead of producing a
@@ -1525,7 +1525,7 @@ func (m model) renderBody() string {
 }
 
 func (m model) header() string {
-	label := "ai-assist — " + m.harness
+	label := "ai-playbook — " + m.harness
 	if m.title != "" {
 		label = m.title
 	}

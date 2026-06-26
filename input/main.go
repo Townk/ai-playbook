@@ -104,28 +104,28 @@ func Main() int {
 			if spec != "" {
 				data, err := os.ReadFile(spec)
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "ai-assist-input: --spec: %v\n", err)
+					fmt.Fprintf(os.Stderr, "ai-playbook input: --spec: %v\n", err)
 					return 1
 				}
 				raw = string(data)
 			} else {
 				data, err := os.ReadFile("/dev/stdin")
 				if err != nil {
-					fmt.Fprintf(os.Stderr, "ai-assist-input: reading stdin: %v\n", err)
+					fmt.Fprintf(os.Stderr, "ai-playbook input: reading stdin: %v\n", err)
 					return 1
 				}
 				raw = string(data)
 			}
 			parsed, err := parseFormSpec(raw)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "ai-assist-input: %v\n", err)
+				fmt.Fprintf(os.Stderr, "ai-playbook input: %v\n", err)
 				return 1
 			}
 			m := newFormModel(*theme, title, parsed, padding, inset)
 			fmt.Println(m.maxHeight(width))
 			return 0
 		default:
-			fmt.Fprintf(os.Stderr, "ai-assist-input: unknown --type %q\n", typ)
+			fmt.Fprintf(os.Stderr, "ai-playbook input: unknown --type %q\n", typ)
 			return 2
 		}
 		fmt.Println(measureHeight(rendered))
@@ -155,7 +155,7 @@ func Main() int {
 	case "form":
 		runForm(*theme, title, spec, padding, inset)
 	default:
-		fmt.Fprintf(os.Stderr, "ai-assist-input: unknown --type %q\n", typ)
+		fmt.Fprintf(os.Stderr, "ai-playbook input: unknown --type %q\n", typ)
 		return 2
 	}
 	return 0

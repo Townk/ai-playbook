@@ -103,11 +103,11 @@ func TestPlaybookHeading_TrimsHeadingSpace(t *testing.T) {
 }
 
 // TestHeaderUsesTitleWhenSet verifies header() renders the playbook title when set,
-// and falls back to the default "ai-assist — <harness>" otherwise.
+// and falls back to the default "ai-playbook — <harness>" otherwise.
 func TestHeaderUsesTitleWhenSet(t *testing.T) {
 	m := newModel("agent", "")
-	if got := m.header(); !strings.Contains(got, "ai-assist — agent") {
-		t.Fatalf("default header must contain %q, got %q", "ai-assist — agent", got)
+	if got := m.header(); !strings.Contains(got, "ai-playbook — agent") {
+		t.Fatalf("default header must contain %q, got %q", "ai-playbook — agent", got)
 	}
 
 	m.title = "Playbook — Compiling an Android Application"
@@ -115,7 +115,7 @@ func TestHeaderUsesTitleWhenSet(t *testing.T) {
 	if !strings.Contains(got, "Playbook — Compiling an Android Application") {
 		t.Fatalf("header must contain the title, got %q", got)
 	}
-	if strings.Contains(got, "ai-assist — agent") {
+	if strings.Contains(got, "ai-playbook — agent") {
 		t.Fatalf("header must NOT contain the default label when title set, got %q", got)
 	}
 	if !strings.Contains(got, "▓▓▓") {

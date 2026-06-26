@@ -224,7 +224,7 @@ func (c *Cache) Store(ctx, req, kind, body string, extras map[string]string, req
 
 	var b strings.Builder
 	b.WriteString("---\n")
-	b.WriteString("schema: ai-assist-cache/v1\n")
+	b.WriteString("schema: ai-playbook-cache/v1\n")
 	fmt.Fprintf(&b, "kind: %s\n", kind)
 	fmt.Fprintf(&b, "context_hash: %s\n", ctx)
 	fmt.Fprintf(&b, "request_hash: %s\n", req)

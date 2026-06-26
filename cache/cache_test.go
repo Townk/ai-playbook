@@ -151,7 +151,7 @@ func TestStoreLookupRoundTrip(t *testing.T) {
 	// Entry content: front matter + body, body stripped correctly.
 	raw, _ := os.ReadFile(entry)
 	content := string(raw)
-	if !strings.HasPrefix(content, "---\nschema: ai-assist-cache/v1\n") {
+	if !strings.HasPrefix(content, "---\nschema: ai-playbook-cache/v1\n") {
 		t.Fatalf("front matter prefix wrong:\n%s", content)
 	}
 	if k, ok := Field(content, "kind"); !ok || k != "playbook" {

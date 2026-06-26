@@ -9,19 +9,19 @@ import (
 )
 
 func TestProcessingShowsSpinnerAndStatus(t *testing.T) {
-	m := newProcessingModel(defaultTheme(), "ai-assist", 50, 12)
+	m := newProcessingModel(defaultTheme(), "ai-playbook", 50, 12)
 	m2, _ := m.Update(statusMsg("Looking up docs"))
 	out := strip(m2.(processingModel).View().Content) // rendered frame
 	if !strings.Contains(out, "Looking up docs") {
 		t.Fatalf("status label not shown: %q", out)
 	}
-	if !strings.Contains(out, "▓▓▓ ai-assist") {
+	if !strings.Contains(out, "▓▓▓ ai-playbook") {
 		t.Fatalf("same framed title expected: %q", out)
 	}
 }
 
 func TestProcessingQuitsOnClose(t *testing.T) {
-	m := newProcessingModel(defaultTheme(), "ai-assist", 50, 12)
+	m := newProcessingModel(defaultTheme(), "ai-playbook", 50, 12)
 	_, cmd := m.Update(closeMsg{})
 	if cmd == nil {
 		t.Fatal("close must return a quit cmd")
@@ -107,7 +107,7 @@ func TestScanRecordsEOFAfterStatusYieldsClose(t *testing.T) {
 }
 
 func TestProcessingModelTracksWindowResize(t *testing.T) {
-	m := newProcessingModel(defaultTheme(), "ai-assist", 50, 12)
+	m := newProcessingModel(defaultTheme(), "ai-playbook", 50, 12)
 	m2, _ := m.Update(tea.WindowSizeMsg{Width: 80, Height: 24})
 	pm := m2.(processingModel)
 	if pm.width != 80 {
@@ -121,13 +121,13 @@ func TestProcessingModelTracksWindowResize(t *testing.T) {
 // The processing frame must fill the SAME height as the input dialog it replaced
 // (so the float shows no black gap), with the spinner centered and no hint.
 func TestProcessingFillsPaneHeight(t *testing.T) {
-	m := newProcessingModel(defaultTheme(), "ai-assist", 56, 14)
+	m := newProcessingModel(defaultTheme(), "ai-playbook", 56, 14)
 	out := m.View().Content
 	if n := len(strings.Split(out, "\n")); n != 14 {
 		t.Fatalf("processing frame should fill the pane height (14), got %d lines:\n%s", n, strip(out))
 	}
 	plain := strip(out)
-	if !strings.Contains(plain, "▓▓▓ ai-assist") {
+	if !strings.Contains(plain, "▓▓▓ ai-playbook") {
 		t.Fatalf("title row expected: %q", plain)
 	}
 	if !strings.Contains(plain, "Processing…") {

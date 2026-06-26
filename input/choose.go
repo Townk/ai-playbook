@@ -119,7 +119,7 @@ func runChoose(theme Theme, variant, title, prompt string, options []string, mul
 		tea.WithColorProfile(colorprofile.TrueColor),
 	).Run()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ai-assist-input: error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "ai-playbook input: error: %v\n", err)
 		os.Exit(1)
 	}
 	res := fm.(chooseModel)

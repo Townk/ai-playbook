@@ -32,7 +32,7 @@ import (
 // $kb_path. The package kb type and this one carry the same text.
 //
 // NOTE(stage 4c-i): only the KB READ path is wired. The KB WRITE/remember path
-// (ai-assist-remember appending a distilled fact) is DEFERRED to a later stage.
+// (the remember tool appending a distilled fact) is DEFERRED to a later stage.
 type KnowledgeBase string
 
 // SystemPrompt assembles the standing literate-playbook authoring prompt for the
@@ -123,15 +123,6 @@ What the user is trying to do:
 %s%s%s
 
 %s
-
-You have these helper tools on PATH — prefer them over your own raw shell:
-- `+"`ai-assist-run \"<cmd>\"`"+` runs a command in the user's real shell (their cwd
-  and environment). Use it to verify; keep those commands read-only or
-  idempotent. It returns the command's output and exit code.
-- `+"`ai-assist-ask --type free|line|confirm|choose \"<question>\" [choices...]`"+`
-  asks the user and returns their answer. It is the only way to get input.
-- `+"`ai-assist-remember \"<fact>\"`"+` saves a durable, distilled fact about this
-  project for future requests.
 
 %s
 

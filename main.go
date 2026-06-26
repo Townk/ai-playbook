@@ -617,7 +617,7 @@ func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content, title,
 	if err := m.SpawnDocked(mux.SpawnOptions{
 		Cmd:  runCmd,
 		Cwd:  cwd,
-		Name: "ai-assist",
+		Name: "ai-playbook",
 	}); err != nil {
 		dbg("spawnAnswer: SpawnDocked FAILED err=%v", err)
 		os.Remove(f.Name())
@@ -782,7 +782,7 @@ func spawnSession(m mux.Mux, selfExe string, req capture.Request, title string) 
 	if err := m.SpawnDocked(mux.SpawnOptions{
 		Cmd:  sessionCmd,
 		Cwd:  cwd,
-		Name: "ai-assist",
+		Name: "ai-playbook",
 	}); err != nil {
 		dbg("spawnSession: SpawnDocked FAILED err=%v", err)
 		os.Remove(f.Name())
