@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
@@ -11,8 +12,8 @@ import (
 
 // TestResultsFifoFlagAccepted guards the regression where --results-fifo was
 // not defined and the binary crashed with exit 2. It builds the real binary,
-// creates a FIFO, feeds it EOF immediately (so the drain goroutine unblocks),
-// and asserts exit 0 — not exit 2.
+// creates the results FIFO, feeds it EOF immediately (so the drain goroutine
+// unblocks), feeds the input stream over stdin, and asserts exit 0 — not exit 2.
 func TestResultsFifoFlagAccepted(t *testing.T) {
 	// Build the root ai-playbook binary into a temp directory. The pager now
 	// lives in package ui and is reached via the `run` subcommand, so we build
@@ -25,24 +26,19 @@ func TestResultsFifoFlagAccepted(t *testing.T) {
 		t.Fatalf("go build failed: %v\n%s", err, out)
 	}
 
-	// Create the three FIFOs the binary expects.
-	inputFifo := filepath.Join(dir, "input")
-	actionsFifo := filepath.Join(dir, "actions")
+	// Create the results FIFO the binary drains.
 	resultsFifo := filepath.Join(dir, "results")
-	for _, p := range []string{inputFifo, actionsFifo, resultsFifo} {
-		if err := syscall.Mkfifo(p, 0o600); err != nil {
-			t.Fatalf("mkfifo %s: %v", p, err)
-		}
+	if err := syscall.Mkfifo(resultsFifo, 0o600); err != nil {
+		t.Fatalf("mkfifo %s: %v", resultsFifo, err)
 	}
 
 	// Run the binary via the `run` subcommand (no TTY → static-render path,
-	// exits after draining input).
+	// exits after draining input). Input comes over stdin.
 	cmd := exec.Command(bin,
 		"run",
-		"--input-fifo", inputFifo,
-		"--actions-fifo", actionsFifo,
 		"--results-fifo", resultsFifo,
 	)
+	cmd.Stdin = strings.NewReader("hello\n")
 	if err := cmd.Start(); err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -55,17 +51,6 @@ func TestResultsFifoFlagAccepted(t *testing.T) {
 			return
 		}
 		rf.Close() // EOF
-	}()
-
-	// Write a minimal payload to the input FIFO and close it so the binary
-	// finishes the static-render path and exits.
-	go func() {
-		wf, err := os.OpenFile(inputFifo, os.O_WRONLY, 0)
-		if err != nil {
-			return
-		}
-		wf.WriteString("hello\n")
-		wf.Close()
 	}()
 
 	done := make(chan error, 1)

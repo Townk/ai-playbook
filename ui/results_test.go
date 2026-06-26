@@ -2,7 +2,6 @@ package ui
 
 import (
 	"os"
-	"path/filepath"
 	"strings"
 	"syscall"
 	"testing"
@@ -169,15 +168,11 @@ func TestResultHandlerApplyUndoInterpretation(t *testing.T) {
 }
 
 // TestApplyDiffClickSetsRunningAndEmits verifies that clicking apply-diff sets
-// Status=running, Action=apply, and emits an apply-diff action record.
+// Status=running, Action=apply, and returns a non-nil cmd.
 func TestApplyDiffClickSetsRunningAndEmits(t *testing.T) {
-	dir := t.TempDir()
-	fifo := filepath.Join(dir, "act")
-
 	md := "```diff {id=fix}\n--- a\n+++ b\n```\n"
 	m := newModel("T", md)
 	m.width, m.height = 80, 24
-	m.fifoPath = fifo
 	m.reflow()
 
 	// Find the apply-diff button.
@@ -209,32 +204,14 @@ func TestApplyDiffClickSetsRunningAndEmits(t *testing.T) {
 	if cmd == nil {
 		t.Error("apply-diff click must return a non-nil cmd (tick+flash)")
 	}
-
-	// Verify the emitted record kind is apply-diff.
-	f, err := os.Open(fifo)
-	if err != nil {
-		t.Fatalf("open fifo: %v", err)
-	}
-	defer f.Close()
-	buf := make([]byte, 256)
-	n, _ := f.Read(buf)
-	rec := string(buf[:n])
-	kind, _, _ := strings.Cut(strings.TrimSuffix(rec, "\x1e"), "\x1f")
-	if kind != "apply-diff" {
-		t.Errorf("emitted kind = %q, want apply-diff", kind)
-	}
 }
 
 // TestUndoDiffClickSetsRunningAndEmits verifies that clicking undo-diff sets
-// Status=running, Action=undo, and emits an undo-diff action record.
+// Status=running, Action=undo, and returns a non-nil cmd.
 func TestUndoDiffClickSetsRunningAndEmits(t *testing.T) {
-	dir := t.TempDir()
-	fifo := filepath.Join(dir, "act")
-
 	md := "```diff {id=fix}\n--- a\n+++ b\n```\n"
 	m := newModel("T", md)
 	m.width, m.height = 80, 24
-	m.fifoPath = fifo
 	// Seed the block as already applied.
 	m.blockStates["fix"] = blockRunState{Status: "ok"}
 	m.reflow()
@@ -267,19 +244,5 @@ func TestUndoDiffClickSetsRunningAndEmits(t *testing.T) {
 	}
 	if cmd == nil {
 		t.Error("undo-diff click must return a non-nil cmd (tick+flash)")
-	}
-
-	// Verify the emitted record kind is undo-diff.
-	f, err := os.Open(fifo)
-	if err != nil {
-		t.Fatalf("open fifo: %v", err)
-	}
-	defer f.Close()
-	buf := make([]byte, 256)
-	n, _ := f.Read(buf)
-	rec := string(buf[:n])
-	kind, _, _ := strings.Cut(strings.TrimSuffix(rec, "\x1e"), "\x1f")
-	if kind != "undo-diff" {
-		t.Errorf("emitted kind = %q, want undo-diff", kind)
 	}
 }

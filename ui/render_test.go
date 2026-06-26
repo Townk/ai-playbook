@@ -1260,18 +1260,16 @@ func TestCachedRegenHintLabelRendered(t *testing.T) {
 }
 
 // TestCachedReloadButtonMouseClick verifies that clicking the reload icon sets
-// m.flashKey="cached:regenerate", returns a non-nil cmd, and emits a
-// "regenerate" record to the FIFO.
+// m.flashKey="cached:regenerate", returns a non-nil cmd, and triggers the
+// in-process regenerate (REPLACE: md cleared, thinking on, no longer cached). A
+// cached-answer regenerate seam stands in for a real orchestrator.
 func TestCachedReloadButtonMouseClick(t *testing.T) {
-	dir := t.TempDir()
-	fifo := dir + "/act"
-
 	m := newModel("agent", "hello")
 	m.width = 120
 	m.height = 24
 	m.isCached = true
 	m.cachedAt = time.Now().Add(-1 * time.Minute)
-	m.fifoPath = fifo
+	m.answerRegen = fakeAnswerRegen()
 	m.reflow()
 
 	var regenBtn *Button
@@ -1302,20 +1300,14 @@ func TestCachedReloadButtonMouseClick(t *testing.T) {
 	if cmd == nil {
 		t.Error("clicking reload icon must return a non-nil cmd")
 	}
-
-	// Verify emitAction wrote a "regenerate" record to the (regular-file) fifo.
-	data, err := os.ReadFile(fifo)
-	if err != nil {
-		t.Fatalf("could not read fifo file: %v", err)
+	if m2.md != "" {
+		t.Errorf("regenerate must clear md (REPLACE); got %q", m2.md)
 	}
-	rec := strings.TrimSuffix(string(data), "\x1e")
-	kind, rest, ok := strings.Cut(rec, "\x1f")
-	if !ok || kind != "regenerate" {
-		t.Fatalf("expected kind=regenerate in record %q", string(data))
+	if m2.isCached {
+		t.Error("regenerate must drop the cached state")
 	}
-	blockID, _, _ := strings.Cut(rest, "\x1f")
-	if blockID != "cached" {
-		t.Fatalf("expected blockID=cached in record %q", string(data))
+	if !m2.thinking {
+		t.Error("regenerate must start a thinking session")
 	}
 }
 

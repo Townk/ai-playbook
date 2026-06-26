@@ -181,10 +181,6 @@ func Main() int {
 	fs.StringVar(&harness, "harness", "agent", "harness label for the header")
 	var titleFlag string
 	fs.StringVar(&titleFlag, "title", "", "explicit pane header title (overrides the H1/front-matter title)")
-	var fifoPath string
-	fs.StringVar(&fifoPath, "actions-fifo", "", "FIFO path to write button actions to")
-	var inputFifo string
-	fs.StringVar(&inputFifo, "input-fifo", "", "FIFO path to read the input stream from (else stdin)")
 	var thinkingLabel string
 	fs.StringVar(&thinkingLabel, "thinking-label", "Working…", "default spinner label")
 	var resultsFifo string
@@ -210,28 +206,19 @@ func Main() int {
 		}
 	}
 
-	// Input source: the named FIFO (opens for read; blocks until a writer
-	// connects), an optional positional <file.md> argument, or stdin. Content
+	// Input source: an optional positional <file.md> argument, or stdin. Content
 	// streams in; keys come from /dev/tty.
 	var src io.Reader = os.Stdin
 	// playbookTitle is the finalized-playbook title for the pager header (▓▓▓
 	// <title>), set when the input is a saved playbook file (run-from-file /
-	// cached-serve). Empty for FIFO/stdin streams (an authoring transcript keeps the
+	// cached-serve). Empty for stdin streams (an authoring transcript keeps the
 	// default "ai-playbook — <harness>" header).
 	playbookTitle := ""
 	// playbookSubtitle is the front-matter `description` shown under the title for a
-	// finalized/served playbook that carries front matter. Empty for FIFO/stdin
-	// streams and for files without a front-matter description.
+	// finalized/served playbook that carries front matter. Empty for stdin streams
+	// and for files without a front-matter description.
 	playbookSubtitle := ""
-	if inputFifo != "" {
-		f, err := os.OpenFile(inputFifo, os.O_RDONLY, 0)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", err)
-			return 1
-		}
-		defer f.Close()
-		src = f
-	} else if file := fs.Arg(0); file != "" {
+	if file := fs.Arg(0); file != "" {
 		// `ai-playbook run <file.md>` — render a finalized playbook artifact from a
 		// file (also the cached-serve path). Read it fully, strip any preamble above
 		// the H1 title, and use the playbook title as the pager header. The stripped
@@ -269,7 +256,6 @@ func Main() int {
 		}
 		m := newModel(harness, b.String())
 		m.width = 100
-		m.fifoPath = fifoPath
 		m.isCached = isCached
 		m.cachedAt = cachedAt
 		m.title = effectiveTitle(titleFlag, playbookTitle)
@@ -279,12 +265,12 @@ func Main() int {
 	}
 	defer tty.Close()
 
-	// In-process mode: when no --actions-fifo is given AND we have a playbook file
-	// to run, drive the real shell directly via the orchestrator instead of the
-	// FIFO/broker. The driver's working dir is --cwd, else the dir of <file.md>,
-	// else $PWD. A failed driver.Open falls back to the legacy (no-orch) behavior
-	// with a logged note rather than crashing. Done only on the interactive path
-	// (after a real TTY) so render-only invocations never spawn a shell.
+	// In-process mode: when we have a playbook file to run, drive the real shell
+	// directly via the orchestrator. The driver's working dir is --cwd, else the
+	// dir of <file.md>, else $PWD. A failed driver.Open falls back to the
+	// (no-orch) render-only behavior with a logged note rather than crashing.
+	// Done only on the interactive path (after a real TTY) so render-only
+	// invocations never spawn a shell.
 	var orch *orchestrator.Orchestrator
 	// Async-orchestrator path (consume-once): when a ready-channel is stashed, do NOT
 	// open a driver or build an orch synchronously. Render the playbook IMMEDIATELY
@@ -304,7 +290,7 @@ func Main() int {
 		// the driver pending; the OTHER pending seams (servedBase/asker/answerRegen/…)
 		// are still consumed below — they don't need the driver.
 		driverPending = true
-	} else if fifoPath == "" && inputFifo == "" && pendingAnswerRegen == nil {
+	} else if pendingAnswerRegen == nil {
 		if file := fs.Arg(0); file != "" {
 			// Reuse the session's shared driver when stashed (the troubleshoot
 			// cached-replay path), so run blocks execute in the shell the tools
@@ -352,8 +338,6 @@ func Main() int {
 	m := newModel(harness, "")
 	m.title = effectiveTitle(titleFlag, playbookTitle)
 	m.subtitle = playbookSubtitle
-	m.fifoPath = fifoPath
-	m.inputFifoPath = inputFifo
 	m.orch = orch
 	m.driverPending = driverPending
 	m.readyCh = readyCh

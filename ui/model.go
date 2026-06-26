@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"syscall"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
@@ -111,25 +110,6 @@ func (m model) flashCmd() tea.Cmd {
 // flashTickMsg clears the active flash highlight after ~140ms.
 type flashTickMsg struct{}
 
-// reArmedMsg is returned by reArmReaderCmd once the input FIFO has been
-// re-opened (or failed to open) for a fresh stream after a regenerate.
-type reArmedMsg struct {
-	reader io.Reader
-	err    error
-}
-
-// reArmReaderCmd opens m.inputFifoPath for reading and returns a reArmedMsg.
-// The open blocks until the helper opens the write end, which is fine because
-// it runs inside the tea.Cmd goroutine (not the event loop).
-func (m model) reArmReaderCmd() tea.Cmd {
-	path := m.inputFifoPath
-	return func() tea.Msg {
-		dbg("re-arm: opening input fifo %q", path)
-		f, err := os.OpenFile(path, os.O_RDONLY, 0)
-		return reArmedMsg{reader: f, err: err}
-	}
-}
-
 type model struct {
 	harness string
 	// title is the finalized-playbook title shown in the pager header (▓▓▓ <title>)
@@ -152,15 +132,12 @@ type model struct {
 	height      int
 	xOff        int
 	yOff        int
-	fifoPath    string
 	hintMode    bool
 	hintLabels  map[string]Button
 	helpMode    bool
 	helpLines   []Line
 	helpYOff    int
 	helpXOff    int
-
-	inputFifoPath string // --input-fifo path; used to re-open the FIFO on regenerate
 
 	// streaming + thinking
 	thinking      bool
@@ -190,9 +167,9 @@ type model struct {
 	cachedAt time.Time
 
 	// orch is the in-process orchestrator. When non-nil the model talks to the
-	// shell driver directly (in-process mode) instead of writing the actions
-	// FIFO; nil selects the legacy FIFO/broker path. Set by Main when no
-	// --actions-fifo is given.
+	// shell driver directly (in-process mode); nil means there is no orchestrator
+	// (render-only / degraded), so orch-driven button actions are a no-op. Set by
+	// Main when a playbook file is run, or delivered later via orchReadyMsg.
 	orch *orchestrator.Orchestrator
 
 	// driverPending marks the ASYNC-startup window: the playbook renders IMMEDIATELY
@@ -325,31 +302,17 @@ type model struct {
 // floatinput.Asker (a fixed text-type Request with the given prompt).
 type AskFunc func(prompt string) (value string, submitted bool)
 
-// emitAction performs a button's action. In FIFO mode (m.orch == nil) it appends
-// a record framed as "<kind>US<id>US<payload>RS" to the actions FIFO, where US
-// (0x1f, Unit Separator) separates fields and RS (0x1e, Record Separator)
-// terminates the record. Payload is written byte-exact (no encoding). No-op when
-// no FIFO is set (standalone/sample). O_APPEND|O_CREATE so a regular file works
-// in tests and a real FIFO opened by a reader also works. O_NONBLOCK prevents
-// blocking the bubbletea event loop when no reader is attached (returns ENXIO).
-//
-// In in-process mode (m.orch != nil) it returns a tea.Cmd that drives the
-// orchestrator directly (off the event loop) and feeds a resultMsg back; the
-// FIFO is never touched. The returned Cmd is nil in FIFO mode (or when there is
-// nothing to feed back), so callers can unconditionally batch it.
+// emitAction performs a button's action. When an in-process orchestrator is wired
+// (m.orch != nil) it returns a tea.Cmd that drives the orchestrator directly (off
+// the event loop) and feeds a resultMsg back. When there is no orchestrator
+// (m.orch == nil — render-only / degraded startup) an orch-driven action is a clean
+// NO-OP returning nil; the shell-action buttons are rendered disabled in that state
+// (driverPending / canRegenerate gating), so this is the safety floor. The returned
+// Cmd is nil when there is nothing to feed back, so callers can unconditionally batch it.
 func (m model) emitAction(b Button) tea.Cmd {
 	if m.orch != nil {
 		return m.orchCmd(b)
 	}
-	if m.fifoPath == "" {
-		return nil
-	}
-	f, err := os.OpenFile(m.fifoPath, os.O_WRONLY|os.O_APPEND|os.O_CREATE|syscall.O_NONBLOCK, 0o600)
-	if err != nil {
-		return nil
-	}
-	defer f.Close()
-	_, _ = f.WriteString(b.Kind + "\x1f" + b.BlockID + "\x1f" + b.Payload + "\x1e")
 	return nil
 }
 
@@ -624,7 +587,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Close a live in-process re-engagement stream so the agent process is
 			// reaped and the orchestrator's on-close side effects fire (regenerate's
-			// cache re-store, wrap-up's artifact close). No-op in FIFO mode (nil).
+			// cache re-store, wrap-up's artifact close). No-op when no stream is active (nil).
 			if m.reengageStream != nil {
 				_ = m.reengageStream.Close()
 				m.reengageStream = nil
@@ -770,24 +733,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if b.Kind == "regenerate" {
 					m.flashKey = "cached:regenerate"
 					// In-process: re-author via the orchestrator and re-arm the parser
-					// (REPLACE). FIFO: re-open the input FIFO. Else flash-only.
+					// (REPLACE). Else flash-only (no regenerate path wired).
 					if cmd := m.beginRegenerate(); cmd != nil {
 						return m, tea.Batch(m.flashCmd(), cmd)
 					}
-					ac := m.emitAction(b)
-					if m.inputFifoPath != "" {
-						m.md = ""
-						m.isCached = false
-						m.thinking = true
-						m.spinFrame = 0
-						m.spinTicks = 0
-						m.streaming = true
-						m.follow = false
-						m.reflow()
-						return m, tea.Batch(m.flashCmd(), m.restartTick(), m.reArmReaderCmd(), ac)
-					}
 					m.reflow()
-					return m, tea.Batch(m.flashCmd(), ac)
+					return m, m.flashCmd()
 				}
 				if b.Kind == "followup" {
 					if cmd := m.beginFollowupStream(b.BlockID, b.Payload); cmd != nil {
@@ -938,20 +889,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						if cmd := m.beginRegenerate(); cmd != nil {
 							return m, tea.Batch(m.flashCmd(), cmd)
 						}
-						ac := m.emitAction(b)
-						if m.inputFifoPath != "" {
-							m.md = ""
-							m.isCached = false
-							m.thinking = true
-							m.spinFrame = 0
-							m.spinTicks = 0
-							m.streaming = true
-							m.follow = false
-							m.reflow()
-							return m, tea.Batch(m.flashCmd(), m.restartTick(), m.reArmReaderCmd(), ac)
-						}
 						m.reflow()
-						return m, tea.Batch(m.flashCmd(), ac)
+						return m, m.flashCmd()
 					}
 					if b.Kind == "followup" {
 						if cmd := m.beginFollowupStream(b.BlockID, b.Payload); cmd != nil {
@@ -1273,13 +1212,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// non-interactive shell), NOT that the fix failed — do NOT auto-fire.
 				// The manual "try another fix" button still appears (unchanged).
 				dbg("auto-followup SUPPRESSED: exit 127 (command not found) id=%s", msg.ID)
-			case m.inputFifoPath == "" && !m.canReengageInProc():
-				// No way to deliver the follow-up: neither a FIFO to re-arm (broker mode)
-				// nor in-process re-engagement (orch + Reengage wired, the live session
-				// path). Without this second clause the live session — which has NO input
-				// FIFO but DOES have Reengage — silently dropped every verify-fail
-				// follow-up (the regression).
-				dbg("auto-followup SUPPRESSED: no FIFO and no in-process reengage (id=%s exit=%d)", msg.ID, msg.Exit)
+			case !m.canReengageInProc():
+				// No way to deliver the follow-up: in-process re-engagement is not wired
+				// (no orch + Reengage). The live session path (file/stdin input, Reengage
+				// set) does have it and so still auto-fires below.
+				dbg("auto-followup SUPPRESSED: no in-process reengage (id=%s exit=%d)", msg.ID, msg.Exit)
 			default:
 				m.followups++
 				dbg("auto-followup fire: id=%s exit=%d attempt=%d/%d", msg.ID, msg.Exit, m.followups, m.maxFollowups)
@@ -1379,17 +1316,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activityLine = collapseLine(msg.summary)
 		}
 		return m, m.activityWaitCmd()
-	case reArmedMsg:
-		dbg("re-arm: reader ready err=%v", msg.err)
-		if msg.err != nil {
-			m.thinking = false
-			m.md += fmt.Sprintf("\n\n_regenerate error: %v_\n", msg.err)
-			m.reflow()
-			return m, nil
-		}
-		m.reader = bufio.NewReader(msg.reader)
-		m.parser = &streamParser{}
-		return m, readStream(m.reader, m.parser)
 	case reArmStreamMsg:
 		// In-process re-arm: swap the parser to the fresh re-engagement stream
 		// (regenerate/followup/wrapup). The orchestrator already produced the stream
@@ -2390,12 +2316,6 @@ func (m *model) announceFollowup(attempt int) {
 	m.clampScroll()
 }
 
-// beginFollowupStream emits a `followup` action (block id + the failed command
-// text) and starts the wrap-up-style append + re-arm: a separator + spinner are
-// appended below the playbook and the input FIFO is re-armed so the agent's
-// revised fix streams in. Returns the cmd batch to run, or nil when no input
-// FIFO is configured (standalone/sample — emit only). Shared by the verify
-// auto-fire path and the `↻ try another fix` button.
 // resolveConfirm answers the native verify-success confirm: yes → generate the
 // final-playbook draft (REPLACE); no → just DISMISS the confirm and do nothing (the
 // command already succeeded, so there is nothing to re-fix). After a No the user can
@@ -2414,8 +2334,8 @@ func (m *model) resolveConfirm(yes bool) tea.Cmd {
 
 // canReengageInProc reports whether in-process re-engagement is wired (an
 // orchestrator with a Reengage context). When true, beginFollowupStream re-arms
-// the parser with the agent's revised-fix stream directly — no input FIFO needed.
-// This is the live session path (file/stdin input, no FIFO, Reengage set).
+// the parser with the agent's revised-fix stream directly. This is the live
+// session path (file/stdin input, Reengage set).
 func (m *model) canReengageInProc() bool {
 	return m.orch != nil && m.orch.Reengage != nil
 }
@@ -2423,9 +2343,7 @@ func (m *model) canReengageInProc() bool {
 // canRegenerate reports whether the cached pill's reload can actually do something —
 // i.e. a regenerate mechanism is wired:
 //   - the orchestrator's in-process re-engagement (playbook regenerate), OR
-//   - the cached-answer seam (answerRegen, the prose re-classify), OR
-//   - a FIFO/broker re-arm (legacy: inputFifoPath re-opens the stream, fifoPath emits
-//     a regenerate action) — retained so the broker handler branches stay live.
+//   - the cached-answer seam (answerRegen, the prose re-classify).
 //
 // The badge only renders the clickable button + reload glyph when this is true, so a
 // wired reload is always live and a dead reload (e.g. the pre-fix answer pane: cached
@@ -2442,9 +2360,7 @@ func (m model) canRegenerate() bool {
 		return true
 	}
 	return m.orch != nil && m.orch.Reengage != nil ||
-		m.answerRegen != nil ||
-		m.inputFifoPath != "" ||
-		m.fifoPath != ""
+		m.answerRegen != nil
 }
 
 func (m *model) beginFollowupStream(blockID, command string) tea.Cmd {
@@ -2458,22 +2374,9 @@ func (m *model) beginFollowupStream(blockID, command string) tea.Cmd {
 			return cmd
 		}
 	}
-	ac := m.emitAction(Button{Kind: "followup", BlockID: blockID, Payload: command})
-	if m.inputFifoPath == "" {
-		// No input FIFO to re-arm (standalone/sample, or in-process without reengage):
-		// surface whatever the action produced so it isn't dropped.
-		return ac
-	}
-	m.md += "\n\n---\n\n"
-	m.thinking = true
-	m.spinFrame = 0
-	m.spinTicks = 0
-	m.streaming = true
-	// Issue #1: do NOT auto-scroll to the bottom on a follow-up — keep the viewport
-	// where the user is reading (the spinner/activity line still clamp into view).
-	m.follow = false
-	m.reflow()
-	return tea.Batch(m.restartTick(), m.reArmReaderCmd())
+	// No in-process re-engagement wired (standalone/sample, or no Reengage): nothing
+	// to deliver the follow-up to — no-op.
+	return nil
 }
 
 // followupCap bounds the failed-command output fed to the follow-up prompt,

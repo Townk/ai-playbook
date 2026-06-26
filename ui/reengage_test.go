@@ -196,8 +196,7 @@ func TestVerifyFailureAutoFiresFollowupInProc(t *testing.T) {
 	m, _ := newReengageModel(t, "# Revised fix\n")
 	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
 	m.width, m.height = 80, 24
-	m.inputFifoPath = "" // live session: NO input FIFO, only in-process Reengage
-	m.reflow()           // populate m.blocks so blockCommand("verify") resolves
+	m.reflow() // populate m.blocks so blockCommand("verify") resolves
 
 	if !m.canReengageInProc() {
 		t.Fatal("test setup: expected in-process re-engagement to be available")
@@ -233,7 +232,6 @@ func TestVerifyFailureAutoFiresFollowupInProc(t *testing.T) {
 func TestVerifyFailureNoReengageNoFifoDoesNotFire(t *testing.T) {
 	m := newModel("T", "```bash {id=verify}\nmake build\n```\n")
 	m.width, m.height = 80, 24
-	m.inputFifoPath = "" // no FIFO
 	// m.orch is nil → no in-process re-engagement either.
 	m.reflow()
 
@@ -262,7 +260,6 @@ func TestFollowupReissuesSpinnerTick(t *testing.T) {
 	m, _ := newReengageModel(t, "# Revised fix\n")
 	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
 	m.width, m.height = 80, 24
-	m.inputFifoPath = ""
 	m.reflow()
 	// Stale-true tick flag (the prior verify-run loop's flag had not been cleared):
 	// this is exactly the condition under which startTick would no-op and the
@@ -332,7 +329,6 @@ func TestVerifyFailureRepeatsUntilCapInProc(t *testing.T) {
 	m, _ := newReengageModel(t, "# Revised fix\n")
 	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
 	m.width, m.height = 80, 24
-	m.inputFifoPath = ""
 	m.maxFollowups = 2
 	m.reflow()
 	if !m.canReengageInProc() {
@@ -566,7 +562,6 @@ func TestFollowupReArmDoesNotAutoScroll(t *testing.T) {
 func TestTwoSuccessiveFollowupsLiveActivity(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "", "# fix\n") // empty delta → activity gets reasoning+tool
 	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.maxFollowups = 5
 	m.reflow()
 	if !m.canReengageInProc() {
@@ -642,7 +637,6 @@ func TestTwoSuccessiveFollowupsLiveActivity(t *testing.T) {
 func TestVerifySuccessSetsConfirmOnce(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# resolved?\n", "## Solution\ndone\n")
 	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 	if !m.canReengageInProc() {
 		t.Fatal("setup: expected in-process re-engagement")
@@ -688,7 +682,6 @@ func TestVerifySuccessSetsConfirmOnce(t *testing.T) {
 func TestVerifySuccessRendersConfirmRow(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# resolved?\n", "# Playbook\n")
 	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.width = 100 // wide enough that the prompt fits on a single line (no wrap split)
 	m.reflow()
 
@@ -728,7 +721,6 @@ func TestConfirmRendersButtonsOnSeparateRow(t *testing.T) {
 	newConfirm := func(width int) model {
 		m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\n")
 		m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
-		m.inputFifoPath = ""
 		m.width = width
 		m.reflow()
 		nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -846,7 +838,6 @@ func TestConfirmRendersButtonsOnSeparateRow(t *testing.T) {
 func TestAppendConfirmButtonsLeftAligned(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\n")
 	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
@@ -903,7 +894,6 @@ func TestConfirmButtonColsIndependentOfPromptWidth(t *testing.T) {
 	colsFor := func(servedBase string) (yesCol, noCol, promptW int) {
 		m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\n")
 		m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
-		m.inputFifoPath = ""
 		m.servedBase = servedBase
 		m.reflow()
 		nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -950,7 +940,6 @@ func TestConfirmButtonColsIndependentOfPromptWidth(t *testing.T) {
 func TestConfirmClickNoResolves(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
@@ -985,7 +974,6 @@ func TestConfirmYesGeneratesFinalPlaybookReplaceDraft(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook — fix\n\n```bash {id=verify}\nclean playbook\n```\n", "# Playbook — fix\n\n```bash {id=verify}\nclean playbook\n```\n")
 	troubleshoot := "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	m.md = troubleshoot
-	m.inputFifoPath = ""
 	m.reflow()
 
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -1041,7 +1029,6 @@ func TestConfirmYesGeneratesFinalPlaybookReplaceDraft(t *testing.T) {
 func TestConfirmNoDismisses(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Revised\n", "# Revised fix\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -1085,7 +1072,6 @@ func TestConfirmYesAmendsServedPlaybook(t *testing.T) {
 	troubleshoot := "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	m.servedBase = served // serving an existing playbook for this context
 	m.md = troubleshoot
-	m.inputFifoPath = ""
 	m.reflow()
 
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -1126,7 +1112,6 @@ func TestConfirmYesFreshWhenNoServedBase(t *testing.T) {
 	troubleshoot := "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	m.servedBase = "" // FRESH: no playbook served
 	m.md = troubleshoot
-	m.inputFifoPath = ""
 	m.reflow()
 
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -1162,7 +1147,6 @@ func TestWGenerateAmendsServedPlaybook(t *testing.T) {
 	m.md = transcript
 	m.finalDraft = false
 	m.committed = false
-	m.inputFifoPath = ""
 	m.reflow()
 
 	nm, cmd := m.Update(key("w"))
@@ -1186,7 +1170,6 @@ func TestConfirmWordingByMode(t *testing.T) {
 	mf, _ := newReengageEventsModel(t, "# x\n", "# x\n")
 	mf.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	mf.servedBase = ""
-	mf.inputFifoPath = ""
 	mf.width = 100 // wide enough to keep the prose on a single line (assert the full string)
 	mf.reflow()
 	nmf, _ := mf.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -1203,7 +1186,6 @@ func TestConfirmWordingByMode(t *testing.T) {
 	ma, _ := newReengageEventsModel(t, "# x\n", "# x\n")
 	ma.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	ma.servedBase = "# Playbook — served\n\nstep\n"
-	ma.inputFifoPath = ""
 	ma.width = 100 // wide enough to keep the prose on a single line (assert the full string)
 	ma.reflow()
 	nma, _ := ma.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -1226,7 +1208,6 @@ func TestConfirmWordingByMode(t *testing.T) {
 func TestConfirmResolvesByClick(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -1270,7 +1251,6 @@ func TestConfirmResolvesByClick(t *testing.T) {
 func TestManualWGeneratesFinalPlaybookDraft(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot content\n"
-	m.inputFifoPath = ""
 	m.reflow()
 
 	nm, cmd := m.Update(key("w"))
@@ -1300,7 +1280,6 @@ func TestWCommitsExistingDraft(t *testing.T) {
 	m.md = "# Playbook — My Setup\n\n```bash {id=verify}\nclean playbook\n```\n"
 	m.finalDraft = true
 	m.committed = false
-	m.inputFifoPath = ""
 	m.reflow()
 
 	nm, cmd := m.Update(key("w"))
@@ -1355,7 +1334,6 @@ func TestWAlreadySavedIsNoOp(t *testing.T) {
 	m.md = "# Playbook — My Setup\n\nclean playbook\n"
 	m.finalDraft = true
 	m.committed = true // already persisted (baseline or a prior w)
-	m.inputFifoPath = ""
 	m.reflow()
 
 	nm, cmd := m.Update(key("w"))
@@ -1378,7 +1356,6 @@ func TestWGeneratesOnTranscript(t *testing.T) {
 	m.md = "# Troubleshoot transcript\n"
 	m.finalDraft = false
 	m.committed = false
-	m.inputFifoPath = ""
 	m.reflow()
 
 	nm, cmd := m.Update(key("w"))
@@ -1405,7 +1382,6 @@ func TestWGeneratesOnTranscript(t *testing.T) {
 func TestConfirmYesAutoPersistsBaselineAtEOF(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# Playbook — fix\n\n```bash {id=verify}\nclean playbook\n```\n", "# Playbook — fix\n\n```bash {id=verify}\nclean playbook\n```\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -1464,7 +1440,6 @@ func TestFAmendDoesNotAutoPersistAtEOF(t *testing.T) {
 	m.md = "# Playbook — fix\n\nbody\n"
 	m.finalDraft = true
 	m.committed = true
-	m.inputFifoPath = ""
 	m.reflow()
 
 	// Drive the `f` amend directly via its message (the asker float is off in tests).
@@ -1565,7 +1540,6 @@ func TestQuitGuardClearedByCommit(t *testing.T) {
 	m.md = "# Playbook — draft\n\n```bash {id=verify}\nbody\n```\n"
 	m.finalDraft = true
 	m.committed = false
-	m.inputFifoPath = ""
 	m.reflow()
 
 	// First quit arms the guard.
@@ -1635,7 +1609,6 @@ func TestQuitNormalWithoutDraft(t *testing.T) {
 func TestVerifyFailStillTriggersFollowupNotWrapup(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# Revised\n", "# Revised fix\n")
 	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 
 	nm, cmd := m.Update(resultMsg{ID: "verify", Exit: 1, Logpath: ""})
@@ -1812,7 +1785,6 @@ func TestAutoFollowupAnnouncesInAgentVoice(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "", "# fix\n")
 	m.md = "# Playbook\n\n```bash {id=verify}\nmake build\n```\n"
 	m.width, m.height = 80, 24
-	m.inputFifoPath = ""
 	m.maxFollowups = 5
 	m.reflow()
 	if !m.canReengageInProc() {
@@ -1884,7 +1856,6 @@ func TestAutoFollowupOneTimeScrollThenNoMovement(t *testing.T) {
 	sb.WriteString("\n```bash {id=verify}\nmake build\n```\n")
 	m.md = sb.String()
 	m.width, m.height = 80, 24
-	m.inputFifoPath = ""
 	m.maxFollowups = 5
 	m.reflow()
 	m.yOff = 3 // user reading near the top
@@ -2202,7 +2173,6 @@ func TestFDraftCoveredByQuitGuard(t *testing.T) {
 func TestConfirmFocusDefaultsToYes(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -2218,7 +2188,6 @@ func TestConfirmFocusDefaultsToYes(t *testing.T) {
 func TestConfirmFocusArrowsMove(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
@@ -2259,7 +2228,6 @@ func TestConfirmFocusArrowsMove(t *testing.T) {
 func TestConfirmEnterSelectsFocused(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# delta\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
@@ -2288,7 +2256,6 @@ func TestConfirmEnterSelectsFocused(t *testing.T) {
 func TestConfirmSpaceSelectsFocusedYes(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\nclean\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
@@ -2310,7 +2277,6 @@ func TestConfirmSpaceSelectsFocusedYes(t *testing.T) {
 func TestConfirmYNStillWorkWithFocus(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\nclean\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
@@ -2365,7 +2331,6 @@ func TestConfirmKeysInertWhenNoConfirm(t *testing.T) {
 func TestConfirmFocusHighlightInRender(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
@@ -2397,7 +2362,6 @@ func TestConfirmFocusHighlightInRender(t *testing.T) {
 func TestConfirmButtonStyling(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
@@ -2464,7 +2428,6 @@ func TestResolveConfirmYesGeneratesNoDismisses(t *testing.T) {
 func TestCKeyReshowsConfirmAfterSolution(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\nclean\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
@@ -2496,7 +2459,6 @@ func TestCKeyReshowsConfirmAfterSolution(t *testing.T) {
 func TestCKeyReshowsConfirmAfterNoDismiss(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\nclean\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
@@ -2530,7 +2492,6 @@ func TestCKeyReshowsConfirmAfterNoDismiss(t *testing.T) {
 func TestCKeyNoOpBeforeSolutionOrWhileStreaming(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\n")
 	m.md = "# Troubleshoot\n"
-	m.inputFifoPath = ""
 	m.reflow()
 	// Before a solution (wrappedUp false).
 	nm, cmd := m.Update(key("c"))
@@ -2559,7 +2520,6 @@ func TestCKeyNoOpBeforeSolutionOrWhileStreaming(t *testing.T) {
 func TestFinalPlaybookGenerateScrollsToTop(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# Playbook\nclean\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
-	m.inputFifoPath = ""
 	m.reflow()
 	// Simulate the user having scrolled down with a stale follow-up pin set.
 	m.yOff = 7

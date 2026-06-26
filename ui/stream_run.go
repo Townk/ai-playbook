@@ -18,7 +18,7 @@ import (
 
 // StreamOptions configure RunStream — the in-process render+drive path that
 // consumes an arbitrary input STREAM (e.g. the authoring agent's stdout) rather
-// than a file/stdin/FIFO. It is the same render+drive path `run <file.md>` uses:
+// than a file/stdin. It is the same render+drive path `run <file.md>` uses:
 // the stream is parsed incrementally, rendered, and its run blocks are driven by
 // the in-process orchestrator against the user's real shell.
 type StreamOptions struct {

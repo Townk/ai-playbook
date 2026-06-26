@@ -164,10 +164,9 @@ func (m model) orchCmd(b Button) tea.Cmd {
 }
 
 // reArmStreamMsg carries a fresh in-process re-engagement stream into the model
-// once the orchestrator has produced it (off the event loop). It mirrors the
-// FIFO-era reArmedMsg, but the reader is the agent's stdout STREAM (not a re-opened
-// FIFO) and the closer lets the model reap the process + fire the orchestrator's
-// on-close side effects when the stream EOFs.
+// once the orchestrator has produced it (off the event loop). The reader is the
+// agent's stdout STREAM and the closer lets the model reap the process + fire the
+// orchestrator's on-close side effects when the stream EOFs.
 type reArmStreamMsg struct {
 	reader io.ReadCloser
 	// activity is the re-engagement's live reasoning + tool-activity feed (from the
