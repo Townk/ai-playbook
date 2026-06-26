@@ -18,6 +18,14 @@ type textField struct {
 	taHeight    int
 	placeholder string // original placeholder text (so viewWith can hide/restore it)
 	iconGlyph   string // prompt-column glyph (defaults to promptIcon)
+
+	// Shell-style history recall (stage 2). history holds the loaded entries,
+	// oldest first / newest last. histIdx is -1 when showing the live draft,
+	// else 0..len-1 while browsing. draft is the live text saved when browsing
+	// begins (restored by paging DOWN past the newest entry).
+	history []string
+	histIdx int
+	draft   string
 }
 
 // taStyle carries the focus-dependent colors used to render a textField box.
@@ -69,7 +77,17 @@ func newTextField(theme Theme, value, placeholder string, height int, singleLine
 		taHeight:    height,
 		placeholder: placeholder,
 		iconGlyph:   promptIcon,
+		histIdx:     -1,
 	}
+}
+
+// SetHistory installs the recall entries (oldest first / newest last) and resets
+// browsing back to the live draft. The model calls this in stage 3 via the
+// existing m.fld.(*textField) type-assert; newTextField/newInputModel signatures
+// are intentionally left unchanged.
+func (f *textField) SetHistory(h []string) {
+	f.history = h
+	f.histIdx = -1
 }
 
 // setWidth sizes the textarea from the innerW (frame-chrome already removed by
@@ -108,6 +126,38 @@ func (f *textField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
 			return f, fieldNone, nil
 		case key.Code == tea.KeyEnter:
 			return f, fieldDone, nil
+		case key.Code == tea.KeyUp:
+			// Recall the previous entry when on the first logical line and
+			// history is non-empty; otherwise fall through to cursor-up.
+			if len(f.history) > 0 && f.ta.Line() == 0 {
+				switch {
+				case f.histIdx == -1:
+					f.draft = f.ta.Value()
+					f.histIdx = len(f.history) - 1
+				case f.histIdx > 0:
+					f.histIdx--
+				default:
+					// already at the oldest entry — stay put
+				}
+				f.ta.SetValue(f.history[f.histIdx])
+				f.ta.MoveToEnd()
+				return f, fieldNone, nil
+			}
+		case key.Code == tea.KeyDown:
+			// Go forward through history when browsing and on the last logical
+			// line; otherwise fall through to cursor-down.
+			if f.histIdx != -1 && f.ta.Line() == f.ta.LineCount()-1 {
+				if f.histIdx < len(f.history)-1 {
+					f.histIdx++
+					f.ta.SetValue(f.history[f.histIdx])
+				} else {
+					// past the newest entry — restore the live draft
+					f.histIdx = -1
+					f.ta.SetValue(f.draft)
+				}
+				f.ta.MoveToEnd()
+				return f, fieldNone, nil
+			}
 		}
 	}
 	var cmd tea.Cmd
