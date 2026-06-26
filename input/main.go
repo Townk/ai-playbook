@@ -28,7 +28,7 @@ func Main() int {
 	var typ, title, prompt, value, placeholder, variant, affirmative, negative, defaultSide, other, spec, icon string
 	var outFifo, inFifo, outFile, historyPath string
 	var height, padding, inset, width int
-	var danger, warning, multi, measure bool
+	var danger, warning, multi, measure, waveDemo bool
 	fs.StringVar(&typ, "type", "text", "widget type: text|line|confirm|choose|form")
 	fs.StringVar(&spec, "spec", "", "form: path to spec file (US/RS encoded); omit to read stdin")
 	fs.StringVar(&title, "title", "", "modal title")
@@ -52,9 +52,15 @@ func Main() int {
 	fs.StringVar(&outFile, "out", "", "path to a one-shot output FILE: on submit the value is written here and the process exits 0; on cancel nothing is written and the process exits 130. Lets a FLOATED input (whose stdout is detached) hand its answer back to a polling launcher.")
 	fs.StringVar(&historyPath, "history", "", "text: path to a JSONL request-history file for UP/DOWN recall; the submitted value is appended (dedup + cap). Empty disables history. Only the troubleshoot request float sets this.")
 	fs.BoolVar(&measure, "measure", false, "print the rendered height and exit (no TUI)")
+	fs.BoolVar(&waveDemo, "wave-demo", false, "live preview of the crossing-sine-wave Braille spinner (no widget)")
 	fs.IntVar(&width, "width", 50, "pane width for measurement/sizing")
 	theme := registerThemeFlags(fs)
 	fs.Parse(os.Args[2:])
+
+	if waveDemo {
+		runWaveDemo(*theme)
+		return 0
+	}
 
 	if danger {
 		variant = "danger"
