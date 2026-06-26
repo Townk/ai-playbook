@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
+	"github.com/mattn/go-runewidth"
 )
 
 const promptIcon = "❯"
@@ -77,6 +78,11 @@ type model struct {
 	outFile         string  // --out path; written on submit, polled (.done) while thinking
 	thinking        bool    // currently animating the in-box wave
 	phase           float64 // wave animation phase (advances on each waveTickMsg)
+	// thinkingLine, when set, is ONE line of dark-grey text rendered BELOW the input
+	// box (with a blank-line gap) while thinking. A LOOK preview for now — the real
+	// agent reasoning is redacted by `claude --print`, so this is a placeholder until
+	// real/streamed content (or a status) is wired. Empty → nothing extra is drawn.
+	thinkingLine string
 }
 
 // initialModel keeps the original signature the existing tests call (text, 1/1
@@ -253,7 +259,28 @@ func (m model) renderThinking() string {
 		sections = append(sections, m.fld.view(iW, true))
 	}
 	// hint = "" → no submit/newline/cancel line while thinking.
-	return renderFrame(m.theme, m.variant, m.title, sections, "", m.width, m.padding, m.inset)
+	frame := renderFrame(m.theme, m.variant, m.title, sections, "", m.width, m.padding, m.inset)
+	// A LOOK preview: one dark-grey line BELOW the box, separated from the box's
+	// bottom border by ONE blank line. Truncated to the box inner width (no wrap,
+	// ellipsis when too long). Only drawn when set — an empty line adds nothing.
+	if m.thinkingLine != "" {
+		line := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).
+			Render(truncateToWidth(m.thinkingLine, iW))
+		frame = frame + "\n\n" + line
+	}
+	return frame
+}
+
+// truncateToWidth shortens s to at most w display columns (rune/width-safe, no
+// wrap), appending an ellipsis when it must cut. w<=0 yields "".
+func truncateToWidth(s string, w int) string {
+	if w <= 0 {
+		return ""
+	}
+	if runewidth.StringWidth(s) <= w {
+		return s
+	}
+	return runewidth.Truncate(s, w, "…")
 }
 
 func (m model) View() tea.View {

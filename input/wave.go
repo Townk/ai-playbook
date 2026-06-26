@@ -253,6 +253,9 @@ func newWaveDemoModel(theme Theme) waveDemoModel {
 	m.resize()
 	m.submitted = true
 	m.thinking = true
+	// Sample text so --wave-demo previews the dark-grey thinking line beneath the box
+	// (placeholder content — the live look only).
+	m.thinkingLine = "deciding: command, quick answer, or a deeper question…"
 	return waveDemoModel{m: m}
 }
 
