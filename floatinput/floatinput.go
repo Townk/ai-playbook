@@ -50,6 +50,9 @@ type Request struct {
 	History string // text only: --history JSONL path for UP/DOWN recall. Set ONLY
 	// by the troubleshoot request float; the ask tool + the `f` amend float leave
 	// it empty so they never recall or append (history is opt-in per the spec).
+	Thinking bool // text only: pass --thinking so the float, on submit, writes --out
+	// but STAYS OPEN animating a wave "Thinking…" state until <out>.done appears
+	// (stage C). Only the troubleshoot request float (AskThinking) sets this.
 }
 
 // Result is the outcome of a float-input. Submitted is true when the user
@@ -111,6 +114,42 @@ func (a Asker) Ask(req Request) (Result, error) {
 	}
 
 	return a.poll_(out), nil
+}
+
+// AskThinking spawns the request float in --thinking mode (stage C): on submit the
+// float WRITES the value to --out but STAYS OPEN animating the wave "Thinking…"
+// state; the caller classifies + routes, then CLOSES the float by writing
+// <out>.done (the returned out path + input.DoneSuffix). It returns the Result and
+// the out-file path (for the .done marker).
+//
+// Unlike Ask, AskThinking does NOT remove the float's temp dir: the float keeps
+// polling for <out>.done after this returns, so removing the dir here would race
+// the float's poll (it could miss the marker and only exit on its 60s backstop).
+// The two tiny files (the answer + the .done marker) are left for the OS /tmp reap,
+// matching the codebase's "leave the temp for the async consumer" pattern
+// (spawnSession likewise leaves its request JSON for the docked pane).
+func (a Asker) AskThinking(req Request) (Result, string, error) {
+	req.Thinking = true
+	dir, err := os.MkdirTemp("", "ai-playbook-float")
+	if err != nil {
+		return Result{}, "", err
+	}
+	out := filepath.Join(dir, "answer")
+
+	cmd := a.buildCmd(req, out)
+	if err := a.Mux.SpawnInputFloat(mux.SpawnOptions{
+		Cmd:        cmd,
+		Cwd:        req.Cwd,
+		Floating:   true,
+		Name:       "",
+		WidthCols:  floatCols,
+		HeightRows: a.measureHeight(req),
+	}); err != nil {
+		os.RemoveAll(dir)
+		return Result{}, "", err
+	}
+
+	return a.poll_(out), out, nil
 }
 
 // measureHeight runs `<selfExe> input --type <t> --measure --width 57 …` to get
@@ -179,6 +218,11 @@ func (a Asker) buildCmd(req Request, out string) []string {
 	// floats leave it empty (no recall, no append).
 	if req.History != "" && typ == "text" {
 		cmd = append(cmd, "--history", req.History)
+	}
+	// --thinking is text-only: on submit the float stays open animating until the
+	// launcher writes <out>.done (stage C). Only AskThinking sets req.Thinking.
+	if req.Thinking && typ == "text" {
+		cmd = append(cmd, "--thinking")
 	}
 	if typ == "choose" {
 		cmd = append(cmd, req.Choices...)

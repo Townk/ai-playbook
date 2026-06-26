@@ -212,12 +212,12 @@ func troubleshoot() int {
 			fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: cannot resolve self: %v\n", err)
 			return 1
 		}
-		return launch(m, selfExe, req)
+		return launch(m, selfExe, req, author.ClassifyRequest)
 	}
 
-	// Inline path (off-Zellij, or explicit request given): run the session body in
-	// the current pane.
-	return runSession(req)
+	// Inline path (off-Zellij, or explicit request given): classify + route in the
+	// current pane (command → print it, answer → print prose, escalate → session).
+	return runInline(req)
 }
 
 // requestHistoryPath is the JSONL request-history file for the troubleshoot
@@ -227,14 +227,32 @@ func requestHistoryPath() string {
 	return filepath.Join(cache.DefaultRoot(), "request-history.jsonl")
 }
 
-// launch is the testable launcher core: spawn the request input FLOAT (prefilled
-// from the captured context), read back the submitted request, and on submit
-// spawn the docked SESSION pane carrying the context. On cancel it exits cleanly
-// (0) with no session spawned. selfExe + m are injected so it is unit-testable
-// with a fake mux (no live zellij).
-func launch(m mux.Mux, selfExe string, req capture.Request) int {
+// classifyFunc is the launcher's classify seam (stage C): the cheap-model triage
+// pass that routes a submitted request to command / answer / escalate. It defaults
+// to author.ClassifyRequest; tests inject a fake returning each kind.
+type classifyFunc func(req capture.Request, opts author.AuthorOptions) (author.Classification, error)
+
+// launch is the testable launcher core (stage C). It spawns the request input
+// FLOAT (prefilled from the captured context) in --thinking mode, reads back the
+// submitted request, then CLASSIFIES it (cheap triage model) and routes three ways:
+//
+//   - command  → the single shell command is typed into the ORIGIN pane (no CR;
+//     the user reviews + presses Enter). NO docked/floating pane.
+//   - answer   → a short prose answer is rendered in a docked pager (`run <md>`).
+//   - escalate → the full docked SESSION pane (the current author/serve flow).
+//
+// The float STAYS OPEN animating "Thinking…" during the classify; after routing,
+// the launcher writes <out>.done to close it (the float also self-times-out at 60s).
+// On cancel it exits cleanly (0) with nothing written and no route taken. A classify
+// error degrades to escalate (never block the user). selfExe + m + classify are
+// injected so it is unit-testable with a fake mux + fake classify (no live zellij,
+// no live model).
+func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFunc) int {
+	if classify == nil {
+		classify = author.ClassifyRequest
+	}
 	asker := floatinput.Asker{SelfExe: selfExe, Mux: m}
-	res, err := asker.Ask(floatinput.Request{
+	res, out, err := asker.AskThinking(floatinput.Request{
 		Type:    "text",
 		Title:   "ai-assist",
 		Prompt:  "How can I help you today?",
@@ -242,17 +260,120 @@ func launch(m mux.Mux, selfExe string, req capture.Request) int {
 		Cwd:     req.CWD,
 		History: requestHistoryPath(),
 	})
-	dbg("launch: Ask returned submitted=%v err=%v value=%q", res.Submitted, err, res.Value)
+	dbg("launch: AskThinking returned submitted=%v err=%v value=%q out=%q", res.Submitted, err, res.Value, out)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: request float: %v\n", err)
 		return 1
 	}
 	if !res.Submitted {
-		// User cancelled the request float — exit cleanly, no session spawned.
+		// User cancelled the request float — it writes its own <out>.cancel and
+		// exits itself, so we write NO .done and take no route. Exit cleanly.
 		return 0
 	}
 	req.UserRequest = strings.TrimSpace(res.Value)
-	return spawnSession(m, selfExe, req)
+
+	// CLASSIFY the submitted request on the cheap triage model. Any error routes to
+	// escalate (the safe default — never block the user on a classify failure).
+	cfg, _ := config.Load()
+	cls, cerr := classify(req, author.AuthorOptions{Cfg: cfg})
+	if cerr != nil {
+		dbg("launch: classify failed (%v); escalating", cerr)
+		cls = author.Classification{Kind: author.KindEscalate}
+	}
+	dbg("launch: classify kind=%q contentLen=%d", cls.Kind, len(cls.Content))
+
+	var code int
+	switch cls.Kind {
+	case author.KindCommand:
+		// Stage the command into the ORIGIN pane with NO trailing CR (mux.TypeInto →
+		// `zellij action write-chars`), so it lands at the prompt for the user to
+		// review and run. No docked/floating pane is opened.
+		if terr := m.TypeInto(req.PaneID, cls.Content); terr != nil {
+			dbg("launch: TypeInto origin pane failed: %v", terr)
+		}
+		code = 0
+	case author.KindAnswer:
+		// Render the short prose answer in a docked pager (no run blocks → just prose).
+		code = spawnAnswer(m, selfExe, req, cls.Content)
+	default: // escalate (incl. empty/unknown kind)
+		code = spawnSession(m, selfExe, req)
+	}
+
+	// Close the thinking float after routing (mirrors writeCancelFile). The float
+	// polls for this marker and exits; the 60s backstop covers a launcher crash.
+	writeDoneFile(out)
+	return code
+}
+
+// writeDoneFile writes the thinking float's <out>.done close marker (an empty file,
+// atomic enough). The float, while animating, polls for it (input.DoneSuffix) and
+// exits when it appears. Mirrors input.writeCancelFile. A no-op on an empty path.
+func writeDoneFile(outFile string) {
+	if outFile == "" {
+		return
+	}
+	_ = os.WriteFile(outFile+input.DoneSuffix, nil, 0o600)
+}
+
+// spawnAnswer renders a SHORT prose answer (the classify "answer" route): write the
+// content to a temp markdown file and open it in a docked pager via `ai-playbook run
+// <answer.md>`. The pager just renders the prose (no run blocks, no authoring loop).
+// The temp file is read asynchronously by the spawned pane, so it is NOT removed
+// here (mirrors spawnSession's request-JSON hand-off).
+func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content string) int {
+	f, err := os.CreateTemp("", "aapb-answer-*.md")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
+		return 1
+	}
+	if _, err := f.WriteString(content); err != nil {
+		f.Close()
+		os.Remove(f.Name())
+		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
+		return 1
+	}
+	f.Close()
+
+	cwd := req.ProjectRoot
+	if cwd == "" {
+		cwd = req.CWD
+	}
+	runCmd := []string{selfExe, "run", f.Name()}
+	dbg("spawnAnswer: cwd=%q answerPath=%q cmd=%q", cwd, f.Name(), runCmd)
+	if err := m.SpawnDocked(mux.SpawnOptions{
+		Cmd:  runCmd,
+		Cwd:  cwd,
+		Name: "ai-assist",
+	}); err != nil {
+		dbg("spawnAnswer: SpawnDocked FAILED err=%v", err)
+		os.Remove(f.Name())
+		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: spawn answer pane: %v\n", err)
+		return 1
+	}
+	return 0
+}
+
+// runInline is the off-Zellij / explicit-request path (no float, no panes): classify
+// the request and route it simply (stage C). command → print the command for the
+// user to run; answer → print the prose; escalate → run the session inline (current
+// behavior). A classify error escalates (the safe default).
+func runInline(req capture.Request) int {
+	cfg, _ := config.Load()
+	cls, err := author.ClassifyRequest(req, author.AuthorOptions{Cfg: cfg})
+	if err != nil {
+		dbg("runInline: classify failed (%v); escalating", err)
+		cls = author.Classification{Kind: author.KindEscalate}
+	}
+	switch cls.Kind {
+	case author.KindCommand:
+		fmt.Printf("Suggested command (review, then run it yourself):\n\n%s\n", cls.Content)
+		return 0
+	case author.KindAnswer:
+		fmt.Println(cls.Content)
+		return 0
+	default:
+		return runSession(req)
+	}
 }
 
 // spawnSession writes the captured Request to a temp JSON file and opens the

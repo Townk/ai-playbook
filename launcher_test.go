@@ -5,9 +5,25 @@ import (
 	"strings"
 	"testing"
 
+	"ai-playbook/author"
 	"ai-playbook/capture"
 	"ai-playbook/mux"
 )
+
+// fakeClassify builds a classifyFunc that always returns the given Classification
+// (and error), so the routing tests drive each kind deterministically without a
+// live model.
+func fakeClassify(cls author.Classification, err error) classifyFunc {
+	return func(capture.Request, author.AuthorOptions) (author.Classification, error) {
+		return cls, err
+	}
+}
+
+// escalateClassify is the default fake: classify → escalate (the current
+// always-author behavior), used by the topology tests that pre-date stage C.
+func escalateClassify() classifyFunc {
+	return fakeClassify(author.Classification{Kind: author.KindEscalate}, nil)
+}
 
 // launchMux is a recording fake Mux for the launcher topology tests. SpawnFloat
 // simulates the floated `input --out <file>` by writing answer to that file (so
@@ -16,18 +32,30 @@ import (
 // file's contents (the launcher→session context hand-off) before the session
 // would consume it.
 type launchMux struct {
-	floats      [][]string
-	docked      [][]string
-	dockedCwd   string
-	dockedReq   string // contents of the --request file at spawn time
-	answer      string
-	floatCancel bool
+	floats       [][]string
+	docked       [][]string
+	dockedCwd    string
+	dockedReq    string // contents of the --request file at spawn time
+	dockedAnswer string // contents of the `run <answer.md>` file at spawn time
+	typedPane    string // pane id passed to the last TypeInto (command route)
+	typedText    string // text passed to the last TypeInto (no CR)
+	typedCount   int    // number of TypeInto calls
+	answer       string
+	floatCancel  bool
 }
 
 func (m *launchMux) DumpScreen(string) (string, error) { return "", nil }
 func (m *launchMux) SpawnPane(mux.SpawnOptions) error  { return nil }
-func (m *launchMux) TypeInto(string, string) error     { return nil }
 func (m *launchMux) SpawnFloat(mux.SpawnOptions) error { return nil }
+
+// TypeInto records the command route's no-CR origin-pane write (mux.TypeInto →
+// `zellij action write-chars`): the command is staged at the prompt for the user.
+func (m *launchMux) TypeInto(pane, text string) error {
+	m.typedCount++
+	m.typedPane = pane
+	m.typedText = text
+	return nil
+}
 
 // SpawnInputFloat is the launcher's request-float seam (Asker.Ask now spawns the
 // borderless input float through it). It records the argv and simulates the
@@ -58,6 +86,13 @@ func (m *launchMux) SpawnDocked(opts mux.SpawnOptions) error {
 			}
 		}
 	}
+	// Snapshot the answer markdown the launcher wrote for the `run <answer.md>`
+	// route (the docked pager reads it asynchronously).
+	if len(opts.Cmd) >= 3 && opts.Cmd[1] == "run" {
+		if b, err := os.ReadFile(opts.Cmd[len(opts.Cmd)-1]); err == nil {
+			m.dockedAnswer = string(b)
+		}
+	}
 	return nil
 }
 
@@ -77,17 +112,20 @@ func TestLaunch_FloatThenDocked(t *testing.T) {
 		Project:     capture.Project{Name: "proj"},
 	}
 
-	if code := launch(m, "/bin/ai-playbook", req); code != 0 {
+	if code := launch(m, "/bin/ai-playbook", req, escalateClassify()); code != 0 {
 		t.Fatalf("launch exit = %d, want 0", code)
 	}
 
-	// 1) One input float, prefilled with the error template.
+	// 1) One input float, prefilled with the error template, in --thinking mode.
 	if len(m.floats) != 1 {
 		t.Fatalf("expected 1 SpawnFloat, got %d", len(m.floats))
 	}
 	fargv := m.floats[0]
 	if fargv[0] != "/bin/ai-playbook" || fargv[1] != "input" {
 		t.Fatalf("float argv prefix = %v, want [/bin/ai-playbook input …]", fargv[:2])
+	}
+	if !contains(fargv, "--thinking") {
+		t.Errorf("request float must be spawned with --thinking\nargv: %v", fargv)
 	}
 	prefill := argAfter(fargv, "--value")
 	if !strings.Contains(prefill, "gg build") || !strings.Contains(prefill, "exit 1") {
@@ -120,18 +158,107 @@ func TestLaunch_FloatThenDocked(t *testing.T) {
 	if !strings.Contains(m.dockedReq, "please fix it") {
 		t.Errorf("docked request JSON missing submitted request:\n%s", m.dockedReq)
 	}
+	// 3) The launcher wrote <out>.done to close the thinking float after routing.
+	if out := argAfter(fargv, "--out"); !fileExists(out + ".done") {
+		t.Errorf("escalate route must write %s.done to close the float", out)
+	}
+}
+
+// TestLaunch_CommandRoute asserts the classify "command" route: the command is
+// typed into the ORIGIN pane (no CR, via TypeInto/write-chars), the float is closed
+// (<out>.done written), and NO docked pane is spawned.
+func TestLaunch_CommandRoute(t *testing.T) {
+	m := &launchMux{answer: "list last week's commits"}
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj", PaneID: "terminal_7"}
+	classify := fakeClassify(author.Classification{Kind: author.KindCommand, Content: "git log --since='last week' -n 3"}, nil)
+
+	if code := launch(m, "/bin/ai-playbook", req, classify); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	if m.typedCount != 1 {
+		t.Fatalf("expected 1 TypeInto (origin-pane stage), got %d", m.typedCount)
+	}
+	if m.typedText != "git log --since='last week' -n 3" {
+		t.Errorf("typed text = %q, want the command verbatim (no CR)", m.typedText)
+	}
+	if strings.ContainsAny(m.typedText, "\r\n") {
+		t.Errorf("typed text must carry NO trailing CR/newline: %q", m.typedText)
+	}
+	if m.typedPane != "terminal_7" {
+		t.Errorf("typed into pane %q, want the origin pane terminal_7", m.typedPane)
+	}
+	if len(m.docked) != 0 {
+		t.Fatalf("command route must spawn NO docked pane, got %d", len(m.docked))
+	}
+	if out := argAfter(m.floats[0], "--out"); !fileExists(out + ".done") {
+		t.Errorf("command route must write %s.done to close the float", out)
+	}
+}
+
+// TestLaunch_AnswerRoute asserts the classify "answer" route: a docked pager renders
+// the prose via `ai-playbook run <answer.md>` (the md holds the content), the float
+// is closed, and NO session pane is spawned.
+func TestLaunch_AnswerRoute(t *testing.T) {
+	m := &launchMux{answer: "what is HEAD?"}
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
+	classify := fakeClassify(author.Classification{Kind: author.KindAnswer, Content: "HEAD is the current commit your working tree is based on."}, nil)
+
+	if code := launch(m, "/bin/ai-playbook", req, classify); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	if m.typedCount != 0 {
+		t.Errorf("answer route must not type into the origin pane, got %d TypeInto", m.typedCount)
+	}
+	if len(m.docked) != 1 {
+		t.Fatalf("expected 1 docked pager pane, got %d", len(m.docked))
+	}
+	dargv := m.docked[0]
+	if dargv[0] != "/bin/ai-playbook" || dargv[1] != "run" {
+		t.Fatalf("docked argv prefix = %v, want [/bin/ai-playbook run …]", dargv[:2])
+	}
+	if contains(dargv, "--request") {
+		t.Errorf("answer route must NOT spawn a session (--request), got %v", dargv)
+	}
+	if !strings.Contains(m.dockedAnswer, "HEAD is the current commit") {
+		t.Errorf("answer md missing the prose content:\n%s", m.dockedAnswer)
+	}
+	if out := argAfter(m.floats[0], "--out"); !fileExists(out + ".done") {
+		t.Errorf("answer route must write %s.done to close the float", out)
+	}
+}
+
+// TestLaunch_ClassifyErrorEscalates asserts a classify error degrades to the
+// escalate route (a docked session pane), never blocking the user.
+func TestLaunch_ClassifyErrorEscalates(t *testing.T) {
+	m := &launchMux{answer: "do a thing"}
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
+	classify := fakeClassify(author.Classification{Kind: author.KindEscalate}, os.ErrDeadlineExceeded)
+
+	if code := launch(m, "/bin/ai-playbook", req, classify); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	if len(m.docked) != 1 || m.docked[0][1] != "session" {
+		t.Fatalf("classify error must escalate to a docked session, got docked=%v", m.docked)
+	}
 }
 
 // TestLaunch_CancelNoSession asserts that cancelling the request float exits
 // cleanly (0) and spawns NO docked session pane.
 func TestLaunch_CancelNoSession(t *testing.T) {
 	m := &launchMux{floatCancel: true}
-	code := launch(m, "/bin/ai-playbook", capture.Request{CWD: "/x"})
+	code := launch(m, "/bin/ai-playbook", capture.Request{CWD: "/x"}, escalateClassify())
 	if code != 0 {
 		t.Fatalf("cancelled launch exit = %d, want 0", code)
 	}
 	if len(m.docked) != 0 {
 		t.Fatalf("cancel should spawn no docked pane, got %d", len(m.docked))
+	}
+	if m.typedCount != 0 {
+		t.Fatalf("cancel should type nothing into the origin pane, got %d", m.typedCount)
+	}
+	// On cancel the launcher writes NO .done (the float exits itself on its .cancel).
+	if out := argAfter(m.floats[0], "--out"); fileExists(out + ".done") {
+		t.Errorf("cancel must NOT write %s.done", out)
 	}
 }
 
@@ -192,4 +319,10 @@ func argAfter(ss []string, key string) string {
 		}
 	}
 	return ""
+}
+
+// fileExists reports whether path exists (used to assert the <out>.done marker).
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
