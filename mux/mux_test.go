@@ -177,8 +177,29 @@ func TestSpawnInputFloat_AbsoluteSizesAndFlags(t *testing.T) {
 
 func TestDefaultProfile_TypeIntoArgv(t *testing.T) {
 	tpl := config.Default().Mux
-	got := tpl.Substitute(tpl.TypeIntoPane, config.Subst{Text: "git status"})
-	assertArgv(t, got, []string{"zellij", "action", "write-chars", "git status"})
+	got := tpl.Substitute(tpl.TypeIntoPane, config.Subst{Pane: "terminal_3", Text: "git status"})
+	assertArgv(t, got, []string{"zellij", "action", "write-chars", "--pane-id", "terminal_3", "git status"})
+}
+
+// With a pane id, TypeInto resolves the targeted argv (--pane-id <pane>) so the
+// write is focus-independent. The command route always passes req.PaneID.
+func TestTypeInto_TargetsPaneArgv(t *testing.T) {
+	tr := FromConfig(config.Default()).(*templated)
+	got := tr.typeIntoArgv("terminal_3", "git log")
+	assertArgv(t, got, []string{"zellij", "action", "write-chars", "--pane-id", "terminal_3", "git log"})
+}
+
+// With an empty pane, TypeInto strips the pane-id flag entirely (no stray empty
+// "--pane-id"), falling back to a focused write.
+func TestTypeInto_EmptyPaneFallsBackToFocused(t *testing.T) {
+	tr := FromConfig(config.Default()).(*templated)
+	got := tr.typeIntoArgv("", "git log")
+	assertArgv(t, got, []string{"zellij", "action", "write-chars", "git log"})
+	for _, a := range got {
+		if a == "--pane-id" || a == "" {
+			t.Fatalf("empty pane must not leave a dangling --pane-id: %q", got)
+		}
+	}
 }
 
 // SpawnFloat with no command errors (no malformed spawn).

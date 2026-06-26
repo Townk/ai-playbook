@@ -286,16 +286,21 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 	switch cls.Kind {
 	case author.KindCommand:
 		// Stage the command into the ORIGIN pane with NO trailing CR (mux.TypeInto →
-		// `zellij action write-chars`), so it lands at the prompt for the user to
-		// review and run. No docked/floating pane is opened.
+		// `zellij action write-chars --pane-id <pane>`), so it lands at the prompt for
+		// the user to review and run. The explicit pane id makes the write
+		// focus-independent (the focused pane is the closing thinking float). No
+		// docked/floating pane is opened.
+		dbg("launch: route=command pane=%q contentLen=%d", req.PaneID, len(cls.Content))
 		if terr := m.TypeInto(req.PaneID, cls.Content); terr != nil {
 			dbg("launch: TypeInto origin pane failed: %v", terr)
 		}
 		code = 0
 	case author.KindAnswer:
 		// Render the short prose answer in a docked pager (no run blocks → just prose).
+		dbg("launch: route=answer")
 		code = spawnAnswer(m, selfExe, req, cls.Content)
 	default: // escalate (incl. empty/unknown kind)
+		dbg("launch: route=escalate kind=%q", cls.Kind)
 		code = spawnSession(m, selfExe, req)
 	}
 

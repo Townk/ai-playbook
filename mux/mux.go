@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strconv"
+	"strings"
 
 	"ai-playbook/config"
 )
@@ -195,10 +196,14 @@ func (t *templated) SpawnDocked(opts SpawnOptions) error {
 // SpawnPane is deferred; callers should use SpawnDocked or SpawnFloat.
 func (t *templated) SpawnPane(opts SpawnOptions) error { return ErrNotImplemented }
 
-// TypeInto types text into the focused pane via the type-into-pane template —
-// the `play` action. Best-effort: stdio is detached. pane is advisory.
+// TypeInto types text into a pane via the type-into-pane template — the `play`
+// action. Best-effort: stdio is detached. When pane is non-empty the default
+// template targets it explicitly (`--pane-id {pane}`), so the write is
+// focus-independent. When pane is empty (off-zellij / inline) the pane-id flag is
+// stripped so we never emit a stray empty `--pane-id`, falling back to a write
+// into the FOCUSED pane.
 func (t *templated) TypeInto(pane, text string) error {
-	argv := t.tpl.Substitute(t.tpl.TypeIntoPane, config.Subst{Pane: pane, Text: text})
+	argv := t.typeIntoArgv(pane, text)
 	if len(argv) == 0 {
 		return errors.New("mux: type-into-pane template is empty")
 	}
@@ -207,4 +212,19 @@ func (t *templated) TypeInto(pane, text string) error {
 	cmd.Stderr = nil
 	cmd.Stdin = nil
 	return cmd.Run()
+}
+
+// typeIntoArgv resolves the type-into-pane template to argv. When pane is empty,
+// the pane-id flag+placeholder pair (long and short forms) is stripped so the
+// resolved argv has no dangling, valueless `--pane-id` — a focused write.
+func (t *templated) typeIntoArgv(pane, text string) []string {
+	tpl := t.tpl.TypeIntoPane
+	if pane == "" {
+		tpl = strings.NewReplacer(
+			"--pane-id {pane}", "",
+			"--pane-id={pane}", "",
+			"-p {pane}", "",
+		).Replace(tpl)
+	}
+	return t.tpl.Substitute(tpl, config.Subst{Pane: pane, Text: text})
 }

@@ -78,7 +78,12 @@ func Default() *Config {
 			OpenInputFloat: `zellij action new-pane --floating --close-on-exit --name "" --borderless true --pinned true --width {width} --height {height} {cwdarg} -- {cmd}`,
 			OpenDockedPane: "zellij action new-pane --direction right --close-on-exit {cwdarg} {namearg} -- {cmd}",
 			DumpScreen:     "zellij action dump-screen {panearg}",
-			TypeIntoPane:   "zellij action write-chars {text}",
+			// Target the ORIGIN pane explicitly via --pane-id (focus-independent), so
+			// the command lands in the pane the request came from even though the
+			// closing thinking float is the focused pane at that moment. mux.TypeInto
+			// drops the "--pane-id {pane}" pair when pane is empty (off-zellij/inline),
+			// falling back to a focused write.
+			TypeIntoPane: "zellij action write-chars --pane-id {pane} {text}",
 		},
 		Agent: Agent{
 			Harness: "claude",
