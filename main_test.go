@@ -12,7 +12,101 @@ import (
 	"ai-playbook/cache"
 	"ai-playbook/capture"
 	"ai-playbook/tools"
+	"ai-playbook/triage"
+	"ai-playbook/ui"
 )
+
+// TestOpenSessionAsync_DeliversOnce asserts the async session opener returns a
+// buffered (cap 1) channel that yields the built session exactly once, so the
+// cached-render path can proceed without blocking on the shell's blank-pane startup.
+func TestOpenSessionAsync_DeliversOnce(t *testing.T) {
+	minimalZDOTDIR(t)
+	ch := openSessionAsync(capture.Request{ProjectRoot: t.TempDir()})
+	if c := cap(ch); c != 1 {
+		t.Errorf("openSessionAsync channel cap = %d, want 1 (buffered so the goroutine never blocks)", c)
+	}
+	select {
+	case sess := <-ch:
+		if sess == nil {
+			t.Fatal("openSessionAsync delivered nil (driver/tools setup failed)")
+		}
+		defer sess.close()
+		if sess.drv == nil {
+			t.Error("delivered session has no shared driver")
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("openSessionAsync did not deliver a session")
+	}
+}
+
+// TestReengageReady_NilSession_Degraded asserts the cached-replay ready builder maps
+// a failed background open (nil session) to an empty OrchReady{} — the signal the ui
+// uses to clear pending state and stay degraded (shell buttons disabled) rather than
+// hang.
+func TestReengageReady_NilSession_Degraded(t *testing.T) {
+	got := reengageReady(triage.Decision{}, capture.Request{}, nil, "")
+	if got.Orch != nil {
+		t.Error("nil session: OrchReady.Orch should be nil (degraded)")
+	}
+	if got.Asker != nil {
+		t.Error("nil session: OrchReady.Asker should be nil (degraded)")
+	}
+}
+
+// TestReengageReady_LiveSession_BuildsOrch asserts that a live session yields a fully
+// wired OrchReady: a non-nil orchestrator (built via ui.BuildOrch with the session's
+// shared driver + the re-engagement context) and the request-input-float asker.
+func TestReengageReady_LiveSession_BuildsOrch(t *testing.T) {
+	minimalZDOTDIR(t)
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir())
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()})
+	if sess == nil {
+		t.Fatal("openSession returned nil (driver/tools setup failed)")
+	}
+	defer sess.close()
+
+	got := reengageReady(triage.Decision{}, capture.Request{ProjectRoot: t.TempDir()}, sess, "/tmp")
+	if got.Orch == nil {
+		t.Error("live session: OrchReady.Orch should be non-nil")
+	}
+	if sess.selfExe != "" && got.Asker == nil {
+		t.Error("live session with selfExe: OrchReady.Asker should be non-nil")
+	}
+}
+
+// TestServeCachedReadyLifecycle_NilSession exercises the serveCachedPlaybook ready
+// goroutine's lifecycle wiring (held/done) against a failed background open: the
+// goroutine reads the nil session off sessCh, records it in held, delivers the
+// degraded OrchReady{}, and closes done — so the post-ui cleanup (<-done; close held)
+// never hangs and never panics. Mirrors the inline goroutine in serveCachedPlaybook.
+func TestServeCachedReadyLifecycle_NilSession(t *testing.T) {
+	sessCh := make(chan *session, 1)
+	sessCh <- nil // background open failed
+
+	readyCh := make(chan ui.OrchReady, 1)
+	held := (*session)(nil)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sess := <-sessCh
+		held = sess
+		readyCh <- reengageReady(triage.Decision{}, capture.Request{}, sess, "")
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("ready goroutine did not close done")
+	}
+	if held != nil {
+		t.Error("held should be nil after a failed background open")
+	}
+	if got := <-readyCh; got.Orch != nil || got.Asker != nil {
+		t.Error("failed open should deliver a degraded OrchReady{}")
+	}
+	// Cleanup is a no-op on a nil session — must not panic.
+	held.close()
+}
 
 // TestAnswerRegenReCachesAnswer exercises the cached-ANSWER reload closure
 // (answerRegenFunc): it re-runs the cheap classify (faked via the answerClassify

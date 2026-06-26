@@ -857,21 +857,43 @@ func runSession(req capture.Request, title string) int {
 	// claude harness reaches it via the MCP adapter (`ai-playbook mcp --socket`).
 	// A failed setup degrades to no-tools authoring (sess is nil) — the ui then
 	// opens its own driver, the pre-stage-5 behavior.
-	sess := openSession(req)
-	dbg("runSession: openSession sess!=nil=%v (agent tools %s)", sess != nil,
-		map[bool]string{true: "enabled", false: "DISABLED"}[sess != nil])
-	if sess != nil {
-		defer sess.close()
-	}
+	// Open the session ASYNCHRONOUSLY: driver.Open spawns a shell that sources the
+	// user's full profile (seconds of blank-pane startup). On a cache HIT we don't
+	// want to pay that before rendering, so the session is built in the background
+	// and the render path proceeds immediately; serveCachedPlaybook delivers the
+	// orchestrator (built from the session's driver) to the ui once it lands.
+	sessCh := openSessionAsync(req)
 
 	switch d.Outcome {
 	case triage.Hit:
 		dbg("runSession: serving cached playbook")
-		return serveCachedPlaybook(d, req, sess, title)
+		// serveCachedPlaybook OWNS the session: it renders instantly, waits for the
+		// background open, and closes the session after ui.Main returns.
+		return serveCachedPlaybook(d, req, sessCh, title)
 	default:
+		// MISS: authoring needs the session up front (its driver-open wait is the
+		// pre-existing behavior, covered by the authoring spinner). Block for it.
+		sess := <-sessCh
+		dbg("runSession: openSession sess!=nil=%v (agent tools %s)", sess != nil,
+			map[bool]string{true: "enabled", false: "DISABLED"}[sess != nil])
+		if sess != nil {
+			defer sess.close()
+		}
 		dbg("runSession: authoring playbook (this runs the agent)")
 		return authorPlaybook(req, d, c, noCache, sess, title)
 	}
+}
+
+// openSessionAsync runs openSession in the background and delivers the result
+// (the *session, or nil on failure) on a buffered (cap 1) channel exactly once.
+// It returns the channel immediately so the caller can render before the shell's
+// blank-pane startup completes. The buffer guarantees the goroutine never blocks
+// on the send even if the caller never reads (e.g. the cached path closes after
+// ui.Main via the done latch), so there's no leak.
+func openSessionAsync(req capture.Request) <-chan *session {
+	ch := make(chan *session, 1)
+	go func() { ch <- openSession(req) }()
+	return ch
 }
 
 // prefillTemplate ports assist::prefill_template: a ready-to-submit request
@@ -1383,7 +1405,33 @@ func strippedAmendBase(body string) string {
 	return body
 }
 
-func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session, title string) int {
+// reengageReady builds the OrchReady the cached-replay background goroutine delivers
+// once the async session open lands. A nil session (the background open failed) → an
+// empty OrchReady{} so the ui clears its pending state and stays degraded (shell
+// buttons remain disabled) instead of hanging. Otherwise it folds the re-engagement
+// context + the session's shared shell driver into a live orchestrator (built with
+// ui's internal cliMux via ui.BuildOrch) and the request-input-float asker that backs
+// the served pager's `f` keybind. This is the single logic site for the bundle the
+// async path used to stash via SetReengage/SetDriver/SetAsker.
+func reengageReady(d triage.Decision, req capture.Request, sess *session, cwd string) ui.OrchReady {
+	if sess == nil {
+		return ui.OrchReady{}
+	}
+	re := &orchestrator.Reengage{
+		Req:         req,
+		Agent:       sess.authoringAgent(),
+		Events:      buildReengageEvents(req, sess),
+		Cache:       cache.Open(),
+		CtxHash:     d.CtxHash,
+		ReqHash:     d.ReqHash,
+		RequestJSON: requestJSON(req),
+		Metadata:    buildMetadataSeam(sess),
+		EnvLookup:   buildEnvLookup(sess.drv),
+	}
+	return ui.OrchReady{Orch: ui.BuildOrch(sess.drv, re), Asker: sess.asker(cwd)}
+}
+
+func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *session, title string) int {
 	raw, err := os.ReadFile(d.Path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: read cache entry: %v\n", err)
@@ -1413,35 +1461,33 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session, 
 		cwd = req.CWD
 	}
 
-	// Re-engagement context for the cached replay (stage 4c-ii): the cached pill's
-	// regenerate button (and the w-key wrap-up / verify follow-up) re-author the
-	// ORIGINAL request in-process. regenerate re-stores the fresh playbook under the
-	// SAME keys so the next identical request hits the refreshed entry — matching
-	// ai-assist-regenerate. Stashed for ui.Main to attach to the orchestrator.
-	var replayDrv *driver.Driver
-	if sess != nil {
-		replayDrv = sess.drv
-	}
-	ui.SetReengage(&orchestrator.Reengage{
-		Req:         req,
-		Agent:       sess.authoringAgent(),
-		Events:      buildReengageEvents(req, sess),
-		Cache:       cache.Open(),
-		CtxHash:     d.CtxHash,
-		ReqHash:     d.ReqHash,
-		RequestJSON: requestJSON(req),
-		Metadata:    buildMetadataSeam(sess),
-		EnvLookup:   buildEnvLookup(replayDrv),
-	})
-
-	// Reuse the session's shared driver for the cached replay's run blocks (the
-	// same shell the re-engagement agent's tools backend drives), stashed for
-	// ui.Main to consume. nil session → ui.Main opens its own driver. Re-engagement
-	// during the cached replay now streams the model's live reasoning + tool activity
-	// via Reengage.Events (part 2b), with the text Agent as the fallback.
-	if sess != nil {
-		ui.SetDriver(sess.drv)
-	}
+	// ASYNC orchestrator delivery (cached playbooks render instantly): the session's
+	// shell driver is still opening in the background (openSessionAsync). Rather than
+	// block here — which would re-introduce the blank-pane startup wait before the
+	// cached playbook appears — we render IMMEDIATELY and hand the ui an OrchReady
+	// channel. A goroutine waits for the background open, builds the orchestrator
+	// (re-engagement context + shared driver folded in), and delivers it on readyCh;
+	// the ui enables the shell-action buttons once it lands. A nil session (background
+	// open failed) → an empty OrchReady{} so the ui clears the pending state and stays
+	// degraded instead of hanging.
+	//
+	// The re-engagement context (stage 4c-ii): the cached pill's regenerate button
+	// (and the w-key wrap-up / verify follow-up) re-author the ORIGINAL request
+	// in-process, re-storing the fresh playbook under the SAME keys so the next
+	// identical request hits the refreshed entry — matching ai-assist-regenerate.
+	//
+	// held captures the session for cleanup after ui.Main returns; it is written
+	// before close(done) and read only after <-done, so the access is race-free.
+	readyCh := make(chan ui.OrchReady, 1)
+	held := (*session)(nil)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		sess := <-sessCh
+		held = sess
+		readyCh <- reengageReady(d, req, sess, cwd)
+	}()
+	ui.SetPendingReady(readyCh)
 
 	// Stage 4 (spec §C amend-on-rerun): this is a cache HIT — we are SERVING an
 	// existing playbook for this context. Stash its body as the served base so a
@@ -1459,11 +1505,10 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session, 
 	// at persist — so strip the playbook front matter before stashing the base.
 	ui.SetServedBase(strippedAmendBase(body))
 
-	// Stage 5 (spec §D): stash the request-input-float asker so the served playbook's
-	// `f` keybind proactively amends it (base = the displayed content, change = the
-	// user's typed adjustment) → REPLACE draft → `w` to re-cache. nil session / no
-	// selfExe → nil → `f` no-ops.
-	ui.SetAsker(sess.asker(cwd))
+	// NB: the request-input-float asker (the `f` keybind), the re-engagement context,
+	// and the shared driver are NO LONGER stashed here via SetAsker/SetReengage/
+	// SetDriver — they all depend on the still-opening session, so they're folded into
+	// the OrchReady the background goroutine delivers on readyCh once the open lands.
 
 	// Reuse the `run` subcommand entrypoint in-process by shaping os.Args the way
 	// ui.Main() parses them (os.Args[1]="run", flags from os.Args[2:]).
@@ -1481,7 +1526,17 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session, 
 	}
 	argv = append(argv, tmp)
 	os.Args = argv
-	return ui.Main()
+	code := ui.Main()
+
+	// Close the session exactly once, after the ui exits: the background goroutine
+	// always sends on readyCh and then closes done (openSessionAsync always delivers),
+	// so <-done never hangs — whether or not the orchestrator went live. held is set
+	// by the goroutine before close(done), so reading it after <-done is race-free.
+	<-done
+	if held != nil {
+		held.close()
+	}
+	return code
 }
 
 func dirExists(p string) bool { fi, err := os.Stat(p); return err == nil && fi.IsDir() }

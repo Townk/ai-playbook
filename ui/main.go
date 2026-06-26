@@ -121,6 +121,21 @@ var pendingReady <-chan OrchReady
 // waits for the orchestrator on the channel. Mirrors SetReengage/SetDriver.
 func SetPendingReady(ch <-chan OrchReady) { pendingReady = ch }
 
+// BuildOrch constructs the in-process orchestrator the way ui.Main does, wired to
+// the ui-internal cliMux + the active float mux. The async-startup path (main.go's
+// serveCachedPlaybook) can't build this itself — the cliMux is unexported — so it
+// hands the driver + re-engagement context here off the background goroutine and
+// delivers the result over OrchReady. When re is non-nil the orchestrator is wired
+// for re-engagement (the cached replay's regenerate/wrap-up). This is the SINGLE
+// construction site: ui.Main's sync path calls it too.
+func BuildOrch(d *driver.Driver, re *orchestrator.Reengage) *orchestrator.Orchestrator {
+	orch := orchestrator.New(d, &cliMux{}).WithFloat(mux.Load())
+	if re != nil {
+		orch.WithReengage(re)
+	}
+	return orch
+}
+
 // loadPlaybookSource reads a finalized-playbook file (run-from-file / cached-serve),
 // strips any leading YAML front matter AND any preamble above the first H1 title,
 // and returns a reader over the stripped body, the playbook title (front-matter
@@ -316,10 +331,7 @@ func Main() int {
 				}
 			}
 			if d != nil {
-				orch = orchestrator.New(d, &cliMux{}).WithFloat(mux.Load())
-				if pendingReengage != nil {
-					orch.WithReengage(pendingReengage)
-				}
+				orch = BuildOrch(d, pendingReengage)
 			}
 		}
 	}
