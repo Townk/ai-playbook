@@ -309,10 +309,10 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 	case author.KindAnswer:
 		// Render the short prose answer in a docked pager (no run blocks → just prose).
 		dbg("launch: route=answer")
-		return spawnAnswer(m, selfExe, req, cls.Content)
+		return spawnAnswer(m, selfExe, req, cls.Content, cls.Title)
 	default: // escalate (incl. empty/unknown kind)
 		dbg("launch: route=escalate kind=%q", cls.Kind)
-		return spawnSession(m, selfExe, req)
+		return spawnSession(m, selfExe, req, cls.Title)
 	}
 }
 
@@ -366,7 +366,7 @@ func writeDoneFile(outFile string) {
 // <answer.md>`. The pager just renders the prose (no run blocks, no authoring loop).
 // The temp file is read asynchronously by the spawned pane, so it is NOT removed
 // here (mirrors spawnSession's request-JSON hand-off).
-func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content string) int {
+func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content, title string) int {
 	f, err := os.CreateTemp("", "aapb-answer-*.md")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
@@ -384,7 +384,13 @@ func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content string)
 	if cwd == "" {
 		cwd = req.CWD
 	}
-	runCmd := []string{selfExe, "run", f.Name()}
+	runCmd := []string{selfExe, "run"}
+	if title != "" {
+		// The classify-supplied short label becomes the pager header (overrides the
+		// H1/front-matter title, which a prose answer has none of).
+		runCmd = append(runCmd, "--title", title)
+	}
+	runCmd = append(runCmd, f.Name())
 	dbg("spawnAnswer: cwd=%q answerPath=%q cmd=%q", cwd, f.Name(), runCmd)
 	if err := m.SpawnDocked(mux.SpawnOptions{
 		Cmd:  runCmd,
@@ -418,7 +424,7 @@ func runInline(req capture.Request) int {
 		fmt.Println(cls.Content)
 		return 0
 	default:
-		return runSession(req)
+		return runSession(req, "")
 	}
 }
 
@@ -426,7 +432,7 @@ func runInline(req capture.Request) int {
 // persistent docked pane running `ai-playbook session --request <json>`. The
 // launcher then exits — the docked pane is the session. The temp file is NOT
 // removed here (the spawned pane reads it asynchronously and removes it itself).
-func spawnSession(m mux.Mux, selfExe string, req capture.Request) int {
+func spawnSession(m mux.Mux, selfExe string, req capture.Request, title string) int {
 	f, err := os.CreateTemp("", "aapb-request-*.json")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
@@ -445,6 +451,11 @@ func spawnSession(m mux.Mux, selfExe string, req capture.Request) int {
 		cwd = req.CWD
 	}
 	sessionCmd := []string{selfExe, "session", "--request", f.Name()}
+	if title != "" {
+		// The classify-supplied short label becomes the docked session's working
+		// header (the pager seeds m.title; a finalized-playbook H1 may update it later).
+		sessionCmd = append(sessionCmd, "--title", title)
+	}
 	if dbgPath != "" {
 		// Carry the debug-log path into the spawned pane explicitly — the pane
 		// inherits the zellij server's env, not ours, so AI_ASSIST_DEBUG_LOG may
@@ -472,9 +483,10 @@ func spawnSession(m mux.Mux, selfExe string, req capture.Request) int {
 // capturing in-process (so `ai-playbook session` is also usable standalone).
 func sessionMain() int {
 	fs := flag.NewFlagSet("session", flag.ExitOnError)
-	var requestPath, debugLog string
+	var requestPath, debugLog, titleFlag string
 	fs.StringVar(&requestPath, "request", "", "path to the captured request JSON (written by the launcher)")
 	fs.StringVar(&debugLog, "debug-log", "", "append a debug trace to this file (set by the launcher)")
+	fs.StringVar(&titleFlag, "title", "", "working pane-header title (the classify-supplied label)")
 	fs.Parse(os.Args[2:])
 	if debugLog == "" {
 		debugLog = os.Getenv("AI_ASSIST_DEBUG_LOG")
@@ -506,7 +518,7 @@ func sessionMain() int {
 			UserRequest: os.Getenv("AI_ASSIST_USER_REQUEST"),
 		})
 	}
-	return runSession(req)
+	return runSession(req, titleFlag)
 }
 
 // runSession is the session BODY (was the inline troubleshoot): route the request
@@ -515,7 +527,7 @@ func sessionMain() int {
 // into the same render+drive path, and cache it on completion. It owns the shared
 // driver + tools backend (openSession) so authoring and the run blocks drive the
 // SAME live shell.
-func runSession(req capture.Request) int {
+func runSession(req capture.Request, title string) int {
 	dbgEnv("runSession")
 	c := cache.Open()
 	noCache := os.Getenv("AI_ASSIST_NO_CACHE") != ""
@@ -539,10 +551,10 @@ func runSession(req capture.Request) int {
 	switch d.Outcome {
 	case triage.Hit:
 		dbg("runSession: serving cached playbook")
-		return serveCachedPlaybook(d, req, sess)
+		return serveCachedPlaybook(d, req, sess, title)
 	default:
 		dbg("runSession: authoring playbook (this runs the agent)")
-		return authorPlaybook(req, d, c, noCache, sess)
+		return authorPlaybook(req, d, c, noCache, sess, title)
 	}
 }
 
@@ -706,7 +718,7 @@ func (s *session) writeMCPConfig() (path string, remove func()) {
 // captured body via cache.Store(ctxHash, reqHash, "playbook", body, …) alongside
 // the original request.json sidecar. Storing respects triage's decision: skipped
 // when the cache was disabled (unreliable key) or bypassed (no-cache).
-func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, sess *session) int {
+func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, sess *session, title string) int {
 	cwd := req.ProjectRoot
 	if cwd == "" {
 		cwd = req.CWD
@@ -755,7 +767,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		// Author via the existing text path so authoring still works.
 		dbg("authorPlaybook: AuthorEvents failed (%v); falling back to text author path", err)
 		removeMCP()
-		return authorPlaybookText(req, d, c, noCache, reengage, cwd, sharedDrv)
+		return authorPlaybookText(req, d, c, noCache, reengage, cwd, sharedDrv, title)
 	}
 
 	// Fan the events into the playbook reader + activity feed; Body() holds the
@@ -766,6 +778,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 
 	code := ui.RunStream(reader, ui.StreamOptions{
 		Harness:  "Claude Code",
+		Title:    title,
 		Cwd:      cwd,
 		Driver:   sharedDrv,
 		Reengage: reengage,
@@ -917,7 +930,7 @@ const defaultEnvDumpTimeout = 10 * time.Second
 // io.ReadCloser-based author.Author (the text harness invocation) when the owned
 // AuthorEvents stream can't start (harness binary missing / unsupported). It tees
 // the produced playbook into a buffer for the cache, exactly as before part 2a.
-func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, reengage *orchestrator.Reengage, cwd string, sharedDrv *driver.Driver) int {
+func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, reengage *orchestrator.Reengage, cwd string, sharedDrv *driver.Driver, title string) int {
 	stream, err := author.Author(req, reengage.Agent)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: author: %v\n", err)
@@ -928,6 +941,7 @@ func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, 
 	var body bytes.Buffer
 	code := ui.RunStream(stream, ui.StreamOptions{
 		Harness:  "Claude Code",
+		Title:    title,
 		Cwd:      cwd,
 		Tee:      &body,
 		Driver:   sharedDrv,
@@ -1046,7 +1060,7 @@ func strippedAmendBase(body string) string {
 	return body
 }
 
-func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session) int {
+func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session, title string) int {
 	raw, err := os.ReadFile(d.Path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: read cache entry: %v\n", err)
@@ -1136,6 +1150,11 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sess *session) 
 	}
 	if cwd != "" {
 		argv = append(argv, "--cwd", cwd)
+	}
+	if title != "" {
+		// Carry the classify-supplied label as the served pager's header (overrides the
+		// cached playbook's own H1 until/unless the user regenerates).
+		argv = append(argv, "--title", title)
 	}
 	argv = append(argv, tmp)
 	os.Args = argv

@@ -311,6 +311,58 @@ func TestLaunch_AnswerRoute(t *testing.T) {
 	}
 }
 
+// TestLaunch_AnswerRouteCarriesTitle asserts the classify-supplied title is passed
+// to the answer pager as `--title <title>` (it becomes the pane header).
+func TestLaunch_AnswerRouteCarriesTitle(t *testing.T) {
+	fastFloatWait(t)
+	m := &launchMux{answer: "what is HEAD?"}
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
+	classify := fakeClassify(author.Classification{Kind: author.KindAnswer, Content: "HEAD is the current commit.", Title: "What Is HEAD"}, nil)
+
+	if code := launch(m, "/bin/ai-playbook", req, classify); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	if len(m.docked) != 1 {
+		t.Fatalf("expected 1 docked pager pane, got %d", len(m.docked))
+	}
+	if got := argAfter(m.docked[0], "--title"); got != "What Is HEAD" {
+		t.Errorf("answer pager --title = %q, want %q\nargv: %v", got, "What Is HEAD", m.docked[0])
+	}
+}
+
+// TestLaunch_EscalateRouteCarriesTitle asserts the classify-supplied title is
+// passed to the docked session as `--title <title>` (the working pane header).
+func TestLaunch_EscalateRouteCarriesTitle(t *testing.T) {
+	fastFloatWait(t)
+	m := &launchMux{answer: "fix the build"}
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
+	classify := fakeClassify(author.Classification{Kind: author.KindEscalate, Title: "Fix Gradle Build"}, nil)
+
+	if code := launch(m, "/bin/ai-playbook", req, classify); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	if len(m.docked) != 1 || m.docked[0][1] != "session" {
+		t.Fatalf("expected 1 docked session pane, got docked=%v", m.docked)
+	}
+	if got := argAfter(m.docked[0], "--title"); got != "Fix Gradle Build" {
+		t.Errorf("session --title = %q, want %q\nargv: %v", got, "Fix Gradle Build", m.docked[0])
+	}
+}
+
+// TestLaunch_NoTitleNoFlag asserts that an empty classify title omits the --title
+// flag entirely (the pane keeps its default/H1 header).
+func TestLaunch_NoTitleNoFlag(t *testing.T) {
+	fastFloatWait(t)
+	m := &launchMux{answer: "fix it"}
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj"}
+	if code := launch(m, "/bin/ai-playbook", req, escalateClassify()); code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	if contains(m.docked[0], "--title") {
+		t.Errorf("empty title must omit --title, got argv: %v", m.docked[0])
+	}
+}
+
 // TestLaunch_ClassifyErrorEscalates asserts a classify error degrades to the
 // escalate route (a docked session pane), never blocking the user.
 func TestLaunch_ClassifyErrorEscalates(t *testing.T) {

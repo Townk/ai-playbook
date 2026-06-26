@@ -22,9 +22,14 @@ import (
 // the stream is parsed incrementally, rendered, and its run blocks are driven by
 // the in-process orchestrator against the user's real shell.
 type StreamOptions struct {
-	Harness string    // header label (default "agent")
-	Cwd     string    // working dir for the in-process driver (default $PWD)
-	Tee     io.Writer // if non-nil, every byte read from Src is mirrored here
+	Harness string // header label (default "agent")
+	// Title, when set, is the WORKING pane header shown while the playbook is being
+	// authored (the classify-supplied short label for an escalated request). A later
+	// finalized-playbook H1 (on stream EOF) may still update it. Empty → the default
+	// "ai-assist — <harness>" header.
+	Title string
+	Cwd   string    // working dir for the in-process driver (default $PWD)
+	Tee   io.Writer // if non-nil, every byte read from Src is mirrored here
 	// Driver, when non-nil, is the SESSION's shared shell driver — the same one
 	// the authoring agent's tools backend drives, so the playbook's run blocks
 	// execute in the exact shell the agent diagnosed in. When nil, RunStream opens
@@ -88,6 +93,7 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 		}
 		m := newModel(harness, b.String())
 		m.width = 100
+		m.title = opts.Title
 		fmt.Print(m.staticRender())
 		return 0
 	}
@@ -122,6 +128,7 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 	}
 
 	m := newModel(harness, "")
+	m.title = opts.Title
 	m.orch = orch
 	m.thinking = true
 	m.streaming = true

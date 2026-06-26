@@ -1,9 +1,11 @@
 package author
 
 import (
+	"encoding/json"
 	"os/exec"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"ai-playbook/capture"
 	"ai-playbook/config"
@@ -36,7 +38,10 @@ func TestClassifyPrompt(t *testing.T) {
 		"fence",     // no markdown fence directive
 		`"kind"`,    // schema key
 		`"content"`, // schema key
-		"command",   // the three kinds
+		`"title"`,   // schema key (the ≤30-char pane-header label)
+		"30",        // the title length bound
+		"Title Case",
+		"command", // the three kinds
 		"answer",
 		"escalate",
 		"SINGLE command",         // command content rule
@@ -81,6 +86,46 @@ func TestClassifyRequest_SuccessCommandNotDowngraded(t *testing.T) {
 	if cls.Content == "" {
 		t.Errorf("command content dropped; want the suggested command")
 	}
+}
+
+// A classify response carrying an over-long title is trimmed + truncated to 30
+// runes (rune-safe), and the surviving title is carried on the Classification.
+func TestClassifyRequest_TitleTruncatedTo30Runes(t *testing.T) {
+	// 50-char title + surrounding whitespace; must come back ≤30 runes, trimmed.
+	const long = "   This Title Is Far Too Long To Fit In A Pane Header   "
+	out := `{"kind":"answer","content":"ok","title":` + jsonQuote(long) + `}`
+	cls, err, _ := runClassify(t, sampleClassifyRequest(), out, "")
+	if err != nil {
+		t.Fatalf("ClassifyRequest: %v", err)
+	}
+	if n := len([]rune(cls.Title)); n > 30 {
+		t.Errorf("title len = %d runes, want ≤30 (title=%q)", n, cls.Title)
+	}
+	if strings.TrimSpace(cls.Title) != cls.Title {
+		t.Errorf("title has surrounding whitespace: %q", cls.Title)
+	}
+	if !strings.HasPrefix(cls.Title, "This Title Is") {
+		t.Errorf("title = %q, want the leading words preserved", cls.Title)
+	}
+}
+
+// A multi-byte title is truncated on a RUNE boundary, never mid-rune.
+func TestTruncateTitle_RuneSafe(t *testing.T) {
+	// 40 accented runes (2 bytes each in UTF-8): a byte-based cut would corrupt one.
+	got := truncateTitle(strings.Repeat("é", 40))
+	if n := len([]rune(got)); n != 30 {
+		t.Errorf("rune count = %d, want 30", n)
+	}
+	if !utf8.ValidString(got) {
+		t.Errorf("truncated title is not valid UTF-8: %q", got)
+	}
+}
+
+// jsonQuote returns s as a JSON string literal (so the test embeds arbitrary
+// titles into the fake harness output safely).
+func jsonQuote(s string) string {
+	b, _ := json.Marshal(s)
+	return string(b)
 }
 
 // runClassify drives ClassifyRequest against a fake harness emitting resultText,

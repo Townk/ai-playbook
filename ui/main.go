@@ -97,6 +97,17 @@ func loadPlaybookSource(file string) (r io.Reader, title, subtitle string, err e
 	return strings.NewReader(body), title, subtitle, nil
 }
 
+// effectiveTitle resolves the pager header title: an explicit --title flag wins
+// (it OVERRIDES the H1/front-matter-derived title — used by the answer/escalate
+// panes, where the classify supplies a short label and a prose answer has no H1),
+// otherwise the title derived from the playbook document (empty → default header).
+func effectiveTitle(flagTitle, derived string) string {
+	if strings.TrimSpace(flagTitle) != "" {
+		return flagTitle
+	}
+	return derived
+}
+
 // Main is the entrypoint for the `ai-playbook run` subcommand. It parses flags
 // from os.Args[2:] (os.Args[1] is the "run" subcommand) and returns an exit
 // code; the caller is responsible for os.Exit.
@@ -113,6 +124,8 @@ func Main() int {
 	fs := flag.NewFlagSet("run", flag.ExitOnError)
 	var harness string
 	fs.StringVar(&harness, "harness", "agent", "harness label for the header")
+	var titleFlag string
+	fs.StringVar(&titleFlag, "title", "", "explicit pane header title (overrides the H1/front-matter title)")
 	var fifoPath string
 	fs.StringVar(&fifoPath, "actions-fifo", "", "FIFO path to write button actions to")
 	var inputFifo string
@@ -204,7 +217,7 @@ func Main() int {
 		m.fifoPath = fifoPath
 		m.isCached = isCached
 		m.cachedAt = cachedAt
-		m.title = playbookTitle
+		m.title = effectiveTitle(titleFlag, playbookTitle)
 		m.subtitle = playbookSubtitle
 		fmt.Print(m.staticRender())
 		return 0
@@ -265,7 +278,7 @@ func Main() int {
 	// during bubbletea's auto-detection, causing colors to be downsampled.
 	// The UI targets a truecolor Catppuccin terminal, so we pin it explicitly.
 	m := newModel(harness, "")
-	m.title = playbookTitle
+	m.title = effectiveTitle(titleFlag, playbookTitle)
 	m.subtitle = playbookSubtitle
 	m.fifoPath = fifoPath
 	m.inputFifoPath = inputFifo

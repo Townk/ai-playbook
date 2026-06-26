@@ -21,7 +21,14 @@ import (
 type Classification struct {
 	Kind    string `json:"kind"`
 	Content string `json:"content"`
+	// Title is a short (≤30-rune) human label for the request, used as the result
+	// pane's header (the answer pager / escalate session). Title Case, no trailing
+	// punctuation. Empty when the model omits it (the pane keeps its default header).
+	Title string `json:"title"`
 }
+
+// maxTitleRunes bounds the pane-header title the classify returns (rune-safe).
+const maxTitleRunes = 30
 
 // Triage kinds.
 const (
@@ -43,7 +50,8 @@ func ClassifyPrompt(req capture.Request) string {
 	b.WriteString("object matching this exact schema:\n\n")
 	b.WriteString("{\n")
 	b.WriteString(`  "kind": "command" | "answer" | "escalate",` + "\n")
-	b.WriteString(`  "content": "..."` + "\n")
+	b.WriteString(`  "content": "...",` + "\n")
+	b.WriteString(`  "title": "..."` + "\n")
 	b.WriteString("}\n\n")
 	b.WriteString("Decide the kind:\n")
 	b.WriteString("- \"command\": the request is satisfied by ONE shell command. content is that\n")
@@ -61,6 +69,10 @@ func ClassifyPrompt(req capture.Request) string {
 	b.WriteString("- \"escalate\": the request needs a full troubleshooting/how-to PLAYBOOK\n")
 	b.WriteString("  (multi-step, diagnosis, or anything beyond one command or a short answer).\n")
 	b.WriteString("  content MUST be empty (\"\").\n\n")
+	b.WriteString("Always set \"title\": a SHORT human label for the request, at most 30\n")
+	b.WriteString("characters, in Title Case, with no trailing punctuation (e.g. \"List Recent\n")
+	b.WriteString("Commits\", \"Merge Vs Rebase\", \"Fix Gradle Build\"). It is shown as the\n")
+	b.WriteString("result pane's header, so keep it terse.\n\n")
 	b.WriteString("Respond with the JSON object ONLY: no prose, no explanation, no markdown code\n")
 	b.WriteString("fence — just the raw JSON.\n\n")
 	b.WriteString("## Context\n")
@@ -202,6 +214,10 @@ func isFailure(req capture.Request) bool {
 // escalate; the failed-command guard (a command equal to a FAILED req.Command →
 // escalate).
 func normalizeClassification(cls Classification, req capture.Request) Classification {
+	// Trim + rune-safe truncate the pane-header title before routing, so every
+	// outcome (incl. the escalate downgrades, which still surface a header) carries
+	// a clean ≤30-rune label.
+	cls.Title = truncateTitle(cls.Title)
 	switch cls.Kind {
 	case KindCommand:
 		// Never re-type the FAILED command: a command equal to the failed command is
@@ -209,15 +225,28 @@ func normalizeClassification(cls Classification, req capture.Request) Classifica
 		// successful last command (a plain question) the same command is a valid
 		// suggestion (e.g. "how do I list 3 commits?" after running git log).
 		if isFailure(req) && collapseWS(cls.Content) == collapseWS(req.Command) {
-			return Classification{Kind: KindEscalate}
+			return Classification{Kind: KindEscalate, Title: cls.Title}
 		}
 		return cls
 	case KindAnswer:
 		return cls
 	default:
-		// Unknown/empty kind (incl. "escalate"): escalate with empty content.
-		return Classification{Kind: KindEscalate}
+		// Unknown/empty kind (incl. "escalate"): escalate with empty content (the
+		// title is kept for the session pane header).
+		return Classification{Kind: KindEscalate, Title: cls.Title}
 	}
+}
+
+// truncateTitle trims surrounding whitespace and truncates to maxTitleRunes runes
+// (rune-safe, so a multi-byte label is never split mid-rune), then trims again so a
+// truncation landing on a space doesn't leave a trailing blank.
+func truncateTitle(s string) string {
+	s = strings.TrimSpace(s)
+	r := []rune(s)
+	if len(r) > maxTitleRunes {
+		r = r[:maxTitleRunes]
+	}
+	return strings.TrimSpace(string(r))
 }
 
 // collapseWS trims and collapses internal whitespace runs to a single space, so
