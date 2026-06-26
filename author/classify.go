@@ -47,9 +47,15 @@ func ClassifyPrompt(req capture.Request) string {
 	b.WriteString("}\n\n")
 	b.WriteString("Decide the kind:\n")
 	b.WriteString("- \"command\": the request is satisfied by ONE shell command. content is that\n")
-	b.WriteString("  SINGLE command, ready to run as-is. NEVER return the failed command verbatim\n")
-	b.WriteString("  — re-running a failure is not a fix; if the only command you'd give equals\n")
-	b.WriteString("  the failed command below, classify as \"escalate\" instead.\n")
+	b.WriteString("  SINGLE command, ready to run as-is.\n")
+	if isFailure(req) {
+		// Only meaningful when the last command actually FAILED: re-running the
+		// failure is not a fix. For a successful last command (a plain question)
+		// the same command is a perfectly good suggestion, so omit this clause.
+		b.WriteString("  NEVER return the FAILED command verbatim — re-running a failure is not a\n")
+		b.WriteString("  fix; if the only command you'd give equals the failed command below,\n")
+		b.WriteString("  classify as \"escalate\" instead.\n")
+	}
 	b.WriteString("- \"answer\": the request is satisfied by a SHORT prose answer. content is that\n")
 	b.WriteString("  answer — a few lines of plain text, no code fences.\n")
 	b.WriteString("- \"escalate\": the request needs a full troubleshooting/how-to PLAYBOOK\n")
@@ -185,14 +191,24 @@ func parseClassification(out string) (Classification, error) {
 	return cls, nil
 }
 
+// isFailure reports whether the captured last command actually FAILED (a non-empty,
+// non-zero exit) — the only case where re-suggesting that command is unhelpful. For
+// a plain question (exit 0) the last command is just context, not a failure to avoid.
+func isFailure(req capture.Request) bool {
+	return req.Exit != "" && req.Exit != "0"
+}
+
 // normalizeClassification applies the routing-safety rules: unknown/empty kind →
-// escalate; the failed-command guard (a command equal to req.Command → escalate).
+// escalate; the failed-command guard (a command equal to a FAILED req.Command →
+// escalate).
 func normalizeClassification(cls Classification, req capture.Request) Classification {
 	switch cls.Kind {
 	case KindCommand:
-		// Never re-type the failed command: a command whose content collapses to the
-		// same text as the failed command is no fix → escalate.
-		if collapseWS(cls.Content) == collapseWS(req.Command) {
+		// Never re-type the FAILED command: a command equal to the failed command is
+		// no fix → escalate. ONLY when the last command actually failed — for a
+		// successful last command (a plain question) the same command is a valid
+		// suggestion (e.g. "how do I list 3 commits?" after running git log).
+		if isFailure(req) && collapseWS(cls.Content) == collapseWS(req.Command) {
 			return Classification{Kind: KindEscalate}
 		}
 		return cls

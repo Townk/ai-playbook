@@ -39,19 +39,47 @@ func TestClassifyPrompt(t *testing.T) {
 		"command",   // the three kinds
 		"answer",
 		"escalate",
-		"SINGLE command",          // command content rule
-		"prose answer",            // answer content rule
-		"PLAYBOOK",                // escalate content rule
-		"NEVER return the failed", // the never-the-failed-command rule
-		req.UserRequest,           // the user's ask
-		"Project: proj",           // context
-		"Last command: `git lg`",  // context: the command
+		"SINGLE command",         // command content rule
+		"prose answer",           // answer content rule
+		"PLAYBOOK",               // escalate content rule
+		req.UserRequest,          // the user's ask
+		"Project: proj",          // context
+		"Last command: `git lg`", // context: the command
 		"Working directory: /Users/me/proj",
 	}
 	for _, w := range wants {
 		if !strings.Contains(p, w) {
 			t.Errorf("ClassifyPrompt missing %q\n--- prompt ---\n%s", w, p)
 		}
+	}
+	// The failed-command guard clause is FAILURE-only: this sample is a successful
+	// question (exit 0), so it must NOT appear; a failure req must include it.
+	if strings.Contains(p, "NEVER return the FAILED") {
+		t.Errorf("question prompt must omit the failed-command clause")
+	}
+	fail := sampleClassifyRequest()
+	fail.Exit = "1"
+	if !strings.Contains(ClassifyPrompt(fail), "NEVER return the FAILED") {
+		t.Errorf("failure prompt must include the failed-command clause")
+	}
+}
+
+// Regression: a SUCCESSFUL last command (a plain question, exit 0) whose suggested
+// command equals that last command must STAY a command — the guard is failure-only.
+// (Was the "ask the same question twice → escalate → nothing at the prompt" bug.)
+func TestClassifyRequest_SuccessCommandNotDowngraded(t *testing.T) {
+	req := sampleClassifyRequest() // Kind question, Exit "0"
+	req.Command = "git log --since='7 days ago' -n 3 --oneline"
+	const out = `{"kind":"command","content":"git log --since='7 days ago' -n 3 --oneline"}`
+	cls, err, _ := runClassify(t, req, out, "")
+	if err != nil {
+		t.Fatalf("ClassifyRequest: %v", err)
+	}
+	if cls.Kind != KindCommand {
+		t.Errorf("kind = %q, want command (success command must not downgrade)", cls.Kind)
+	}
+	if cls.Content == "" {
+		t.Errorf("command content dropped; want the suggested command")
 	}
 }
 
