@@ -34,6 +34,32 @@ func TestLoad_NoFile_Defaults(t *testing.T) {
 	if cfg.Agent.Thinking != "medium" {
 		t.Fatalf("agent.thinking default = %q, want medium", cfg.Agent.Thinking)
 	}
+	// The cheap classify pass defaults to the "haiku" model alias.
+	if cfg.Agent.TriageModel != "haiku" {
+		t.Fatalf("agent.triage_model default = %q, want haiku", cfg.Agent.TriageModel)
+	}
+}
+
+// triage_model is parsed from a present [agent] block; an absent key keeps the
+// "haiku" default.
+func TestMerge_TriageModel(t *testing.T) {
+	data := []byte("[agent]\ntriage_model = \"claude-3-5-haiku-latest\"\n")
+	cfg, err := loadFrom(Default(), "test.toml", data)
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.Agent.TriageModel != "claude-3-5-haiku-latest" {
+		t.Fatalf("agent.triage_model override: %q", cfg.Agent.TriageModel)
+	}
+
+	// Absent → keep the default.
+	cfg2, err := loadFrom(Default(), "test.toml", []byte("[agent]\nmodel = \"opus\"\n"))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg2.Agent.TriageModel != "haiku" {
+		t.Fatalf("agent.triage_model should keep default: %q", cfg2.Agent.TriageModel)
+	}
 }
 
 // XDG path takes precedence; a present file's keys override the defaults.

@@ -40,6 +40,9 @@ type Mux struct {
 //     later). Each supported harness is a matched {owned invocation, stream
 //     adapter} pair.
 //   - Model: the model id to pass the harness (empty → harness default).
+//   - TriageModel: the model id for the cheap one-shot CLASSIFY pass (command/
+//     answer/escalate). Defaults to "haiku" (the claude CLI alias — cheap+fast)
+//     so a quick classify never burns the capable authoring model.
 //   - Bin: optional override for the harness executable path (empty → the
 //     harness name resolved on PATH).
 //   - Thinking: reasoning effort for the owned claude invocation, mapped to a
@@ -47,10 +50,11 @@ type Mux struct {
 //     Empty defaults to "medium" so the model's reasoning streams as live
 //     activity. "off" disables thinking. See author.claudeThinkingTokens.
 type Agent struct {
-	Harness  string `toml:"harness"`
-	Model    string `toml:"model"`
-	Bin      string `toml:"bin"`
-	Thinking string `toml:"thinking"`
+	Harness     string `toml:"harness"`
+	Model       string `toml:"model"`
+	TriageModel string `toml:"triage_model"`
+	Bin         string `toml:"bin"`
+	Thinking    string `toml:"thinking"`
 }
 
 // Config is the merged ai-playbook configuration.
@@ -79,7 +83,10 @@ func Default() *Config {
 		Agent: Agent{
 			Harness: "claude",
 			Model:   "",
-			Bin:     "",
+			// The cheap classify pass: "haiku" is the claude CLI model alias
+			// (cheap+fast) for a one-shot command/answer/escalate decision.
+			TriageModel: "haiku",
+			Bin:         "",
 			// "medium" → MAX_THINKING_TOKENS=8000 in the owned claude invocation, so
 			// reasoning blocks stream as live activity by default. "off" disables it.
 			Thinking: "medium",
@@ -139,6 +146,7 @@ func loadFrom(base *Config, path string, data []byte) (*Config, error) {
 	mergeStr(&base.Mux.TypeIntoPane, user.Mux.TypeIntoPane)
 	mergeStr(&base.Agent.Harness, user.Agent.Harness)
 	mergeStr(&base.Agent.Model, user.Agent.Model)
+	mergeStr(&base.Agent.TriageModel, user.Agent.TriageModel)
 	mergeStr(&base.Agent.Bin, user.Agent.Bin)
 	mergeStr(&base.Agent.Thinking, user.Agent.Thinking)
 	return base, nil

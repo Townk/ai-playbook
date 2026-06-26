@@ -80,6 +80,11 @@ type AuthorOptions struct {
 	Cfg *config.Config
 	// MCPConfigPath, when non-empty, is forwarded as --mcp-config (claude harness).
 	MCPConfigPath string
+	// ModelOverride, when non-empty, replaces cfg [agent].Model for THIS invocation
+	// only (the owned argv's --model). It is the seam the cheap CLASSIFY pass uses to
+	// run on the triage model without disturbing the authoring path (which keeps
+	// using cfg [agent].Model). Empty → the configured Model is used as before.
+	ModelOverride string
 	// Command overrides process construction for tests. It receives the resolved
 	// bin and owned argv and returns the *exec.Cmd to run. nil → exec.Command.
 	Command func(bin string, args []string) *exec.Cmd
@@ -138,7 +143,13 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 		if opts.MCPConfigPath != "" {
 			sys += ToolInstruction
 		}
-		args = ClaudeArgs(cfg.Agent.Model, opts.MCPConfigPath, sys, userMessage)
+		// Per-invocation model override (the classify pass selects the triage model)
+		// falls back to the configured authoring model when unset.
+		model := cfg.Agent.Model
+		if opts.ModelOverride != "" {
+			model = opts.ModelOverride
+		}
+		args = ClaudeArgs(model, opts.MCPConfigPath, sys, userMessage)
 		adapterName = "claude"
 		// Enable thinking so the claude adapter's Reasoning mapping has blocks to
 		// emit; off → no env var (no thinking). See claudeThinkingTokens.
