@@ -126,7 +126,7 @@ func TestHeaderUsesTitleWhenSet(t *testing.T) {
 // TestFinalDraftEOFStripsAndSetsTitle verifies that a finalDraft EOF strips m.md to
 // the H1 and sets m.title from the playbook heading.
 func TestFinalDraftEOFStripsAndSetsTitle(t *testing.T) {
-	m := newModel("agent", "preamble above\n\n# Playbook — X\n\nstep body\n")
+	m := newModel("agent", "preamble above\n\n# Playbook — X\n\n```bash {id=verify}\nmake build\n```\n")
 	m.width, m.height = 80, 24
 	m.finalDraft = true
 	m.dirty = true
@@ -162,6 +162,81 @@ func TestNonFinalDraftEOFDoesNotStrip(t *testing.T) {
 	}
 	if got.md != orig {
 		t.Fatalf("non-finalDraft EOF must not strip md, got %q", got.md)
+	}
+}
+
+// TestIsValidPlaybook verifies the playbook-vs-narration predicate: true only when
+// there is an H1 title AND at least one runnable block; false otherwise.
+func TestIsValidPlaybook(t *testing.T) {
+	if !isValidPlaybook("# Playbook — X\n\nstep\n", 1) {
+		t.Errorf("H1 + 1 block must be valid")
+	}
+	if isValidPlaybook("Just a narration. The playbook is above.\n", 0) {
+		t.Errorf("no H1 must be invalid")
+	}
+	if isValidPlaybook("# Playbook — X\n\nprose only\n", 0) {
+		t.Errorf("H1 but 0 blocks must be invalid")
+	}
+}
+
+// TestFinalDraftEOFNarrationRestoresTroubleshoot verifies the safety guard: a
+// finalDraft EOF whose m.md is a narration (no H1, 0 blocks) restores the backed-up
+// troubleshoot, clears the draft/persist flags, sets a status, and persists NOTHING
+// (nil cmd — no commitPlaybookCmd).
+func TestFinalDraftEOFNarrationRestoresTroubleshoot(t *testing.T) {
+	troubleshoot := "## Resolved troubleshoot\n\nthe good fix is here\n"
+	m := newModel("agent", "The playbook is above. Hope it helps.\n")
+	m.width, m.height = 80, 24
+	m.finalDraft = true
+	m.persistOnFinish = true
+	m.preFinalMd = troubleshoot
+	m.dirty = true
+
+	nm, cmd := m.Update(streamEventsMsg{eof: true})
+	got := nm.(model)
+
+	if cmd != nil {
+		t.Fatalf("invalid final playbook must NOT persist — want nil cmd, got %T", cmd())
+	}
+	if got.md != troubleshoot {
+		t.Fatalf("md must be restored to the troubleshoot, got %q", got.md)
+	}
+	if got.finalDraft {
+		t.Fatalf("finalDraft must be cleared")
+	}
+	if got.persistOnFinish {
+		t.Fatalf("persistOnFinish must be cleared")
+	}
+	if got.status == "" {
+		t.Fatalf("a status explaining the restore must be set")
+	}
+}
+
+// TestFinalDraftEOFValidPlaybookPersists verifies the happy path is unchanged: a
+// finalDraft EOF whose m.md IS a real playbook (H1 + a runnable block) strips the
+// preamble, sets the title, and (with persistOnFinish) returns the commit cmd.
+func TestFinalDraftEOFValidPlaybookPersists(t *testing.T) {
+	m, _ := newReengageModel(t, "")
+	m.md = "preamble above\n\n# Playbook — X\n\n```bash {id=verify}\nmake build\n```\n"
+	m.width, m.height = 80, 24
+	m.finalDraft = true
+	m.persistOnFinish = true
+	m.dirty = true
+
+	nm, cmd := m.Update(streamEventsMsg{eof: true})
+	got := nm.(model)
+
+	if got.title != "Playbook — X" {
+		t.Fatalf("title = %q, want %q", got.title, "Playbook — X")
+	}
+	if strings.HasPrefix(got.md, "preamble above") {
+		t.Fatalf("valid finalDraft EOF must strip preamble, md = %q", got.md)
+	}
+	if !strings.HasPrefix(got.md, "# Playbook — X") {
+		t.Fatalf("md must start at the H1, got %q", got.md)
+	}
+	if cmd == nil {
+		t.Fatalf("a valid playbook with persistOnFinish must return the commit cmd")
 	}
 }
 

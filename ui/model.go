@@ -272,6 +272,12 @@ type model struct {
 	// an `f` amend leaves committed=false (an unsaved tweak the `w`/quit-guard handle).
 	persistOnFinish bool
 
+	// preFinalMd backs up the resolved troubleshoot displayed at the moment a FINAL
+	// playbook generation REPLACES it (beginFinalPlaybookGenerate sets m.md = ""). If
+	// the generation finishes with junk (a narration: no H1 / no runnable blocks) the
+	// stream-EOF guard restores this so the good troubleshoot is never lost or persisted.
+	preFinalMd string
+
 	// quitGuard is set when the user pressed quit (q/esc/ctrl+c) while an uncommitted
 	// draft was displayed (finalDraft && !committed): instead of quitting we show a
 	// one-line warning and require a SECOND quit to actually exit. A `w` commit in
@@ -544,11 +550,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// troubleshoot transcript (non-finalDraft EOF) is left untouched (default
 			// "ai-assist — <harness>" header, no stripping).
 			if m.finalDraft {
-				if title, body := playbookHeading(m.md); title != "" {
-					m.md = body
-					m.title = title
+				title, body := playbookHeading(m.md)
+				// Safety guard: occasionally the model NARRATES instead of producing a
+				// playbook (e.g. a short "The playbook is above…" with 0 runnable blocks).
+				// A real playbook has an H1 title AND at least one runnable block. If this
+				// draft is NOT a real playbook, restore the troubleshoot we replaced and
+				// do NOT keep or persist the junk.
+				if !isValidPlaybook(m.md, len(m.blocks)) {
+					dbg("invalid final playbook (title=%q blocks=%d) — restoring troubleshoot, skipping persist", title, len(m.blocks))
+					m.md = m.preFinalMd
+					m.title = ""
+					m.finalDraft = false
+					m.persistOnFinish = false
+					m.status = "Couldn't generate a clean playbook — kept the troubleshoot. Press c to retry."
 					m.reflow()
+					return m, nil
 				}
+				// VALID: strip any preamble above the H1 and set the pager header title.
+				m.md = body
+				m.title = title
+				m.reflow()
 			}
 			// Close a live in-process re-engagement stream so the agent process is
 			// reaped and the orchestrator's on-close side effects fire (regenerate's
@@ -1384,6 +1405,16 @@ func loadPlaybookDocument(content string) (title, subtitle, body string) {
 	}
 	title = h1
 	return title, subtitle, body
+}
+
+// isValidPlaybook reports whether md is a REAL final playbook rather than a narration:
+// it must carry an H1 title (playbookHeading finds one) AND at least one runnable block
+// (blocks > 0, the count parsed by Render). Used to guard the final-playbook draft at
+// stream-EOF and as a backstop before any commit, so a narrated non-playbook is never
+// displayed in place of the troubleshoot nor saved/cached.
+func isValidPlaybook(md string, blocks int) bool {
+	title, _ := playbookHeading(md)
+	return title != "" && blocks > 0
 }
 
 func playbookHeading(md string) (title, body string) {

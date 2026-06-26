@@ -933,7 +933,7 @@ func TestConfirmClickNoResolves(t *testing.T) {
 // the rendered content is reset, thinking starts, and finalDraft is set / committed
 // stays false. The current troubleshoot content is threaded as the change.
 func TestConfirmYesGeneratesFinalPlaybookReplaceDraft(t *testing.T) {
-	m, fe := newReengageEventsModel(t, "# Playbook — fix\nclean playbook\n", "# Playbook — fix\nclean playbook\n")
+	m, fe := newReengageEventsModel(t, "# Playbook — fix\n\n```bash {id=verify}\nclean playbook\n```\n", "# Playbook — fix\n\n```bash {id=verify}\nclean playbook\n```\n")
 	troubleshoot := "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	m.md = troubleshoot
 	m.inputFifoPath = ""
@@ -1248,7 +1248,7 @@ func TestManualWGeneratesFinalPlaybookDraft(t *testing.T) {
 // It does NOT re-generate (the producer is not called and the draft is preserved).
 func TestWCommitsExistingDraft(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
-	m.md = "# Playbook — My Setup\n\nclean playbook\n"
+	m.md = "# Playbook — My Setup\n\n```bash {id=verify}\nclean playbook\n```\n"
 	m.finalDraft = true
 	m.committed = false
 	m.inputFifoPath = ""
@@ -1354,7 +1354,7 @@ func TestWGeneratesOnTranscript(t *testing.T) {
 // commit (CommitPlaybook) and shows "finalizing…"; the playbookCommittedMsg result
 // flips committed=true. Quitting now leaves a complete saved playbook.
 func TestConfirmYesAutoPersistsBaselineAtEOF(t *testing.T) {
-	m, _ := newReengageEventsModel(t, "# Playbook — fix\nclean playbook\n", "# Playbook — fix\nclean playbook\n")
+	m, _ := newReengageEventsModel(t, "# Playbook — fix\n\n```bash {id=verify}\nclean playbook\n```\n", "# Playbook — fix\n\n```bash {id=verify}\nclean playbook\n```\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	m.inputFifoPath = ""
 	m.reflow()
@@ -1513,7 +1513,7 @@ func TestQuitGuardWithUncommittedDraft(t *testing.T) {
 // a subsequent quit exits immediately (the draft is now persisted).
 func TestQuitGuardClearedByCommit(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
-	m.md = "# Playbook — draft\n\nbody\n"
+	m.md = "# Playbook — draft\n\n```bash {id=verify}\nbody\n```\n"
 	m.finalDraft = true
 	m.committed = false
 	m.inputFifoPath = ""
@@ -1996,7 +1996,7 @@ func TestFKeyIssuesAskCmd(t *testing.T) {
 // the producer is called with base==m.md (the snapshotted content) and change==the
 // typed value, in REPLACE mode, marked a DRAFT (finalDraft set, committed false).
 func TestFChangeSubmittedTriggersAmend(t *testing.T) {
-	m, fe := newReengageEventsModel(t, "# Playbook — amended\nbase + ndk\n", "# Playbook — amended\nbase + ndk\n")
+	m, fe := newReengageEventsModel(t, "# Playbook — amended\n\n```bash {id=verify}\nbase + ndk\n```\n", "# Playbook — amended\n\n```bash {id=verify}\nbase + ndk\n```\n")
 	base := "# Playbook — current\n\nstep\n"
 	change := "also configure the NDK"
 	m.md = base
@@ -2122,7 +2122,7 @@ func TestFKeyWhileStreamingNoOp(t *testing.T) {
 // uncommitted-draft quit guard covers it — the first quit warns, a `w` commit clears
 // it. This verifies `f` drafts ride the same guard as confirm/`w` drafts.
 func TestFDraftCoveredByQuitGuard(t *testing.T) {
-	m, _ := newReengageEventsModel(t, "# amended\n", "# amended\n")
+	m, _ := newReengageEventsModel(t, "# amended\n", "# amended\n\n```bash {id=verify}\nmake build\n```\n")
 	base := "# Playbook — current\n\nstep\n"
 	m.md = base
 	m.streaming = false

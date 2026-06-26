@@ -264,6 +264,10 @@ func (m *model) beginFinalPlaybookGenerate(base, change string) tea.Cmd {
 	if orch == nil || orch.Reengage == nil {
 		return nil
 	}
+	// Back up the resolved troubleshoot BEFORE the REPLACE clears it: if the generation
+	// turns out to be junk (a narration, not a real playbook) the stream-EOF guard
+	// restores this so the good troubleshoot is never wiped or persisted over.
+	m.preFinalMd = m.md
 	// REPLACE: reset the rendered content + thinking state (like regenerate).
 	m.md = ""
 	m.isCached = false
@@ -302,6 +306,16 @@ func (m *model) commitPlaybookCmd(body string) tea.Cmd {
 	orch := m.orch
 	if orch == nil || orch.Reengage == nil {
 		return func() tea.Msg { return statusMsg{text: "commit: not available in this mode"} }
+	}
+	// Backstop: never save/cache a non-playbook (no H1 / no runnable block). The
+	// stream-EOF guard already prevents an invalid draft from being displayed, so this
+	// is defense-in-depth for any `w`-commit path. Count runnable blocks the same way
+	// the renderer does so the predicate matches what the pager would show.
+	_, _, blocks := Render(body, m.contentWidth(), m.blockStates, m.flashKey)
+	if !isValidPlaybook(body, len(blocks)) {
+		return func() tea.Msg {
+			return statusMsg{text: "Not a playbook — nothing saved (no title or no runnable steps)."}
+		}
 	}
 	return func() tea.Msg {
 		path, err := orch.CommitPlaybook(body)
