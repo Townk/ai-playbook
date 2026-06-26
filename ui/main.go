@@ -246,7 +246,12 @@ func Main() int {
 	// with a logged note rather than crashing. Done only on the interactive path
 	// (after a real TTY) so render-only invocations never spawn a shell.
 	var orch *orchestrator.Orchestrator
-	if fifoPath == "" && inputFifo == "" {
+	// Skip the shell driver entirely for a cached ANSWER (pendingAnswerRegen set): an
+	// answer has no run blocks and its reload is a cheap-model call (ClassifyRequest),
+	// not a shell command. Opening a driver here spawns a shell that sources the user's
+	// full profile — seconds of blank-pane startup — for nothing. (The cached-PLAYBOOK
+	// path reuses the session's already-open driver, so it never pays this.)
+	if fifoPath == "" && inputFifo == "" && pendingAnswerRegen == nil {
 		if file := fs.Arg(0); file != "" {
 			// Reuse the session's shared driver when stashed (the troubleshoot
 			// cached-replay path), so run blocks execute in the shell the tools
