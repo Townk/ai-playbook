@@ -602,8 +602,11 @@ func TestVerifySuccessSetsConfirmOnce(t *testing.T) {
 	// First verify exit 0 → confirm state set; NO agent re-engagement fired yet.
 	nm, cmd := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
-	if cmd != nil {
-		t.Errorf("verify exit 0 must NOT auto-fire an agent re-engagement (native confirm), got %T", cmd)
+	// The only cmd here must be the hide-cursor re-assert (the confirm row repaints),
+	// never an agent re-engagement / generation. fe.calls / thinking below confirm
+	// no generation fired.
+	if !hasHide(collectRawSeqs(t, cmd)) {
+		t.Errorf("verify exit 0 must re-assert the hide-cursor and NOT fire a re-engagement, got %T", cmd)
 	}
 	if !m.confirmResolved {
 		t.Fatal("verify exit 0 must set the native confirmResolved state")
@@ -2422,8 +2425,8 @@ func TestCKeyReshowsConfirmAfterSolution(t *testing.T) {
 	m.confirmFocus = 1 // move focus to No so we can see `c` reset it
 	nm2, cmd := m.Update(key("c"))
 	m = nm2.(model)
-	if cmd != nil {
-		t.Fatal("c must NOT trigger generation — it re-shows the confirm")
+	if !hasHide(collectRawSeqs(t, cmd)) {
+		t.Fatal("c must re-assert the hide-cursor (re-show repaint), NOT trigger generation")
 	}
 	if !m.confirmResolved {
 		t.Error("c must keep the confirm shown")
@@ -2460,8 +2463,8 @@ func TestCKeyReshowsConfirmAfterNoDismiss(t *testing.T) {
 	// `c` re-shows the confirm instead of generating.
 	nm2, cmd := m.Update(key("c"))
 	m = nm2.(model)
-	if cmd != nil {
-		t.Fatal("c must NOT trigger generation after a No dismiss — it re-shows the confirm")
+	if !hasHide(collectRawSeqs(t, cmd)) {
+		t.Fatal("c after a No dismiss must re-assert the hide-cursor (re-show), NOT trigger generation")
 	}
 	if !m.confirmResolved {
 		t.Error("c after a No dismiss must re-show the confirm")

@@ -31,6 +31,26 @@ func (m model) tickCmdGen(gen int) tea.Cmd {
 	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return spinTickMsg{gen: gen} })
 }
 
+// hideCursorSeq is DECTCEM "hide cursor" (ESC[?25l). Our pager keeps
+// View.Cursor nil forever (see View), and bubbletea's cursed_renderer only
+// (re-)emits a cursor-visibility sequence when View.Cursor flips between
+// nil/non-nil, or on the first frame / an alt-screen toggle (see
+// shouldUpdateCursorVis in cursed_renderer.go). So after the very first frame
+// bubbletea NEVER re-hides the cursor. Some multiplexers (zellij) re-SHOW the
+// hardware cursor whenever they observe the renderer moving the cursor around
+// to paint a diff — which happens in the re-render-heavy states: hint mode, the
+// spinner/wave animation, and the verify-success confirm. We counter that by
+// re-asserting the hide on those states/transitions and on focus regain.
+const hideCursorSeq = "\x1b[?25l" // == ansi.ResetModeTextCursorEnable / ansi.HideCursor
+
+// reassertHideCursor re-emits ESC[?25l via tea.Raw — the supported way to send a
+// raw escape sequence. The program serializes RawMsg output through p.flush(),
+// which the render-loop goroutine runs BEFORE p.renderer.flush() on the same
+// tick, so the sequence can never land inside the renderer's synchronized-output
+// (?2026) frame and corrupt it. Re-hiding an already-hidden cursor is a no-op at
+// the terminal, so re-asserting every tick does not flicker.
+func reassertHideCursor() tea.Cmd { return tea.Raw(hideCursorSeq) }
+
 // startTick returns the single spinner tick loop, or nil if a loop is already
 // live. External entry points (Init, thinkEvent, click handlers, regenerate,
 // wrap-up, follow-up) call this instead of tickCmd directly so that at most one
@@ -598,7 +618,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if running {
 			m.reflow()
 		}
-		return m, m.tickCmd()
+		// Re-assert the hide-cursor on every live tick: the spinner/wave diff this
+		// tick paints is exactly the renderer activity that makes zellij re-show the
+		// hardware cursor. Idempotent, so it never flickers (see reassertHideCursor).
+		return m, tea.Batch(m.tickCmd(), reassertHideCursor())
+	case tea.FocusMsg:
+		// The pager regains focus after the thinking float closes; some terminals
+		// re-show the cursor on focus. Re-assert the hide (ReportFocus is enabled in
+		// View so this msg is actually delivered).
+		return m, reassertHideCursor()
 	case tea.WindowSizeMsg:
 		m.flashKey = ""
 		m.width = msg.Width
@@ -894,6 +922,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(visible) > 0 {
 				m.hintLabels = assignHintLabels(visible)
 				m.hintMode = true
+				// Entering hint mode repaints the hint overlay; re-assert the hide so
+				// zellij can't re-show the cursor on that activity.
+				return m, reassertHideCursor()
 			}
 			return m, nil
 		}
@@ -1001,6 +1032,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.confirmResolved = true
 				m.confirmFocus = 0
 				m.reflow()
+				// Re-showing the confirm repaints; re-assert the hide-cursor.
+				return m, reassertHideCursor()
 			}
 			return m, nil
 		// Vertical: line
@@ -1180,6 +1213,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.confirmFocus = 0 // default keyboard focus = Yes
 			dbg("verify exit 0 — rendering native resolve-confirm row")
 			m.reflow()
+			// The confirm row appearing is a one-shot repaint; re-assert the hide so
+			// zellij can't re-show the cursor on it.
+			return m, reassertHideCursor()
 		}
 		return m, nil
 	case statusMsg:
@@ -2322,6 +2358,10 @@ func (m model) View() tea.View {
 	v := tea.NewView(m.viewString())
 	v.AltScreen = true
 	v.MouseMode = tea.MouseModeCellMotion
+	// Issue #5 (cont.): receive tea.FocusMsg so we can re-assert the hide-cursor
+	// when the pager regains focus (e.g. after the thinking float closes); some
+	// terminals re-show the cursor on focus.
+	v.ReportFocus = true
 	// Issue #5: hide the hardware cursor in the pager. In bubbletea v2 the cursor is
 	// shown ONLY when the View carries a non-nil Cursor (the cursed_renderer derives
 	// showCursor := view.Cursor != nil and emits the hide-cursor sequence otherwise).
