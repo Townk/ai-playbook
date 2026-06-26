@@ -130,31 +130,27 @@ func WaveFrame(phase float64, cols, rows int, blue, red, magenta string) string 
 	return strings.Join(lines, "\n")
 }
 
-// waveTickMsg advances the demo animation one frame.
+// waveTickMsg advances the wave animation one frame.
 type waveTickMsg struct{}
 
-// waveDemoModel is the live preview for --wave-demo: a rounded-border box
-// showing a crossing-sine-wave Braille spinner under a "Thinking…" caption.
-type waveDemoModel struct {
-	theme   Theme
-	phase   float64
-	cols    int
-	rows    int
-	blue    string
-	red     string
-	magenta string
-}
+// doneSignalMsg carries the result of one <outFile>.done poll: done=true means
+// the launcher's close signal appeared and the thinking float should exit.
+type doneSignalMsg struct{ done bool }
 
-func newWaveDemoModel(theme Theme) waveDemoModel {
-	return waveDemoModel{
-		theme:   theme,
-		cols:    30,
-		rows:    3,
-		blue:    theme.Border, // #89b4fa-ish blue
-		red:     "#f38ba8",    // catppuccin red/peach (theme has no red)
-		magenta: theme.Accent, // #cba6f7 mauve / accent
-	}
-}
+// thinkingBackstopMsg fires after the max thinking duration — a safety net so a
+// dead launcher (one that never writes .done) can't hang the float forever.
+type thinkingBackstopMsg struct{}
+
+// outWrittenMsg acknowledges that the submitted value was handed to outFile.
+type outWrittenMsg struct{}
+
+// donePollInterval is how often the thinking float re-checks for <outFile>.done.
+// thinkingBackstopAfter bounds how long the float will animate without a signal.
+// Both are vars so tests can shrink them; defaults match the spec (~80ms / 60s).
+var (
+	donePollInterval      = 80 * time.Millisecond
+	thinkingBackstopAfter = 60 * time.Second
+)
 
 func waveTick() tea.Cmd {
 	// tea.Every aligns ticks to the wall clock, so the cadence is steady regardless
@@ -163,33 +159,79 @@ func waveTick() tea.Cmd {
 	return tea.Every(33*time.Millisecond, func(time.Time) tea.Msg { return waveTickMsg{} })
 }
 
-func (m waveDemoModel) Init() tea.Cmd { return waveTick() }
+// writeOutCmd hands the submitted value to outFile immediately (so the launcher
+// can read it while the float animates). Reuses writeOutFile's atomic write.
+func writeOutCmd(outFile, val string) tea.Cmd {
+	return func() tea.Msg {
+		if outFile != "" {
+			writeOutFile(outFile, val)
+		}
+		return outWrittenMsg{}
+	}
+}
 
-func (m waveDemoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case waveTickMsg:
-		m.phase += 0.35
-		return m, waveTick()
-	case tea.KeyPressMsg:
-		switch msg.String() {
+// doneExists reports whether the launcher's <outFile>.done close marker is present.
+func doneExists(outFile string) bool {
+	if outFile == "" {
+		return false
+	}
+	_, err := os.Stat(outFile + DoneSuffix)
+	return err == nil
+}
+
+// pollDoneCmd waits one interval then reports whether <outFile>.done exists. The
+// model re-arms it on a "not yet" result, forming the poll loop, and quits on a
+// "done" result. Driveable directly in tests (it blocks one interval, then stats).
+func pollDoneCmd(outFile string) tea.Cmd {
+	return func() tea.Msg {
+		time.Sleep(donePollInterval)
+		return doneSignalMsg{done: doneExists(outFile)}
+	}
+}
+
+// backstopCmd fires the thinking backstop after the max duration.
+func backstopCmd() tea.Cmd {
+	return func() tea.Msg {
+		time.Sleep(thinkingBackstopAfter)
+		return thinkingBackstopMsg{}
+	}
+}
+
+// waveDemoModel is the live preview for --wave-demo. It wraps the REAL input
+// model forced into the thinking state so the user can eyeball the true framing
+// (outer frame, title, "Thinking…" prompt, and the field box with the wave
+// interior), not just a bare wave. It is self-contained: no --out, no .done poll
+// — just the wave tick — and quits on q/esc/ctrl+c.
+type waveDemoModel struct{ m model }
+
+func newWaveDemoModel(theme Theme) waveDemoModel {
+	m := newInputModel(theme, "default", "ai-playbook", "How can I help you today?",
+		"list the last 3 commits of last week", "", 3, 1, 1, false, "")
+	m.width = 64
+	m.resize()
+	m.submitted = true
+	m.thinking = true
+	return waveDemoModel{m: m}
+}
+
+func (d waveDemoModel) Init() tea.Cmd {
+	// Start the wave tick directly (the demo skips the .done/backstop cmds).
+	return tea.Batch(d.m.Init(), waveTick())
+}
+
+func (d waveDemoModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if km, ok := msg.(tea.KeyPressMsg); ok {
+		switch km.String() {
 		case "ctrl+c", "q", "esc":
-			return m, tea.Quit
+			return d, tea.Quit
 		}
 	}
-	return m, nil
+	nm, cmd := d.m.Update(msg)
+	d.m = nm.(model)
+	return d, cmd
 }
 
-func (m waveDemoModel) render() string {
-	caption := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text)).Render("Thinking…")
-	wave := WaveFrame(m.phase, m.cols, m.rows, m.blue, m.red, m.magenta)
-	box := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(m.theme.Border)).
-		Render(wave)
-	return lipgloss.JoinVertical(lipgloss.Left, caption, box)
-}
-
-func (m waveDemoModel) View() tea.View { return tea.NewView(m.render()) }
+func (d waveDemoModel) View() tea.View { return d.m.View() }
 
 func runWaveDemo(theme Theme) {
 	_, err := tea.NewProgram(

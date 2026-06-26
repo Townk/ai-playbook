@@ -67,6 +67,15 @@ type model struct {
 	quitting  bool
 	// singleLine is kept for hint rendering only.
 	singleLine bool
+
+	// --- thinking state (triage stage B) -------------------------------------
+	// thinkingEnabled is set by --thinking (text type only): on submit the float
+	// does NOT quit but transitions IN PLACE to a wave-animated "thinking" state,
+	// staying open until the launcher writes <outFile>.done (or the backstop).
+	thinkingEnabled bool
+	outFile         string  // --out path; written on submit, polled (.done) while thinking
+	thinking        bool    // currently animating the in-box wave
+	phase           float64 // wave animation phase (advances on each waveTickMsg)
 }
 
 // initialModel keeps the original signature the existing tests call (text, 1/1
@@ -111,12 +120,65 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.resize()
 		return m, nil
+	case waveTickMsg:
+		// Advance the wave ONLY while thinking; re-tick to keep animating.
+		if m.thinking {
+			m.phase += 0.35
+			return m, waveTick()
+		}
+		return m, nil
+	case doneSignalMsg:
+		// The launcher's <outFile>.done close signal (or its absence). Only acted
+		// on while thinking; on "not yet" we re-arm the poll.
+		if !m.thinking {
+			return m, nil
+		}
+		if msg.done {
+			return m, tea.Quit
+		}
+		return m, pollDoneCmd(m.outFile)
+	case thinkingBackstopMsg:
+		// Backstop: a dead launcher must not hang the float forever.
+		if m.thinking {
+			return m, tea.Quit
+		}
+		return m, nil
+	case outWrittenMsg:
+		// The submit value was handed to outFile; nothing further to do.
+		return m, nil
 	}
+
+	// While thinking, the field is frozen (nothing to type/submit); the only key
+	// affordance is cancel — Escape / ctrl+c quit (cancel mid-think is allowed).
+	if m.thinking {
+		if km, ok := msg.(tea.KeyPressMsg); ok {
+			switch km.String() {
+			case "ctrl+c", "esc":
+				m.quitting = true
+				return m, tea.Quit
+			}
+		}
+		return m, nil
+	}
+
 	f, act, cmd := m.fld.handle(msg)
 	m.fld = f
 	switch act {
 	case fieldDone:
 		m.submitted = true
+		if m.thinkingEnabled {
+			// Transition IN PLACE to the thinking state instead of quitting:
+			// (a) hand the submitted value to outFile NOW so the launcher can read
+			// it while we animate; (b) start the wave tick; (c) poll for the
+			// launcher's <outFile>.done close signal; (d) arm the safety backstop.
+			m.thinking = true
+			return m, tea.Batch(
+				writeOutCmd(m.outFile, m.fld.value()),
+				waveTick(),
+				pollDoneCmd(m.outFile),
+				backstopCmd(),
+			)
+		}
 		return m, tea.Quit
 	case fieldCancel:
 		m.quitting = true
@@ -139,6 +201,9 @@ func (m model) hint() string {
 }
 
 func (m model) render() string {
+	if m.thinking {
+		return m.renderThinking()
+	}
 	iW := m.innerW()
 	sections := []string{}
 	if m.prompt != "" {
@@ -146,6 +211,29 @@ func (m model) render() string {
 	}
 	sections = append(sections, m.fld.view(iW, true))
 	return renderFrame(m.theme, m.variant, m.title, sections, m.hint(), m.width, m.padding, m.inset)
+}
+
+// thinking-state wave palette: the same trio --wave-demo uses — theme Border as
+// the blue wave, catppuccin red (#f38ba8) as the red wave, theme Accent (mauve)
+// as the magenta overlap.
+const thinkingWaveRed = "#f38ba8"
+
+// renderThinking draws the in-place thinking state: the prompt line becomes
+// "Thinking…", the input box interior becomes the wave canvas (SAME border + icon
+// column as the text box), and the hint line is dropped. Same row count as the
+// normal render so the float pane fills without a gap.
+func (m model) renderThinking() string {
+	iW := m.innerW()
+	sections := []string{
+		lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text)).Render("Thinking…"),
+	}
+	if tf, ok := m.fld.(*textField); ok {
+		sections = append(sections, tf.thinkingView(iW, m.phase, m.theme.Border, thinkingWaveRed, m.theme.Accent))
+	} else {
+		sections = append(sections, m.fld.view(iW, true))
+	}
+	// hint = "" → no submit/newline/cancel line while thinking.
+	return renderFrame(m.theme, m.variant, m.title, sections, "", m.width, m.padding, m.inset)
 }
 
 func (m model) View() tea.View {
@@ -184,8 +272,16 @@ func writeCancelFile(outFile string) {
 	_ = os.WriteFile(outFile+CancelSuffix, nil, 0o600)
 }
 
-func runInput(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool, icon, outFile, historyPath string) {
+// DoneSuffix is appended to an --out path to form the close-signal file the
+// launcher writes after routing a thinking submit. The float, while animating,
+// polls for it and exits when it appears. Exported so the launcher (stage C)
+// shares the contract, mirroring CancelSuffix.
+const DoneSuffix = ".done"
+
+func runInput(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool, icon, outFile, historyPath string, thinkingEnabled bool) {
 	m := newInputModel(theme, variant, title, prompt, value, placeholder, height, padding, inset, singleLine, icon)
+	m.thinkingEnabled = thinkingEnabled
+	m.outFile = outFile
 	applyHistory(&m, historyPath)
 	fm, err := tea.NewProgram(
 		m,
@@ -197,6 +293,14 @@ func runInput(theme Theme, variant, title, prompt, value, placeholder string, he
 		os.Exit(1)
 	}
 	res := fm.(model)
+	// Thinking submit: the value was ALREADY written to outFile on submit (while
+	// the wave animated) and the launcher already consumed it — do NOT re-write
+	// --out, do NOT print it again, and do NOT write a .cancel marker. Only the
+	// (still-unwritten) history append remains.
+	if res.thinking {
+		recordHistory(historyPath, res.fld.value())
+		os.Exit(0)
+	}
 	if res.submitted {
 		if outFile != "" {
 			writeOutFile(outFile, res.fld.value())

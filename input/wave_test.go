@@ -88,24 +88,37 @@ func TestWaveFrameSmallDims(t *testing.T) {
 	_ = WaveFrame(0, 0, 0, waveBlue, waveRed, waveMagenta)
 }
 
-// TestWaveDemoModel exercises the demo model's Init/Update/View for one tick so
-// the live preview is known to construct and step without error.
+// TestWaveDemoModel exercises the repurposed --wave-demo model (the REAL input
+// model forced into the thinking state): it constructs, ticks the wave, renders
+// the true framing, and quits on q.
 func TestWaveDemoModel(t *testing.T) {
 	m := newWaveDemoModel(defaultTheme())
+	if !m.m.thinking {
+		t.Fatal("wave-demo must force the model into the thinking state")
+	}
 	if cmd := m.Init(); cmd == nil {
 		t.Fatal("Init returned no tick command")
 	}
-	start := m.phase
+	start := m.m.phase
 	next, cmd := m.Update(waveTickMsg{})
 	wm := next.(waveDemoModel)
-	if wm.phase <= start {
-		t.Errorf("phase did not advance: %v -> %v", start, wm.phase)
+	if wm.m.phase <= start {
+		t.Errorf("phase did not advance: %v -> %v", start, wm.m.phase)
 	}
 	if cmd == nil {
 		t.Error("tick did not re-schedule")
 	}
-	if v := wm.View(); v.Content == "" {
+	v := wm.View()
+	if v.Content == "" {
 		t.Error("View rendered empty")
+	}
+	// The demo renders the REAL framing: title + Thinking… prompt + Braille box.
+	plain := strip(v.Content)
+	if !strings.Contains(plain, "Thinking…") {
+		t.Error("wave-demo must show the Thinking… prompt")
+	}
+	if !strings.Contains(plain, "ai-playbook") {
+		t.Error("wave-demo must show the sample title")
 	}
 	// Quit on q.
 	_, qcmd := wm.Update(tea.KeyPressMsg{Code: 'q', Text: "q"})
