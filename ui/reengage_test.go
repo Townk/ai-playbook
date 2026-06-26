@@ -1855,7 +1855,7 @@ func TestAutoFollowupAnnouncesInAgentVoice(t *testing.T) {
 }
 
 // followupAnnouncement must vary per attempt and clamp to the last phrase past
-// the list (e.g. a higher $AI_ASSIST_MAX_FOLLOWUPS).
+// the list (e.g. a higher $AI_PLAYBOOK_MAX_FOLLOWUPS).
 func TestFollowupAnnouncementVariesAndClamps(t *testing.T) {
 	a1, a2, a3 := followupAnnouncement(1), followupAnnouncement(2), followupAnnouncement(3)
 	if a1 == a2 || a2 == a3 || a1 == a3 {

@@ -64,7 +64,7 @@ type Cache interface {
 // DISABLED for this request: keys are cleared, never looked up, never stored, so
 // the request always escalates (authors fresh).
 //
-// noCache forces a miss (the AI_ASSIST_NO_CACHE bypass for regenerate/testing).
+// noCache forces a miss (the AI_PLAYBOOK_NO_CACHE bypass for regenerate/testing).
 func Route(req capture.Request, c Cache, noCache bool) Decision {
 	cr := cache.Request{
 		ProjectRoot: req.ProjectRoot,

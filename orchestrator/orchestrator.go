@@ -28,7 +28,7 @@ import (
 )
 
 // defaultTimeout bounds a single run block (matches the broker's
-// AI_ASSIST_RUN_TIMEOUT default of 120s).
+// AI_PLAYBOOK_RUN_TIMEOUT default of 120s).
 const defaultTimeout = 120 * time.Second
 
 // reengageActivityBuffer bounds the re-engagement fan-out's activity channel —
@@ -201,7 +201,7 @@ type PlaybookMeta struct {
 }
 
 // dataRoot resolves the data dir for wrap-up side effects: the explicit DataRoot,
-// else cache.DefaultRoot (AI_ASSIST_DATA_DIR / XDG), matching the shell's $DATA.
+// else cache.DefaultRoot (AI_PLAYBOOK_DATA_DIR / XDG), matching the shell's $DATA.
 func (re *Reengage) dataRoot() string {
 	if re.DataRoot != "" {
 		return re.DataRoot
@@ -292,7 +292,7 @@ func (o *Orchestrator) Do(a Action) (driver.Result, error) {
 // the fresh playbook stream (ModeReplace — the ui resets the rendered content and
 // streams the new playbook). It re-stores the fresh playbook so a later identical
 // request hits the refreshed entry, matching ai-assist-regenerate
-// (AI_ASSIST_NO_CACHE=1 for the lookup, then `cache store` the new body).
+// (AI_PLAYBOOK_NO_CACHE=1 for the lookup, then `cache store` the new body).
 //
 // Because the body is consumed by the ui (rendered incrementally), the re-store
 // tees the stream into a buffer and persists it when the stream is fully read and
@@ -644,15 +644,15 @@ func (o *Orchestrator) viewDiff(id, diff string) error {
 }
 
 // projectRoot anchors the float pane's cwd, mirroring the broker's
-// ${AI_ASSIST_PROJECT_ROOT:-$PWD}: the driver's session cwd, else
-// $AI_ASSIST_PROJECT_ROOT, else "" (the mux falls back to its own default).
+// ${AI_PLAYBOOK_PROJECT_ROOT:-$PWD}: the driver's session cwd, else
+// $AI_PLAYBOOK_PROJECT_ROOT, else "" (the mux falls back to its own default).
 func (o *Orchestrator) projectRoot() string {
 	if o.Drv != nil {
 		if c := o.Drv.Cwd(); c != "" {
 			return c
 		}
 	}
-	return os.Getenv("AI_ASSIST_PROJECT_ROOT")
+	return os.Getenv("AI_PLAYBOOK_PROJECT_ROOT")
 }
 
 // writePatch writes diff to a temp patch file with a guaranteed trailing newline
@@ -682,7 +682,7 @@ func writePatch(diff string) (string, error) {
 
 // diffViewerCmd resolves the diff viewer command for patch, porting the broker's
 // preference: hunk (split mode) → delta (side-by-side) → less. hunk is overridable
-// via $AI_ASSIST_HUNK_BIN (for tests, as in the broker).
+// via $AI_PLAYBOOK_HUNK_BIN (for tests, as in the broker).
 func diffViewerCmd(patch string) []string {
 	if h := hunkBin(); h != "" {
 		return []string{h, "patch", "--mode", "split", patch}
@@ -693,10 +693,10 @@ func diffViewerCmd(patch string) []string {
 	return []string{"less", patch}
 }
 
-// hunkBin resolves the hunk binary: $AI_ASSIST_HUNK_BIN, else hunk on PATH, else
+// hunkBin resolves the hunk binary: $AI_PLAYBOOK_HUNK_BIN, else hunk on PATH, else
 // well-known install dirs, else "" (not installed).
 func hunkBin() string {
-	if v := os.Getenv("AI_ASSIST_HUNK_BIN"); v != "" {
+	if v := os.Getenv("AI_PLAYBOOK_HUNK_BIN"); v != "" {
 		return v
 	}
 	return lookViewer("hunk")

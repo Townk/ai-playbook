@@ -230,11 +230,11 @@ func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'
 // TestAuthoringAgent_InvokesClaudeWithMCPConfig asserts that, with a live session,
 // the authoring agent's claude invocation includes --mcp-config (the MCP adapter
 // wiring) and that the system prompt carries the run-tool instruction. It uses a
-// fake claude (AI_ASSIST_CLAUDE_BIN) to capture the argv.
+// fake claude (AI_PLAYBOOK_CLAUDE_BIN) to capture the argv.
 func TestAuthoringAgent_InvokesClaudeWithMCPConfig(t *testing.T) {
 	minimalZDOTDIR(t)
 	argvFile := filepath.Join(t.TempDir(), "argv")
-	t.Setenv("AI_ASSIST_CLAUDE_BIN", fakeClaude(t, argvFile))
+	t.Setenv("AI_PLAYBOOK_CLAUDE_BIN", fakeClaude(t, argvFile))
 
 	sess := openSession(capture.Request{ProjectRoot: t.TempDir()})
 	if sess == nil {

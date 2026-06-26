@@ -9,17 +9,17 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// TestDbgGatedByEnv verifies that with AI_ASSIST_DEBUG_LOG set, driving an
+// TestDbgGatedByEnv verifies that with AI_PLAYBOOK_DEBUG_LOG set, driving an
 // Update code path that calls dbg (quitEvent) appends the expected line to the
 // file; and that with the var unset, dbg is a silent no-op that never panics.
 func TestDbgGatedByEnv(t *testing.T) {
 	// Restore env + resolved handle after the test so we stay hermetic.
-	orig, had := os.LookupEnv("AI_ASSIST_DEBUG_LOG")
+	orig, had := os.LookupEnv("AI_PLAYBOOK_DEBUG_LOG")
 	t.Cleanup(func() {
 		if had {
-			os.Setenv("AI_ASSIST_DEBUG_LOG", orig)
+			os.Setenv("AI_PLAYBOOK_DEBUG_LOG", orig)
 		} else {
-			os.Unsetenv("AI_ASSIST_DEBUG_LOG")
+			os.Unsetenv("AI_PLAYBOOK_DEBUG_LOG")
 		}
 		resolveDbg()
 	})
@@ -27,7 +27,7 @@ func TestDbgGatedByEnv(t *testing.T) {
 	logPath := filepath.Join(t.TempDir(), "pager-debug.log")
 
 	// --- Set: dbg must write a line containing the expected text. ---
-	os.Setenv("AI_ASSIST_DEBUG_LOG", logPath)
+	os.Setenv("AI_PLAYBOOK_DEBUG_LOG", logPath)
 	resolveDbg()
 
 	m := newModel("T", "content")
@@ -53,12 +53,12 @@ func TestDbgGatedByEnv(t *testing.T) {
 	}
 
 	// --- Unset: dbg must be a no-op (no panic, nothing written). ---
-	os.Unsetenv("AI_ASSIST_DEBUG_LOG")
+	os.Unsetenv("AI_PLAYBOOK_DEBUG_LOG")
 	resolveDbg()
 
 	noWritePath := filepath.Join(t.TempDir(), "should-not-exist.log")
-	os.Setenv("AI_ASSIST_DEBUG_LOG", noWritePath) // env present but handle not re-resolved
-	defer os.Unsetenv("AI_ASSIST_DEBUG_LOG")
+	os.Setenv("AI_PLAYBOOK_DEBUG_LOG", noWritePath) // env present but handle not re-resolved
+	defer os.Unsetenv("AI_PLAYBOOK_DEBUG_LOG")
 	// dbgFile is nil here (we resolved with the var unset), so dbg is a no-op.
 
 	m2 := newModel("T", "content")

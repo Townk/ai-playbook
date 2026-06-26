@@ -18,7 +18,7 @@ import (
 	"ai-playbook/mux"
 )
 
-// defaultScrollbackLines mirrors AI_ASSIST_SCROLLBACK_LINES (default 200).
+// defaultScrollbackLines mirrors AI_PLAYBOOK_SCROLLBACK_LINES (default 200).
 const defaultScrollbackLines = 200
 
 // Project is the {name, branch} pair the request carries.

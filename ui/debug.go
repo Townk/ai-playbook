@@ -6,19 +6,19 @@ import (
 	"time"
 )
 
-// dbgFile is the open append handle for AI_ASSIST_DEBUG_LOG, or nil when the
+// dbgFile is the open append handle for AI_PLAYBOOK_DEBUG_LOG, or nil when the
 // env var is unset/empty or the file could not be opened. Resolved once at
 // package init so dbg() is a cheap no-op in the common (unset) case.
 var dbgFile *os.File
 
 func init() { resolveDbg() }
 
-// resolveDbg (re)resolves dbgFile from AI_ASSIST_DEBUG_LOG: opens the file for
+// resolveDbg (re)resolves dbgFile from AI_PLAYBOOK_DEBUG_LOG: opens the file for
 // append when the var is non-empty and openable, else leaves dbgFile nil so dbg
 // is a no-op. Called once at init; also reusable from tests that toggle the env.
 func resolveDbg() {
 	dbgFile = nil
-	path := os.Getenv("AI_ASSIST_DEBUG_LOG")
+	path := os.Getenv("AI_PLAYBOOK_DEBUG_LOG")
 	if path == "" {
 		return
 	}
@@ -30,7 +30,7 @@ func resolveDbg() {
 }
 
 // dbg appends a timestamped line "<RFC3339> [pager] <msg>\n" to the file named
-// by AI_ASSIST_DEBUG_LOG. It is a no-op when that env var is unset/empty or the
+// by AI_PLAYBOOK_DEBUG_LOG. It is a no-op when that env var is unset/empty or the
 // file failed to open. Safe to call from the single-goroutine bubbletea Update
 // loop; not designed for concurrent callers.
 func dbg(format string, args ...any) {
@@ -48,6 +48,6 @@ func SetDebugLog(path string) {
 	if path == "" {
 		return
 	}
-	os.Setenv("AI_ASSIST_DEBUG_LOG", path)
+	os.Setenv("AI_PLAYBOOK_DEBUG_LOG", path)
 	resolveDbg()
 }

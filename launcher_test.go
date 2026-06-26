@@ -866,12 +866,12 @@ func TestLaunch_CacheMissEscalateStoresNothing(t *testing.T) {
 	}
 }
 
-// TestLaunch_NoCacheBypass: AI_ASSIST_NO_CACHE bypasses the lookup (classify runs)
+// TestLaunch_NoCacheBypass: AI_PLAYBOOK_NO_CACHE bypasses the lookup (classify runs)
 // and skips the store (no entry written), even for a command/answer classification.
 func TestLaunch_NoCacheBypass(t *testing.T) {
 	fastFloatWait(t)
 	c := isolateCache(t)
-	t.Setenv("AI_ASSIST_NO_CACHE", "1")
+	t.Setenv("AI_PLAYBOOK_NO_CACHE", "1")
 	const submitted = "show the git log"
 	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj", PaneID: "terminal_7"}
 

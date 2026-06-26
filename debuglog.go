@@ -10,7 +10,7 @@ import (
 
 // Gated debug logging for the live launcher↔session↔float flow. These boundaries
 // only misbehave under a real terminal multiplexer (panes/floats can't be tested
-// headless), so we trace them to a file when AI_ASSIST_DEBUG_LOG (launcher) or
+// headless), so we trace them to a file when AI_PLAYBOOK_DEBUG_LOG (launcher) or
 // --debug-log (session pane — env may not survive the zellij spawn) is set.
 var (
 	dbgPath string

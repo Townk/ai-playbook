@@ -31,32 +31,32 @@ func Author(req capture.Request, agent Agent) (io.ReadCloser, error) {
 }
 
 // claudeBin resolves the claude executable, mirroring ai-assist-claude's
-// $AI_ASSIST_CLAUDE_BIN (default "claude").
+// $AI_PLAYBOOK_CLAUDE_BIN (default "claude").
 func claudeBin() string {
-	if v := os.Getenv("AI_ASSIST_CLAUDE_BIN"); v != "" {
+	if v := os.Getenv("AI_PLAYBOOK_CLAUDE_BIN"); v != "" {
 		return v
 	}
 	return "claude"
 }
 
 // claudeModel resolves the capable model, mirroring ai-assist-claude:
-// $ASSIST_MODEL, else $AI_ASSIST_MODEL, else "sonnet". Capable by design — never
+// $ASSIST_MODEL, else $AI_PLAYBOOK_MODEL, else "sonnet". Capable by design — never
 // a cheap one (the cheap haiku pass was the triage classify step, not authoring).
 func claudeModel() string {
 	if v := os.Getenv("ASSIST_MODEL"); v != "" {
 		return v
 	}
-	if v := os.Getenv("AI_ASSIST_MODEL"); v != "" {
+	if v := os.Getenv("AI_PLAYBOOK_MODEL"); v != "" {
 		return v
 	}
 	return "sonnet"
 }
 
 // claudePermissionMode resolves the headless permission posture, mirroring
-// $AI_ASSIST_CLAUDE_PERMISSION_MODE (default bypassPermissions) so the headless
+// $AI_PLAYBOOK_CLAUDE_PERMISSION_MODE (default bypassPermissions) so the headless
 // agent never blocks on an interactive permission prompt.
 func claudePermissionMode() string {
-	if v := os.Getenv("AI_ASSIST_CLAUDE_PERMISSION_MODE"); v != "" {
+	if v := os.Getenv("AI_PLAYBOOK_CLAUDE_PERMISSION_MODE"); v != "" {
 		return v
 	}
 	return "bypassPermissions"

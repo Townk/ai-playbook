@@ -49,7 +49,7 @@ import (
 )
 
 // runTimeout bounds a single agent-issued `run` (matches the orchestrator /
-// broker AI_ASSIST_RUN_TIMEOUT default of 120s).
+// broker AI_PLAYBOOK_RUN_TIMEOUT default of 120s).
 const runTimeout = 120 * time.Second
 
 // askUnavailableMsg is the sentinel reply for the deferred float-backed ask: the

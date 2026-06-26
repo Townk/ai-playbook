@@ -176,15 +176,15 @@ func selftest() int {
 // `ai-playbook session --request <json>`. See runSession for the body.
 //
 // An explicit request on the CLI (args after `troubleshoot`, or
-// $AI_ASSIST_USER_REQUEST) SKIPS the float — the request is already known. Off a
+// $AI_PLAYBOOK_USER_REQUEST) SKIPS the float — the request is already known. Off a
 // mux (no zellij) there is no float/pane to spawn; the launcher runs the session
 // INLINE in the current pane (the pre-topology behavior), so headless and SSH
 // contexts still work.
 func troubleshoot() int {
-	dbgInit(os.Getenv("AI_ASSIST_DEBUG_LOG"))
+	dbgInit(os.Getenv("AI_PLAYBOOK_DEBUG_LOG"))
 	cliRequest := strings.TrimSpace(strings.Join(os.Args[2:], " "))
 	if cliRequest == "" {
-		cliRequest = os.Getenv("AI_ASSIST_USER_REQUEST")
+		cliRequest = os.Getenv("AI_PLAYBOOK_USER_REQUEST")
 	}
 
 	// pane id from env (mirrors the shell's ZELLIJ_PANE_ID → terminal_<id>).
@@ -281,10 +281,10 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 	// CACHE-BY-KIND: a repeat request (same context + request) is served straight
 	// from the cache, skipping the cheap classify ENTIRELY. triage.Route computes
 	// the same (ctxHash, reqHash) keys the session uses and does the lookup; on a
-	// hit we route by the stored `kind` with no model call. AI_ASSIST_NO_CACHE
+	// hit we route by the stored `kind` with no model call. AI_PLAYBOOK_NO_CACHE
 	// bypasses the lookup (matches runSession; the env rename is a separate task).
 	c := cache.Open()
-	noCache := os.Getenv("AI_ASSIST_NO_CACHE") != ""
+	noCache := os.Getenv("AI_PLAYBOOK_NO_CACHE") != ""
 	d := triage.Route(req, c, noCache)
 	dbg("launch: triage outcome=%v noCache=%v disabled=%v", d.Outcome, noCache, d.Disabled)
 
@@ -774,7 +774,7 @@ func spawnSession(m mux.Mux, selfExe string, req capture.Request, title string) 
 	}
 	if dbgPath != "" {
 		// Carry the debug-log path into the spawned pane explicitly — the pane
-		// inherits the zellij server's env, not ours, so AI_ASSIST_DEBUG_LOG may
+		// inherits the zellij server's env, not ours, so AI_PLAYBOOK_DEBUG_LOG may
 		// not reach it.
 		sessionCmd = append(sessionCmd, "--debug-log", dbgPath)
 	}
@@ -805,7 +805,7 @@ func sessionMain() int {
 	fs.StringVar(&titleFlag, "title", "", "working pane-header title (the classify-supplied label)")
 	fs.Parse(os.Args[2:])
 	if debugLog == "" {
-		debugLog = os.Getenv("AI_ASSIST_DEBUG_LOG")
+		debugLog = os.Getenv("AI_PLAYBOOK_DEBUG_LOG")
 	}
 	dbgInit(debugLog)
 	ui.SetDebugLog(debugLog) // the ui pkg traces too; the pane got --debug-log as a flag (env dropped)
@@ -831,7 +831,7 @@ func sessionMain() int {
 			Mux:         mux.Load(),
 			Atuin:       capture.NewAtuin(),
 			PaneID:      paneID,
-			UserRequest: os.Getenv("AI_ASSIST_USER_REQUEST"),
+			UserRequest: os.Getenv("AI_PLAYBOOK_USER_REQUEST"),
 		})
 	}
 	return runSession(req, titleFlag)
@@ -846,7 +846,7 @@ func sessionMain() int {
 func runSession(req capture.Request, title string) int {
 	dbgEnv("runSession")
 	c := cache.Open()
-	noCache := os.Getenv("AI_ASSIST_NO_CACHE") != ""
+	noCache := os.Getenv("AI_PLAYBOOK_NO_CACHE") != ""
 	d := triage.Route(req, c, noCache)
 	dbg("runSession: triage outcome=%v noCache=%v", d.Outcome, noCache)
 

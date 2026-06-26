@@ -393,11 +393,11 @@ func newModel(harness, md string) model {
 // before falling back to the manual "try another fix" button.
 const defaultMaxFollowups = 3
 
-// resolveMaxFollowups reads the auto-follow-up cap from $AI_ASSIST_MAX_FOLLOWUPS
+// resolveMaxFollowups reads the auto-follow-up cap from $AI_PLAYBOOK_MAX_FOLLOWUPS
 // (a positive integer), else defaultMaxFollowups. A non-positive / unparseable
 // value falls back to the default rather than disabling the feature.
 func resolveMaxFollowups() int {
-	if v := os.Getenv("AI_ASSIST_MAX_FOLLOWUPS"); v != "" {
+	if v := os.Getenv("AI_PLAYBOOK_MAX_FOLLOWUPS"); v != "" {
 		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
 			return n
 		}
@@ -1238,7 +1238,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// "the fix didn't work" signal. It fires on EACH verify failure — including
 		// the re-armed follow-up playbook's own verify block, which reuses id=verify
 		// and so flows through this same path — until the attempt cap (m.maxFollowups,
-		// default 3, $AI_ASSIST_MAX_FOLLOWUPS) is reached. Past the cap it stops
+		// default 3, $AI_PLAYBOOK_MAX_FOLLOWUPS) is reached. Past the cap it stops
 		// auto-firing and the manual "try another fix" button is shown on the verify
 		// block instead (render.go gates that button on m.followups >= m.maxFollowups).
 		//
@@ -2304,7 +2304,7 @@ func (m model) blockCommand(id string) string {
 // followupAnnouncements are the agent-voice narration lines inserted above each
 // AUTO follow-up attempt (issue #1). They vary by attempt number so successive
 // rounds don't read identically — index = (attempt-1), clamped to the last entry
-// for any round at/beyond the list length (e.g. a higher $AI_ASSIST_MAX_FOLLOWUPS).
+// for any round at/beyond the list length (e.g. a higher $AI_PLAYBOOK_MAX_FOLLOWUPS).
 // Rendered as a dim/italic markdown paragraph so it reads as narration, separate
 // from playbook content. Tweak the phrasing here.
 var followupAnnouncements = []string{
