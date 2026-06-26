@@ -55,6 +55,8 @@ func main() {
 		os.Exit(sessionMain())
 	case "run":
 		os.Exit(ui.Main())
+	case "finalize":
+		os.Exit(finalize())
 	case "mcp":
 		os.Exit(mcpMain())
 	case "input":
@@ -69,7 +71,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ai-playbook {troubleshoot|session [--request <json>]|run <file.md>|mcp --socket <path>|input|selftest}")
+	fmt.Fprintln(os.Stderr, "usage: ai-playbook {troubleshoot|session [--request <json>]|run <file.md>|finalize [--dry-run] <file.md>|mcp --socket <path>|input|selftest}")
 }
 
 // mcpMain is the `ai-playbook mcp --socket <path>` subcommand: an MCP stdio

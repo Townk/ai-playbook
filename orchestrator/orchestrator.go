@@ -452,13 +452,7 @@ func (o *Orchestrator) CommitPlaybook(body string) (string, error) {
 func (re *Reengage) buildFrontMatter(body string) frontmatter.FrontMatter {
 	// name: the playbook's H1 title (the model authored it; we just read it),
 	// matching playbookSlug's title source.
-	name := playbookTitle.FindStringSubmatch(body)
-	title := ""
-	if name != nil {
-		title = name[1]
-	} else if m := firstHeading.FindStringSubmatch(body); m != nil {
-		title = m[1]
-	}
+	title := PlaybookName(body)
 
 	// Model classification (best-effort): on a nil seam OR any error, continue with
 	// empty model fields — NEVER fail the commit over metadata.
@@ -494,6 +488,27 @@ func (re *Reengage) buildFrontMatter(body string) frontmatter.FrontMatter {
 // (the em-dash the FINAL-PLAYBOOK prompt mandates), capturing <title>. A plain
 // `# <title>` (no "Playbook —" prefix) is matched by the fallback in playbookSlug.
 var playbookTitle = regexp.MustCompile(`(?m)^#\s+Playbook\s+—\s+(.+?)\s*$`)
+
+// PlaybookName derives the front-matter `name` from a playbook body, the SAME way
+// the live commit path does: the title in the `# Playbook — <title>` heading, else
+// the first markdown H1 `# <title>`, else "". Exported so the `finalize` subcommand
+// reuses the exact name-derivation the commit path uses (no second implementation
+// to drift). A body with no H1 yields "".
+func PlaybookName(body string) string {
+	if m := playbookTitle.FindStringSubmatch(body); m != nil {
+		return m[1]
+	}
+	if m := firstHeading.FindStringSubmatch(body); m != nil {
+		return m[1]
+	}
+	return ""
+}
+
+// StripPreamble removes any prose ABOVE the first markdown H1 so a finalized
+// playbook begins at its title; exported wrapper over stripPreamble for the
+// `finalize` subcommand (same logic the commit path applies before assembling the
+// front matter). Idempotent; a body with no H1 is returned unchanged.
+func StripPreamble(body string) string { return stripPreamble(body) }
 
 // firstHeading matches the first markdown H1 `# <title>` as a fallback title source.
 var firstHeading = regexp.MustCompile(`(?m)^#\s+(.+?)\s*$`)
