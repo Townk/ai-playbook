@@ -4,6 +4,7 @@
 [![codecov](https://codecov.io/gh/Townk/ai-playbook/branch/master/graph/badge.svg)](https://codecov.io/gh/Townk/ai-playbook)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Townk/ai-playbook)](https://goreportcard.com/report/github.com/Townk/ai-playbook)
 [![Latest release](https://img.shields.io/github/v/release/Townk/ai-playbook)](https://github.com/Townk/ai-playbook/releases)
+[![License](https://img.shields.io/github/license/Townk/ai-playbook)](LICENSE)
 
 **ai-playbook** is a harness-agnostic, terminal-native AI assistant that turns
 your live shell context into **runnable, reusable playbooks**. Instead of
