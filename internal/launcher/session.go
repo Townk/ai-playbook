@@ -95,7 +95,7 @@ func runSession(req capture.Request, title string, m mux.Mux) int {
 	// Configured shell (cfg.Driver.Shell) threaded into BOTH the session's shared
 	// driver (openSession) and the ui's own-driver fallbacks (authorPlaybook's
 	// RunStream, serveCachedPlaybook's ui.Main). "" preserves the zsh default.
-	cfg, _ := config.Load()
+	cfg, _ := config.Load() // always non-nil (Default on error)
 	shell := cfg.Driver.Shell
 
 	// Session setup: ONE shared shell driver is created here, at session start, so
@@ -382,7 +382,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 	// cfg is loaded here (before the reengage construction) so StoreDir can be wired
 	// from cfg.GlobalStoreDir() — the single resolver that both the writer
 	// (CommitPlaybook) and the reader (store.Index) use, ensuring they never diverge.
-	cfg, _ := config.Load()
+	cfg, _ := config.Load() // always non-nil (Default on error)
 	reengage := &orchestrator.Reengage{
 		Req:         req,
 		Agent:       sess.authoringAgent(),

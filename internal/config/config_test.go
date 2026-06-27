@@ -7,6 +7,25 @@ import (
 	"testing"
 )
 
+// A malformed config.toml IS an error, but Load/loadFrom must still return a
+// usable non-nil *Config (the defaults) so callers that ignore the error
+// (cfg, _ := Load()) never deref nil. Regression guard for the nil-config panic.
+func TestLoadFrom_ParseError_ReturnsUsableDefault(t *testing.T) {
+	cfg, err := loadFrom(Default(), "bad.toml", []byte("this is = not [valid toml"))
+	if err == nil {
+		t.Fatal("expected a parse error for malformed toml")
+	}
+	if cfg == nil {
+		t.Fatal("loadFrom returned nil *Config on parse error — callers would panic")
+	}
+	if got := cfg.Driver.Shell; got != "zsh" {
+		t.Fatalf("fallback cfg not the default profile: Driver.Shell = %q, want \"zsh\"", got)
+	}
+	if cfg.GlobalStoreDir() == "" {
+		t.Fatal("fallback cfg.GlobalStoreDir() empty — deref-safety not preserved")
+	}
+}
+
 // No config file → the baked-in default profile stands alone (zellij defaults).
 func TestLoad_NoFile_Defaults(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // empty dir → no config.toml

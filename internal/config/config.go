@@ -163,6 +163,10 @@ func configPath() string {
 // values from the user's config.toml laid over it. A missing file is NOT an
 // error (the defaults stand alone). A present-but-unreadable or malformed file
 // IS an error so misconfiguration is loud rather than silently ignored.
+//
+// The returned *Config is ALWAYS non-nil: on error it is the usable Default()
+// (best-effort merge), so callers that ignore the error (cfg, _ := Load()) can
+// safely deref it.
 func Load() (*Config, error) {
 	cfg := Default()
 	path := configPath()
@@ -174,7 +178,7 @@ func Load() (*Config, error) {
 		if os.IsNotExist(err) {
 			return cfg, nil
 		}
-		return nil, fmt.Errorf("config: read %s: %w", path, err)
+		return cfg, fmt.Errorf("config: read %s: %w", path, err)
 	}
 	return loadFrom(cfg, path, data)
 }
@@ -188,7 +192,9 @@ func loadFrom(base *Config, path string, data []byte) (*Config, error) {
 	// key keeps the default rather than blanking it.)
 	var user Config
 	if err := toml.Unmarshal(data, &user); err != nil {
-		return nil, fmt.Errorf("config: parse %s: %w", path, err)
+		// Return the usable base (defaults) alongside the error so callers that
+		// ignore the error (cfg, _ := Load()) never get a nil *Config to deref.
+		return base, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 	// Detect a user-supplied [mux] section: Mux has only string fields (comparable),
 	// so a zero-value means the user omitted [mux] entirely.
