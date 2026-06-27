@@ -242,32 +242,39 @@ func TestSpawnFloat_ExecsStub(t *testing.T) {
 	}
 }
 
-// Select returns Null when $ZELLIJ is unset and the config has no [mux] section.
-func TestSelect_NullWhenNoZellijAndNoConfig(t *testing.T) {
-	noenv := func(string) string { return "" }
-	m := Select(noenv, config.Default())
+// Select returns Null with the Default config: the mux is OFF by default
+// ([mux] backend == ""), even inside zellij — there is no $ZELLIJ auto-enable.
+func TestSelect_NullWhenBackendOff(t *testing.T) {
+	m := Select(config.Default())
 	if !IsNull(m) {
-		t.Fatal("Select with no ZELLIJ and Default config must return Null()")
+		t.Fatal("Select with Default config (backend off) must return Null()")
 	}
 }
 
-// Select returns a non-null (templated) Mux when $ZELLIJ is set, even with Default config.
-func TestSelect_NonNullWhenZellijSet(t *testing.T) {
-	zellijenv := func(s string) string {
-		if s == "ZELLIJ" {
-			return "0"
-		}
-		return ""
-	}
-	m := Select(zellijenv, config.Default())
+// Select returns a non-null (templated) Mux when the user opts in with
+// [mux] backend = "zellij".
+func TestSelect_NonNullWhenBackendSet(t *testing.T) {
+	cfg := config.Default()
+	cfg.Mux.Backend = "zellij"
+	m := Select(cfg)
 	if IsNull(m) {
-		t.Fatal("Select with ZELLIJ set must not return Null()")
+		t.Fatal("Select with backend = zellij must not return Null()")
 	}
 }
 
-// Select returns a non-null Mux when the user config has a [mux] section
-// (MuxConfigured() == true), even without $ZELLIJ.
-func TestSelect_NonNullWhenMuxConfigured(t *testing.T) {
+// TestLoad_NullWhenNoConfig asserts Load returns Null when no user config file is
+// present (so [mux] backend stays "" — the mux is off by default).
+func TestLoad_NullWhenNoConfig(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // empty dir → no config.toml
+	m := Load()
+	if !IsNull(m) {
+		t.Fatal("Load with no config must return Null() (mux off by default)")
+	}
+}
+
+// TestLoad_NonNullWhenBackendSet asserts Load returns a non-null (templated) Mux
+// when the user config opts in with [mux] backend = "zellij".
+func TestLoad_NonNullWhenBackendSet(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
 	cfgDir := filepath.Join(dir, "ai-playbook")
@@ -275,50 +282,22 @@ func TestSelect_NonNullWhenMuxConfigured(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"),
-		[]byte("[mux]\ndump-screen = \"tmux capture-pane -p\"\n"), 0o644); err != nil {
+		[]byte("[mux]\nbackend = \"zellij\"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	cfg, err := config.Load()
-	if err != nil {
-		t.Fatalf("config.Load: %v", err)
-	}
-	noenv := func(string) string { return "" }
-	m := Select(noenv, cfg)
-	if IsNull(m) {
-		t.Fatal("Select with MuxConfigured must not return Null()")
-	}
-}
-
-// TestLoad_NullWhenNoZellijNoConfig asserts Load returns Null when $ZELLIJ is
-// empty and no user config file is present (so MuxConfigured() is false).
-func TestLoad_NullWhenNoZellijNoConfig(t *testing.T) {
-	t.Setenv("ZELLIJ", "")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // empty dir → no config.toml
-	m := Load()
-	if !IsNull(m) {
-		t.Fatal("Load with no ZELLIJ and no config must return Null()")
-	}
-}
-
-// TestLoad_NonNullWhenZellijSet asserts Load returns a non-null (templated) Mux
-// when $ZELLIJ is set, even without a config file.
-func TestLoad_NonNullWhenZellijSet(t *testing.T) {
-	t.Setenv("ZELLIJ", "0")
-	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // empty dir
 	m := Load()
 	if IsNull(m) {
-		t.Fatal("Load with ZELLIJ set must return non-null")
+		t.Fatal("Load with [mux] backend = zellij must return non-null")
 	}
 }
 
 // TestLoad_FallsBackToDefaultOnBadConfig asserts Load uses config.Default() when
-// the config file is malformed (config.Load fails), producing a non-null Mux
-// because $ZELLIJ is set. This covers the `if err != nil { cfg = config.Default() }`
-// branch inside Load.
+// the config file is malformed (config.Load fails). The Default profile has the
+// mux OFF (backend ""), so the result is Null — this covers the
+// `if err != nil { cfg = config.Default() }` branch inside Load.
 func TestLoad_FallsBackToDefaultOnBadConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", dir)
-	t.Setenv("ZELLIJ", "0")
 	cfgDir := filepath.Join(dir, "ai-playbook")
 	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -328,8 +307,8 @@ func TestLoad_FallsBackToDefaultOnBadConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	m := Load()
-	if IsNull(m) {
-		t.Fatal("Load with ZELLIJ set must return non-null even when config is malformed (fallback to Default)")
+	if !IsNull(m) {
+		t.Fatal("Load with malformed config must fall back to Default (mux off) → Null()")
 	}
 }
 

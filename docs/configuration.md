@@ -24,14 +24,31 @@ Selects the model harness and a few value preferences. The harness *invocation*
 | `bin`          | `""`       | Override for the harness executable path; empty → the harness name resolved on `PATH`. |
 | `thinking`     | `medium`   | Reasoning effort for the owned Claude invocation, mapped to a `MAX_THINKING_TOKENS` budget: `off` / `low` / `medium` / `high`, or a bare integer. `medium` ≈ 8000 tokens; `off` disables thinking. |
 
+### `[driver]`
+
+Selects the executing shell for run-blocks.
+
+| Key     | Default        | Meaning |
+|---------|----------------|---------|
+| `shell` | `""` (auto)    | The shell preset to spawn: `zsh`, `bash`, or POSIX `sh`. The default `""` means **auto** — honor `$SHELL` when its basename names a supported shell and it resolves, otherwise fall back `zsh` → `bash` → `sh`. A `zsh` login shell is therefore unaffected. Set an explicit value to pin one regardless of `$SHELL`. |
+
 ### `[mux]`
 
-Command **templates** for terminal-multiplexer actions (defaults target zellij).
-Each value is a template string; the binary token-splits it, substitutes
-placeholders (`{cmd}`, `{cwd}`/`{cwdarg}`, `{pane}`/`{panearg}`, `{width}`,
-`{height}`, `{name}`/`{namearg}`, `{text}`, `{title}`), and runs the resulting argv
-directly (it is **not** a shell). An empty value after merge means the action is
-unconfigured.
+The terminal multiplexer is **OFF by default**: with no `[mux] backend` set,
+ai-playbook uses the inline (no-mux) UX even inside zellij. Opt in with a tier-1
+selector — `backend = "zellij"` — that mirrors `[driver] shell` and
+`[agent] harness`.
+
+| Key       | Default     | Meaning |
+|-----------|-------------|---------|
+| `backend` | `""` (off)  | The named multiplexer preset to enable. `""` = off (inline UX). `"zellij"` = the built-in zellij preset (the command templates below). Any other value requires full per-command template overrides. |
+
+When the mux is enabled, each action is driven by a command **template** (tier-2,
+for fine-grained control). Each value is a template string; the binary token-splits
+it, substitutes placeholders (`{cmd}`, `{cwd}`/`{cwdarg}`, `{pane}`/`{panearg}`,
+`{width}`, `{height}`, `{name}`/`{namearg}`, `{text}`, `{title}`), and runs the
+resulting argv directly (it is **not** a shell). The defaults are the zellij preset;
+override one only to target a different multiplexer or tweak a single action.
 
 | Key                  | Action |
 |----------------------|--------|
@@ -41,8 +58,9 @@ unconfigured.
 | `dump-screen`        | Capture a pane's scrollback (for context capture). |
 | `type-into-pane`     | Write characters into the origin pane (targets `--pane-id`). |
 
-Defaults are the zellij commands from `config.Default()`; see `config/config.go` for
-the exact template strings and the placeholder/argv-safety contract.
+The template defaults are the zellij commands from `config.Default()`; see
+`config/config.go` for the exact strings and the placeholder/argv-safety contract.
+An empty template value after merge means that action is unconfigured.
 
 Example:
 
@@ -53,8 +71,12 @@ model = "sonnet"
 triage_model = "haiku"
 thinking = "medium"
 
+[driver]
+shell = "bash"   # pin bash; omit (or "") to auto-honor $SHELL
+
 [mux]
-# override only if you are not on the default zellij setup
+backend = "zellij"   # opt in to the multiplexer (off by default)
+# tier-2: override a single action only if you are not on the default zellij setup
 dump-screen = "tmux capture-pane -p {panearg}"
 ```
 

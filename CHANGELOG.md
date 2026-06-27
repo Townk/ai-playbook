@@ -22,9 +22,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in-viewer overlay (all types: text/line/confirm/choose/free). With a multiplexer
   present, the floating-pane experience is unchanged.
 - Configurable shell (ADR-0006 Stage 2): `[driver] shell` selects the executing
-  shell — `zsh` (default), `bash`, or POSIX `sh` — falling back to `$SHELL` when
-  unset. zsh remains the default for full fidelity (aliases/functions/rc); bash and
-  sh are supported with per-shell value-passing that round-trips special characters.
+  shell — `zsh`, `bash`, or POSIX `sh`. bash and sh are supported with per-shell
+  value-passing that round-trips special characters; zsh gives full fidelity
+  (aliases/functions/rc). The default honors `$SHELL` (see *Changed*).
+
+### Changed
+
+- The multiplexer integration is now **OFF by default** (was: auto-enabled inside
+  zellij). Opt in with `[mux] backend = "zellij"`. The `$ZELLIJ`-presence
+  auto-enable is removed; per-command `[mux]` template overrides remain as tier-2.
+  **Behavior change** (ADR-0007): pre-existing users who relied on auto-zellij must
+  add `[mux] backend = "zellij"`.
+- The shell driver now **defaults to `$SHELL`** (was: zsh-first). With no
+  `[driver] shell` set it honors the login shell when its basename names a supported
+  shell (zsh/bash/sh), falling back `zsh` → `bash` → `sh`. Pin a specific shell with
+  `[driver] shell`. **Behavior change** (ADR-0007); a zsh user is unaffected.
 
 ## [0.3.0] - 2026-06-26
 

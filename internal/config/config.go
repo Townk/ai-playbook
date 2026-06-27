@@ -26,6 +26,13 @@ import (
 // is a template string (see Substitute for placeholders). Empty strings after
 // merge mean the action is unconfigured.
 type Mux struct {
+	// Backend is the named multiplexer preset to enable. "" (the compiled-in
+	// default) means the multiplexer is OFF — the inline (no-mux) UX is used even
+	// inside zellij (ADR-0007). "zellij" selects the built-in zellij preset (the
+	// command templates below). Any other value requires full per-command template
+	// overrides. It is the tier-1 selector, mirroring [driver] shell and
+	// [agent] harness.
+	Backend          string `toml:"backend"`
 	OpenFloatingPane string `toml:"open-floating-pane"`
 	OpenInputFloat   string `toml:"open-input-float"`
 	OpenDockedPane   string `toml:"open-docked-pane"`
@@ -92,21 +99,13 @@ type Config struct {
 	Agent  Agent  `toml:"agent"`
 	Driver Driver `toml:"driver"`
 	Store  Store  `toml:"store"`
-	// muxConfigured is set true by loadFrom when the decoded user TOML contained a
-	// [mux] section with at least one non-empty key. It is unexported so the TOML
-	// decoder ignores it; it is never set on the Default() profile.
-	muxConfigured bool
 }
 
-// MuxConfigured reports whether the user's config file contained a [mux] section.
-// When false, and $ZELLIJ is also unset, callers should select the null no-op Mux
-// because no terminal multiplexer is active. It is always false for Default(),
-// which carries no user-supplied data.
-func (c *Config) MuxConfigured() bool { return c.muxConfigured }
-
-// Default returns a fresh copy of the baked-in default profile. The mux defaults
-// are the zellij commands the binary used before it was config-driven, so a
-// no-config run behaves identically to the hardcoded zellij path.
+// Default returns a fresh copy of the baked-in default profile. The multiplexer
+// is OFF by default (Mux.Backend == ""): a no-config run uses the inline (no-mux)
+// UX even inside zellij (ADR-0007). Opt in via [mux] backend = "zellij". The mux
+// command templates below ARE the zellij preset — populated so that opting in
+// reproduces the previous hardcoded zellij invocations exactly.
 func Default() *Config {
 	return &Config{
 		Mux: Mux{
@@ -198,11 +197,7 @@ func loadFrom(base *Config, path string, data []byte) (*Config, error) {
 		// ignore the error (cfg, _ := Load()) never get a nil *Config to deref.
 		return base, fmt.Errorf("config: parse %s: %w", path, err)
 	}
-	// Detect a user-supplied [mux] section: Mux has only string fields (comparable),
-	// so a zero-value means the user omitted [mux] entirely.
-	if user.Mux != (Mux{}) {
-		base.muxConfigured = true
-	}
+	mergeStr(&base.Mux.Backend, user.Mux.Backend)
 	mergeStr(&base.Mux.OpenFloatingPane, user.Mux.OpenFloatingPane)
 	mergeStr(&base.Mux.OpenInputFloat, user.Mux.OpenInputFloat)
 	mergeStr(&base.Mux.OpenDockedPane, user.Mux.OpenDockedPane)

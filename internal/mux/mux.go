@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -75,20 +74,22 @@ type templated struct {
 	tpl config.Mux
 }
 
-// FromConfig builds a Mux from the merged config. With the default profile this
-// reproduces the previous hardcoded zellij invocations exactly, so capture and
-// view-diff are unchanged when no config file is present.
+// FromConfig builds a Mux from the merged config. With the zellij preset's
+// templates (config.Default's Mux command templates) this reproduces the previous
+// hardcoded zellij invocations exactly, so capture and view-diff are unchanged
+// once the multiplexer is opted in via [mux] backend.
 func FromConfig(cfg *config.Config) Mux {
 	return &templated{tpl: cfg.Mux}
 }
 
-// Select picks the right Mux for the current environment. It returns Null() when
-// no multiplexer is present — i.e. getenv("ZELLIJ") returns "" AND the user has
-// not configured a [mux] section (cfg.MuxConfigured() is false). Otherwise it
-// returns the config-driven (templated) Mux so existing zellij behavior is
-// unchanged for callers that do have a multiplexer.
-func Select(getenv func(string) string, cfg *config.Config) Mux {
-	if getenv("ZELLIJ") == "" && !cfg.MuxConfigured() {
+// Select picks the right Mux for the merged config. The multiplexer is OFF by
+// default: it returns Null() unless the user explicitly opted in with
+// [mux] backend = "<name>" (cfg.Mux.Backend != ""). There is no $ZELLIJ
+// auto-enable (ADR-0007). When a backend is set it returns the config-driven
+// (templated) Mux, so the floating/docked/templated behavior is unchanged for
+// callers who opted in.
+func Select(cfg *config.Config) Mux {
+	if cfg.Mux.Backend == "" {
 		return Null()
 	}
 	return FromConfig(cfg)
@@ -102,7 +103,7 @@ func Load() Mux {
 	if err != nil {
 		cfg = config.Default()
 	}
-	return Select(os.Getenv, cfg)
+	return Select(cfg)
 }
 
 // percent renders n as a "<n>%" size string, empty when n <= 0 (template default).

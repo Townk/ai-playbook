@@ -244,52 +244,40 @@ func TestDriverShellAbsentKeepsAuto(t *testing.T) {
 	}
 }
 
-// MuxConfigured returns false for the baked-in Default (no user config, no [mux]).
-func TestDefault_MuxConfiguredFalse(t *testing.T) {
-	if Default().MuxConfigured() {
-		t.Fatal("Default() must have MuxConfigured() == false")
+// The mux is OFF by default: Default().Mux.Backend is "" (no preset selected),
+// so a no-config run uses the inline (no-mux) UX even inside zellij (ADR-0007).
+func TestDefault_MuxBackendOff(t *testing.T) {
+	if got := Default().Mux.Backend; got != "" {
+		t.Fatalf("Default().Mux.Backend = %q, want \"\" (off)", got)
 	}
 }
 
-// MuxConfigured returns true after loading a config that includes a [mux] key.
-func TestMuxConfigured_TrueWithMuxSection(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	cfgDir := filepath.Join(dir, "ai-playbook")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"),
-		[]byte("[mux]\ndump-screen = \"tmux capture-pane -p\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := Load()
+// A [mux] backend key in the config opts the multiplexer in (mirrors
+// [driver] shell and [agent] harness — a [section] selector = "name").
+func TestMuxBackendMergeOverride(t *testing.T) {
+	data := []byte("[mux]\nbackend = \"zellij\"\n")
+	cfg, err := loadFrom(Default(), "test.toml", data)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("loadFrom: %v", err)
 	}
-	if !cfg.MuxConfigured() {
-		t.Fatal("config with [mux] section must have MuxConfigured() == true")
+	if cfg.Mux.Backend != "zellij" {
+		t.Fatalf("Mux.Backend override: got %q, want zellij", cfg.Mux.Backend)
+	}
+	// Opting in keeps the zellij preset's command templates (they ARE the preset).
+	if cfg.Mux.DumpScreen != Default().Mux.DumpScreen {
+		t.Fatalf("backend opt-in should keep the preset templates: %q", cfg.Mux.DumpScreen)
 	}
 }
 
-// MuxConfigured returns false when only [agent] is configured (no [mux] section).
-func TestMuxConfigured_FalseWithOnlyAgentSection(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", dir)
-	cfgDir := filepath.Join(dir, "ai-playbook")
-	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"),
-		[]byte("[agent]\nharness = \"pi\"\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, err := Load()
+// A config that sets only [agent] (no [mux] backend) keeps the mux OFF ("").
+func TestMuxBackendAbsentKeepsOff(t *testing.T) {
+	data := []byte("[agent]\nharness = \"pi\"\n")
+	cfg, err := loadFrom(Default(), "test.toml", data)
 	if err != nil {
-		t.Fatalf("Load: %v", err)
+		t.Fatalf("loadFrom: %v", err)
 	}
-	if cfg.MuxConfigured() {
-		t.Fatal("config with only [agent] section must have MuxConfigured() == false")
+	if cfg.Mux.Backend != "" {
+		t.Fatalf("Mux.Backend should keep default: got %q, want \"\" (off)", cfg.Mux.Backend)
 	}
 }
 
