@@ -100,17 +100,26 @@ func TestResolveShell(t *testing.T) {
 			wantA:   "bash",
 		},
 		{
-			// Explicit "sh" selector — no adapter yet (Task 5).
-			name:    "explicit sh → errUnsupportedShell",
+			// Explicit "sh" selector — sh adapter registered in Task 5.
+			name:    "explicit sh → sh adapter",
 			sel:     "sh",
 			getenv:  noShellEnv,
-			look:    zshOnPath,
-			wantErr: errUnsupportedShell,
+			look:    makeLook("sh"),
+			wantBin: "sh",
+			wantA:   "sh",
 		},
 		{
-			// No shell anywhere: look finds nothing, $SHELL unset.
-			// Policy: return errUnsupportedShell (sh fallback deferred to Task 5).
-			name:    "all absent → errUnsupportedShell",
+			// zsh/bash absent, $SHELL unset, but sh present on PATH → sh fallback.
+			name:    "all absent except sh → sh fallback",
+			sel:     "",
+			getenv:  noShellEnv,
+			look:    makeLook("sh"),
+			wantBin: "sh",
+			wantA:   "sh",
+		},
+		{
+			// Truly nothing on PATH and $SHELL unset — not even sh.
+			name:    "all absent including sh → errUnsupportedShell",
 			sel:     "",
 			getenv:  noShellEnv,
 			look:    makeLook(), // nothing on PATH

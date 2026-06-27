@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 )
 
-// errUnsupportedShell is returned by resolveShell when the requested or
-// $SHELL-derived shell has no adapter registered yet. Task 5 will register the
-// POSIX sh adapter, at which point only truly unknown names reach this error.
-var errUnsupportedShell = errors.New("driver: unsupported shell; only zsh and bash are supported (sh adapter pending)")
+// errUnsupportedShell is returned by resolveShell when no adapter-backed shell
+// (zsh, bash, or POSIX sh) can be found anywhere — not on PATH by name, not via
+// $SHELL, and not even sh as the final fallback.
+var errUnsupportedShell = errors.New("driver: no supported shell found (zsh, bash, or sh)")
 
 // resolveShell picks the shell binary path and its shellAdapter from a selector
 // string. sel may be "", "auto", "zsh", "bash", or "sh"; "" behaves identically
@@ -20,11 +20,11 @@ var errUnsupportedShell = errors.New("driver: unsupported shell; only zsh and ba
 //  2. $SHELL fallback: take filepath.Base(getenv("SHELL")).
 //     - "zsh": try look(getenv("SHELL")) (the absolute path), use zshAdapter if found.
 //     - "bash": try look(getenv("SHELL")) (the absolute path), use bashAdapter if found.
-//     - "sh": return errUnsupportedShell (adapter registered in Task 5).
-//     - anything else / SHELL unset: return errUnsupportedShell.
+//     - "sh": try look(getenv("SHELL")) (the absolute path), use shAdapter if found.
+//  3. Final fallback: look("sh") → shAdapter (covers $SHELL unset or pointing at
+//     an unknown shell, as long as a POSIX sh exists on PATH).
 //
-// All-absent policy: errUnsupportedShell (the sh fallback is deferred to Task 5
-// when the POSIX sh adapter is registered).
+// All-absent policy: errUnsupportedShell only when not even sh can be found.
 //
 // look and getenv are injected for testability; production callers pass
 // exec.LookPath and os.Getenv.
@@ -45,8 +45,11 @@ func resolveShell(sel string, getenv func(string) string, look func(string) (str
 		return b, bashAdapter{}, nil
 
 	case "sh":
-		// Adapter registered in Task 5.
-		return "", nil, errUnsupportedShell
+		b, lerr := look("sh")
+		if lerr != nil {
+			return "", nil, fmt.Errorf("driver: sh requested but not found on PATH: %w", lerr)
+		}
+		return b, shAdapter{}, nil
 
 	case "", "auto":
 		// 1. Prefer zsh by name (the common case: zsh on PATH).
@@ -69,12 +72,20 @@ func resolveShell(sel string, getenv func(string) string, look func(string) (str
 					return b, bashAdapter{}, nil
 				}
 			case "sh":
-				// Recognised but not yet supported (adapter registered in Task 5).
-				return "", nil, errUnsupportedShell
+				// sh at an absolute path (e.g. $SHELL=/bin/sh or dash).
+				if b, lerr := look(shellEnv); lerr == nil {
+					return b, shAdapter{}, nil
+				}
 			}
 		}
 
-		// 3. No supported shell found anywhere.
+		// 3. Final fallback: any POSIX sh on PATH. sh is the lowest-common
+		//    denominator, so it is the last resort before giving up.
+		if b, lerr := look("sh"); lerr == nil {
+			return b, shAdapter{}, nil
+		}
+
+		// 4. No supported shell found anywhere — not even sh.
 		return "", nil, errUnsupportedShell
 
 	default:
