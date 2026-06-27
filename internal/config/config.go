@@ -31,6 +31,17 @@ type Mux struct {
 	TypeIntoPane     string `toml:"type-into-pane"`
 }
 
+// Driver holds the executing-shell configuration for ai-playbook's shell driver.
+// The single [driver] shell key is the tier-1 named preset (e.g. "zsh", "bash",
+// "sh"). Future per-command overrides will extend this struct and plug in via
+// driver.resolveShell — no caller reshaping is required.
+type Driver struct {
+	// Shell is the named shell preset the driver will spawn. Supported values:
+	// "zsh" (default), "bash", "sh". An empty string is treated as "zsh" by
+	// driver.resolveShell.
+	Shell string `toml:"shell"`
+}
+
 // Agent holds the user's harness SELECTION and a few value preferences. It does
 // NOT carry the invocation command: the harness invocation flags and the stream
 // parser are one matched contract owned in-tree (package author + agentstream),
@@ -59,8 +70,9 @@ type Agent struct {
 
 // Config is the merged ai-playbook configuration.
 type Config struct {
-	Mux   Mux   `toml:"mux"`
-	Agent Agent `toml:"agent"`
+	Mux    Mux    `toml:"mux"`
+	Agent  Agent  `toml:"agent"`
+	Driver Driver `toml:"driver"`
 	// muxConfigured is set true by loadFrom when the decoded user TOML contained a
 	// [mux] section with at least one non-empty key. It is unexported so the TOML
 	// decoder ignores it; it is never set on the Default() profile.
@@ -106,6 +118,9 @@ func Default() *Config {
 			// reasoning blocks stream as live activity by default. "off" disables it.
 			Thinking: "medium",
 		},
+		// Explicit default so a no-config run always spawns zsh; driver.resolveShell
+		// treats "" identically, but an explicit default avoids hidden coupling.
+		Driver: Driver{Shell: "zsh"},
 	}
 }
 
@@ -169,6 +184,7 @@ func loadFrom(base *Config, path string, data []byte) (*Config, error) {
 	mergeStr(&base.Agent.TriageModel, user.Agent.TriageModel)
 	mergeStr(&base.Agent.Bin, user.Agent.Bin)
 	mergeStr(&base.Agent.Thinking, user.Agent.Thinking)
+	mergeStr(&base.Driver.Shell, user.Driver.Shell)
 	return base, nil
 }
 

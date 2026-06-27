@@ -194,6 +194,37 @@ func containsExact(argv []string, want string) bool {
 	return false
 }
 
+// Default().Driver.Shell must be "zsh" so a no-config run keeps zsh.
+func TestDefaultShellIsZsh(t *testing.T) {
+	if got := Default().Driver.Shell; got != "zsh" {
+		t.Fatalf("Driver.Shell default = %q, want zsh", got)
+	}
+}
+
+// A [driver] shell key in the config overrides the default.
+func TestDriverShellMergeOverride(t *testing.T) {
+	data := []byte("[driver]\nshell = \"bash\"\n")
+	cfg, err := loadFrom(Default(), "test.toml", data)
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.Driver.Shell != "bash" {
+		t.Fatalf("Driver.Shell override: got %q, want bash", cfg.Driver.Shell)
+	}
+}
+
+// A config that sets only [agent] (no [driver]) keeps the default zsh shell.
+func TestDriverShellAbsentKeepsZsh(t *testing.T) {
+	data := []byte("[agent]\nharness = \"pi\"\n")
+	cfg, err := loadFrom(Default(), "test.toml", data)
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.Driver.Shell != "zsh" {
+		t.Fatalf("Driver.Shell should keep default: got %q, want zsh", cfg.Driver.Shell)
+	}
+}
+
 // MuxConfigured returns false for the baked-in Default (no user config, no [mux]).
 func TestDefault_MuxConfiguredFalse(t *testing.T) {
 	if Default().MuxConfigured() {
