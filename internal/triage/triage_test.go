@@ -109,3 +109,34 @@ func TestRoute_NoCacheForcesMiss(t *testing.T) {
 		t.Fatalf("no-cache must force escalate even with an entry, got %s", d.Outcome)
 	}
 }
+
+func TestRoute_NilCache(t *testing.T) {
+	req := capture.Request{ProjectRoot: "/p", Exit: "0", UserRequest: "q"}
+	d := Route(req, nil, false)
+	if d.Outcome != Escalate {
+		t.Fatalf("nil cache must escalate, got %s", d.Outcome)
+	}
+	if d.CtxHash == "" || d.ReqHash == "" {
+		t.Fatalf("nil cache must still compute keys: %+v", d)
+	}
+	if d.Disabled {
+		t.Fatal("nil cache path must not mark Disabled")
+	}
+}
+
+func TestOutcomeString(t *testing.T) {
+	tests := []struct {
+		outcome Outcome
+		want    string
+	}{
+		{Hit, "hit"},
+		{Escalate, "escalate"},
+		{Outcome(999), "unknown"},
+	}
+	for _, tc := range tests {
+		got := tc.outcome.String()
+		if got != tc.want {
+			t.Errorf("Outcome(%d).String() = %q, want %q", int(tc.outcome), got, tc.want)
+		}
+	}
+}
