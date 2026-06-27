@@ -104,6 +104,30 @@ Resolution: a bare slug → the **global** store; `proj:<stem>` → the **projec
 (explicit, no shadowing surprises). On-demand directory scan, no DB. A malformed file is
 skipped (logged), never fatal.
 
+### Configuration (store directories are configurable)
+
+Both store locations are user-configurable via a new `[store]` config section; the
+**defaults are exactly the locations above**. The `store` package must resolve its
+directories through config, never hardcode them.
+
+```toml
+[store]
+# Global store dir. Default: <data-dir>/playbooks, where <data-dir> is
+# $AI_PLAYBOOK_DATA_DIR (else ${XDG_DATA_HOME:-~/.local/share}/ai-playbook).
+global  = "~/.local/share/ai-playbook/playbooks"
+# Project-local store dir. Relative paths resolve against PROJECT_ROOT; absolute
+# paths are used verbatim. Default: ".ai-playbook/playbooks".
+project = ".ai-playbook/playbooks"
+```
+
+Resolution precedence for the global dir: explicit `[store] global` → derived from
+`$AI_PLAYBOOK_DATA_DIR` → XDG default. `CommitPlaybook` (which writes new playbooks)
+must write to the **same** configured global dir the store reads from — resolve both
+through one shared helper so write and read never diverge. `~` expands to the home dir
+(consistent with env-value normalization). The `[store]` config follows the same shape
+as the other config sections (`[agent]`/`[driver]`/`[mux]`); these are plain path
+settings (not the integration 2-tier preset+override style).
+
 ## Front matter: add `workdir`
 
 Add a `workdir` field = the target directory the playbook applies to. Populated at
