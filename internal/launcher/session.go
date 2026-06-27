@@ -211,6 +211,7 @@ func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge) *sess
 	if cwd == "" {
 		cwd = req.CWD
 	}
+	// TODO(stage2): thread cfg.Driver.Shell once openSession receives a config.
 	drv, err := driver.Open(driver.Options{Cwd: cwd})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: driver.Open failed (%v); authoring without agent tools\n", err)

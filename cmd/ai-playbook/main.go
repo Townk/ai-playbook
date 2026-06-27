@@ -103,6 +103,7 @@ func selftest() int {
 		}
 	}
 
+	// TODO(stage2): thread cfg.Driver.Shell here once selftest loads config.
 	d, err := driver.Open(driver.Options{})
 	if err != nil {
 		say("FATAL: %v", err)

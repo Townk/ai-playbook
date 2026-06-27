@@ -129,6 +129,7 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 			runCwd, _ = os.Getwd()
 		}
 		var derr error
+		// TODO(stage2): thread cfg.Driver.Shell once RunStream receives a config.
 		d, derr = driver.Open(driver.Options{Cwd: runCwd})
 		if derr != nil {
 			fmt.Fprintf(os.Stderr, "ai-playbook: driver.Open failed (%v); falling back to render-only\n", derr)

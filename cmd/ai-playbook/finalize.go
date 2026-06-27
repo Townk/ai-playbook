@@ -131,7 +131,7 @@ func finalize() int {
 	// Ground-truth env lookup: open a driver in the CURRENT cwd, dump `env`, parse
 	// it into a map, and return a lookup closure. Nil-safe: if the driver fails to
 	// open we proceed with no env values (a warning), never aborting the finalize.
-	lookup, closeDrv := driverEnvLookup()
+	lookup, closeDrv := driverEnvLookup(cfg.Driver.Shell)
 	defer closeDrv()
 
 	created := time.Now().Format("2006-01-02")
@@ -161,14 +161,15 @@ func finalize() int {
 	return 0
 }
 
-// driverEnvLookup opens a shell driver in the current cwd, dumps its environment
-// once, and returns a lookup closure plus a close func. It mirrors main.go's
-// buildEnvLookup approach (dump `env`, parse KEY=VALUE). On a driver-open failure
-// it prints a warning and returns an always-miss lookup with a no-op close, so the
-// caller proceeds with no env values rather than aborting.
-func driverEnvLookup() (lookup func(string) (string, bool), closeFn func()) {
+// driverEnvLookup opens a shell driver (using shell as the Options.Shell selector)
+// in the current cwd, dumps its environment once, and returns a lookup closure
+// plus a close func. It mirrors main.go's buildEnvLookup approach (dump `env`,
+// parse KEY=VALUE). On a driver-open failure it prints a warning and returns an
+// always-miss lookup with a no-op close, so the caller proceeds with no env values
+// rather than aborting.
+func driverEnvLookup(shell string) (lookup func(string) (string, bool), closeFn func()) {
 	miss := func(string) (string, bool) { return "", false }
-	d, err := driver.Open(driver.Options{})
+	d, err := driver.Open(driver.Options{Shell: shell})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook finalize: driver.Open failed (%v); finalizing without env values\n", err)
 		return miss, func() {}

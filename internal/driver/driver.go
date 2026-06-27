@@ -30,9 +30,13 @@ type Result struct {
 
 // Options configures a Driver. Env defaults to os.Environ() (the real shell);
 // tests pass a controlled ZDOTDIR via Env. Cwd, if set, is entered after spawn.
+// Shell selects the executing shell: "" | "auto" | "zsh" | "bash" | "sh"; ""
+// behaves like "auto" (zsh if present, else $SHELL fallback, else error). Shell
+// is resolved by resolveShell; unsupported names return an error from Open.
 type Options struct {
-	Env []string
-	Cwd string
+	Env   []string
+	Cwd   string
+	Shell string // "" | "auto" | "zsh" | "bash" | "sh"; "" behaves like "auto"
 }
 
 // Driver is a live, drivable interactive shell session.
@@ -58,14 +62,33 @@ type Driver struct {
 // the session is not tracked here.
 func (d *Driver) Cwd() string { return d.cwd }
 
-// Open spawns `zsh -il` under a pty and drives it ready.
+// Open resolves the configured shell (Options.Shell; default "auto" → zsh),
+// spawns it under a pty, and drives it ready. Returns an error if the shell
+// cannot be resolved (e.g. unsupported selector or binary not found).
 func Open(opts Options) (*Driver, error) {
 	env := opts.Env
 	if env == nil {
 		env = os.Environ()
 	}
-	a := shellAdapter(zshAdapter{})
-	c := exec.Command(a.name(), a.spawnArgs()...)
+	// getenvFn reads from opts.Env when set (so a test's controlled env is
+	// honored for SHELL / ZDOTDIR lookups), else falls back to os.Getenv.
+	getenvFn := func(key string) string {
+		if opts.Env != nil {
+			prefix := key + "="
+			for _, e := range opts.Env {
+				if strings.HasPrefix(e, prefix) {
+					return e[len(prefix):]
+				}
+			}
+			return ""
+		}
+		return os.Getenv(key)
+	}
+	bin, a, err := resolveShell(opts.Shell, getenvFn, exec.LookPath)
+	if err != nil {
+		return nil, err
+	}
+	c := exec.Command(bin, a.spawnArgs()...)
 	c.Env = env
 	ptmx, err := pty.Start(c)
 	if err != nil {

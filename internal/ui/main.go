@@ -328,6 +328,7 @@ func Main() int {
 					runCwd, _ = os.Getwd()
 				}
 				var derr error
+				// TODO(stage2): thread cfg.Driver.Shell once ui.Main receives a config.
 				d, derr = driver.Open(driver.Options{Cwd: runCwd})
 				if derr != nil {
 					fmt.Fprintf(os.Stderr, "ai-playbook run: driver.Open failed (%v); falling back to render-only\n", derr)
