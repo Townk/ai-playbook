@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/launcher"
@@ -46,6 +47,10 @@ func main() {
 	case "session":
 		os.Exit(launcher.SessionMain())
 	case "run":
+		// The `run` subcommand opens its own driver; honor the configured shell.
+		// ui stays config-agnostic — it receives the selector as DATA via SetShell.
+		cfg, _ := config.Load()
+		ui.SetShell(cfg.Driver.Shell)
 		os.Exit(ui.Main())
 	case "answer":
 		os.Exit(launcher.AnswerMain())
@@ -103,7 +108,10 @@ func selftest() int {
 		}
 	}
 
-	// TODO(stage2): thread cfg.Driver.Shell here once selftest loads config.
+	// selftest is intentionally pinned to the zsh default (Shell:"") — its checks
+	// below are zsh-specific (`print -r --`, mise auto-env on cd) and validate the
+	// zsh fidelity path, not the configurable runtime. It is not part of the
+	// assist/escalate flow, so cfg.Driver.Shell does not apply here.
 	d, err := driver.Open(driver.Options{})
 	if err != nil {
 		say("FATAL: %v", err)

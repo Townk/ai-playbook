@@ -60,7 +60,7 @@ func TestBridgeAskFunc_CarriesChoices(t *testing.T) {
 // cached-render path can proceed without blocking on the shell's blank-pane startup.
 func TestOpenSessionAsync_DeliversOnce(t *testing.T) {
 	minimalZDOTDIR(t)
-	ch := openSessionAsync(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil)
+	ch := openSessionAsync(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
 	if c := cap(ch); c != 1 {
 		t.Errorf("openSessionAsync channel cap = %d, want 1 (buffered so the goroutine never blocks)", c)
 	}
@@ -100,7 +100,7 @@ func TestReengageReady_NilSession_Degraded(t *testing.T) {
 func TestReengageReady_LiveSession_BuildsOrch(t *testing.T) {
 	minimalZDOTDIR(t)
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir())
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, &launchMux{}, nil)
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, &launchMux{}, nil, "")
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -221,7 +221,7 @@ func minimalZDOTDIR(t *testing.T) {
 // for the `f` keybind — both seams must be consistently unavailable off-mux.
 func TestOpenSession_AskUnavailableOffMux(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil)
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -243,7 +243,7 @@ func TestOpenSession_AskUnavailableOffMux(t *testing.T) {
 // agent and the playbook drive the same shell.
 func TestOpenSession_SharedDriverAndToolsBackend(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil)
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -299,7 +299,7 @@ func TestAuthoringAgent_InvokesClaudeWithMCPConfig(t *testing.T) {
 	argvFile := filepath.Join(t.TempDir(), "argv")
 	t.Setenv("AI_PLAYBOOK_CLAUDE_BIN", fakeClaude(t, argvFile))
 
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil)
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
 	if sess == nil {
 		t.Fatal("openSession returned nil")
 	}
@@ -391,7 +391,7 @@ func TestWriteMCPConfig_NoSelfExe(t *testing.T) {
 // resolved selfExe writes a valid config file and the remove func cleans it up.
 func TestWriteMCPConfig_LiveSession(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil)
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
 	if sess == nil {
 		t.Fatal("openSession returned nil")
 	}

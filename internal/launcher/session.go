@@ -92,6 +92,12 @@ func runSession(req capture.Request, title string, m mux.Mux) int {
 	d := triage.Route(req, c, noCache)
 	dbg("runSession: triage outcome=%v noCache=%v", d.Outcome, noCache)
 
+	// Configured shell (cfg.Driver.Shell) threaded into BOTH the session's shared
+	// driver (openSession) and the ui's own-driver fallbacks (authorPlaybook's
+	// RunStream, serveCachedPlaybook's ui.Main). "" preserves the zsh default.
+	cfg, _ := config.Load()
+	shell := cfg.Driver.Shell
+
 	// Session setup: ONE shared shell driver is created here, at session start, so
 	// BOTH authoring (the agent's tools backend) and the ui's run-blocks drive the
 	// SAME live shell — the agent diagnoses in the exact environment the playbook's
@@ -113,14 +119,14 @@ func runSession(req capture.Request, title string, m mux.Mux) int {
 	if mux.IsNull(m) {
 		bridge = askbridge.New()
 	}
-	sessCh := openSessionAsync(req, m, bridge)
+	sessCh := openSessionAsync(req, m, bridge, shell)
 
 	switch d.Outcome {
 	case triage.Hit:
 		dbg("runSession: serving cached playbook")
 		// serveCachedPlaybook OWNS the session: it renders instantly, waits for the
 		// background open, and closes the session after ui.Main returns.
-		return serveCachedPlaybook(d, req, sessCh, title, bridge)
+		return serveCachedPlaybook(d, req, sessCh, title, bridge, shell)
 	default:
 		// MISS: authoring needs the session up front (its driver-open wait is the
 		// pre-existing behavior, covered by the authoring spinner). Block for it.
@@ -142,9 +148,10 @@ func runSession(req capture.Request, title string, m mux.Mux) int {
 // on the send even if the caller never reads (e.g. the cached path closes after
 // ui.Main via the done latch), so there's no leak.
 // m is threaded from the caller (never re-loaded) so all paths agree on null-vs-templated.
-func openSessionAsync(req capture.Request, m mux.Mux, bridge *askbridge.Bridge) <-chan *session {
+// shell is the configured selector (cfg.Driver.Shell) threaded to openSession's driver.
+func openSessionAsync(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell string) <-chan *session {
 	ch := make(chan *session, 1)
-	go func() { ch <- openSession(req, m, bridge) }()
+	go func() { ch <- openSession(req, m, bridge, shell) }()
 	return ch
 }
 
@@ -197,22 +204,28 @@ func bridgeAskFunc(b *askbridge.Bridge) tools.AskFunc {
 // to absorb a brief ui stall without blocking the event pump (sends drop-if-full).
 const ActivityBuffer = 16
 
+// driverOpen is the driver.Open seam: the single site openSession spawns the shared
+// shell through. It is a package var so tests can capture the driver.Options (the
+// regression guard that cfg.Driver.Shell actually reaches the runtime) without
+// starting a live shell. Production uses the real driver.Open.
+var driverOpen = driver.Open
+
 // openSession creates the shared driver and starts the tools backend on a temp
 // unix socket. The driver's cwd is the request's project root (else its cwd).
-// Returns nil on any failure (driver open, socket dir, or Serve) so the caller
-// degrades to no-tools authoring rather than aborting.
+// shell is the configured selector (cfg.Driver.Shell) threaded from runSession;
+// "" preserves the zsh default. Returns nil on any failure (driver open, socket
+// dir, or Serve) so the caller degrades to no-tools authoring rather than aborting.
 //
 // m is the already-selected mux (threaded from the launcher / SessionMain): when
 // m is a real mux, the float ask is wired as before. When m is the null mux (no
 // multiplexer) and a bridge is supplied, the agent's `ask` tool is routed to the
 // in-viewer overlay via the bridge (the float can't be hosted without a mux).
-func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge) *session {
+func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell string) *session {
 	cwd := req.ProjectRoot
 	if cwd == "" {
 		cwd = req.CWD
 	}
-	// TODO(stage2): thread cfg.Driver.Shell once openSession receives a config.
-	drv, err := driver.Open(driver.Options{Cwd: cwd})
+	drv, err := driverOpen(driver.Options{Cwd: cwd, Shell: shell})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: driver.Open failed (%v); authoring without agent tools\n", err)
 		return nil
@@ -396,7 +409,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		// Author via the existing text path so authoring still works.
 		dbg("authorPlaybook: AuthorEvents failed (%v); falling back to text author path", err)
 		removeMCP()
-		return authorPlaybookText(req, d, c, noCache, reengage, cwd, sharedDrv, title, bridgeOf(sess))
+		return authorPlaybookText(req, d, c, noCache, reengage, cwd, sharedDrv, title, bridgeOf(sess), cfg.Driver.Shell)
 	}
 
 	// Fan the events into the playbook reader + activity feed; Body() holds the
@@ -409,6 +422,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		Harness:   "Claude Code",
 		Title:     title,
 		Cwd:       cwd,
+		Shell:     cfg.Driver.Shell, // configured shell for RunStream's own-driver fallback
 		Driver:    sharedDrv,
 		Reengage:  reengage,
 		Activity:  activity,
@@ -560,7 +574,7 @@ const DefaultEnvDumpTimeout = 10 * time.Second
 // io.ReadCloser-based author.Author (the text harness invocation) when the owned
 // AuthorEvents stream can't start (harness binary missing / unsupported). It tees
 // the produced playbook into a buffer for the cache, exactly as before part 2a.
-func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, reengage *orchestrator.Reengage, cwd string, sharedDrv *driver.Driver, title string, bridge *askbridge.Bridge) int {
+func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, reengage *orchestrator.Reengage, cwd string, sharedDrv *driver.Driver, title string, bridge *askbridge.Bridge, shell string) int {
 	stream, err := author.Author(req, reengage.Agent)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: author: %v\n", err)
@@ -573,6 +587,7 @@ func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, 
 		Harness:   "Claude Code",
 		Title:     title,
 		Cwd:       cwd,
+		Shell:     shell, // configured shell for RunStream's own-driver fallback
 		Tee:       &body,
 		Driver:    sharedDrv,
 		Reengage:  reengage,
@@ -724,7 +739,7 @@ func reengageReady(d triage.Decision, req capture.Request, sess *session, cwd st
 	return ui.OrchReady{Orch: ui.BuildOrch(sess.drv, re), Asker: sess.asker(cwd)}
 }
 
-func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *session, title string, bridge *askbridge.Bridge) int {
+func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *session, title string, bridge *askbridge.Bridge, shell string) int {
 	raw, err := os.ReadFile(d.Path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: read cache entry: %v\n", err)
@@ -787,6 +802,11 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *
 	// (regenerate/followup) re-invokes the agent, whose `ask` then reaches the overlay.
 	// nil when a real mux is present (the float ask path is unchanged).
 	ui.SetAskBridge(bridge)
+
+	// Configured shell for ui.Main's own-driver fallback. On the cached path the run
+	// blocks normally drive the session's shared driver (delivered via readyCh, already
+	// opened with this shell); this covers the fallback where ui.Main opens its own.
+	ui.SetShell(shell)
 
 	// Stage 4 (spec §C amend-on-rerun): this is a cache HIT — we are SERVING an
 	// existing playbook for this context. Stash its body as the served base so a

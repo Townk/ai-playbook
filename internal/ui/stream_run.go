@@ -31,6 +31,12 @@ type StreamOptions struct {
 	Title string
 	Cwd   string    // working dir for the in-process driver (default $PWD)
 	Tee   io.Writer // if non-nil, every byte read from Src is mirrored here
+	// Shell is the configured shell selector (cfg.Driver.Shell) threaded from the
+	// launcher: "" | "auto" | "zsh" | "bash" | "sh". It is passed to driver.Open
+	// when RunStream opens its OWN driver (opts.Driver == nil). "" preserves the
+	// zsh default (no regression). When a session driver is supplied it is already
+	// opened with the configured shell, so this field is unused on that path.
+	Shell string
 	// Driver, when non-nil, is the SESSION's shared shell driver — the same one
 	// the authoring agent's tools backend drives, so the playbook's run blocks
 	// execute in the exact shell the agent diagnosed in. When nil, RunStream opens
@@ -129,8 +135,7 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 			runCwd, _ = os.Getwd()
 		}
 		var derr error
-		// TODO(stage2): thread cfg.Driver.Shell once RunStream receives a config.
-		d, derr = driver.Open(driver.Options{Cwd: runCwd})
+		d, derr = driver.Open(driver.Options{Cwd: runCwd, Shell: opts.Shell})
 		if derr != nil {
 			fmt.Fprintf(os.Stderr, "ai-playbook: driver.Open failed (%v); falling back to render-only\n", derr)
 			d = nil

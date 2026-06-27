@@ -108,6 +108,18 @@ var pendingAskBridge *askbridge.Bridge
 // (the cached-serve path). Consumed (and cleared) by Main.
 func SetAskBridge(b *askbridge.Bridge) { pendingAskBridge = b }
 
+// pendingShell is the configured shell selector (cfg.Driver.Shell) consumed by the
+// next Main() call. ui is config-agnostic — it receives the shell as DATA: the
+// composition roots (cmd/ai-playbook for `run`, the launcher's cached-serve / inline
+// answer paths that reshape os.Args to `run`) load config and stash it here. Main
+// passes it to driver.Open when it opens its OWN driver. "" preserves the zsh
+// default (no regression); a session-supplied driver (pendingDriver) ignores it.
+var pendingShell string
+
+// SetShell stashes the configured shell selector for the next ui.Main() invocation.
+// Consumed (and cleared) by Main. Mirrors SetDriver/SetAskBridge.
+func SetShell(s string) { pendingShell = s }
+
 // OrchReady carries the lazily-opened orchestrator (and its request-input asker)
 // delivered on the pendingReady channel by the async-startup path: main.go opens
 // the shell driver + builds the orchestrator in the BACKGROUND while ui.Main
@@ -328,8 +340,7 @@ func Main() int {
 					runCwd, _ = os.Getwd()
 				}
 				var derr error
-				// TODO(stage2): thread cfg.Driver.Shell once ui.Main receives a config.
-				d, derr = driver.Open(driver.Options{Cwd: runCwd})
+				d, derr = driver.Open(driver.Options{Cwd: runCwd, Shell: pendingShell})
 				if derr != nil {
 					fmt.Fprintf(os.Stderr, "ai-playbook run: driver.Open failed (%v); falling back to render-only\n", derr)
 					d = nil
@@ -354,6 +365,7 @@ func Main() int {
 	pendingAsker = nil       // ditto: the `f` asker stash is consume-once
 	pendingAnswerRegen = nil // ditto: the cached-answer regenerate stash is consume-once
 	pendingAskBridge = nil   // ditto: the no-mux ask-bridge stash is consume-once
+	pendingShell = ""        // ditto: the configured-shell stash is consume-once
 
 	// Force TrueColor: zellij's alt-screen pane underreports the color profile
 	// during bubbletea's auto-detection, causing colors to be downsampled.

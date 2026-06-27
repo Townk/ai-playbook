@@ -83,6 +83,10 @@ func viewProse(content, title, cwd string) int {
 	f.Close()
 	defer os.Remove(tmp)
 
+	// ui.Main opens its own driver for this reshaped `run`; honor the configured shell.
+	cfg, _ := config.Load()
+	ui.SetShell(cfg.Driver.Shell)
+
 	argv := []string{os.Args[0], "run"}
 	if title != "" {
 		argv = append(argv, "--title", title)
