@@ -83,6 +83,12 @@ type model struct {
 	// agent reasoning is redacted by `claude --print`, so this is a placeholder until
 	// real/streamed content (or a status) is wired. Empty → nothing extra is drawn.
 	thinkingLine string
+
+	// in-process inline thinking (no-mux RunInline): when inlineSubmit is set, a
+	// submit transitions IN-BOX to the wave state and drives the animation from
+	// the channel inlineSubmit returns (instead of the float's <out>.done file).
+	inlineSubmit func(value string) <-chan ThinkUpdate
+	inlineThink  <-chan ThinkUpdate
 }
 
 // initialModel keeps the original signature the existing tests call (text, 1/1
@@ -149,6 +155,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.done {
 			return m, tea.Quit
 		}
+		if m.inlineThink != nil {
+			return m, recvThink(m.inlineThink)
+		}
 		return m, pollDoneCmd(m.outFile)
 	case thinkingBackstopMsg:
 		// Backstop: a dead launcher must not hang the float forever.
@@ -179,6 +188,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch act {
 	case fieldDone:
 		m.submitted = true
+		if m.inlineSubmit != nil {
+			// In-process inline: enter the wave state and drive it from the channel.
+			m.thinking = true
+			m.thinkingLine = thinkingPrepLine
+			m.inlineThink = m.inlineSubmit(m.fld.value())
+			return m, tea.Batch(waveTick(), recvThink(m.inlineThink))
+		}
 		if m.thinkingEnabled {
 			// Transition IN PLACE to the thinking state instead of quitting:
 			// (a) hand the submitted value to outFile NOW so the launcher can read
