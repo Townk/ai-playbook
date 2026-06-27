@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Runs without a terminal multiplexer (ADR-0006 Stage 1): off-mux, the input box
+  renders inline below the shell prompt, and the agent's `ask` dialog renders as an
+  in-viewer overlay (all types: text/line/confirm/choose/free). With a multiplexer
+  present, the floating-pane experience is unchanged.
+- Configurable shell (ADR-0006 Stage 2): `[driver] shell` selects the executing
+  shell — `zsh` (default), `bash`, or POSIX `sh` — falling back to `$SHELL` when
+  unset. zsh remains the default for full fidelity (aliases/functions/rc); bash and
+  sh are supported with per-shell value-passing that round-trips special characters.
+
 ## [0.3.0] - 2026-06-26
 
 ### Added
