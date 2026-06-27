@@ -1,6 +1,6 @@
 # Progressive enhancement: a portable core with optional shell, multiplexer, and PTY
 
-- **Status:** Proposed
+- **Status:** Accepted
 - **Date:** 2026-06-27
 
 ## Context and Problem Statement
