@@ -41,6 +41,7 @@ type Driver struct {
 	cmd      *exec.Cmd
 	re       *regexp.Regexp
 	shellPid int
+	a        shellAdapter // shell-specific spawn/job/source/cd tokens
 
 	cwd string // the cwd entered at Open (Options.Cwd), for callers that need it
 
@@ -63,7 +64,8 @@ func Open(opts Options) (*Driver, error) {
 	if env == nil {
 		env = os.Environ()
 	}
-	c := exec.Command("zsh", "-il")
+	a := shellAdapter(zshAdapter{})
+	c := exec.Command(a.name(), a.spawnArgs()...)
 	c.Env = env
 	ptmx, err := pty.Start(c)
 	if err != nil {
@@ -76,6 +78,7 @@ func Open(opts Options) (*Driver, error) {
 		re:       regexp.MustCompile(sentinel + `(-?\d+)` + sentinel),
 		shellPid: c.Process.Pid,
 		lastSeen: time.Now(),
+		a:        a,
 	}
 	go d.read()
 	if err := d.ready(); err != nil {
@@ -85,7 +88,7 @@ func Open(opts Options) (*Driver, error) {
 	d.run("stty -echo 2>/dev/null", 5*time.Second) // cosmetic: trim echo noise
 	if opts.Cwd != "" {
 		d.cwd = opts.Cwd
-		d.run("builtin cd -- "+shquote(opts.Cwd)+" 2>/dev/null", 10*time.Second)
+		d.run(d.a.cdCmd(opts.Cwd), 10*time.Second)
 	}
 	return d, nil
 }
@@ -255,7 +258,7 @@ func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
 	defer os.RemoveAll(dir)
 	o := filepath.Join(dir, "o")
 	e := filepath.Join(dir, "e")
-	job := filepath.Join(dir, "job.zsh")
+	job := filepath.Join(dir, "job."+d.a.jobExt())
 	// The block runs in a SUBSHELL `( … )` — sourced in the main shell, but the
 	// subshell isolates a block's `set -e`/`set -u`/`setopt`/`trap`. This is
 	// critical: zsh `errexit` exits the WHOLE shell on a failing command regardless
@@ -276,31 +279,17 @@ func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
 	// value-passing across blocks goes through AAS_OUT_<id>/LAST_*, which the driver
 	// sets in the main context below.)
 	cwdf := filepath.Join(dir, "cwd")
-	qcwd := shquote(cwdf)
-	trapBody := "builtin pwd >| " + qcwd
-	qo := shquote(o)
-	qe := shquote(e)
-	vp := "" +
-		"export LAST_EXCODE=${(q)__aapb_rc}\n" +
-		"export LAST_STDOUT=${(q)\"$(<" + qo + ")\"}\n" +
-		"export LAST_STDERR=${(q)\"$(<" + qe + ")\"}\n"
-	if id != "" {
-		key := sanitizeKey(id)
-		vp += "" +
-			"export AAS_OUT_" + key + "=${(q)\"$(<" + qo + ")\"}\n" +
-			"export AAS_ERR_" + key + "=${(q)\"$(<" + qe + ")\"}\n" +
-			"export AAS_EXIT_" + key + "=${(q)__aapb_rc}\n"
-	}
-	_ = os.WriteFile(job, []byte(
-		"( trap "+shquote(trapBody)+" EXIT\n"+cmdline+"\n) </dev/null >"+o+" 2>"+e+"\n"+
-			"__aapb_rc=$?\n"+
-			"if [[ $__aapb_rc -eq 141 ]]; then __aapb_rc=0; fi\n"+
-			"if [[ -s "+qcwd+" ]]; then builtin cd -- \"$(< "+qcwd+")\" 2>/dev/null; fi\n"+
-			vp+
-			"print -r -- "+sentinel+"${__aapb_rc}"+sentinel+"\n"), 0644)
+	_ = os.WriteFile(job, []byte(d.a.job(jobParams{
+		cmdline: cmdline,
+		o:       o,
+		e:       e,
+		cwdf:    cwdf,
+		id:      id,
+		key:     sanitizeKey(id),
+	})), 0644)
 	d.clearBuf()
 	d.setStopped(false)
-	d.send("source " + job)
+	d.send(d.a.sourceCmd(job))
 
 	res := Result{Exit: -1}
 	m := d.waitSentinel(timeout)
