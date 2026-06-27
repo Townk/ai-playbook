@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"ai-playbook/internal/author"
-	"ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/internal/author"
+	"github.com/Townk/ai-playbook/internal/frontmatter"
 )
 
 // fakeLookup is a deterministic env lookup over a fixed map (the driver seam in

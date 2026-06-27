@@ -9,7 +9,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
 
 // statusMsg carries a transient one-line status update into the model (e.g. when

@@ -24,7 +24,7 @@ import (
 	"strings"
 	"time"
 
-	"ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/internal/mux"
 )
 
 // Float geometry — matches ai-assist-summon: a 57-column pinned/borderless float

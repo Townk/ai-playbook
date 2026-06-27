@@ -43,9 +43,9 @@ import (
 	"sync"
 	"time"
 
-	"ai-playbook/internal/driver"
-	"ai-playbook/internal/floatinput"
-	"ai-playbook/internal/kb"
+	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/internal/floatinput"
+	"github.com/Townk/ai-playbook/internal/kb"
 )
 
 // runTimeout bounds a single agent-issued `run` (matches the orchestrator /

@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/internal/mux"
 )
 
 // recordMux is a recording fake Mux. SpawnFloat captures the spawned argv and,

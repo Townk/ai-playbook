@@ -10,8 +10,8 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"ai-playbook/internal/capture"
-	"ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/config"
 )
 
 // sampleClassifyRequest is a captured request with a typed user ask and a failed

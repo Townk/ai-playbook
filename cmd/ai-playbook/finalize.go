@@ -9,11 +9,11 @@ import (
 	"strings"
 	"time"
 
-	"ai-playbook/internal/author"
-	"ai-playbook/internal/config"
-	"ai-playbook/internal/driver"
-	"ai-playbook/internal/frontmatter"
-	"ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/author"
+	"github.com/Townk/ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
 
 // finalizeDoc is the testable core of the `finalize` subcommand: it backfills

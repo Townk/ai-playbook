@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"ai-playbook/internal/agentstream"
-	"ai-playbook/internal/author"
-	"ai-playbook/internal/capture"
-	"ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/agentstream"
+	"github.com/Townk/ai-playbook/internal/author"
+	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/config"
 )
 
 // drainActivity reads the activity channel to close, returning everything it saw.

@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"ai-playbook/internal/agentstream"
-	"ai-playbook/internal/capture"
-	"ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/agentstream"
+	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/config"
 )
 
 // FRESH mode: base == "" → distill the resolved session into a new reusable

@@ -5,9 +5,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"ai-playbook/internal/driver"
-	"ai-playbook/internal/floatinput"
-	"ai-playbook/internal/kb"
+	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/internal/floatinput"
+	"github.com/Townk/ai-playbook/internal/kb"
 )
 
 // newTestDriver opens a real driver against a minimal controlled ZDOTDIR (no

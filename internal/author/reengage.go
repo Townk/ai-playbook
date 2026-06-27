@@ -5,7 +5,7 @@ import (
 	"io"
 	"strings"
 
-	"ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/capture"
 )
 
 // Followup is the Go port of ai-assist-followup: the "your fix didn't work"

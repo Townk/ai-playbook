@@ -1,4 +1,4 @@
-module ai-playbook
+module github.com/Townk/ai-playbook
 
 go 1.26.4
 

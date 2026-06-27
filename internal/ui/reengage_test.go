@@ -11,10 +11,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"ai-playbook/internal/agentstream"
-	"ai-playbook/internal/capture"
-	"ai-playbook/internal/driver"
-	"ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/agentstream"
+	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
 
 // fakeAgent returns a canned stream and records calls. Injected as author.Agent.

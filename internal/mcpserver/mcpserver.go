@@ -17,7 +17,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"ai-playbook/internal/tools"
+	"github.com/Townk/ai-playbook/internal/tools"
 )
 
 // runInput is the `run` tool's arguments: a command to execute in the user's real

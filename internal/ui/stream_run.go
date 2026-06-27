@@ -11,9 +11,9 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/mattn/go-runewidth"
 
-	"ai-playbook/internal/driver"
-	"ai-playbook/internal/mux"
-	"ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
 
 // StreamOptions configure RunStream — the in-process render+drive path that

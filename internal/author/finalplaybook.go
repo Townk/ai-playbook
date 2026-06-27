@@ -5,8 +5,8 @@ import (
 	"io"
 	"strings"
 
-	"ai-playbook/internal/agentstream"
-	"ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/agentstream"
+	"github.com/Townk/ai-playbook/internal/capture"
 )
 
 // FinalPlaybookPrompt assembles the FINAL-PLAYBOOK system prompt (spec §B/§C/§D):

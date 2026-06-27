@@ -5,8 +5,8 @@ import (
 	"os"
 	"os/exec"
 
-	"ai-playbook/internal/capture"
-	"ai-playbook/internal/kb"
+	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/kb"
 )
 
 // Agent runs the capable agent with the given system prompt and user message and

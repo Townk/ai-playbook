@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	"ai-playbook/internal/capture"
-	"ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/config"
 )
 
 // Classification is the cheap-model triage decision for one request: a Kind plus

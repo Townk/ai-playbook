@@ -5,8 +5,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"ai-playbook/internal/driver"
-	"ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
 
 // newInProcModel builds a model wired to a real orchestrator over a controlled-rc

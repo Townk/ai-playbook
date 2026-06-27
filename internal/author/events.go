@@ -6,10 +6,10 @@ import (
 	"os/exec"
 	"strconv"
 
-	"ai-playbook/internal/agentstream"
-	"ai-playbook/internal/capture"
-	"ai-playbook/internal/config"
-	"ai-playbook/internal/kb"
+	"github.com/Townk/ai-playbook/internal/agentstream"
+	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/kb"
 )
 
 // ClaudeArgs builds the OWNED claude argv for the streaming event path. The

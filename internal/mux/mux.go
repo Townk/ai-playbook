@@ -22,7 +22,7 @@ import (
 	"strconv"
 	"strings"
 
-	"ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/config"
 )
 
 // ErrNotImplemented marks a Mux method modeled but deferred to a later stage.

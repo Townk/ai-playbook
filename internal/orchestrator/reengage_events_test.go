@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"ai-playbook/internal/agentstream"
-	"ai-playbook/internal/cache"
+	"github.com/Townk/ai-playbook/internal/agentstream"
+	"github.com/Townk/ai-playbook/internal/cache"
 )
 
 // fakeEvents builds an EventsFunc that emits a canned normalized event stream:

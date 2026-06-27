@@ -8,12 +8,12 @@ import (
 	"testing"
 	"time"
 
-	"ai-playbook/internal/author"
-	"ai-playbook/internal/cache"
-	"ai-playbook/internal/capture"
-	"ai-playbook/internal/tools"
-	"ai-playbook/internal/triage"
-	"ai-playbook/internal/ui"
+	"github.com/Townk/ai-playbook/internal/author"
+	"github.com/Townk/ai-playbook/internal/cache"
+	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/tools"
+	"github.com/Townk/ai-playbook/internal/triage"
+	"github.com/Townk/ai-playbook/internal/ui"
 )
 
 // TestOpenSessionAsync_DeliversOnce asserts the async session opener returns a

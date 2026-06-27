@@ -15,7 +15,7 @@ import (
 	"strconv"
 	"strings"
 
-	"ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/internal/mux"
 )
 
 // defaultScrollbackLines mirrors AI_PLAYBOOK_SCROLLBACK_LINES (default 200).

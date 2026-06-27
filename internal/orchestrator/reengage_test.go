@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"ai-playbook/internal/author"
-	"ai-playbook/internal/cache"
-	"ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/author"
+	"github.com/Townk/ai-playbook/internal/cache"
+	"github.com/Townk/ai-playbook/internal/capture"
 )
 
 // fakeAgent records the system prompt it was called with and returns a canned

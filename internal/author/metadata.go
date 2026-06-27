@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"ai-playbook/internal/agentstream"
+	"github.com/Townk/ai-playbook/internal/agentstream"
 )
 
 // EnvVarNote is the model's rationale for an environment variable it judges

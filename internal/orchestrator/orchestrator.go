@@ -18,13 +18,13 @@ import (
 	"strings"
 	"time"
 
-	"ai-playbook/internal/agentstream"
-	"ai-playbook/internal/author"
-	"ai-playbook/internal/cache"
-	"ai-playbook/internal/capture"
-	"ai-playbook/internal/driver"
-	"ai-playbook/internal/frontmatter"
-	"ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/internal/agentstream"
+	"github.com/Townk/ai-playbook/internal/author"
+	"github.com/Townk/ai-playbook/internal/cache"
+	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/internal/mux"
 )
 
 // defaultTimeout bounds a single run block (matches the broker's

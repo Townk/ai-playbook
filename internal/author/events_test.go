@@ -8,8 +8,8 @@ import (
 	"strings"
 	"testing"
 
-	"ai-playbook/internal/agentstream"
-	"ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/agentstream"
+	"github.com/Townk/ai-playbook/internal/config"
 )
 
 func TestClaudeArgs_OwnedInvocation(t *testing.T) {

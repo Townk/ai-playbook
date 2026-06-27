@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/config"
 )
 
 // MetadataPrompt must carry the JSON-only directive, the four schema fields

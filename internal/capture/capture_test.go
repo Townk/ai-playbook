@@ -3,7 +3,7 @@ package capture
 import (
 	"testing"
 
-	"ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/internal/mux"
 )
 
 // fakeAtuin is the injectable last-command source.

@@ -6,7 +6,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
 
 // Truecolor ANSI foreground params for the colors that distinguish an enabled vs a

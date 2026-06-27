@@ -11,8 +11,8 @@ package triage
 import (
 	"strings"
 
-	"ai-playbook/internal/cache"
-	"ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/cache"
+	"github.com/Townk/ai-playbook/internal/capture"
 )
 
 // Outcome enumerates the router's decision.

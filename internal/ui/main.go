@@ -14,9 +14,9 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/mattn/go-runewidth"
 
-	"ai-playbook/internal/driver"
-	"ai-playbook/internal/mux"
-	"ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
 
 // pendingReengage is the re-engagement context consumed by the next Main() call,

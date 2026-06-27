@@ -7,11 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"ai-playbook/internal/author"
-	"ai-playbook/internal/cache"
-	"ai-playbook/internal/capture"
-	"ai-playbook/internal/input"
-	"ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/internal/author"
+	"github.com/Townk/ai-playbook/internal/cache"
+	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/internal/mux"
 )
 
 // isolateCache points the cache at a throwaway temp root (AI_PLAYBOOK_DATA_DIR)

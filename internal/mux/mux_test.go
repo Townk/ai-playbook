@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/config"
 )
 
 // fakeMux is the injectable test double used by capture tests too.

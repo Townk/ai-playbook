@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"ai-playbook/internal/cache"
+	"github.com/Townk/ai-playbook/internal/cache"
 
 	"gopkg.in/yaml.v3"
 )

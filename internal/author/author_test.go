@@ -7,8 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	"ai-playbook/internal/capture"
-	"ai-playbook/internal/kb"
+	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/kb"
 )
 
 // sampleFailure is a representative failed-command request.

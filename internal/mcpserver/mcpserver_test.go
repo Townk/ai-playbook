@@ -12,7 +12,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"ai-playbook/internal/tools"
+	"github.com/Townk/ai-playbook/internal/tools"
 )
 
 // fakeBackend is a minimal stand-in for the tools backend: it accepts one

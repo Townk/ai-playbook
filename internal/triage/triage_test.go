@@ -3,8 +3,8 @@ package triage
 import (
 	"testing"
 
-	"ai-playbook/internal/cache"
-	"ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/cache"
+	"github.com/Townk/ai-playbook/internal/capture"
 )
 
 func TestRoute_Hit(t *testing.T) {

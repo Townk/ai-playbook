@@ -13,8 +13,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"ai-playbook/internal/frontmatter"
-	"ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
 
 // spinTickMsg drives the spinner animation/timer while thinking. gen identifies
