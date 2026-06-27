@@ -13,7 +13,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/Townk/ai-playbook/internal/askbridge"
 	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
 
@@ -138,6 +140,16 @@ type model struct {
 	helpLines   []Line
 	helpYOff    int
 	helpXOff    int
+
+	// no-mux ask overlay: when askBridge is set, a tea.Cmd drains pending agent
+	// asks (recvAskCmd); askMode raises the embedded ask dialog over the document
+	// (the help-modal compositing mechanism) and routes keys to it; askReq is the
+	// pending request answered on submit/cancel. nil bridge (mux path / tests) →
+	// the overlay is never raised.
+	askBridge *askbridge.Bridge
+	askMode   bool
+	ask       *input.Ask
+	askReq    askbridge.Request
 
 	// streaming + thinking
 	thinking      bool
@@ -384,6 +396,11 @@ func (m model) Init() tea.Cmd {
 	if c := m.orchReadyWaitCmd(); c != nil {
 		cmds = append(cmds, c)
 	}
+	// Subscribe to the no-mux agent-ask bridge: each pending ask arrives as an
+	// askOpenMsg that raises the overlay. nil bridge returns nil (no-op).
+	if c := recvAskCmd(m.askBridge); c != nil {
+		cmds = append(cmds, c)
+	}
 	if m.reader == nil {
 		return tea.Batch(cmds...)
 	}
@@ -509,6 +526,17 @@ func (m *model) bodyTop() int {
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	// no-mux ask overlay: a pending agent ask raises the dialog; while it's open
+	// every message except a window resize (which still reaches the document so the
+	// layout behind the overlay stays correct) drives the embedded ask.
+	if om, ok := msg.(askOpenMsg); ok {
+		return m, m.openAsk(om.req)
+	}
+	if m.askMode {
+		if _, ok := msg.(tea.WindowSizeMsg); !ok {
+			return m, m.handleAskKey(msg)
+		}
+	}
 	switch msg := msg.(type) {
 	case streamEventsMsg:
 		startedThinking := false
@@ -1982,6 +2010,13 @@ func (m model) helpModal() string {
 func (m model) viewString() string {
 	cw := m.contentWidth()
 	var sb strings.Builder
+
+	if m.askMode {
+		// The ask overlay composites the dialog centered over the live document,
+		// exactly like the help modal — the playbook keeps rendering behind it.
+		sb.WriteString(m.askOverlay())
+		return sb.String()
+	}
 
 	if m.hintMode {
 		// Labels float on the line above each button (or below when the line
