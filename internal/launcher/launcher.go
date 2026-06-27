@@ -589,6 +589,13 @@ func AnswerMain() int {
 		}
 	}
 
+	// Thread the configured shell for consistency with the other reshape paths.
+	// Inert on the normal answer path (an answer has no run blocks → ui.Main opens
+	// no driver), but defensive for the empty-request edge.
+	if cfg, err := config.Load(); err == nil {
+		ui.SetShell(cfg.Driver.Shell)
+	}
+
 	// Reshape os.Args to the `run` entrypoint (os.Args[1]="run", flags from [2:]),
 	// exactly like serveCachedPlaybook, and reuse ui.Main().
 	argv := []string{os.Args[0], "run"}
