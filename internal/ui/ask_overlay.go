@@ -10,10 +10,6 @@ import (
 	"github.com/Townk/ai-playbook/internal/input"
 )
 
-// askBoxWidth is the float's 57-col geometry, reused for the in-viewer overlay so
-// the no-mux ask looks the same as the mux-present float ask.
-const askBoxWidth = 57
-
 // askOpenMsg delivers one pending agent ask to the model (produced by recvAskCmd
 // reading the bridge).
 type askOpenMsg struct{ req askbridge.Request }
@@ -54,7 +50,7 @@ func (m *model) handleAskKey(msg tea.Msg) tea.Cmd {
 // like the help modal (spliceOver), so the playbook keeps rendering behind it.
 func (m model) askOverlay() string {
 	base := m.normalLines()
-	box := strings.Split(m.ask.View(askBoxWidth), "\n")
+	box := strings.Split(m.ask.View(input.FloatWidthDefault), "\n")
 	boxH := len(box)
 	boxW := 0
 	if boxH > 0 {

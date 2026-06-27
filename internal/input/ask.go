@@ -12,9 +12,10 @@ type Ask struct {
 	m model
 }
 
-// floatWidthDefault matches the float's 57-col geometry, so the overlay box is the
-// same width the user sees in the mux-present ask.
-const floatWidthDefault = 57
+// FloatWidthDefault matches the float's 57-col geometry, so the overlay box is the
+// same width the user sees in the mux-present ask. Exported so the ui overlay
+// (internal/ui/ask_overlay.go) can share the single source of truth.
+const FloatWidthDefault = 57
 
 // NewAsk builds an ask dialog for typ:
 //   - "line"            → single-line text entry
@@ -33,12 +34,12 @@ func NewAsk(title, prompt, value, typ string, choices []string) *Ask {
 	case "confirm":
 		m := newInputModel(theme, variant, title, prompt, "", "", 1, 1, 1, false, "")
 		m.fld = newConfirmField(theme, variant, "Yes", "No", false)
-		m.width = floatWidthDefault
+		m.width = FloatWidthDefault
 		return &Ask{m: m}
 	case "choose":
 		m := newInputModel(theme, variant, title, prompt, "", "", 1, 1, 1, false, "")
 		m.fld = newChooseField(theme, variant, choices, false, "")
-		m.width = floatWidthDefault
+		m.width = FloatWidthDefault
 		return &Ask{m: m}
 	default: // text | free | line | ""
 		singleLine := typ == "line"
@@ -47,7 +48,7 @@ func NewAsk(title, prompt, value, typ string, choices []string) *Ask {
 			height = 1
 		}
 		m := newInputModel(theme, variant, title, prompt, value, "", height, 1, 1, singleLine, "")
-		m.width = floatWidthDefault
+		m.width = FloatWidthDefault
 		m.resize()
 		return &Ask{m: m}
 	}
@@ -58,12 +59,9 @@ func (a *Ask) Init() tea.Cmd { return a.m.fld.initCmd() }
 // Update steps the dialog by delegating to the underlying field. done is true when
 // the user submitted or cancelled; submitted distinguishes the two; value is the
 // field's produced answer (the typed text, "yes"/"no", or the chosen option).
+// Window resize is handled by the embedding ui model before messages reach here;
+// passing WindowSizeMsg is unnecessary and the case is intentionally absent.
 func (a *Ask) Update(msg tea.Msg) (cmd tea.Cmd, done, submitted bool, value string) {
-	if wm, ok := msg.(tea.WindowSizeMsg); ok {
-		a.m.width = wm.Width
-		a.m.resize()
-		return nil, false, false, ""
-	}
 	f, act, c := a.m.fld.handle(msg)
 	a.m.fld = f
 	switch act {

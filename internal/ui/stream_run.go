@@ -164,5 +164,11 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 		fmt.Fprintf(os.Stderr, "ai-playbook: %v\n", err)
 		return 1
 	}
+	// Drain and cancel any agent ask that arrives after the viewer exits so the
+	// tools goroutine is never left blocked on an orphaned ask. A nil stop
+	// channel keeps the goroutine running until process exit (bounded).
+	if opts.AskBridge != nil {
+		go drainAskCancel(opts.AskBridge, nil)
+	}
 	return 0
 }
