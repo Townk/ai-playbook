@@ -26,6 +26,7 @@ var helpSections = []helpSection{
 			{"f", "follow-up with agent manually"},
 			{"w", "wrap-up work in the playbook"},
 			{"c", "generate a playbook for the solution"},
+			{"d", "view original → adapted diff (adapted run)"},
 			{"?", "toggle this help"},
 			{"q / 󱊷", "quit/dismiss"},
 		}},

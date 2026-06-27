@@ -213,6 +213,10 @@ func Main() int {
 	fs.StringVar(&cwd, "cwd", "", "working dir for the in-process shell driver (default: dir of <file.md>, else $PWD)")
 	var fileFlag string
 	fs.StringVar(&fileFlag, "file", "", "playbook file to render (alternative to the positional arg)")
+	var adaptedFrom string
+	fs.StringVar(&adaptedFrom, "adapted-from", "", "source slug: render an 'adapted from <slug>' banner + enable the `d` diff overlay")
+	var origFile string
+	fs.StringVar(&origFile, "orig-file", "", "original (pre-adaptation) playbook file backing the `d` original→adapted diff")
 	// os.Args[1] is the "run" subcommand (dispatched from the root main); flags
 	// start at os.Args[2:]. Guard for direct/odd invocations.
 	argv := os.Args[2:]
@@ -267,6 +271,20 @@ func Main() int {
 		playbookSubtitle = subtitle
 		src = r
 	}
+
+	// Adapt-on-run (Task 9): --adapted-from <slug> renders the "adapted from <slug>"
+	// banner in the subtitle slot (when the document carries no description of its
+	// own) and enables the `d` original→adapted diff overlay. --orig-file backs that
+	// diff with the pre-adaptation body. Both are empty for a normal render.
+	origDoc := ""
+	if origFile != "" {
+		if raw, rerr := os.ReadFile(origFile); rerr == nil {
+			_, _, origDoc = loadPlaybookDocument(string(raw))
+		}
+	}
+	if adaptedFrom != "" && playbookSubtitle == "" {
+		playbookSubtitle = adaptedBanner(adaptedFrom)
+	}
 	parser := &streamParser{}
 
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
@@ -303,6 +321,8 @@ func Main() int {
 		m.cachedAt = cachedAt
 		m.title = effectiveTitle(titleFlag, playbookTitle)
 		m.subtitle = playbookSubtitle
+		m.adaptedFrom = adaptedFrom
+		m.origDoc = origDoc
 		fmt.Print(m.staticRender())
 		return 0
 	}
@@ -384,6 +404,8 @@ func Main() int {
 	m := newModel(harness, "")
 	m.title = effectiveTitle(titleFlag, playbookTitle)
 	m.subtitle = playbookSubtitle
+	m.adaptedFrom = adaptedFrom
+	m.origDoc = origDoc
 	m.orch = orch
 	m.driverPending = driverPending
 	m.readyCh = readyCh
