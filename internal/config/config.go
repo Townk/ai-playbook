@@ -39,8 +39,9 @@ type Mux struct {
 // driver.resolveShell — no caller reshaping is required.
 type Driver struct {
 	// Shell is the named shell preset the driver will spawn. Supported values:
-	// "zsh" (default), "bash", "sh". An empty string is treated as "zsh" by
-	// driver.resolveShell.
+	// "zsh", "bash", "sh". An empty string (the compiled-in default) means
+	// "auto": driver.resolveShell honours $SHELL when it names a supported shell
+	// and falls back through zsh → bash → sh otherwise.
 	Shell string `toml:"shell"`
 }
 
@@ -136,9 +137,10 @@ func Default() *Config {
 			// reasoning blocks stream as live activity by default. "off" disables it.
 			Thinking: "medium",
 		},
-		// Explicit default so a no-config run always spawns zsh; driver.resolveShell
-		// treats "" identically, but an explicit default avoids hidden coupling.
-		Driver: Driver{Shell: "zsh"},
+		// "" means auto: driver.resolveShell honours $SHELL (when it names a
+		// supported shell) and falls back through zsh → bash → sh. A no-config
+		// run therefore inherits the user's login shell, not a hardcoded preset.
+		Driver: Driver{Shell: ""},
 		// Global left empty so the resolver derives it from cache.DefaultRoot() at
 		// call time, honouring AI_PLAYBOOK_DATA_DIR without baking a literal path.
 		Store: Store{Project: ".ai-playbook/playbooks"},

@@ -18,8 +18,8 @@ func TestLoadFrom_ParseError_ReturnsUsableDefault(t *testing.T) {
 	if cfg == nil {
 		t.Fatal("loadFrom returned nil *Config on parse error — callers would panic")
 	}
-	if got := cfg.Driver.Shell; got != "zsh" {
-		t.Fatalf("fallback cfg not the default profile: Driver.Shell = %q, want \"zsh\"", got)
+	if got := cfg.Driver.Shell; got != "" {
+		t.Fatalf("fallback cfg not the default profile: Driver.Shell = %q, want \"\" (auto)", got)
 	}
 	if cfg.GlobalStoreDir() == "" {
 		t.Fatal("fallback cfg.GlobalStoreDir() empty — deref-safety not preserved")
@@ -213,10 +213,10 @@ func containsExact(argv []string, want string) bool {
 	return false
 }
 
-// Default().Driver.Shell must be "zsh" so a no-config run keeps zsh.
-func TestDefaultShellIsZsh(t *testing.T) {
-	if got := Default().Driver.Shell; got != "zsh" {
-		t.Fatalf("Driver.Shell default = %q, want zsh", got)
+// Default().Driver.Shell must be "" (auto) so a no-config run honours $SHELL.
+func TestDefaultShellIsAuto(t *testing.T) {
+	if got := Default().Driver.Shell; got != "" {
+		t.Fatalf("Driver.Shell default = %q, want \"\" (auto/honor-$SHELL)", got)
 	}
 }
 
@@ -232,15 +232,15 @@ func TestDriverShellMergeOverride(t *testing.T) {
 	}
 }
 
-// A config that sets only [agent] (no [driver]) keeps the default zsh shell.
-func TestDriverShellAbsentKeepsZsh(t *testing.T) {
+// A config that sets only [agent] (no [driver]) keeps the default "" (auto) shell.
+func TestDriverShellAbsentKeepsAuto(t *testing.T) {
 	data := []byte("[agent]\nharness = \"pi\"\n")
 	cfg, err := loadFrom(Default(), "test.toml", data)
 	if err != nil {
 		t.Fatalf("loadFrom: %v", err)
 	}
-	if cfg.Driver.Shell != "zsh" {
-		t.Fatalf("Driver.Shell should keep default: got %q, want zsh", cfg.Driver.Shell)
+	if cfg.Driver.Shell != "" {
+		t.Fatalf("Driver.Shell should keep default: got %q, want \"\" (auto)", cfg.Driver.Shell)
 	}
 }
 

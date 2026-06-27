@@ -126,6 +126,37 @@ func TestResolveShell(t *testing.T) {
 			look:    makeLook(), // nothing on PATH
 			wantErr: errUnsupportedShell,
 		},
+		{
+			// $SHELL=/bin/bash with BOTH bash and zsh on PATH: $SHELL wins, so bash
+			// adapter is returned even though zsh is also available.  This is the key
+			// regression guard for the new $SHELL-first resolution order.
+			name: "$SHELL=/bin/bash + zsh also on PATH → bash adapter ($SHELL wins)",
+			sel:  "",
+			getenv: func(k string) string {
+				if k == "SHELL" {
+					return "/bin/bash"
+				}
+				return ""
+			},
+			look:    makeLook("/bin/bash", "zsh"),
+			wantBin: "/bin/bash",
+			wantA:   "bash",
+		},
+		{
+			// $SHELL points at fish (unsupported) but zsh is on PATH: resolution falls
+			// through to the zsh fallback, NOT sh.
+			name: "$SHELL=/usr/bin/fish (unsupported) + zsh on PATH → zsh fallback",
+			sel:  "",
+			getenv: func(k string) string {
+				if k == "SHELL" {
+					return "/usr/bin/fish"
+				}
+				return ""
+			},
+			look:    makeLook("zsh"),
+			wantBin: "zsh",
+			wantA:   "zsh",
+		},
 	}
 
 	for _, tc := range tests {
