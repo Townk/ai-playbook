@@ -3,6 +3,11 @@ package launcher
 import (
 	"fmt"
 	"os"
+	"time"
+
+	"github.com/charmbracelet/colorprofile"
+
+	tea "charm.land/bubbletea/v2"
 
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/capture"
@@ -158,4 +163,135 @@ func inlineInput(req capture.Request, m mux.Mux) int {
 		cls = author.Classification{Kind: author.KindEscalate}
 	}
 	return routeInline(req, cls, m)
+}
+
+// explicitProgress is the explicit-request null-mux path: SKIP the input box,
+// show the viewer-style "Working…" indicator + model-activity line while the
+// cheap classify runs inline, then route the result. A classify error escalates.
+func explicitProgress(req capture.Request, m mux.Mux) int {
+	cls, err := classifyWithProgress(req)
+	if err != nil {
+		cls = author.Classification{Kind: author.KindEscalate}
+	}
+	return routeInline(req, cls, m)
+}
+
+// classifyWithProgress runs classifyInline while rendering ui.WaitingLine inline
+// (non-alt-screen) on /dev/tty. With no controlling terminal it classifies
+// silently. The inline region is cleared before returning.
+func classifyWithProgress(req capture.Request) (author.Classification, error) {
+	tty, terr := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if terr != nil {
+		return classifyInline(req, func(string) {})
+	}
+	defer tty.Close()
+
+	resCh := make(chan wResult, 1)
+	actCh := make(chan string, 8)
+	go func() {
+		cls, cerr := classifyInline(req, func(line string) {
+			select {
+			case actCh <- line:
+			default:
+			}
+		})
+		resCh <- wResult{cls: cls, err: cerr}
+		close(actCh)
+	}()
+
+	fm, perr := tea.NewProgram(
+		newWaitingModel(actCh, resCh),
+		tea.WithInput(tty),
+		tea.WithOutput(tty),
+		tea.WithColorProfile(colorprofile.TrueColor),
+	).Run()
+	wm, _ := fm.(waitingModel)
+	input.ClearInline(tty, wm.lastHeight())
+	if perr != nil {
+		r := <-resCh
+		return r.cls, r.err
+	}
+	return wm.res.cls, wm.res.err
+}
+
+// wResult carries the classify outcome out of the goroutine.
+type wResult struct {
+	cls author.Classification
+	err error
+}
+
+// waitingModel messages.
+type wTickMsg struct{}
+type wActMsg string
+type wDoneMsg struct{ r wResult }
+
+// waitingModel is a minimal bubbletea model that renders ui.WaitingLine inline
+// (no alt-screen) while classifyInline runs in a goroutine.
+type waitingModel struct {
+	width    int
+	frame    int
+	ticks    int // 100ms ticks; seconds = ticks/10
+	activity string
+	res      wResult
+	actCh    <-chan string
+	resCh    <-chan wResult
+}
+
+func newWaitingModel(actCh <-chan string, resCh <-chan wResult) waitingModel {
+	return waitingModel{width: 80, actCh: actCh, resCh: resCh}
+}
+
+func (m waitingModel) Init() tea.Cmd {
+	return tea.Batch(wTick(), wRecvAct(m.actCh), wRecvDone(m.resCh))
+}
+
+func wTick() tea.Cmd {
+	return tea.Tick(100*time.Millisecond, func(time.Time) tea.Msg { return wTickMsg{} })
+}
+
+func wRecvAct(ch <-chan string) tea.Cmd {
+	return func() tea.Msg {
+		s, ok := <-ch
+		if !ok {
+			return wActMsg("")
+		}
+		return wActMsg(s)
+	}
+}
+
+func wRecvDone(ch <-chan wResult) tea.Cmd {
+	return func() tea.Msg { return wDoneMsg{r: <-ch} }
+}
+
+func (m waitingModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		return m, nil
+	case wTickMsg:
+		m.frame++
+		m.ticks++
+		return m, wTick()
+	case wActMsg:
+		if string(msg) != "" {
+			m.activity = string(msg)
+		}
+		return m, wRecvAct(m.actCh)
+	case wDoneMsg:
+		m.res = msg.r
+		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m waitingModel) View() tea.View {
+	return tea.NewView(ui.WaitingLine(m.frame, m.ticks/10, m.activity, m.width))
+}
+
+// lastHeight is the rendered line count for the clear-on-exit step.
+func (m waitingModel) lastHeight() int {
+	if m.activity == "" {
+		return 1
+	}
+	return 2
 }

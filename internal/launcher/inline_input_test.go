@@ -11,6 +11,31 @@ import (
 	"github.com/Townk/ai-playbook/internal/mux"
 )
 
+func TestExplicitProgress_ClassifiesAndRoutes(t *testing.T) {
+	isolateCache(t)
+	origCls, origSess := inlineClassifyFn, routeInlineSessionFn
+	t.Cleanup(func() { inlineClassifyFn, routeInlineSessionFn = origCls, origSess })
+	inlineClassifyFn = fakeClassify(author.Classification{Kind: author.KindEscalate}, nil)
+	routeInlineSessionFn = func(_ capture.Request, _ string, _ mux.Mux) int { return 9 }
+
+	if code := explicitProgress(capture.Request{CWD: "/p", UserRequest: "why did it crash"}, mux.Null()); code != 9 {
+		t.Fatalf("explicitProgress exit = %d, want 9 (escalate seam)", code)
+	}
+}
+
+func TestExplicitProgress_ClassifyErrorEscalates(t *testing.T) {
+	isolateCache(t)
+	origCls, origSess := inlineClassifyFn, routeInlineSessionFn
+	t.Cleanup(func() { inlineClassifyFn, routeInlineSessionFn = origCls, origSess })
+	inlineClassifyFn = fakeClassify(author.Classification{}, os.ErrDeadlineExceeded)
+	called := false
+	routeInlineSessionFn = func(_ capture.Request, _ string, _ mux.Mux) int { called = true; return 0 }
+
+	if code := explicitProgress(capture.Request{CWD: "/p"}, mux.Null()); code != 0 || !called {
+		t.Fatalf("classify error must escalate; exit=%d called=%v", code, called)
+	}
+}
+
 func TestRouteInline_Command_PrintsToStdout(t *testing.T) {
 	isolateCache(t)
 	var code int

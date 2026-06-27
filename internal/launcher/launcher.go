@@ -102,7 +102,7 @@ func Troubleshoot() int {
 		if cliRequest == "" {
 			return inlineInput(req, m)
 		}
-		return runInline(req, m) // Task 3 replaces this with explicitProgress
+		return explicitProgress(req, m)
 	}
 
 	// Real mux + explicit request: unchanged inline classify+route.
