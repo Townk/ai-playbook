@@ -171,7 +171,7 @@ type session struct {
 	m       mux.Mux // already-selected mux (never re-loaded); used for ask seam + asker
 }
 
-// activityBuffer is the depth of the authoring fan-out's activity channel: enough
+// ActivityBuffer is the depth of the authoring fan-out's activity channel: enough
 // to absorb a brief ui stall without blocking the event pump (sends drop-if-full).
 const ActivityBuffer = 16
 

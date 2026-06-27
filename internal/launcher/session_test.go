@@ -303,6 +303,84 @@ func after(ss []string, key string) string {
 	return ""
 }
 
+// ── writeMCPConfig coverage ────────────────────────────────────────────────
+
+// TestWriteMCPConfig_NilSession asserts the nil-session fast path returns an empty
+// path and a safe-to-call no-op remove func.
+func TestWriteMCPConfig_NilSession(t *testing.T) {
+	var s *session
+	path, remove := s.writeMCPConfig()
+	if path != "" {
+		t.Errorf("nil session: want empty path, got %q", path)
+	}
+	remove() // must not panic
+}
+
+// TestWriteMCPConfig_NoSelfExe asserts that a session with no selfExe falls through
+// the nil-selfExe guard and returns an empty path.
+func TestWriteMCPConfig_NoSelfExe(t *testing.T) {
+	s := &session{selfExe: ""}
+	path, remove := s.writeMCPConfig()
+	if path != "" {
+		t.Errorf("no selfExe: want empty path, got %q", path)
+	}
+	remove()
+}
+
+// TestWriteMCPConfig_LiveSession asserts the success path: a live session with a
+// resolved selfExe writes a valid config file and the remove func cleans it up.
+func TestWriteMCPConfig_LiveSession(t *testing.T) {
+	minimalZDOTDIR(t)
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null())
+	if sess == nil {
+		t.Fatal("openSession returned nil")
+	}
+	defer sess.close()
+	if sess.selfExe == "" {
+		t.Skip("os.Executable unavailable; cannot test writeMCPConfig success path")
+	}
+
+	path, remove := sess.writeMCPConfig()
+	if path == "" {
+		t.Fatal("writeMCPConfig: expected a non-empty config path")
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatalf("writeMCPConfig: config file not created at %s: %v", path, err)
+	}
+	remove()
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Errorf("writeMCPConfig remove func did not clean up %s", path)
+	}
+}
+
+// ── asker coverage ─────────────────────────────────────────────────────────
+
+// TestAsker_ReturnsNilForNilSession asserts the asker is nil when the session is nil.
+func TestAsker_ReturnsNilForNilSession(t *testing.T) {
+	var s *session
+	if s.asker("/") != nil {
+		t.Error("nil session: asker must return nil")
+	}
+}
+
+// TestAsker_ReturnsNilForNullMux asserts the asker is nil when the session's mux is
+// null — with no multiplexer the terminal is owned by the inline TUI.
+func TestAsker_ReturnsNilForNullMux(t *testing.T) {
+	s := &session{selfExe: "/bin/foo", m: mux.Null()}
+	if s.asker("/") != nil {
+		t.Error("null mux: asker must return nil (terminal owned by inline TUI)")
+	}
+}
+
+// TestAsker_ReturnsNilForNoSelfExe asserts asker returns nil when selfExe is empty
+// (we can't spawn ourselves without knowing our own path).
+func TestAsker_ReturnsNilForNoSelfExe(t *testing.T) {
+	s := &session{selfExe: "", m: &launchMux{}}
+	if s.asker("/") != nil {
+		t.Error("no selfExe: asker must return nil")
+	}
+}
+
 // TestStrippedAmendBase verifies the served-playbook amend base is FM-stripped:
 // a body that begins with playbook front matter is reduced to the literate content
 // (H1 + body); a body without front matter is returned unchanged.

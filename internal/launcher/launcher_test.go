@@ -1,6 +1,8 @@
 package launcher
 
 import (
+	"bytes"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -891,5 +893,184 @@ func TestLaunch_NoCacheBypass(t *testing.T) {
 	ctx, rh := launchKeys(req, submitted)
 	if _, ok := c.Lookup(ctx, rh); ok {
 		t.Error("no-cache must NOT store the classified result")
+	}
+}
+
+// captureStdout runs f() and returns whatever it wrote to os.Stdout.
+func captureStdout(t *testing.T, f func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stdout
+	os.Stdout = w
+	f()
+	w.Close()
+	os.Stdout = old
+	var buf bytes.Buffer
+	io.Copy(&buf, r) //nolint:errcheck
+	r.Close()
+	return buf.String()
+}
+
+// ── debug.go coverage ──────────────────────────────────────────────────────
+
+// TestDbgInit_SetsPath asserts dbgInit stores the path in the package-level
+// dbgPath var, which gates all subsequent dbg/dbgEnv calls.
+func TestDbgInit_SetsPath(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "debug.log")
+	dbgInit(tmp)
+	t.Cleanup(func() { dbgInit("") })
+	if dbgPath != tmp {
+		t.Errorf("dbgPath = %q, want %q", dbgPath, tmp)
+	}
+}
+
+// TestDbg_WritesLineToLog asserts dbg appends a formatted, pid-tagged line to
+// the configured debug log when dbgPath is set.
+func TestDbg_WritesLineToLog(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "debug.log")
+	dbgInit(tmp)
+	t.Cleanup(func() { dbgInit("") })
+	dbg("hello %s", "world")
+	b, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("debug log not created: %v", err)
+	}
+	if !strings.Contains(string(b), "hello world") {
+		t.Errorf("debug log = %q, want to contain 'hello world'", string(b))
+	}
+}
+
+// TestDbg_NoOpWhenUnset asserts dbg is a no-op (no file created, no panic)
+// when dbgPath is empty.
+func TestDbg_NoOpWhenUnset(t *testing.T) {
+	saved := dbgPath
+	dbgPath = ""
+	defer func() { dbgPath = saved }()
+	dbg("should not write anything")
+	// No assertion needed — the test passes if no panic occurs.
+}
+
+// TestDbgEnv_WritesEntry asserts dbgEnv records a line that includes the
+// caller-supplied context string (the `where` arg).
+func TestDbgEnv_WritesEntry(t *testing.T) {
+	tmp := filepath.Join(t.TempDir(), "debug.log")
+	dbgInit(tmp)
+	t.Cleanup(func() { dbgInit("") })
+	dbgEnv("testsite")
+	b, err := os.ReadFile(tmp)
+	if err != nil {
+		t.Fatalf("debug log not created: %v", err)
+	}
+	if !strings.Contains(string(b), "testsite") {
+		t.Errorf("dbgEnv log missing 'testsite': %q", string(b))
+	}
+}
+
+// TestDbgEnv_NoOpWhenUnset asserts dbgEnv is a no-op (no panic, no file) when
+// dbgPath is empty — covering the early-return branch.
+func TestDbgEnv_NoOpWhenUnset(t *testing.T) {
+	saved := dbgPath
+	dbgPath = ""
+	defer func() { dbgPath = saved }()
+	dbgEnv("should-not-appear") // must not panic
+}
+
+// ── runInline coverage ─────────────────────────────────────────────────────
+
+// TestRunInline_CommandRoute asserts the command branch: the classified command is
+// printed to stdout (with a header) so the user can review it. Uses the
+// runInlineClassify seam so no live model is called.
+func TestRunInline_CommandRoute(t *testing.T) {
+	isolateCache(t)
+	orig := runInlineClassify
+	t.Cleanup(func() { runInlineClassify = orig })
+	runInlineClassify = fakeClassify(author.Classification{Kind: author.KindCommand, Content: "git status"}, nil)
+
+	var code int
+	out := captureStdout(t, func() {
+		code = runInline(capture.Request{CWD: "/proj"}, mux.Null())
+	})
+
+	if code != 0 {
+		t.Fatalf("command route exit = %d, want 0", code)
+	}
+	if !strings.Contains(out, "git status") {
+		t.Errorf("command route stdout = %q, want to contain the command", out)
+	}
+	if !strings.Contains(out, "Suggested command") {
+		t.Errorf("command route stdout = %q, want the header line", out)
+	}
+}
+
+// TestRunInline_AnswerRoute asserts the answer branch: the prose answer is
+// printed to stdout. Uses the runInlineClassify seam.
+func TestRunInline_AnswerRoute(t *testing.T) {
+	isolateCache(t)
+	orig := runInlineClassify
+	t.Cleanup(func() { runInlineClassify = orig })
+	runInlineClassify = fakeClassify(author.Classification{
+		Kind:    author.KindAnswer,
+		Content: "HEAD is the current commit pointer.",
+	}, nil)
+
+	var code int
+	out := captureStdout(t, func() {
+		code = runInline(capture.Request{CWD: "/proj"}, mux.Null())
+	})
+
+	if code != 0 {
+		t.Fatalf("answer route exit = %d, want 0", code)
+	}
+	if !strings.Contains(out, "HEAD is the current commit pointer.") {
+		t.Errorf("answer route stdout = %q, want the prose content", out)
+	}
+}
+
+// TestRunInline_EscalateRoute asserts the escalate (default) branch: the
+// inline session seam is invoked with the request. Uses both seams so no live
+// driver/model is started.
+func TestRunInline_EscalateRoute(t *testing.T) {
+	isolateCache(t)
+	origCls := runInlineClassify
+	origSess := runInlineSessionFn
+	t.Cleanup(func() {
+		runInlineClassify = origCls
+		runInlineSessionFn = origSess
+	})
+	runInlineClassify = fakeClassify(author.Classification{Kind: author.KindEscalate}, nil)
+	runInlineSessionFn = func(_ capture.Request, _ string, _ mux.Mux) int { return 42 }
+
+	code := runInline(capture.Request{CWD: "/proj"}, mux.Null())
+	if code != 42 {
+		t.Fatalf("escalate route: want runInlineSessionFn called (exit 42), got %d", code)
+	}
+}
+
+// TestRunInline_ClassifyErrorEscalates asserts a classify error degrades to the
+// escalate branch (the safe default), matching launch's behavior.
+func TestRunInline_ClassifyErrorEscalates(t *testing.T) {
+	isolateCache(t)
+	origCls := runInlineClassify
+	origSess := runInlineSessionFn
+	t.Cleanup(func() {
+		runInlineClassify = origCls
+		runInlineSessionFn = origSess
+	})
+	runInlineClassify = fakeClassify(author.Classification{}, os.ErrDeadlineExceeded)
+	sessWasCalled := false
+	runInlineSessionFn = func(_ capture.Request, _ string, _ mux.Mux) int {
+		sessWasCalled = true
+		return 0
+	}
+
+	code := runInline(capture.Request{CWD: "/proj"}, mux.Null())
+	if code != 0 {
+		t.Fatalf("classify error: want escalate (exit 0), got %d", code)
+	}
+	if !sessWasCalled {
+		t.Error("classify error must escalate to runInlineSessionFn")
 	}
 }

@@ -289,6 +289,233 @@ func TestSelect_NonNullWhenMuxConfigured(t *testing.T) {
 	}
 }
 
+// TestLoad_NullWhenNoZellijNoConfig asserts Load returns Null when $ZELLIJ is
+// empty and no user config file is present (so MuxConfigured() is false).
+func TestLoad_NullWhenNoZellijNoConfig(t *testing.T) {
+	t.Setenv("ZELLIJ", "")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // empty dir → no config.toml
+	m := Load()
+	if !IsNull(m) {
+		t.Fatal("Load with no ZELLIJ and no config must return Null()")
+	}
+}
+
+// TestLoad_NonNullWhenZellijSet asserts Load returns a non-null (templated) Mux
+// when $ZELLIJ is set, even without a config file.
+func TestLoad_NonNullWhenZellijSet(t *testing.T) {
+	t.Setenv("ZELLIJ", "0")
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir()) // empty dir
+	m := Load()
+	if IsNull(m) {
+		t.Fatal("Load with ZELLIJ set must return non-null")
+	}
+}
+
+// TestLoad_FallsBackToDefaultOnBadConfig asserts Load uses config.Default() when
+// the config file is malformed (config.Load fails), producing a non-null Mux
+// because $ZELLIJ is set. This covers the `if err != nil { cfg = config.Default() }`
+// branch inside Load.
+func TestLoad_FallsBackToDefaultOnBadConfig(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	t.Setenv("ZELLIJ", "0")
+	cfgDir := filepath.Join(dir, "ai-playbook")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// Malformed TOML forces config.Load() to return an error.
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"), []byte("not = [broken toml\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := Load()
+	if IsNull(m) {
+		t.Fatal("Load with ZELLIJ set must return non-null even when config is malformed (fallback to Default)")
+	}
+}
+
+// TestTemplatedDumpScreen_ExecsStub asserts the DumpScreen method exec's the
+// configured dump-screen template and returns its stdout as the screen text.
+func TestTemplatedDumpScreen_ExecsStub(t *testing.T) {
+	dir := t.TempDir()
+	stub := filepath.Join(dir, "stubmux")
+	script := "#!/bin/sh\nprintf 'viewport text\\n'\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Mux.DumpScreen = stub + " dump-screen {pane}"
+	m := FromConfig(cfg)
+	text, err := m.DumpScreen("terminal_3")
+	if err != nil {
+		t.Fatalf("DumpScreen: unexpected error: %v", err)
+	}
+	if text != "viewport text\n" {
+		t.Errorf("DumpScreen text = %q, want %q", text, "viewport text\n")
+	}
+}
+
+// TestTemplatedDumpScreen_EmptyTemplate asserts DumpScreen returns an error when
+// the dump-screen template is empty (argv resolves to nothing).
+func TestTemplatedDumpScreen_EmptyTemplate(t *testing.T) {
+	cfg := config.Default()
+	cfg.Mux.DumpScreen = ""
+	m := FromConfig(cfg)
+	if _, err := m.DumpScreen("terminal_3"); err == nil {
+		t.Fatal("DumpScreen with empty template must return an error")
+	}
+}
+
+// TestSpawnDocked_ExecsStub asserts SpawnDocked exec's the open-docked-pane template.
+// A stub captures the argv (command tokens) to a file for assertion.
+func TestSpawnDocked_ExecsStub(t *testing.T) {
+	dir := t.TempDir()
+	argfile := filepath.Join(dir, "args")
+	stub := filepath.Join(dir, "stubmux")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argfile + "\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Mux.OpenDockedPane = stub + " new-pane --direction right -- {cmd}"
+	m := FromConfig(cfg)
+	if err := m.SpawnDocked(SpawnOptions{
+		Cmd:  []string{"ai-playbook", "run", "/tmp/pb.md"},
+		Cwd:  "/proj",
+		Name: "playbook",
+	}); err != nil {
+		t.Fatalf("SpawnDocked: %v", err)
+	}
+	b, err := os.ReadFile(argfile)
+	if err != nil {
+		t.Fatalf("stub did not record args: %v", err)
+	}
+	out := string(b)
+	for _, want := range []string{"new-pane", "ai-playbook", "run", "/tmp/pb.md"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("SpawnDocked argv missing %q\n%s", want, out)
+		}
+	}
+}
+
+// TestSpawnDocked_NeedsCommand asserts SpawnDocked with an empty Cmd errors.
+func TestSpawnDocked_NeedsCommand(t *testing.T) {
+	m := FromConfig(config.Default())
+	if err := m.SpawnDocked(SpawnOptions{}); err == nil {
+		t.Fatal("SpawnDocked with no Cmd should error")
+	}
+}
+
+// TestSpawnFloat_EmptyTemplate asserts SpawnFloat errors when the open-floating-pane
+// template is empty — spawn can't resolve an argv even with a valid Cmd.
+func TestSpawnFloat_EmptyTemplate(t *testing.T) {
+	cfg := config.Default()
+	cfg.Mux.OpenFloatingPane = ""
+	m := FromConfig(cfg)
+	if err := m.SpawnFloat(SpawnOptions{Cmd: []string{"less", "/tmp/p"}}); err == nil {
+		t.Fatal("SpawnFloat with empty template must error")
+	}
+}
+
+// TestSpawnInputFloat_FallsBackToOpenFloatingPane asserts that when open-input-float
+// is empty, SpawnInputFloat falls back to the open-floating-pane template — so an
+// operator who only overrides open-floating-pane still gets a float.
+func TestSpawnInputFloat_FallsBackToOpenFloatingPane(t *testing.T) {
+	dir := t.TempDir()
+	argfile := filepath.Join(dir, "args")
+	stub := filepath.Join(dir, "stub")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argfile + "\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Mux.OpenInputFloat = "" // force fallback
+	cfg.Mux.OpenFloatingPane = stub + " new-pane --floating -- {cmd}"
+	m := FromConfig(cfg)
+	if err := m.SpawnInputFloat(SpawnOptions{Cmd: []string{"ai-playbook", "input"}}); err != nil {
+		t.Fatalf("SpawnInputFloat fallback to OpenFloatingPane: %v", err)
+	}
+	b, err := os.ReadFile(argfile)
+	if err != nil {
+		t.Fatalf("fallback stub did not record args: %v", err)
+	}
+	if !strings.Contains(string(b), "ai-playbook") {
+		t.Errorf("SpawnInputFloat fallback argv missing cmd: %s", b)
+	}
+}
+
+// TestSpawnFloat_WithPercentSizes covers the defaultPercent positive-n path: when
+// Width/Height > 0 (and not overridden by WidthCols/HeightRows), they are rendered as
+// "<n>%" via percent(n) and emitted into the argv.
+func TestSpawnFloat_WithPercentSizes(t *testing.T) {
+	dir := t.TempDir()
+	argfile := filepath.Join(dir, "args")
+	stub := filepath.Join(dir, "stub")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argfile + "\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Mux.OpenFloatingPane = stub + " new-pane --width {width} --height {height} -- {cmd}"
+	m := FromConfig(cfg)
+	if err := m.SpawnFloat(SpawnOptions{
+		Cmd:    []string{"less"},
+		Width:  70,
+		Height: 50,
+	}); err != nil {
+		t.Fatalf("SpawnFloat with percent sizes: %v", err)
+	}
+	b, err := os.ReadFile(argfile)
+	if err != nil {
+		t.Fatalf("stub did not record args: %v", err)
+	}
+	out := string(b)
+	if !strings.Contains(out, "70%") {
+		t.Errorf("SpawnFloat percent width: argv missing 70%%\n%s", out)
+	}
+	if !strings.Contains(out, "50%") {
+		t.Errorf("SpawnFloat percent height: argv missing 50%%\n%s", out)
+	}
+}
+
+// TestTypeInto_ExecsStub asserts TypeInto exec's the type-into-pane template. A stub
+// captures the argv so the test asserts the pane id and text reach the command.
+func TestTypeInto_ExecsStub(t *testing.T) {
+	dir := t.TempDir()
+	argfile := filepath.Join(dir, "args")
+	stub := filepath.Join(dir, "stubmux")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$@\" > " + argfile + "\n"
+	if err := os.WriteFile(stub, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := config.Default()
+	cfg.Mux.TypeIntoPane = stub + " write-chars --pane-id {pane} {text}"
+	m := FromConfig(cfg)
+	if err := m.TypeInto("terminal_3", "git status"); err != nil {
+		t.Fatalf("TypeInto: %v", err)
+	}
+	b, err := os.ReadFile(argfile)
+	if err != nil {
+		t.Fatalf("stub did not record args: %v", err)
+	}
+	out := string(b)
+	for _, want := range []string{"write-chars", "terminal_3", "git status"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("TypeInto argv missing %q\n%s", want, out)
+		}
+	}
+}
+
+// TestTypeInto_EmptyTemplate asserts TypeInto returns an error when the
+// type-into-pane template is empty (argv resolves to nothing).
+func TestTypeInto_EmptyTemplate(t *testing.T) {
+	cfg := config.Default()
+	cfg.Mux.TypeIntoPane = ""
+	m := FromConfig(cfg)
+	if err := m.TypeInto("terminal_3", "git status"); err == nil {
+		t.Fatal("TypeInto with empty template must return an error")
+	}
+}
+
 func assertArgv(t *testing.T, got, want []string) {
 	t.Helper()
 	if len(got) != len(want) {

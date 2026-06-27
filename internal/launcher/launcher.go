@@ -604,6 +604,14 @@ func AnswerMain() int {
 	return ui.Main()
 }
 
+// runInlineClassify is runInline's classify seam: tests inject a fake classifyFunc
+// to drive each route without calling the live model. Mirrors answerClassify.
+var runInlineClassify classifyFunc = author.ClassifyRequest
+
+// runInlineSessionFn is runInline's session seam: tests override this to assert the
+// escalate branch without starting a live driver.
+var runInlineSessionFn = runSession
+
 // runInline is the null-mux / explicit-request path (no float, no panes): classify
 // the request and route it simply (stage C). command → print the command for the
 // user to run; answer → print the prose; escalate → run the full session inline
@@ -612,7 +620,7 @@ func AnswerMain() int {
 // launcher already made (never re-loads it).
 func runInline(req capture.Request, m mux.Mux) int {
 	cfg, _ := config.Load()
-	cls, err := author.ClassifyRequest(req, author.AuthorOptions{Cfg: cfg})
+	cls, err := runInlineClassify(req, author.AuthorOptions{Cfg: cfg})
 	if err != nil {
 		dbg("runInline: classify failed (%v); escalating", err)
 		cls = author.Classification{Kind: author.KindEscalate}
@@ -625,7 +633,7 @@ func runInline(req capture.Request, m mux.Mux) int {
 		fmt.Println(cls.Content)
 		return 0
 	default:
-		return runSession(req, "", m)
+		return runInlineSessionFn(req, "", m)
 	}
 }
 
