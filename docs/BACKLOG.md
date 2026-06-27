@@ -16,7 +16,7 @@ _(none — phase work lives in the roadmap)_
 
 ## Tasks
 
-_(none — phase work lives in the roadmap)_
+- [ ] clean up + enforce golangci-lint (currently advisory) (2026-06-26)
 
 ## Ideas
 

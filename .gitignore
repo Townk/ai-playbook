@@ -1,2 +1,6 @@
 /ai-playbook
 *.test
+
+# Build / release / coverage artifacts.
+/dist/
+/coverage.out

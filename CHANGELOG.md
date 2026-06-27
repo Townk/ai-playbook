@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-06-26
+
 ### Added
 
 - Single Go binary unifying and replacing the retired shell-script stack;
@@ -39,3 +41,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The retired zsh + `libexec/` shell stack.
 - Dead FIFO plumbing, including `--results-fifo` and the broker process.
+
+## [0.2.0] - (historical)
+
+- First all-Go-binary release (replaced the shell stack).
+
+## [0.1.0] - (historical)
+
+- Original zsh shell-script implementation (ai-assist).
+
+[Unreleased]: https://github.com/Townk/ai-playbook/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Townk/ai-playbook/releases/tag/v0.3.0
+[0.2.0]: https://github.com/Townk/ai-playbook/releases/tag/v0.2.0
+[0.1.0]: https://github.com/Townk/ai-playbook/releases/tag/v0.1.0
