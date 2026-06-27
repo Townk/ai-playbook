@@ -1049,6 +1049,14 @@ func TestRunInline_EscalateRoute(t *testing.T) {
 	}
 }
 
+// TestAssistSymbol pins the post-rename entrypoint: the launcher exposes Assist
+// (renamed from Troubleshoot) with the `func() int` shape the cmd dispatch (both
+// the `assist` case and the deprecated `troubleshoot` alias) calls. A pure
+// compile-time guard — the behavior is covered by the launch/runInline tests.
+func TestAssistSymbol(t *testing.T) {
+	var _ func() int = Assist
+}
+
 // TestLauncherRoute asserts the routing predicate:
 //   - null mux → false (never float, regardless of request)
 //   - real mux + empty request → true (use the float)

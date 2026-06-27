@@ -103,7 +103,7 @@ func TestClassifyInline_StreamsContentTail(t *testing.T) {
 	}
 }
 
-// On null mux with no explicit request, Troubleshoot must use the inline-input
+// On null mux with no explicit request, Assist must use the inline-input
 // seam (NOT the float launch, NOT the stdin read). We assert via the seam.
 func TestInlineInput_SubmitRoutesClassification(t *testing.T) {
 	isolateCache(t)

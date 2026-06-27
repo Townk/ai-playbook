@@ -1,6 +1,6 @@
 // Package launcher holds the assist/session orchestration extracted from the
 // ai-playbook command's package main (golang-standards "thin main"). It owns the
-// launcher (Troubleshoot), the docked session pane (SessionMain), and the prose
+// launcher (Assist), the docked session pane (SessionMain), and the prose
 // answer pager (AnswerMain) — the three subcommand entrypoints cmd/ai-playbook
 // dispatches into — plus the cache-serve, authoring, and request-JSON plumbing
 // behind them. This is a mechanical extraction: behavior is preserved exactly.
@@ -56,7 +56,7 @@ func launcherRoute(m mux.Mux, cliRequest string) bool {
 	return cliRequest == "" && !mux.IsNull(m)
 }
 
-func Troubleshoot() int {
+func Assist() int {
 	dbgInit(os.Getenv("AI_PLAYBOOK_DEBUG_LOG"))
 	cliRequest := strings.TrimSpace(strings.Join(os.Args[2:], " "))
 	if cliRequest == "" {
