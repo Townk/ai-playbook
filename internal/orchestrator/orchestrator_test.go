@@ -9,7 +9,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/mux"
 )
 
@@ -273,6 +275,32 @@ func TestViewDiff(t *testing.T) {
 	last := opt.Cmd[len(opt.Cmd)-1]
 	if !strings.HasSuffix(last, ".patch") {
 		t.Errorf("viewer's last arg = %q, want a .patch temp file", last)
+	}
+}
+
+// TestBuildFrontMatter_WorkdirPopulated verifies buildFrontMatter sets Workdir
+// to the home-normalized project root from re.Req.ProjectRoot.
+func TestBuildFrontMatter_WorkdirPopulated(t *testing.T) {
+	home, _ := os.UserHomeDir()
+	projRoot := filepath.Join(home, "Projects", "myapp")
+	re := &Reengage{
+		Req: capture.Request{
+			ProjectRoot: projRoot,
+			UserRequest: "fix the build",
+		},
+		EnvLookup: func(string) (string, bool) { return "", false },
+		Metadata:  nil,
+	}
+	body := "# Playbook — Fix Build\n\nDo the thing.\n"
+	fm := re.buildFrontMatter(body)
+	want := frontmatter.NormalizeHome(projRoot, home)
+	if fm.Workdir != want {
+		t.Errorf("Workdir = %q, want %q", fm.Workdir, want)
+	}
+	// also verify the assembled FM carries the workdir: key
+	assembled := frontmatter.Assemble(fm)
+	if !strings.Contains(assembled, "workdir:") {
+		t.Errorf("assembled FM has no workdir: key:\n%s", assembled)
 	}
 }
 

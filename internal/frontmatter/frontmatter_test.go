@@ -370,3 +370,20 @@ func TestParse_UnterminatedIsNotFrontMatter(t *testing.T) {
 		t.Fatalf("body must be unchanged, got %q", body)
 	}
 }
+
+// TestAssemble_WorkdirRoundTrip verifies that the Workdir field survives a
+// full Assemble → Parse round-trip without loss or corruption.
+func TestAssemble_WorkdirRoundTrip(t *testing.T) {
+	fm := FrontMatter{Name: "X", Workdir: "~/proj"}
+	assembled := Assemble(fm)
+	parsed, _, ok := Parse(assembled)
+	if !ok {
+		t.Fatalf("Parse must return ok=true for assembled front matter, got: %q", assembled)
+	}
+	if parsed.Workdir != "~/proj" {
+		t.Errorf("Workdir round-trip = %q, want %q", parsed.Workdir, "~/proj")
+	}
+	if parsed.Name != "X" {
+		t.Errorf("Name round-trip = %q, want X", parsed.Name)
+	}
+}

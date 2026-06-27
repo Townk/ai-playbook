@@ -87,6 +87,7 @@ func finalizeDoc(
 		Env:         env,
 		Created:     created,
 		ProjectRoot: frontmatter.NormalizeHome(projectRoot, home),
+		Workdir:     frontmatter.NormalizeHome(projectRoot, home),
 	}
 	return frontmatter.Prepend(fm, body), err
 }

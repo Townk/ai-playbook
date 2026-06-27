@@ -155,6 +155,32 @@ func TestFinalizeSummary(t *testing.T) {
 	}
 }
 
+// TestFinalizeDoc_WorkdirBackfilled asserts that finalizeDoc populates the
+// workdir field in the assembled front matter using the home-normalized
+// projectRoot argument.
+func TestFinalizeDoc_WorkdirBackfilled(t *testing.T) {
+	raw := "# Playbook — Z\n\nDo things.\n"
+	metaFn := func(string) (author.Metadata, error) { return author.Metadata{}, nil }
+	const home = "/Users/tester"
+	projectRoot := home + "/Projects/proj"
+
+	full, err := finalizeDoc(raw, metaFn, fakeLookup(nil), "2026-06-27", projectRoot, home)
+	if err != nil {
+		t.Fatalf("finalizeDoc returned error: %v", err)
+	}
+	if !strings.Contains(full, "workdir:") {
+		t.Errorf("assembled FM has no workdir: key:\n%s", full)
+	}
+	fm, _, ok := frontmatter.Parse(full)
+	if !ok {
+		t.Fatalf("output does not parse as front matter:\n%s", full)
+	}
+	want := "~/Projects/proj"
+	if fm.Workdir != want {
+		t.Errorf("Workdir = %q, want %q", fm.Workdir, want)
+	}
+}
+
 // TestFrontMatterBlock verifies --dry-run extracts only the leading front-matter
 // block (through the closing fence), not the body.
 func TestFrontMatterBlock(t *testing.T) {
