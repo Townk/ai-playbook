@@ -43,12 +43,19 @@ import (
 	"encoding/json"
 )
 
+// version is the binary's version string. It defaults to "dev" for local
+// builds; GoReleaser injects the real tag via -ldflags "-X main.version=...".
+var version = "dev"
+
 func main() {
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)
 	}
 	switch os.Args[1] {
+	case "version", "--version", "-v":
+		fmt.Printf("ai-playbook %s\n", version)
+		os.Exit(0)
 	case "selftest":
 		os.Exit(selftest())
 	case "troubleshoot":
