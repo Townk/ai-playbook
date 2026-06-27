@@ -96,9 +96,8 @@ func Troubleshoot() int {
 	}
 
 	// Null-mux UX (no multiplexer): inline input box for an interactive request,
-	// or the plain runInline for an explicit request (Task 3 replaces the explicit
-	// branch with explicitProgress). The mux-present paths (float launch above;
-	// real-mux+explicit runInline below) are unchanged.
+	// or explicitProgress for an explicit one. The mux-present paths (float launch
+	// above; real-mux+explicit runInline below) are unchanged.
 	if mux.IsNull(m) {
 		if cliRequest == "" {
 			return inlineInput(req, m)
@@ -615,7 +614,7 @@ var runInlineClassify classifyFunc = author.ClassifyRequest
 // escalate branch without starting a live driver.
 var runInlineSessionFn = runSession
 
-// runInline is the null-mux / explicit-request path (no float, no panes): classify
+// runInline is the real-mux + explicit-request path (no float, no panes): classify
 // the request and route it simply (stage C). command → print the command for the
 // user to run; answer → print the prose; escalate → run the full session inline
 // (ui.Main full-screen TUI). A classify error escalates (the safe default).

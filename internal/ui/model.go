@@ -532,10 +532,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if om, ok := msg.(askOpenMsg); ok {
 		return m, m.openAsk(om.req)
 	}
+	// Ask overlay: only user-input messages are diverted to the embedded ask
+	// widget; stream/tick/ready messages fall through to the main switch so the
+	// stream keeps draining and re-arming behind the overlay (mirrors helpMode,
+	// which only intercepts inside case tea.KeyPressMsg).
 	if m.askMode {
-		if _, ok := msg.(tea.WindowSizeMsg); !ok {
+		switch msg.(type) {
+		case tea.KeyPressMsg, tea.PasteMsg, tea.MouseClickMsg, tea.MouseWheelMsg:
 			return m, m.handleAskKey(msg)
 		}
+		// WindowSizeMsg and all non-input messages (streamEventsMsg, renderTickMsg,
+		// orchReadyMsg, spinTickMsg, flashTickMsg, …) fall through to the main switch.
 	}
 	switch msg := msg.(type) {
 	case streamEventsMsg:

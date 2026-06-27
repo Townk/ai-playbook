@@ -138,7 +138,10 @@ func inlineInput(req capture.Request, m mux.Mux) int {
 				}
 			})
 			clsCh <- clsResult{cls: cls, err: cerr}
-			ch <- input.ThinkUpdate{Done: true}
+			select {
+			case ch <- input.ThinkUpdate{Done: true}:
+			default: // reader cancelled (e.g. esc during classify wave) — don't block
+			}
 		}()
 		return ch
 	})

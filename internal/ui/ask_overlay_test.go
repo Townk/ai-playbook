@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Townk/ai-playbook/internal/askbridge"
+	"github.com/Townk/ai-playbook/internal/input"
 )
 
 func TestAskOverlay_OpensAndRespondsOnSubmit(t *testing.T) {
@@ -113,5 +114,29 @@ func TestAskOverlay_ChooseDeliversChoicesAndResponds(t *testing.T) {
 	}
 	if a := <-answered; !a.Submitted || a.Value != "stage" {
 		t.Fatalf("bridge answer = %+v, want {stage,true}", a)
+	}
+}
+
+// TestAskOverlay_StreamEventsPassThrough verifies that while the ask overlay is
+// open (askMode=true), a streamEventsMsg is NOT swallowed by handleAskKey but
+// instead falls through to the main Update switch, which re-arms the stream
+// reader. Without the fix the streamEventsMsg was diverted to handleAskKey →
+// the events were dropped and readStream was never re-issued → the viewer
+// stalled after the user answered the ask.
+func TestAskOverlay_StreamEventsPassThrough(t *testing.T) {
+	m := newModel("T", "# Playbook\n")
+	m.width, m.height = 80, 24
+	m.reader = strings.NewReader("")
+	m.parser = &streamParser{}
+
+	// Enter askMode with a live ask widget (mirrors openAsk).
+	m.askMode = true
+	m.ask = input.NewAsk("ai-playbook", "which env?", "", "line", nil)
+
+	// A streamEventsMsg carrying no events (EOF=false) should be processed by
+	// the main switch, which always issues readStream as its first cmd.
+	_, cmd := m.Update(streamEventsMsg{events: nil, eof: false})
+	if cmd == nil {
+		t.Fatal("streamEventsMsg while askMode must re-arm the stream (non-nil cmd); overlay is freezing the stream")
 	}
 }
