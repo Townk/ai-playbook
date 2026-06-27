@@ -2,6 +2,7 @@ package driver
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -133,6 +134,134 @@ func TestResolveShell(t *testing.T) {
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
 					t.Errorf("resolveShell(%q) error = %v, want %v", tc.sel, err, tc.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveShell(%q) unexpected error: %v", tc.sel, err)
+			}
+			if bin != tc.wantBin {
+				t.Errorf("bin = %q, want %q", bin, tc.wantBin)
+			}
+			if a.name() != tc.wantA {
+				t.Errorf("adapter.name() = %q, want %q", a.name(), tc.wantA)
+			}
+		})
+	}
+}
+
+// makeLookHelper mirrors the in-test makeLook: an injected look matching only the
+// supplied names.
+func makeLookHelper(found ...string) func(string) (string, error) {
+	s := make(map[string]struct{}, len(found))
+	for _, f := range found {
+		s[f] = struct{}{}
+	}
+	return func(name string) (string, error) {
+		if _, ok := s[name]; ok {
+			return name, nil
+		}
+		return "", errors.New("not found: " + name)
+	}
+}
+
+// TestResolveShell_ErrorBranches covers the wrapped-error and fallthrough paths the
+// happy-path table doesn't: explicit selectors whose binary is absent, an unknown
+// selector, $SHELL pointing at sh / an unknown shell, and the $SHELL-absolute-path
+// lookup failing so resolution falls through to the sh fallback.
+func TestResolveShell_ErrorBranches(t *testing.T) {
+	noEnv := func(string) string { return "" }
+	shellEnv := func(v string) func(string) string {
+		return func(k string) string {
+			if k == "SHELL" {
+				return v
+			}
+			return ""
+		}
+	}
+
+	tests := []struct {
+		name        string
+		sel         string
+		getenv      func(string) string
+		look        func(string) (string, error)
+		wantBin     string
+		wantA       string
+		wantErrSub  string // non-empty → expect an error whose message contains this
+		wantErrSent error  // non-empty → expect errors.Is(err, sentinel)
+	}{
+		{
+			name:       "explicit zsh missing → wrapped error",
+			sel:        "zsh",
+			getenv:     noEnv,
+			look:       makeLookHelper(), // nothing on PATH
+			wantErrSub: "zsh requested but not found",
+		},
+		{
+			name:       "explicit bash missing → wrapped error",
+			sel:        "bash",
+			getenv:     noEnv,
+			look:       makeLookHelper(),
+			wantErrSub: "bash requested but not found",
+		},
+		{
+			name:       "explicit sh missing → wrapped error",
+			sel:        "sh",
+			getenv:     noEnv,
+			look:       makeLookHelper(),
+			wantErrSub: "sh requested but not found",
+		},
+		{
+			name:       "unknown selector → error",
+			sel:        "fish",
+			getenv:     noEnv,
+			look:       makeLookHelper("zsh", "sh"),
+			wantErrSub: "unknown shell selector",
+		},
+		{
+			// auto + zsh absent + $SHELL=/bin/sh present → sh adapter via $SHELL.
+			name:    "auto + SHELL=/bin/sh → sh via SHELL",
+			sel:     "",
+			getenv:  shellEnv("/bin/sh"),
+			look:    makeLookHelper("/bin/sh"),
+			wantBin: "/bin/sh",
+			wantA:   "sh",
+		},
+		{
+			// auto + $SHELL points at an unrecognized shell (fish): the switch has no
+			// case for it, so resolution falls through to the sh fallback on PATH.
+			name:    "auto + SHELL=/usr/bin/fish → sh fallback",
+			sel:     "",
+			getenv:  shellEnv("/usr/bin/fish"),
+			look:    makeLookHelper("sh"),
+			wantBin: "sh",
+			wantA:   "sh",
+		},
+		{
+			// auto + $SHELL=/opt/zsh but that absolute path isn't resolvable (look
+			// fails): the zsh case's inner-if is false, so we fall through to the sh
+			// fallback. Exercises the "matched base but look failed" branch.
+			name:    "auto + SHELL=/opt/zsh unresolvable → sh fallback",
+			sel:     "",
+			getenv:  shellEnv("/opt/zsh"),
+			look:    makeLookHelper("sh"), // look("zsh") and look("/opt/zsh") fail
+			wantBin: "sh",
+			wantA:   "sh",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bin, a, err := resolveShell(tc.sel, tc.getenv, tc.look)
+			if tc.wantErrSub != "" || tc.wantErrSent != nil {
+				if err == nil {
+					t.Fatalf("resolveShell(%q) = nil error, want error", tc.sel)
+				}
+				if tc.wantErrSub != "" && !strings.Contains(err.Error(), tc.wantErrSub) {
+					t.Errorf("error = %q, want substring %q", err.Error(), tc.wantErrSub)
+				}
+				if tc.wantErrSent != nil && !errors.Is(err, tc.wantErrSent) {
+					t.Errorf("error = %v, want errors.Is %v", err, tc.wantErrSent)
 				}
 				return
 			}
