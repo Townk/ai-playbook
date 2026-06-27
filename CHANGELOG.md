@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Live playbook store (Phase 1): saved playbooks are now a browsable, searchable,
+  editable, re-runnable library. New commands — `list`/`search`
+  (`--format human|fuzzy-data-source|json`), `show`, `edit`, and `create` (author a
+  playbook directly). `troubleshoot` is renamed to `assist` (the old name still works).
+  A global store plus a project-local store (`.ai-playbook/playbooks/`, `proj:`-prefixed
+  slugs); both directories are configurable via `[store]`. `run <slug>` adapts a stored
+  playbook to the current project (with an "adapted from" banner and a `d` diff view);
+  `run --file <path>` runs a file directly. Playbooks gain a `workdir` front-matter field.
 - Runs without a terminal multiplexer (ADR-0006 Stage 1): off-mux, the input box
   renders inline below the shell prompt, and the agent's `ask` dialog renders as an
   in-viewer overlay (all types: text/line/confirm/choose/free). With a multiplexer

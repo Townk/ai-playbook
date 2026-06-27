@@ -32,6 +32,7 @@ _(none — phase work lives in the roadmap)_
 - [ ] (small, cheap) Make `cmd/ai-playbook` `main` dispatch unit-testable: extract `run(args []string, deps) int` (keep the lone `os.Exit` in `main`), inject the subcommand funcs behind a seam so dispatch can be spied. Also trivially testable today: `atomicWrite`/`dirExists`/`head`. Distinct from the integration-glue item above — this part is a fixable structural gap, not inherent (2026-06-27)
 - [ ] Portability / progressive enhancement: the driver needs a Unix PTY + signals (`x/sys/unix`), so it's Linux/macOS-only. Evaluate a degraded no-PTY "plain exec" mode for a portable core, and a ConPTY-based Windows driver (large) (2026-06-27)
 - [ ] `create`'s similar-playbooks banner uses a whole-string substring search (`store.Search(prompt)`), so multi-word prompts rarely match — make it per-word/token (2026-06-27)
+- [ ] adapt-on-run leaves two temp files per run (`writeTempMarkdown` render+orig in /tmp, never reaped; orig written even when junk-guarded) — defer-cleanup after `ui.Main` returns (2026-06-27)
 - [ ] Cross-block output piping (runme parity; minor) (2026-06-26)
 - [ ] Optional rich output via the kitty graphics protocol — images/charts in the pager (2026-06-26)
 - [ ] A structured / JUnit-style report for `run --auto` (CI) (2026-06-26)
