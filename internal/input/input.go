@@ -242,7 +242,15 @@ func (m model) render() string {
 		sections = append(sections, lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text)).Render(m.prompt))
 	}
 	sections = append(sections, m.fld.view(iW, true))
-	return renderFrame(m.theme, m.variant, m.title, sections, m.hint(), m.width, m.padding, m.inset)
+	// Prefer the field's own hint when it provides one (confirm/choose carry
+	// type-specific accelerators); text/line fields have none, so the generic
+	// submit/newline/cancel hint applies. This makes the embeddable Ask render the
+	// correct hint per type while the standalone text/line path is unchanged.
+	hint := m.hint()
+	if h, ok := m.fld.(interface{ hint() string }); ok {
+		hint = h.hint()
+	}
+	return renderFrame(m.theme, m.variant, m.title, sections, hint, m.width, m.padding, m.inset)
 }
 
 // thinking-state wave palette: the same trio --wave-demo uses — theme Border as
