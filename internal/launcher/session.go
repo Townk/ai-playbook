@@ -204,17 +204,15 @@ func openSession(req capture.Request, m mux.Mux) *session {
 
 	// Ask seam: when a real multiplexer is present and we can resolve our own binary,
 	// the agent's `ask` tool spawns `ai-playbook input … --out <tmp>` in a float.
-	// When the mux is null (no multiplexer) we fall back to reading the answer from
-	// stdin (the inline session already owns the terminal, so the float path is
-	// unavailable). Without selfExe the ask seam stays nil (deps.Ask nil).
+	// When the mux is null (no multiplexer), the inline TUI owns the terminal in raw
+	// mode + alt-screen: a stdin ask would corrupt the display and cannot read a clean
+	// cooked line. Leave ask nil so the tools backend returns the unavailable sentinel
+	// — consistent with s.asker's null-mux no-op for the `f` keybind.
+	// Without selfExe the ask seam also stays nil (deps.Ask nil).
 	var ask tools.AskFunc
-	if selfExe != "" {
-		if mux.IsNull(m) {
-			ask = stdinAsk(os.Stdin, os.Stdout)
-		} else {
-			asker := floatinput.Asker{SelfExe: selfExe, Mux: m}
-			ask = asker.Ask
-		}
+	if selfExe != "" && !mux.IsNull(m) {
+		asker := floatinput.Asker{SelfExe: selfExe, Mux: m}
+		ask = asker.Ask
 	}
 
 	// The agent's live activity (reasoning + tool calls) is no longer surfaced via

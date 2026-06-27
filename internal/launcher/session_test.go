@@ -176,6 +176,28 @@ func minimalZDOTDIR(t *testing.T) {
 	t.Setenv("ZDOTDIR", zdot)
 }
 
+// TestOpenSession_AskUnavailableOffMux asserts that a session opened under the null
+// mux makes the agent ask unavailable: the tools backend returns {unavailable:true}
+// instead of attempting a stdin ask that would corrupt the inline TUI (raw mode +
+// alt-screen owns the terminal in that context). Mirrors s.asker's null-mux no-op
+// for the `f` keybind — both seams must be consistently unavailable off-mux.
+func TestOpenSession_AskUnavailableOffMux(t *testing.T) {
+	minimalZDOTDIR(t)
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null())
+	if sess == nil {
+		t.Fatal("openSession returned nil (driver/tools setup failed)")
+	}
+	defer sess.close()
+
+	res, err := tools.Dial(sess.socket, tools.Call{Tool: "ask", Prompt: "which env?"})
+	if err != nil {
+		t.Fatalf("dial ask tool: %v", err)
+	}
+	if !res.Unavailable {
+		t.Errorf("off-mux ask: want Unavailable=true, got %+v", res)
+	}
+}
+
 // TestOpenSession_SharedDriverAndToolsBackend asserts the stage-5 lifecycle: ONE
 // driver is created at session start and the tools backend serves THAT driver
 // (the backend's `run` executes in the shared shell). The session's driver is the

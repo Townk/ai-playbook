@@ -5,7 +5,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Townk/ai-playbook/internal/floatinput"
 	"github.com/Townk/ai-playbook/internal/mux"
 )
 
@@ -61,33 +60,5 @@ func TestReadRequestStdin_EOF(t *testing.T) {
 	_, ok := readRequestStdin(in, io.Discard)
 	if ok {
 		t.Error("EOF: want ok=false")
-	}
-}
-
-// TestStdinAsk_ReadsAnswer asserts the returned AskFunc prints the prompt and reads
-// the answer line, returning it as a submitted Result.
-func TestStdinAsk_ReadsAnswer(t *testing.T) {
-	in := strings.NewReader("the answer\n")
-	ask := stdinAsk(in, io.Discard)
-	res, err := ask(floatinput.Request{Prompt: "What do you want?"})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !res.Submitted {
-		t.Error("expected Submitted=true")
-	}
-	if res.Value != "the answer" {
-		t.Errorf("got Value=%q, want %q", res.Value, "the answer")
-	}
-}
-
-// TestStdinAsk_EOFError asserts EOF before any answer returns a non-nil error
-// (the agent can't get an answer; the caller handles the error).
-func TestStdinAsk_EOFError(t *testing.T) {
-	in := strings.NewReader("")
-	ask := stdinAsk(in, io.Discard)
-	_, err := ask(floatinput.Request{Prompt: "?"})
-	if err == nil {
-		t.Error("EOF: want non-nil error")
 	}
 }
