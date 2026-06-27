@@ -640,9 +640,8 @@ func (r *renderer) code(n ast.Node) {
 	}
 	copyCol := col
 	sb.WriteString(r.buttonGlyph(blk.ID, "copy", glyphCopy, colYellow, bg))
-	col++
+	// copy is the last button on the row, so col is not tracked past it.
 	sb.WriteString(bg.Render(" "))
-	col++
 	r.buttons = append(r.buttons, Button{Line: lineIdx, Col: copyCol, Width: 2, Kind: "copy", Payload: src, BlockID: blk.ID})
 
 	r.lines = append(r.lines, Line{Text: sb.String(), Wide: false, Code: true})

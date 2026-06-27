@@ -514,15 +514,6 @@ func TestCodeBlockButtonsNonShell(t *testing.T) {
 	}
 }
 
-func hasKind(bs []Button, k string) bool {
-	for _, b := range bs {
-		if b.Kind == k {
-			return true
-		}
-	}
-	return false
-}
-
 func TestRunButtonShellAndScript(t *testing.T) {
 	_, b1, _ := Render("```bash {id=a}\nls\n```\n", 80, nil, "")
 	_, b2, _ := Render("```python {id=p}\nprint(1)\n```\n", 80, nil, "")
@@ -749,7 +740,9 @@ func TestDiffApplyGatedByNeeds(t *testing.T) {
 func TestRunRegionCompletedShowsSummaryAndTail(t *testing.T) {
 	dir := t.TempDir()
 	lp := dir + "/log"
-	os.WriteFile(lp, []byte("line1\nlANCHOR\n"), 0o644)
+	if err := os.WriteFile(lp, []byte("line1\nlANCHOR\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	st := map[string]blockRunState{"a": {Status: "ok", Exit: 0, Logpath: lp, Expanded: true}}
 	lines, _, _ := Render("```bash {id=a}\nls\n```\n", 80, st, "")
 	if !linesContain(lines, "exit 0") {
@@ -763,7 +756,9 @@ func TestRunRegionCompletedShowsSummaryAndTail(t *testing.T) {
 func TestRunRegionOutputTailLinesAreWide(t *testing.T) {
 	dir := t.TempDir()
 	lp := dir + "/log"
-	os.WriteFile(lp, []byte("output line one\noutput line two\n"), 0o644)
+	if err := os.WriteFile(lp, []byte("output line one\noutput line two\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	st := map[string]blockRunState{"a": {Status: "ok", Exit: 0, Logpath: lp, Expanded: true}}
 	lines, _, _ := Render("```bash {id=a}\nls\n```\n", 80, st, "")
 	// The summary line (✓ ran … ▸/▾) must be Wide=false (carries the toggle button).

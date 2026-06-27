@@ -185,7 +185,9 @@ func TestSpinTickStopsWhenNothingRunning(t *testing.T) {
 func TestToggleExpandsRegion(t *testing.T) {
 	dir := t.TempDir()
 	lp := dir + "/log"
-	os.WriteFile(lp, []byte("xTAILx\n"), 0o644)
+	if err := os.WriteFile(lp, []byte("xTAILx\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	m := newModel("T", "```bash {id=a}\nls\n```\n")
 	m.width, m.height = 80, 24
 	m.blockStates = map[string]blockRunState{"a": {Status: "ok", Logpath: lp, Expanded: false}}

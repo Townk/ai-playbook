@@ -108,7 +108,7 @@ func finalize() int {
 	fs := flag.NewFlagSet("finalize", flag.ExitOnError)
 	var dryRun bool
 	fs.BoolVar(&dryRun, "dry-run", false, "print the assembled front matter block to stdout; do not write the file")
-	fs.Parse(os.Args[2:])
+	_ = fs.Parse(os.Args[2:]) // flag.ExitOnError: Parse never returns a non-nil error
 
 	if fs.NArg() != 1 {
 		fmt.Fprintln(os.Stderr, "usage: ai-playbook finalize [--dry-run] <file.md>")

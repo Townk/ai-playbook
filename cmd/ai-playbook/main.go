@@ -94,7 +94,7 @@ func mcpMain() int {
 	var socket string
 	fs.StringVar(&socket, "socket", "", "path to the session's tools-backend unix socket")
 	argv := os.Args[2:]
-	fs.Parse(argv)
+	_ = fs.Parse(argv) // flag.ExitOnError: Parse never returns a non-nil error
 	if socket == "" {
 		fmt.Fprintln(os.Stderr, "ai-playbook mcp: --socket <path> is required")
 		return 2
@@ -142,7 +142,8 @@ func selftest() int {
 	if have("mise") {
 		dir, _ := os.MkdirTemp("", "selftest-mise")
 		defer os.RemoveAll(dir)
-		os.WriteFile(filepath.Join(dir, "mise.toml"), []byte("[env]\nSELFTEST_MISE = \"mise-works\"\n"), 0644)
+		// Best-effort fixture write; a failure surfaces as the chk below missing SELFTEST_MISE.
+		_ = os.WriteFile(filepath.Join(dir, "mise.toml"), []byte("[env]\nSELFTEST_MISE = \"mise-works\"\n"), 0644)
 		d.Run("mise trust "+dir+" 2>/dev/null || true", 10*time.Second)
 		d.Run("builtin cd -- "+dir, 10*time.Second)
 		r := d.Run("print -r -- ${SELFTEST_MISE:-MISSING}", 10*time.Second)
@@ -694,7 +695,7 @@ func answerMain() int {
 	fs.StringVar(&title, "title", "", "pager header title")
 	var cwd string
 	fs.StringVar(&cwd, "cwd", "", "working dir for the pager")
-	fs.Parse(os.Args[2:])
+	_ = fs.Parse(os.Args[2:]) // flag.ExitOnError: Parse never returns a non-nil error
 
 	if contentFile == "" {
 		fmt.Fprintln(os.Stderr, "ai-playbook answer: --content <file> is required")
@@ -810,7 +811,7 @@ func sessionMain() int {
 	fs.StringVar(&requestPath, "request", "", "path to the captured request JSON (written by the launcher)")
 	fs.StringVar(&debugLog, "debug-log", "", "append a debug trace to this file (set by the launcher)")
 	fs.StringVar(&titleFlag, "title", "", "working pane-header title (the classify-supplied label)")
-	fs.Parse(os.Args[2:])
+	_ = fs.Parse(os.Args[2:]) // flag.ExitOnError: Parse never returns a non-nil error
 	if debugLog == "" {
 		debugLog = os.Getenv("AI_PLAYBOOK_DEBUG_LOG")
 	}

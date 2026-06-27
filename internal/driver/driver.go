@@ -157,12 +157,6 @@ func (d *Driver) setStopped(v bool) {
 	d.mu.Unlock()
 }
 
-func (d *Driver) isStopped() bool {
-	d.mu.Lock()
-	defer d.mu.Unlock()
-	return d.stopped
-}
-
 // Pgrp returns the pty's foreground process group — the running command's group
 // (a real, monitorable, killable handle), or the shell's pgrp when idle.
 func (d *Driver) Pgrp() int {
@@ -325,7 +319,8 @@ func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
 	res.Out = strings.TrimRight(string(ob), "\n")
 	res.Err = strings.TrimRight(string(eb), "\n")
 	if m != nil {
-		fmt.Sscanf(m[1], "%d", &res.Exit)
+		// Best-effort parse of the sentinel's exit field; res.Exit stays 0 on failure.
+		_, _ = fmt.Sscanf(m[1], "%d", &res.Exit)
 	}
 	return res
 }

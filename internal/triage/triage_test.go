@@ -101,7 +101,9 @@ func TestRoute_NoCacheForcesMiss(t *testing.T) {
 	req := capture.Request{ProjectRoot: "/p", Exit: "0", UserRequest: "q"}
 	ctx := cache.ContextHash(cache.Request{ProjectRoot: "/p"})
 	reqHash := cache.RequestHash("q")
-	c.Store(ctx, reqHash, "answer", "x", nil, "")
+	if _, err := c.Store(ctx, reqHash, "answer", "x", nil, ""); err != nil {
+		t.Fatalf("seed cache: %v", err)
+	}
 	d := Route(req, c, true)
 	if d.Outcome != Escalate {
 		t.Fatalf("no-cache must force escalate even with an entry, got %s", d.Outcome)

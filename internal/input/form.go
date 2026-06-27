@@ -277,8 +277,9 @@ func (m formModel) hint() string {
 // measuring a single render() (which only reflects focus=0) so that the pane
 // is sized for the worst-case navigable height.
 func (m formModel) maxHeight(width int) int {
+	// Value receiver: m is a local copy, so mutating m.width / m.focus to probe
+	// each focus state never leaks back to the caller — no save/restore needed.
 	m.width = width
-	saved := m.focus
 	max := 0
 	for i := range m.fields {
 		m.focus = i
@@ -287,7 +288,6 @@ func (m formModel) maxHeight(width int) int {
 			max = h
 		}
 	}
-	m.focus = saved
 	return max
 }
 

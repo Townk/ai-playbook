@@ -61,11 +61,6 @@ const (
 	colHintLabelFg = "#ff5555"
 	colHintLabelBg = "#3a1212"
 
-	// Diff block hunk-style backgrounds: subtle dark tints that pair with the
-	// Catppuccin Mocha green/red foregrounds without overwhelming the text.
-	colDiffAddBg = "#2a3b2e" // dark green tint — added lines
-	colDiffDelBg = "#3b2a2e" // dark red tint  — deleted lines
-
 	// Flash highlight: bright background applied to a button glyph for ~140ms
 	// after activation. A bright bold foreground with NO background — a background
 	// on the glyph cell makes some terminals render the nerd-font (PUA) glyph

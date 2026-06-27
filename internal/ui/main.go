@@ -193,7 +193,7 @@ func Main() int {
 	if len(os.Args) < 2 {
 		argv = nil
 	}
-	fs.Parse(argv)
+	_ = fs.Parse(argv) // flag.ExitOnError: Parse never returns a non-nil error
 
 	var cachedAt time.Time
 	isCached := false

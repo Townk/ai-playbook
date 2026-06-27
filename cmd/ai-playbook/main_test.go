@@ -253,7 +253,7 @@ func TestAuthoringAgent_InvokesClaudeWithMCPConfig(t *testing.T) {
 		t.Fatalf("authoring agent: %v", err)
 	}
 	// Drain + close so the fake claude runs to completion and writes its argv.
-	io.Copy(io.Discard, stream)
+	_, _ = io.Copy(io.Discard, stream)
 	stream.Close()
 
 	argv, err := os.ReadFile(argvFile)

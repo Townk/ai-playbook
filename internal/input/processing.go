@@ -15,7 +15,6 @@ import (
 // Messages understood by processingModel.
 type statusMsg string
 type closeMsg struct{}
-type submitMsg string
 
 // processingModel is a Bubble Tea model that shows a spinner + status label
 // inside the same renderFrame used by the input widget. It is swapped in

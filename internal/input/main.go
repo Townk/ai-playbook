@@ -56,7 +56,7 @@ func Main() int {
 	fs.BoolVar(&thinking, "thinking", false, "text only: on submit, transition IN PLACE to a wave-animated thinking state — write --out, stay open animating, and exit when <out>.done appears (or a backstop fires). The launcher owns classify→route→.done.")
 	fs.IntVar(&width, "width", 50, "pane width for measurement/sizing")
 	theme := registerThemeFlags(fs)
-	fs.Parse(os.Args[2:])
+	_ = fs.Parse(os.Args[2:]) // flag.ExitOnError: Parse never returns a non-nil error
 
 	if waveDemo {
 		runWaveDemo(*theme)
