@@ -48,6 +48,10 @@ func main() {
 		os.Exit(launcher.ListMain())
 	case "search":
 		os.Exit(launcher.SearchMain())
+	case "show":
+		os.Exit(launcher.ShowMain())
+	case "edit":
+		os.Exit(launcher.EditMain())
 	case "session":
 		os.Exit(launcher.SessionMain())
 	case "run":
@@ -74,7 +78,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ai-playbook {troubleshoot|list [--format human|fuzzy-data-source|json]|search <query> [--format ...]|session [--request <json>]|run <file.md>|answer --request <json> --content <file> [--cached <iso>] [--title <t>] [--cwd <dir>]|finalize [--dry-run] <file.md>|mcp --socket <path>|input|selftest}")
+	fmt.Fprintln(os.Stderr, "usage: ai-playbook {troubleshoot|list [--format human|fuzzy-data-source|json]|search <query> [--format ...]|show <slug>|edit <slug>|session [--request <json>]|run <file.md>|answer --request <json> --content <file> [--cached <iso>] [--title <t>] [--cwd <dir>]|finalize [--dry-run] <file.md>|mcp --socket <path>|input|selftest}")
 }
 
 // mcpMain is the `ai-playbook mcp --socket <path>` subcommand: an MCP stdio

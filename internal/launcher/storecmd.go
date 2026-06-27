@@ -1,15 +1,23 @@
-// storecmd.go — list and search subcommand entrypoints over the playbook store.
+// storecmd.go — list, search, show, and edit subcommand entrypoints over the
+// playbook store.
 //
-// Both commands share three output formats selected via --format:
+// list/search share three output formats selected via --format:
 //
 //   - human (default): aligned tabwriter columns for terminal reading.
 //   - fuzzy-data-source: US-delimited (\x1f) records for fzf --with-nth 1
 //     piping; display \x1f slug \x1f path per line.
 //   - json: indented JSON array of []store.Meta for scripting.
 //
-// The indexFn / searchFn package-level vars are the store seams: production
-// wires them to store.Index / store.Search; tests inject fakes that return
-// canned []store.Meta without seeding any real directories.
+// show renders a saved playbook read-only by reshaping os.Args to the `run`
+// subcommand and delegating to ui.Main (via uiMainFn — seam for tests).
+//
+// edit opens a saved playbook in $EDITOR via the editorSpawn seam.
+//
+// Package-level seams:
+//   - indexFn  / searchFn: production wires store.Index / store.Search; tests inject fakes.
+//   - pathForFn:           production wires store.PathFor; tests inject fakes.
+//   - uiMainFn:            production wires ui.Main; tests inject a no-op.
+//   - editorSpawn:         production exec.Commands $EDITOR; tests inject a recorder.
 package launcher
 
 import (
@@ -17,11 +25,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
 	"text/tabwriter"
 	"time"
 
 	"github.com/Townk/ai-playbook/internal/store"
+	"github.com/Townk/ai-playbook/internal/ui"
 )
 
 // indexFn is the Index seam: lists all playbooks from both stores.
@@ -29,6 +39,23 @@ var indexFn = func() ([]store.Meta, error) { return store.Index() }
 
 // searchFn is the Search seam: filters playbooks by substring query.
 var searchFn = func(query string) ([]store.Meta, error) { return store.Search(query) }
+
+// pathForFn is the PathFor seam: resolves a slug to its file path.
+var pathForFn = func(slug string) (string, bool) { return store.PathFor(slug) }
+
+// uiMainFn is the ui.Main seam: delegates to the real pager; tests replace it
+// so ShowMain tests never need a TTY.
+var uiMainFn = func() int { return ui.Main() }
+
+// editorSpawn is the seam for launching $EDITOR: production opens the editor
+// with inherited stdio; tests inject a recorder.
+var editorSpawn = func(editor, path string) error {
+	cmd := exec.Command(editor, path)
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
 
 // ListMain is the `ai-playbook list [--format human|fuzzy-data-source|json]`
 // subcommand: enumerate the full store index in the requested format.
@@ -176,6 +203,67 @@ func formatJSON(metas []store.Meta) (string, error) {
 		return "", err
 	}
 	return string(b), nil
+}
+
+// resolveShow looks up slug via pathForFn and returns (path, true) on a hit or
+// ("", false) on a miss. Extracted as a pure function so unit tests can verify
+// slug resolution without launching ui.Main (which requires a TTY).
+func resolveShow(slug string) (string, bool) {
+	return pathForFn(slug)
+}
+
+// ShowMain is the `ai-playbook show <slug>` subcommand: renders a saved
+// playbook read-only by reshaping os.Args to the `run` subcommand and
+// delegating to uiMainFn (ui.Main in production). No --cached flag is passed,
+// so the cached badge never appears.
+func ShowMain() int {
+	args := os.Args[2:]
+	if len(args) == 0 || args[0] == "" {
+		fmt.Fprintln(os.Stderr, "ai-playbook show: <slug> is required")
+		return 2
+	}
+	slug := args[0]
+	path, ok := resolveShow(slug)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "ai-playbook show: no playbook for slug %q\n", slug)
+		return 1
+	}
+	// Reshape os.Args so that uiMainFn (ui.Main) sees:
+	//   os.Args = {bin, "run", path}
+	// ui.Main reads its file via fs.Arg(0) — the bare positional after flags.
+	// No --cached: read-only render, badge stays off.
+	saved := os.Args
+	os.Args = []string{os.Args[0], "run", path}
+	code := uiMainFn()
+	os.Args = saved
+	return code
+}
+
+// EditMain is the `ai-playbook edit <slug>` subcommand: resolves the playbook
+// path and opens it in $EDITOR. Missing $EDITOR or an unknown slug are user
+// errors (exit 1); a missing slug argument is a usage error (exit 2).
+func EditMain() int {
+	args := os.Args[2:]
+	if len(args) == 0 || args[0] == "" {
+		fmt.Fprintln(os.Stderr, "ai-playbook edit: <slug> is required")
+		return 2
+	}
+	slug := args[0]
+	editor := os.Getenv("EDITOR")
+	if editor == "" {
+		fmt.Fprintln(os.Stderr, "ai-playbook edit: $EDITOR is not set")
+		return 1
+	}
+	path, ok := pathForFn(slug)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "ai-playbook edit: no playbook for slug %q\n", slug)
+		return 1
+	}
+	if err := editorSpawn(editor, path); err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook edit: %v\n", err)
+		return 1
+	}
+	return 0
 }
 
 // humanAge returns a short human-readable duration since t (e.g. "3d", "2h",

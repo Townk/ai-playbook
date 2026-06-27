@@ -282,3 +282,187 @@ func TestSearchMain_QueryPassedToSearchFn(t *testing.T) {
 		t.Errorf("searchFn received query %q, want %q", gotQuery, "my-query")
 	}
 }
+
+// ---- withPathForFn seam helper ----
+
+// withPathForFn replaces pathForFn for the duration of t.
+func withPathForFn(t *testing.T, fn func(string) (string, bool)) {
+	t.Helper()
+	old := pathForFn
+	pathForFn = fn
+	t.Cleanup(func() { pathForFn = old })
+}
+
+// withEditorSpawn replaces editorSpawn for the duration of t.
+func withEditorSpawn(t *testing.T, fn func(string, string) error) {
+	t.Helper()
+	old := editorSpawn
+	editorSpawn = fn
+	t.Cleanup(func() { editorSpawn = old })
+}
+
+// withEnv sets an env var for the duration of t and restores the original value.
+func withEnv(t *testing.T, key, val string) {
+	t.Helper()
+	old, hadOld := os.LookupEnv(key)
+	if val == "" {
+		os.Unsetenv(key)
+	} else {
+		os.Setenv(key, val)
+	}
+	t.Cleanup(func() {
+		if hadOld {
+			os.Setenv(key, old)
+		} else {
+			os.Unsetenv(key)
+		}
+	})
+}
+
+// ---- resolveShow ----
+
+func TestResolveShow_KnownSlug(t *testing.T) {
+	const wantPath = "/store/build-app.md"
+	withPathForFn(t, func(slug string) (string, bool) {
+		if slug == "build-app" {
+			return wantPath, true
+		}
+		return "", false
+	})
+	path, ok := resolveShow("build-app")
+	if !ok {
+		t.Fatal("resolveShow: want ok=true for known slug")
+	}
+	if path != wantPath {
+		t.Errorf("resolveShow: path = %q, want %q", path, wantPath)
+	}
+}
+
+func TestResolveShow_UnknownSlug(t *testing.T) {
+	withPathForFn(t, func(string) (string, bool) { return "", false })
+	_, ok := resolveShow("no-such-slug")
+	if ok {
+		t.Error("resolveShow: want ok=false for unknown slug")
+	}
+}
+
+// ---- ShowMain ----
+
+func TestShowMain_MissingArg_Exit2(t *testing.T) {
+	withArgs(t, []string{"ai-playbook", "show"})
+	if code := ShowMain(); code != 2 {
+		t.Errorf("ShowMain missing arg: want exit 2, got %d", code)
+	}
+}
+
+func TestShowMain_UnknownSlug_Exit1(t *testing.T) {
+	withArgs(t, []string{"ai-playbook", "show", "no-such-slug"})
+	withPathForFn(t, func(string) (string, bool) { return "", false })
+	if code := ShowMain(); code != 1 {
+		t.Errorf("ShowMain unknown slug: want exit 1, got %d", code)
+	}
+}
+
+// TestShowMain_KnownSlug_ReshapesArgs verifies that ShowMain reshapes os.Args
+// to {bin, "run", path} before delegating to ui.Main. We intercept via the
+// uiMainFn seam so no TTY is required.
+func TestShowMain_KnownSlug_ReshapesArgs(t *testing.T) {
+	const wantPath = "/store/build-app.md"
+	withArgs(t, []string{"ai-playbook", "show", "build-app"})
+	withPathForFn(t, func(slug string) (string, bool) {
+		if slug == "build-app" {
+			return wantPath, true
+		}
+		return "", false
+	})
+
+	var capturedArgs []string
+	withUIMainFn(t, func() int {
+		capturedArgs = append([]string{}, os.Args...)
+		return 0
+	})
+
+	code := ShowMain()
+	if code != 0 {
+		t.Errorf("ShowMain known slug: want exit 0, got %d", code)
+	}
+	if len(capturedArgs) < 3 {
+		t.Fatalf("ShowMain: os.Args not reshaped; got %v", capturedArgs)
+	}
+	if capturedArgs[1] != "run" {
+		t.Errorf("ShowMain: os.Args[1] = %q, want %q", capturedArgs[1], "run")
+	}
+	if capturedArgs[2] != wantPath {
+		t.Errorf("ShowMain: os.Args[2] = %q, want %q", capturedArgs[2], wantPath)
+	}
+	// No --cached flag: read-only render must NOT show the cached badge.
+	for _, a := range capturedArgs {
+		if a == "--cached" {
+			t.Errorf("ShowMain: unexpected --cached in reshaped args: %v", capturedArgs)
+		}
+	}
+}
+
+// withUIMainFn replaces uiMainFn for the duration of t.
+func withUIMainFn(t *testing.T, fn func() int) {
+	t.Helper()
+	old := uiMainFn
+	uiMainFn = fn
+	t.Cleanup(func() { uiMainFn = old })
+}
+
+// ---- EditMain ----
+
+func TestEditMain_MissingArg_Exit2(t *testing.T) {
+	withArgs(t, []string{"ai-playbook", "edit"})
+	if code := EditMain(); code != 2 {
+		t.Errorf("EditMain missing arg: want exit 2, got %d", code)
+	}
+}
+
+func TestEditMain_NoEditor_Exit1(t *testing.T) {
+	withArgs(t, []string{"ai-playbook", "edit", "build-app"})
+	withEnv(t, "EDITOR", "")
+	if code := EditMain(); code != 1 {
+		t.Errorf("EditMain no EDITOR: want exit 1, got %d", code)
+	}
+}
+
+func TestEditMain_UnknownSlug_Exit1(t *testing.T) {
+	withArgs(t, []string{"ai-playbook", "edit", "no-such-slug"})
+	withEnv(t, "EDITOR", "vi")
+	withPathForFn(t, func(string) (string, bool) { return "", false })
+	if code := EditMain(); code != 1 {
+		t.Errorf("EditMain unknown slug: want exit 1, got %d", code)
+	}
+}
+
+func TestEditMain_HappyPath(t *testing.T) {
+	const wantPath = "/store/build-app.md"
+	withArgs(t, []string{"ai-playbook", "edit", "build-app"})
+	withEnv(t, "EDITOR", "vi")
+	withPathForFn(t, func(slug string) (string, bool) {
+		if slug == "build-app" {
+			return wantPath, true
+		}
+		return "", false
+	})
+
+	var gotEditor, gotPath string
+	withEditorSpawn(t, func(editor, path string) error {
+		gotEditor = editor
+		gotPath = path
+		return nil
+	})
+
+	code := EditMain()
+	if code != 0 {
+		t.Errorf("EditMain happy path: want exit 0, got %d", code)
+	}
+	if gotEditor != "vi" {
+		t.Errorf("editorSpawn: editor = %q, want %q", gotEditor, "vi")
+	}
+	if gotPath != wantPath {
+		t.Errorf("editorSpawn: path = %q, want %q", gotPath, wantPath)
+	}
+}
