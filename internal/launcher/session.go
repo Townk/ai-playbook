@@ -379,6 +379,10 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		sharedDrv = sess.drv
 	}
 
+	// cfg is loaded here (before the reengage construction) so StoreDir can be wired
+	// from cfg.GlobalStoreDir() — the single resolver that both the writer
+	// (CommitPlaybook) and the reader (store.Index) use, ensuring they never diverge.
+	cfg, _ := config.Load()
 	reengage := &orchestrator.Reengage{
 		Req:         req,
 		Agent:       sess.authoringAgent(),
@@ -387,6 +391,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		RequestJSON: requestJSON(req),
 		Metadata:    buildMetadataSeam(sess),
 		EnvLookup:   buildEnvLookup(sharedDrv),
+		StoreDir:    cfg.GlobalStoreDir(),
 	}
 	if !d.Disabled && !noCache {
 		reengage.CtxHash = d.CtxHash
@@ -399,7 +404,6 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 	// + tool activity while the playbook still streams. The mcp-config wires the
 	// agent's run/ask/remember tools to this session's backend.
 	mcpPath, removeMCP := sess.writeMCPConfig()
-	cfg, _ := config.Load()
 	events, closeFn, err := author.AuthorEvents(req, author.AuthorOptions{
 		Cfg:           cfg,
 		MCPConfigPath: mcpPath,
@@ -725,6 +729,14 @@ func reengageReady(d triage.Decision, req capture.Request, sess *session, cwd st
 	if sess == nil {
 		return ui.OrchReady{}
 	}
+	// Resolve the global store dir so the cached-replay's CommitPlaybook (w key /
+	// wrap-up) writes to the same directory store.Index reads from. cfg may be nil
+	// on a config-file error; in that case storeDir stays "" and CommitPlaybook
+	// falls back to its dataRoot/playbooks default (back-compat).
+	var storeDir string
+	if cfg, _ := config.Load(); cfg != nil {
+		storeDir = cfg.GlobalStoreDir()
+	}
 	re := &orchestrator.Reengage{
 		Req:         req,
 		Agent:       sess.authoringAgent(),
@@ -735,6 +747,7 @@ func reengageReady(d triage.Decision, req capture.Request, sess *session, cwd st
 		RequestJSON: requestJSON(req),
 		Metadata:    buildMetadataSeam(sess),
 		EnvLookup:   buildEnvLookup(sess.drv),
+		StoreDir:    storeDir,
 	}
 	return ui.OrchReady{Orch: ui.BuildOrch(sess.drv, re), Asker: sess.asker(cwd)}
 }

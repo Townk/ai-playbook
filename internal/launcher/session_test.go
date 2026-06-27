@@ -12,6 +12,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/floatinput"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/tools"
@@ -112,6 +113,37 @@ func TestReengageReady_LiveSession_BuildsOrch(t *testing.T) {
 	}
 	if sess.selfExe != "" && got.Asker == nil {
 		t.Error("live session with selfExe: OrchReady.Asker should be non-nil")
+	}
+}
+
+// TestReengageReady_StoreDirWired asserts that reengageReady wires Reengage.StoreDir
+// to cfg.GlobalStoreDir() so CommitPlaybook writes to the same directory the store
+// reader resolves (write/read convergence).
+func TestReengageReady_StoreDirWired(t *testing.T) {
+	minimalZDOTDIR(t)
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir())
+
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		t.Skip("config.Load failed; cannot assert StoreDir wiring")
+	}
+	wantDir := cfg.GlobalStoreDir()
+
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, &launchMux{}, nil, "")
+	if sess == nil {
+		t.Fatal("openSession returned nil (driver/tools setup failed)")
+	}
+	defer sess.close()
+
+	got := reengageReady(triage.Decision{}, capture.Request{}, sess, "/tmp")
+	if got.Orch == nil {
+		t.Fatal("live session: OrchReady.Orch should be non-nil")
+	}
+	if got.Orch.Reengage == nil {
+		t.Fatal("Orch.Reengage should be non-nil")
+	}
+	if got.Orch.Reengage.StoreDir != wantDir {
+		t.Errorf("Reengage.StoreDir = %q, want %q", got.Orch.Reengage.StoreDir, wantDir)
 	}
 }
 

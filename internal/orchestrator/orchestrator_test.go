@@ -316,3 +316,61 @@ func TestKindString(t *testing.T) {
 		}
 	}
 }
+
+// TestCommitPlaybook_HonorsStoreDir asserts that CommitPlaybook writes the .md
+// file under Reengage.StoreDir when it is set, NOT under dataRoot/playbooks.
+func TestCommitPlaybook_HonorsStoreDir(t *testing.T) {
+	storeDir := t.TempDir()
+	dataRoot := t.TempDir()
+
+	re := &Reengage{
+		StoreDir:  storeDir,
+		DataRoot:  dataRoot,
+		Req:       capture.Request{},
+		EnvLookup: func(string) (string, bool) { return "", false },
+	}
+	o := New(nil, &recMux{}).WithReengage(re)
+
+	body := "# Playbook — StoreDir Test\n\nVerify the injected store dir is used.\n"
+	path, err := o.CommitPlaybook(body)
+	if err != nil {
+		t.Fatalf("CommitPlaybook: %v", err)
+	}
+
+	// File must land under storeDir (the injected value), not under dataRoot/playbooks.
+	if !strings.HasPrefix(path, storeDir) {
+		t.Errorf("CommitPlaybook path = %q, want prefix %q", path, storeDir)
+	}
+	badDir := filepath.Join(dataRoot, "playbooks")
+	if strings.HasPrefix(path, badDir) {
+		t.Errorf("CommitPlaybook used dataRoot fallback: path = %q", path)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("returned path does not exist: %v", err)
+	}
+}
+
+// TestCommitPlaybook_NoStoreDir_FallsBackToDataRoot asserts the back-compat
+// path: when StoreDir is empty, CommitPlaybook writes under dataRoot/playbooks.
+func TestCommitPlaybook_NoStoreDir_FallsBackToDataRoot(t *testing.T) {
+	dataRoot := t.TempDir()
+
+	re := &Reengage{
+		// StoreDir deliberately left empty → must fall back to dataRoot/playbooks.
+		DataRoot:  dataRoot,
+		Req:       capture.Request{},
+		EnvLookup: func(string) (string, bool) { return "", false },
+	}
+	o := New(nil, &recMux{}).WithReengage(re)
+
+	body := "# Playbook — Fallback Test\n\nVerify the dataRoot fallback.\n"
+	path, err := o.CommitPlaybook(body)
+	if err != nil {
+		t.Fatalf("CommitPlaybook: %v", err)
+	}
+
+	wantPrefix := filepath.Join(dataRoot, "playbooks")
+	if !strings.HasPrefix(path, wantPrefix) {
+		t.Errorf("CommitPlaybook path = %q, want prefix %q", path, wantPrefix)
+	}
+}

@@ -184,6 +184,13 @@ type Reengage struct {
 	// inject a fake map lookup. nil-safe: a nil seam means no env VALUES are captured
 	// (referenced vars are simply omitted, since their values are unknown).
 	EnvLookup func(name string) (value string, ok bool)
+
+	// StoreDir is the resolved global store directory CommitPlaybook writes playbooks
+	// into. Set by the launcher to cfg.GlobalStoreDir() so the writer and the store
+	// reader (store.Index) always resolve the same directory. When empty, CommitPlaybook
+	// falls back to <dataRoot>/playbooks for back-compat (the pre-Task-4 behaviour).
+	// The orchestrator does NOT import config — the launcher injects the resolved dir.
+	StoreDir string
 }
 
 // PlaybookMeta is the orchestrator-local mirror of the model's four classification
@@ -430,8 +437,13 @@ func (o *Orchestrator) CommitPlaybook(body string) (string, error) {
 		_, _ = re.Cache.Store(re.CtxHash, re.ReqHash, "playbook", full, nil, re.RequestJSON)
 	}
 
-	// (2) Save the .md file under <DataRoot>/playbooks/<slug>.md (FM + body).
-	dir := filepath.Join(re.dataRoot(), "playbooks")
+	// (2) Save the .md file under the resolved store dir / <slug>.md (FM + body).
+	// StoreDir is injected by the launcher (cfg.GlobalStoreDir()); empty → back-compat
+	// fallback to <dataRoot>/playbooks so unmodified callers/tests are unaffected.
+	dir := re.StoreDir
+	if dir == "" {
+		dir = filepath.Join(re.dataRoot(), "playbooks")
+	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return "", err
 	}
