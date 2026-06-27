@@ -6,10 +6,15 @@ for the feature roadmap; design lives under `docs/architecture/` and `docs/speci
 
 ## Build / test / format / install
 
-- `go build ./...` · `go vet ./...` · `go test ./...` (the `ui` suite is slow, ~2 min — allow time).
-- Format: `gofmt -w <files>`; CI gates on `gofmt -l` being empty.
+- `make check` is the **pre-commit gate**: runs `build`, `vet`, `lint`, `fmt-check`,
+  and `test`. It fails the build on **any** lint finding or unformatted file —
+  the same gate CI enforces. Run it green before committing.
+- `make lint` for lint-only (`golangci-lint run`); lint findings are **blocking**
+  (CI and `make check` both fail on any finding).
+- Individual targets: `make build` · `make vet` · `make test` (the `ui` suite is
+  slow, ~2 min — allow time) · `make fmt-check`.
+- Format: `gofmt -w <files>`; CI and `make fmt-check` gate on `gofmt -l` being empty.
 - Install the binary: `go install ./cmd/ai-playbook` (deploys to `$GOBIN` / `~/.local/share/go/bin`).
-- Lint (once CI lands): `golangci-lint run`.
 
 ## Commits
 

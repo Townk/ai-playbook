@@ -46,12 +46,8 @@ jobs:
           CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
 
   lint:
-    name: golangci-lint (advisory)
+    name: golangci-lint
     runs-on: ubuntu-latest
-    # Advisory for now: the repo has known, non-blocking findings tracked in
-    # docs/BACKLOG.md ("clean up + enforce golangci-lint"). Flip continue-on-error
-    # to false once those are resolved to make linting blocking.
-    continue-on-error: true
     steps:
       - name: Checkout
         uses: actions/checkout@v4

@@ -16,7 +16,7 @@ _(none — phase work lives in the roadmap)_
 
 ## Tasks
 
-- [ ] clean up + enforce golangci-lint (currently advisory) (2026-06-26)
+- [ ] internal/ui test suite is slow on CI (~10min+ under -race on 2-core runners) — parallelize / reduce per-test zsh-driver spawns (2026-06-27)
 
 ## Ideas
 
