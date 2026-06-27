@@ -14,10 +14,11 @@ builds:
     binary: ai-playbook
     env:
       - CGO_ENABLED=0
+    # Unix-only: the shell driver uses x/sys/unix (PTY, signals, TIOCGPGRP),
+    # which does not build on Windows. This is a terminal/zsh-native tool.
     goos:
       - linux
       - darwin
-      - windows
     goarch:
       - amd64
       - arm64
@@ -33,9 +34,6 @@ archives:
       {{- .Version }}_
       {{- .Os }}_
       {{- .Arch }}
-    format_overrides:
-      - goos: windows
-        formats: [zip]
 
 checksum:
   name_template: "checksums.txt"

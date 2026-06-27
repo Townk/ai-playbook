@@ -124,7 +124,7 @@ any wiring into a particular shell/dotfiles setup is separate and secondary.
   entry per release, tied to tags.
 - **CI (GitHub Actions)** — `go test` (+race) + `vet` + `golangci-lint` +
   coverage upload, on push and PR.
-- **Releases** — multi-platform binaries (linux/darwin/windows × amd64/arm64)
+- **Releases** — multi-platform binaries (linux/darwin × amd64/arm64; Unix-only tool)
   via [GoReleaser](https://goreleaser.com) on a version tag; checksums and an
   optional Homebrew tap. CHANGELOG drives the release notes.
 - **zsh completion** — ship a full `_ai-playbook` completion: subcommands, all

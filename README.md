@@ -29,7 +29,7 @@ Install the latest binary with the Go toolchain:
 go install github.com/Townk/ai-playbook/cmd/ai-playbook@latest
 ```
 
-Or download a prebuilt binary for your platform (linux / darwin / windows ×
+Or download a prebuilt binary for your platform (linux / macOS ×
 amd64 / arm64) from the [Releases](https://github.com/Townk/ai-playbook/releases)
 page and place it on your `PATH`.
 
