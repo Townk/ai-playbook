@@ -835,13 +835,13 @@ func langInterp(lang string) string {
 // runPayload returns the shell command the agent eval's when the run button is
 // pressed. Shell blocks run raw; script blocks (Type=="run") self-invoke their
 // interpreter via a quoted heredoc so the agent shell can eval the whole thing.
-// Note: a script body containing a line that is exactly "__AAS_RUN__" would
+// Note: a script body containing a line that is exactly "__AAPB_RUN__" would
 // break the heredoc — that constraint is acceptable for troubleshooting snippets.
 func runPayload(blk Block) string {
 	if blk.Type != "run" {
 		return blk.Payload
 	}
-	return langInterp(blk.Lang) + " <<'__AAS_RUN__'\n" + blk.Payload + "\n__AAS_RUN__"
+	return langInterp(blk.Lang) + " <<'__AAPB_RUN__'\n" + blk.Payload + "\n__AAPB_RUN__"
 }
 
 // needsSatisfied returns the UNMET needs of blk (empty slice ⇔ all satisfied).

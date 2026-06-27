@@ -38,7 +38,7 @@ type KnowledgeBase string
 // SystemPrompt assembles the standing literate-playbook authoring prompt for the
 // given request, faithfully porting assist::system_prompt. The text is verbatim
 // from the shell heredoc; the failure-vs-general branch, the {id/needs}/{static}
-// block schema, the $AAS_OUT/$AAS_ERR/$AAS_EXIT value-passing refs, and the C3a
+// block schema, the $AAPB_OUT/$AAPB_ERR/$AAPB_EXIT value-passing refs, and the C3a
 // "verify re-runs the original failed command in a SEPARATE block" instruction
 // are all preserved.
 //
@@ -144,7 +144,7 @@ Shell blocks run under `+"`set -e`"+`: a block FAILS at its FIRST failing comman
 a later command cannot mask an earlier failure. If a non-zero exit is expected
 (a probe like `+"`command -v foo`"+` or `+"`grep …`"+`), guard it with `+"`|| true`"+`.
 If a step uses a previous step's output, tag it {id=next needs=fix} and reference
-the earlier output via $AAS_OUT_fix / $AAS_ERR_fix / $AAS_EXIT_fix.
+the earlier output via $AAPB_OUT_fix / $AAPB_ERR_fix / $AAPB_EXIT_fix.
 Show captured error output or sample output as a console block (or tag it
 {static}) so it is NOT treated as runnable.
 For example, an illustrative block starts with: `+"```"+`console {static}

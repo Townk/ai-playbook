@@ -27,9 +27,9 @@ func (zshAdapter) job(p jobParams) string {
 	if p.id != "" {
 		key := p.key
 		vp += "" +
-			"export AAS_OUT_" + key + "=${(q)\"$(<" + qo + ")\"}\n" +
-			"export AAS_ERR_" + key + "=${(q)\"$(<" + qe + ")\"}\n" +
-			"export AAS_EXIT_" + key + "=${(q)__aapb_rc}\n"
+			"export AAPB_OUT_" + key + "=${(q)\"$(<" + qo + ")\"}\n" +
+			"export AAPB_ERR_" + key + "=${(q)\"$(<" + qe + ")\"}\n" +
+			"export AAPB_EXIT_" + key + "=${(q)__aapb_rc}\n"
 	}
 	return "( trap " + shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) </dev/null >" + p.o + " 2>" + p.e + "\n" +
 		"__aapb_rc=$?\n" +

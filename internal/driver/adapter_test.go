@@ -19,9 +19,9 @@ func goldenZshJob(cmdline, o, e, cwdf, id, key string) string {
 		"export LAST_STDERR=${(q)\"$(<" + qe + ")\"}\n"
 	if id != "" {
 		vp += "" +
-			"export AAS_OUT_" + key + "=${(q)\"$(<" + qo + ")\"}\n" +
-			"export AAS_ERR_" + key + "=${(q)\"$(<" + qe + ")\"}\n" +
-			"export AAS_EXIT_" + key + "=${(q)__aapb_rc}\n"
+			"export AAPB_OUT_" + key + "=${(q)\"$(<" + qo + ")\"}\n" +
+			"export AAPB_ERR_" + key + "=${(q)\"$(<" + qe + ")\"}\n" +
+			"export AAPB_EXIT_" + key + "=${(q)__aapb_rc}\n"
 	}
 	return "( trap " + shquote(trapBody) + " EXIT\n" + cmdline + "\n) </dev/null >" + o + " 2>" + e + "\n" +
 		"__aapb_rc=$?\n" +
@@ -32,20 +32,20 @@ func goldenZshJob(cmdline, o, e, cwdf, id, key string) string {
 }
 
 func TestZshAdapterJobBytesUnchanged(t *testing.T) {
-	// With an id: AAS_* exports present.
+	// With an id: AAPB_* exports present.
 	got := zshAdapter{}.job(jobParams{cmdline: "echo hi", o: "/d/o", e: "/d/e", cwdf: "/d/cwd", id: "fix", key: "fix"})
 	want := goldenZshJob("echo hi", "/d/o", "/d/e", "/d/cwd", "fix", "fix")
 	if got != want {
 		t.Errorf("job bytes drifted from golden template (id case)\n got: %q\nwant: %q", got, want)
 	}
 
-	// Without an id: AAS_* lines must be absent, but LAST_* still present.
+	// Without an id: AAPB_* lines must be absent, but LAST_* still present.
 	gotNo := zshAdapter{}.job(jobParams{cmdline: "echo hi", o: "/d/o", e: "/d/e", cwdf: "/d/cwd", id: "", key: ""})
 	wantNo := goldenZshJob("echo hi", "/d/o", "/d/e", "/d/cwd", "", "")
 	if gotNo != wantNo {
 		t.Errorf("job bytes drifted from golden template (no-id case)\n got: %q\nwant: %q", gotNo, wantNo)
 	}
-	for _, frag := range []string{"AAS_OUT_", "AAS_ERR_", "AAS_EXIT_"} {
+	for _, frag := range []string{"AAPB_OUT_", "AAPB_ERR_", "AAPB_EXIT_"} {
 		if strings.Contains(gotNo, frag) {
 			t.Errorf("no-id job must not contain %q, got: %q", frag, gotNo)
 		}

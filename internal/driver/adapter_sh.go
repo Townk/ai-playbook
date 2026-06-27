@@ -15,7 +15,7 @@ package driver
 //   - value-quoting: a pure-shell single-quote quoter (decision (b)) — dash lacks
 //     printf %q and ${(q)}; sed is avoided (BSD/GNU sed differ). __aapb_q wraps a
 //     value in '…' and rewrites each embedded ' as '\” using POSIX parameter
-//     expansion + printf only, so $AAS_OUT_<id>/$LAST_STDOUT are stored
+//     expansion + printf only, so $AAPB_OUT_<id>/$LAST_STDOUT are stored
 //     shell-quoted (word-split/glob-safe to re-expand), matching zsh/bash.
 type shAdapter struct{}
 
@@ -48,9 +48,9 @@ func (shAdapter) job(p jobParams) string {
 	if p.id != "" {
 		key := p.key
 		vp += "" +
-			"export AAS_OUT_" + key + "=\"$(__aapb_q \"$(cat " + qo + ")\")\"" + "\n" +
-			"export AAS_ERR_" + key + "=\"$(__aapb_q \"$(cat " + qe + ")\")\"" + "\n" +
-			"export AAS_EXIT_" + key + "=$__aapb_rc\n"
+			"export AAPB_OUT_" + key + "=\"$(__aapb_q \"$(cat " + qo + ")\")\"" + "\n" +
+			"export AAPB_ERR_" + key + "=\"$(__aapb_q \"$(cat " + qe + ")\")\"" + "\n" +
+			"export AAPB_EXIT_" + key + "=$__aapb_rc\n"
 	}
 	return "( trap " + shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) </dev/null >" + p.o + " 2>" + p.e + "\n" +
 		"__aapb_rc=$?\n" +

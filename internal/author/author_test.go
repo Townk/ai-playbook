@@ -152,13 +152,13 @@ func TestAuthor_FoldsInOnDiskKB(t *testing.T) {
 func TestSystemPrompt_LoadBearingSections(t *testing.T) {
 	sys := SystemPrompt(sampleFailure(), "")
 	wants := []string{
-		"LITERATE TROUBLESHOOTING PLAYBOOK",           // failure structure
-		"{id=fix}",                                    // block-schema id marker
-		"{id=next needs=fix}",                         // needs-gating marker
-		"$AAS_OUT_fix / $AAS_ERR_fix / $AAS_EXIT_fix", // value-passing refs
-		"{id=verify needs=<fix-id>}",                  // separate verify block
-		"re-run the original failed",                  // verify re-runs original command
-		"Do NOT fold the re-run into the fix block",   // C3a no-fold rule
+		"LITERATE TROUBLESHOOTING PLAYBOOK",              // failure structure
+		"{id=fix}",                                       // block-schema id marker
+		"{id=next needs=fix}",                            // needs-gating marker
+		"$AAPB_OUT_fix / $AAPB_ERR_fix / $AAPB_EXIT_fix", // value-passing refs
+		"{id=verify needs=<fix-id>}",                     // separate verify block
+		"re-run the original failed",                     // verify re-runs original command
+		"Do NOT fold the re-run into the fix block",      // C3a no-fold rule
 		"{static}",     // static (non-runnable) tag
 		"unified diff", // diff block schema
 		"set -e",       // shell block semantics

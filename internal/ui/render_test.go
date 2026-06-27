@@ -530,7 +530,7 @@ func TestRunButtonShellAndScript(t *testing.T) {
 
 func TestRunPayloadWrapsInterpreter(t *testing.T) {
 	got := runPayload(Block{Type: "run", Lang: "python", Payload: "print(1)"})
-	if !strings.Contains(got, "python3 <<'__AAS_RUN__'") || !strings.Contains(got, "print(1)") {
+	if !strings.Contains(got, "python3 <<'__AAPB_RUN__'") || !strings.Contains(got, "print(1)") {
 		t.Fatalf("python run payload not wrapped: %q", got)
 	}
 	if runPayload(Block{Type: "shell", Lang: "bash", Payload: "ls"}) != "ls" {

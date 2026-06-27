@@ -125,8 +125,8 @@ func (d *Driver) Run(cmd string, timeout time.Duration) Result {
 
 // RunID is Run with value-passing. In the hosted shell's main context — AFTER the
 // command's exit code is captured and BEFORE the sentinel is printed — it exports
-// LAST_EXCODE / LAST_STDOUT / LAST_STDERR (and, when id != "", AAS_OUT_<key> /
-// AAS_ERR_<key> / AAS_EXIT_<key>, key = id with [^A-Za-z0-9_]→_) so a later block
+// LAST_EXCODE / LAST_STDOUT / LAST_STDERR (and, when id != "", AAPB_OUT_<key> /
+// AAPB_ERR_<key> / AAPB_EXIT_<key>, key = id with [^A-Za-z0-9_]→_) so a later block
 // can reference the prior block's output. Because the job is sourced in the main
 // context (not a subshell), these exports persist across Runs.
 func (d *Driver) RunID(id, cmd string, timeout time.Duration) Result {
@@ -299,7 +299,7 @@ func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
 	// driver removes the temp dir only after the sentinel returns). ${(q)…} keeps
 	// multi-line values intact. Post-block lines use if/fi (not `&&`) defensively.
 	// (Trade-off: a block's raw `export FOO=…` no longer persists to later blocks;
-	// value-passing across blocks goes through AAS_OUT_<id>/LAST_*, which the driver
+	// value-passing across blocks goes through AAPB_OUT_<id>/LAST_*, which the driver
 	// sets in the main context below.)
 	cwdf := filepath.Join(dir, "cwd")
 	_ = os.WriteFile(job, []byte(d.a.job(jobParams{

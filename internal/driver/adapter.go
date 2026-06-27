@@ -3,7 +3,7 @@ package driver
 // jobParams carries the per-run, shell-agnostic values a shellAdapter needs to
 // render a job script. cmdline is the user's command; o/e/cwdf are the temp-file
 // paths for stdout/stderr/cwd capture; id is the value-passing id ("" disables
-// the AAS_* exports) and key is its sanitized form (sanitizeKey(id)).
+// the AAPB_* exports) and key is its sanitized form (sanitizeKey(id)).
 type jobParams struct {
 	cmdline, o, e, cwdf, id, key string
 }

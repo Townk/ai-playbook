@@ -52,16 +52,16 @@ func TestValuePassingAcrossBlocks(t *testing.T) {
 		t.Fatalf("block a → %+v err=%v", r, err)
 	}
 	// A later block (no id) reads block a's exported output.
-	r, err := o.Do(Action{Kind: KindRun, Payload: "print -r -- got:$AAS_OUT_a"})
+	r, err := o.Do(Action{Kind: KindRun, Payload: "print -r -- got:$AAPB_OUT_a"})
 	if err != nil {
 		t.Fatalf("block b err=%v", err)
 	}
 	if r.Out != "got:HELLO" {
-		t.Errorf("AAS_OUT_a did not propagate → %q (want got:HELLO)", r.Out)
+		t.Errorf("AAPB_OUT_a did not propagate → %q (want got:HELLO)", r.Out)
 	}
-	// LAST_* and AAS_EXIT_<id> propagate too.
-	if r, err := o.Do(Action{Kind: KindRun, Payload: "print -r -- last:$LAST_EXCODE exit:$AAS_EXIT_a"}); err != nil || r.Out != "last:0 exit:0" {
-		t.Errorf("LAST_EXCODE/AAS_EXIT_a → %q err=%v", r.Out, err)
+	// LAST_* and AAPB_EXIT_<id> propagate too.
+	if r, err := o.Do(Action{Kind: KindRun, Payload: "print -r -- last:$LAST_EXCODE exit:$AAPB_EXIT_a"}); err != nil || r.Out != "last:0 exit:0" {
+		t.Errorf("LAST_EXCODE/AAPB_EXIT_a → %q err=%v", r.Out, err)
 	}
 }
 
@@ -71,8 +71,8 @@ func TestValuePassingKeySanitized(t *testing.T) {
 	if _, err := o.Do(Action{Kind: KindRun, ID: "step-1", Payload: "print -r -- X"}); err != nil {
 		t.Fatal(err)
 	}
-	if r, _ := o.Do(Action{Kind: KindRun, Payload: "print -r -- $AAS_OUT_step_1"}); r.Out != "X" {
-		t.Errorf("sanitized key AAS_OUT_step_1 → %q (want X)", r.Out)
+	if r, _ := o.Do(Action{Kind: KindRun, Payload: "print -r -- $AAPB_OUT_step_1"}); r.Out != "X" {
+		t.Errorf("sanitized key AAPB_OUT_step_1 → %q (want X)", r.Out)
 	}
 }
 

@@ -292,7 +292,7 @@ func TestOpenSession_SharedDriverAndToolsBackend(t *testing.T) {
 	// executes in that shell. We prove shared state via CWD, which persists across
 	// runs by design (auto-env on cd depends on it). NB: a block's raw `export` is
 	// intentionally isolated to its subshell so a block's `set -e` can't kill the
-	// hosted shell; cross-block data flows through AAS_OUT_<id>/LAST_* (driver-managed
+	// hosted shell; cross-block data flows through AAPB_OUT_<id>/LAST_* (driver-managed
 	// in the main context), not bare exports.
 	sess.drv.Run("builtin cd -- /tmp", 5*time.Second)
 	res, err := tools.Dial(sess.socket, tools.Call{Tool: "run", Cmd: "pwd"})

@@ -115,13 +115,13 @@ func TestCrossShellSemantics(t *testing.T) {
 
 			// 3. value-passing ROUND-TRIP (decision (b), the load-bearing one): a
 			//    producer emits a special-char value (space, single quote, newline,
-			//    glob); a later block recovers it from $AAS_OUT_fix via the portable
+			//    glob); a later block recovers it from $AAPB_OUT_fix via the portable
 			//    re-expansion idiom and must observe the ORIGINAL bytes. This proves
 			//    the per-shell quoting (zsh ${(q)}, bash printf %q, sh __aapb_q)
 			//    round-trips — asserting the CONTRACT, not the stored escaping form.
 			const orig = "a b'c\n*d"
 			d.RunID("fix", "printf 'a b'\\''c\\n*d'", to)
-			if r := d.Run(`eval "x=$AAS_OUT_fix"; printf '%s' "$x"`, to); r.Out != orig {
+			if r := d.Run(`eval "x=$AAPB_OUT_fix"; printf '%s' "$x"`, to); r.Out != orig {
 				t.Errorf("[value round-trip] consumer saw %q, want %q (per-shell quoting failed)", r.Out, orig)
 			}
 
