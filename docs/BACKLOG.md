@@ -23,8 +23,7 @@ _(none — phase work lives in the roadmap)_
 - [ ] Migrate golangci-lint v1→v2 (modernize; v1 is EOL) — `checkout@v5`/`setup-go@v6` already bumped (2026-06-27)
 - [ ] Make the author/agent prompt shell-aware: `internal/author/prompt.go:143` hardcodes `set -e` + shell idioms; should adapt to `cfg.Driver.Shell` so a non-zsh shell gets correct guidance (2026-06-27)
 - [ ] view-diff in a null-mux inline TUI shows a raw "mux: no multiplexer available" — thread the selected mux into `internal/ui` + soften the message (2026-06-27)
-- [ ] Default to NO mux: ship with the mux integration OFF by default (user opts in via `mux = "zellij"`); docs show how to integrate. Flip the default only AFTER mux-optional (incl. the inline ask) lands (2026-06-27)
-- [ ] 2-tier integration config for mux + shell + AI: a named preset works out of the box (e.g. `mux = "zellij"` picks sensible default commands), with optional per-command overrides for fine-grained control. Apply the SAME config style uniformly across all three integrations (2026-06-27)
+- [ ] 2-tier integration config — residual: the named-preset selectors are DONE and uniform (`[mux] backend`, `[driver] shell`, `[agent] harness`) and mux has per-command overrides; consider whether shell/AI want per-command/per-aspect overrides too (likely not needed — revisit if a use case appears) (2026-06-27)
 
 ## Ideas
 

@@ -139,8 +139,10 @@ any wiring into a particular shell/dotfiles setup is separate and secondary.
 ## Phase 1 — Store & entry verbs
 
 **Goal:** make the accumulating playbooks a browsable/searchable/editable
-library (via an external picker), and split the entry verbs. **Status:** not
-started.
+library (via an external picker), and split the entry verbs. **Status:** SHIPPED
+(2026-06-27) — `internal/store`, `list`/`search`/`show`/`edit`, `assist`/`create`
+split, `workdir` front matter, configurable `[store]` dirs. Dotfiles FZF-pick
+pairing in progress (separate repo).
 
 **Features**
 
@@ -174,13 +176,15 @@ only. Detailed spec:
 ## Phase 2 — Run engine
 
 **Goal:** `run` a store playbook (or file) with adaptation and three execution
-modes + rollback. **Status:** not started.
+modes + rollback. **Status:** PARTIALLY SHIPPED — the run args + adapt-on-run
+(below) landed with Phase 1 (2026-06-27); the run modes, rollback, and execution
+log are NOT started (the remaining Phase 2 work).
 
 **Features**
 
-- `run --playbook <slug>` / `--file <path>` (positional ⇒ `--playbook`).
+- [DONE] `run --playbook <slug>` / `--file <path>` (positional ⇒ `--playbook`).
   Internal callers (`serveCachedPlaybook`, `answer`) move to `run --file`.
-- **Adapt-on-run:** resolve `workdir` (default to it; `ask` the user when
+- [DONE] **Adapt-on-run:** resolve `workdir` (default to it; `ask` the user when
   absent/stale) → authoring-model rewrite for the target (paths/versions) →
   pager with an "adapted from `<slug>`" banner + `d` to view the
   original→adapted diff → drive. Junk→original fallback (reuse
