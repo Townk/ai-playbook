@@ -59,6 +59,8 @@ jobs:
           cache: true
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
-        with:
-          version: v1.64.8
+        # Run via `make lint` (go run …golangci-lint@<ver>) so the linter is built
+        # with the repo's Go toolchain (go.mod) and can analyze newer-Go code. The
+        # prebuilt action binary is built with an older Go and errors out otherwise.
+        # Bonus: keeps CI identical to the local `make lint` gate.
+        run: make lint
