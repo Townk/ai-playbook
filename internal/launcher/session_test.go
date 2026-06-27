@@ -8,21 +8,59 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Townk/ai-playbook/internal/askbridge"
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/floatinput"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/tools"
 	"github.com/Townk/ai-playbook/internal/triage"
 	"github.com/Townk/ai-playbook/internal/ui"
 )
 
+// TestBridgeAskFunc_RoutesThroughBridge asserts the null-mux AskFunc adapter routes
+// the agent's `ask` call through the bridge: the call blocks until the viewer-side
+// Respond, then returns the answer as a floatinput.Result.
+func TestBridgeAskFunc_RoutesThroughBridge(t *testing.T) {
+	b := askbridge.New()
+	ask := bridgeAskFunc(b) // tools.AskFunc adapter
+
+	got := make(chan floatinput.Result, 1)
+	go func() {
+		r, _ := ask(floatinput.Request{Prompt: "which env?", Type: "line"})
+		got <- r
+	}()
+	req := <-b.Requests()
+	if req.Prompt != "which env?" || req.Type != "line" {
+		t.Fatalf("bridge request = (%q,%q), want the prompt+type", req.Prompt, req.Type)
+	}
+	req.Respond(askbridge.Answer{Value: "prod", Submitted: true})
+
+	if r := <-got; r.Value != "prod" || !r.Submitted {
+		t.Fatalf("adapter result = %+v, want {prod,true}", r)
+	}
+}
+
+// TestBridgeAskFunc_CarriesChoices asserts the adapter forwards choose options.
+func TestBridgeAskFunc_CarriesChoices(t *testing.T) {
+	b := askbridge.New()
+	ask := bridgeAskFunc(b)
+
+	go func() { _, _ = ask(floatinput.Request{Prompt: "pick", Type: "choose", Choices: []string{"x", "y"}}) }()
+	req := <-b.Requests()
+	if req.Type != "choose" || len(req.Choices) != 2 || req.Choices[0] != "x" {
+		t.Fatalf("bridge request choices = %v (type %q), want [x y] choose", req.Choices, req.Type)
+	}
+	req.Respond(askbridge.Answer{Value: "y", Submitted: true})
+}
+
 // TestOpenSessionAsync_DeliversOnce asserts the async session opener returns a
 // buffered (cap 1) channel that yields the built session exactly once, so the
 // cached-render path can proceed without blocking on the shell's blank-pane startup.
 func TestOpenSessionAsync_DeliversOnce(t *testing.T) {
 	minimalZDOTDIR(t)
-	ch := openSessionAsync(capture.Request{ProjectRoot: t.TempDir()}, mux.Null())
+	ch := openSessionAsync(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil)
 	if c := cap(ch); c != 1 {
 		t.Errorf("openSessionAsync channel cap = %d, want 1 (buffered so the goroutine never blocks)", c)
 	}
@@ -62,7 +100,7 @@ func TestReengageReady_NilSession_Degraded(t *testing.T) {
 func TestReengageReady_LiveSession_BuildsOrch(t *testing.T) {
 	minimalZDOTDIR(t)
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir())
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, &launchMux{})
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, &launchMux{}, nil)
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -183,7 +221,7 @@ func minimalZDOTDIR(t *testing.T) {
 // for the `f` keybind — both seams must be consistently unavailable off-mux.
 func TestOpenSession_AskUnavailableOffMux(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null())
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil)
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -205,7 +243,7 @@ func TestOpenSession_AskUnavailableOffMux(t *testing.T) {
 // agent and the playbook drive the same shell.
 func TestOpenSession_SharedDriverAndToolsBackend(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null())
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil)
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -261,7 +299,7 @@ func TestAuthoringAgent_InvokesClaudeWithMCPConfig(t *testing.T) {
 	argvFile := filepath.Join(t.TempDir(), "argv")
 	t.Setenv("AI_PLAYBOOK_CLAUDE_BIN", fakeClaude(t, argvFile))
 
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null())
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil)
 	if sess == nil {
 		t.Fatal("openSession returned nil")
 	}
@@ -353,7 +391,7 @@ func TestWriteMCPConfig_NoSelfExe(t *testing.T) {
 // resolved selfExe writes a valid config file and the remove func cleans it up.
 func TestWriteMCPConfig_LiveSession(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null())
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil)
 	if sess == nil {
 		t.Fatal("openSession returned nil")
 	}

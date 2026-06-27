@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Townk/ai-playbook/internal/agentstream"
+	"github.com/Townk/ai-playbook/internal/askbridge"
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
@@ -103,14 +104,23 @@ func runSession(req capture.Request, title string, m mux.Mux) int {
 	// want to pay that before rendering, so the session is built in the background
 	// and the render path proceeds immediately; serveCachedPlaybook delivers the
 	// orchestrator (built from the session's driver) to the ui once it lands.
-	sessCh := openSessionAsync(req, m)
+	// No-mux ask bridge: with no multiplexer there is no float to host the agent's
+	// `ask` dialog, so create a bridge that routes asks to the in-viewer overlay. It
+	// is threaded into openSession (the tools-side AskFunc adapter) and the viewer
+	// (RunStream/Main) so the two ends meet. nil when a real mux is present — that
+	// path keeps the float ask UNCHANGED.
+	var bridge *askbridge.Bridge
+	if mux.IsNull(m) {
+		bridge = askbridge.New()
+	}
+	sessCh := openSessionAsync(req, m, bridge)
 
 	switch d.Outcome {
 	case triage.Hit:
 		dbg("runSession: serving cached playbook")
 		// serveCachedPlaybook OWNS the session: it renders instantly, waits for the
 		// background open, and closes the session after ui.Main returns.
-		return serveCachedPlaybook(d, req, sessCh, title)
+		return serveCachedPlaybook(d, req, sessCh, title, bridge)
 	default:
 		// MISS: authoring needs the session up front (its driver-open wait is the
 		// pre-existing behavior, covered by the authoring spinner). Block for it.
@@ -132,9 +142,9 @@ func runSession(req capture.Request, title string, m mux.Mux) int {
 // on the send even if the caller never reads (e.g. the cached path closes after
 // ui.Main via the done latch), so there's no leak.
 // m is threaded from the caller (never re-loaded) so all paths agree on null-vs-templated.
-func openSessionAsync(req capture.Request, m mux.Mux) <-chan *session {
+func openSessionAsync(req capture.Request, m mux.Mux, bridge *askbridge.Bridge) <-chan *session {
 	ch := make(chan *session, 1)
-	go func() { ch <- openSession(req, m) }()
+	go func() { ch <- openSession(req, m, bridge) }()
 	return ch
 }
 
@@ -168,7 +178,19 @@ type session struct {
 	srv     *tools.Server
 	socket  string
 	selfExe string
-	m       mux.Mux // already-selected mux (never re-loaded); used for ask seam + asker
+	m       mux.Mux           // already-selected mux (never re-loaded); used for ask seam + asker
+	bridge  *askbridge.Bridge // no-mux ask overlay bridge (nil when a real mux is present)
+}
+
+// bridgeAskFunc adapts an askbridge.Bridge to a tools.AskFunc: the agent's `ask`
+// call BLOCKS here until the viewer overlay replies (or the headless guard cancels
+// it). Used on the null-mux path in place of the float Asker — the in-viewer overlay
+// replaces the float dialog when there is no multiplexer to host one.
+func bridgeAskFunc(b *askbridge.Bridge) tools.AskFunc {
+	return func(req floatinput.Request) (floatinput.Result, error) {
+		a := b.Ask(req.Prompt, req.Type, req.Choices)
+		return floatinput.Result{Value: a.Value, Submitted: a.Submitted}, nil
+	}
 }
 
 // ActivityBuffer is the depth of the authoring fan-out's activity channel: enough
@@ -181,10 +203,10 @@ const ActivityBuffer = 16
 // degrades to no-tools authoring rather than aborting.
 //
 // m is the already-selected mux (threaded from the launcher / SessionMain): when
-// m is the null mux (no multiplexer), the ask seam falls back to stdin so the
-// agent's `ask` tool still works in headless/SSH contexts. When m is a real mux,
-// the float ask is wired as before.
-func openSession(req capture.Request, m mux.Mux) *session {
+// m is a real mux, the float ask is wired as before. When m is the null mux (no
+// multiplexer) and a bridge is supplied, the agent's `ask` tool is routed to the
+// in-viewer overlay via the bridge (the float can't be hosted without a mux).
+func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge) *session {
 	cwd := req.ProjectRoot
 	if cwd == "" {
 		cwd = req.CWD
@@ -202,17 +224,21 @@ func openSession(req capture.Request, m mux.Mux) *session {
 	socket := filepath.Join(dir, "tools.sock")
 	selfExe, _ := os.Executable()
 
-	// Ask seam: when a real multiplexer is present and we can resolve our own binary,
-	// the agent's `ask` tool spawns `ai-playbook input … --out <tmp>` in a float.
-	// When the mux is null (no multiplexer), the inline TUI owns the terminal in raw
-	// mode + alt-screen: a stdin ask would corrupt the display and cannot read a clean
-	// cooked line. Leave ask nil so the tools backend returns the unavailable sentinel
-	// — consistent with s.asker's null-mux no-op for the `f` keybind.
-	// Without selfExe the ask seam also stays nil (deps.Ask nil).
+	// Ask seam:
+	//   - real multiplexer + resolvable binary → the agent's `ask` tool spawns
+	//     `ai-playbook input … --out <tmp>` in a float (UNCHANGED).
+	//   - null mux (no multiplexer) + bridge → route `ask` to the in-viewer overlay
+	//     (the viewer renders the dialog over the document and replies via the bridge);
+	//     this replaces the prior "ask unavailable" sentinel stopgap on the no-mux path.
+	//   - otherwise (no selfExe and no bridge) → nil, so the tools backend returns the
+	//     unavailable sentinel as before.
 	var ask tools.AskFunc
-	if selfExe != "" && !mux.IsNull(m) {
+	switch {
+	case selfExe != "" && !mux.IsNull(m):
 		asker := floatinput.Asker{SelfExe: selfExe, Mux: m}
 		ask = asker.Ask
+	case bridge != nil:
+		ask = bridgeAskFunc(bridge)
 	}
 
 	// The agent's live activity (reasoning + tool calls) is no longer surfaced via
@@ -232,7 +258,17 @@ func openSession(req capture.Request, m mux.Mux) *session {
 		os.RemoveAll(dir)
 		return nil
 	}
-	return &session{drv: drv, srv: srv, socket: socket, selfExe: selfExe, m: m}
+	return &session{drv: drv, srv: srv, socket: socket, selfExe: selfExe, m: m, bridge: bridge}
+}
+
+// bridgeOf returns the session's no-mux ask bridge, or nil for a nil session. It
+// is the single accessor the authoring/serve paths use to thread the bridge into
+// the viewer (RunStream/Main) so the agent's `ask` reaches the in-viewer overlay.
+func bridgeOf(s *session) *askbridge.Bridge {
+	if s == nil {
+		return nil
+	}
+	return s.bridge
 }
 
 // close tears down the tools backend, the shared driver, and the socket temp dir.
@@ -359,7 +395,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		// Author via the existing text path so authoring still works.
 		dbg("authorPlaybook: AuthorEvents failed (%v); falling back to text author path", err)
 		removeMCP()
-		return authorPlaybookText(req, d, c, noCache, reengage, cwd, sharedDrv, title)
+		return authorPlaybookText(req, d, c, noCache, reengage, cwd, sharedDrv, title, bridgeOf(sess))
 	}
 
 	// Fan the events into the playbook reader + activity feed; Body() holds the
@@ -369,13 +405,14 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 	defer removeMCP()
 
 	code := ui.RunStream(reader, ui.StreamOptions{
-		Harness:  "Claude Code",
-		Title:    title,
-		Cwd:      cwd,
-		Driver:   sharedDrv,
-		Reengage: reengage,
-		Activity: activity,
-		Asker:    sess.asker(cwd), // `f` proactive amend (spec §D)
+		Harness:   "Claude Code",
+		Title:     title,
+		Cwd:       cwd,
+		Driver:    sharedDrv,
+		Reengage:  reengage,
+		Activity:  activity,
+		Asker:     sess.asker(cwd), // `f` proactive amend (spec §D)
+		AskBridge: bridgeOf(sess),  // no-mux agent `ask` → in-viewer overlay
 	})
 
 	// Cache-store on completion — only when the cache wasn't disabled/bypassed and
@@ -522,7 +559,7 @@ const DefaultEnvDumpTimeout = 10 * time.Second
 // io.ReadCloser-based author.Author (the text harness invocation) when the owned
 // AuthorEvents stream can't start (harness binary missing / unsupported). It tees
 // the produced playbook into a buffer for the cache, exactly as before part 2a.
-func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, reengage *orchestrator.Reengage, cwd string, sharedDrv *driver.Driver, title string) int {
+func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, reengage *orchestrator.Reengage, cwd string, sharedDrv *driver.Driver, title string, bridge *askbridge.Bridge) int {
 	stream, err := author.Author(req, reengage.Agent)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: author: %v\n", err)
@@ -532,12 +569,13 @@ func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, 
 
 	var body bytes.Buffer
 	code := ui.RunStream(stream, ui.StreamOptions{
-		Harness:  "Claude Code",
-		Title:    title,
-		Cwd:      cwd,
-		Tee:      &body,
-		Driver:   sharedDrv,
-		Reengage: reengage,
+		Harness:   "Claude Code",
+		Title:     title,
+		Cwd:       cwd,
+		Tee:       &body,
+		Driver:    sharedDrv,
+		Reengage:  reengage,
+		AskBridge: bridge, // no-mux agent `ask` → in-viewer overlay
 	})
 
 	if !d.Disabled && !noCache && d.CtxHash != "" && d.ReqHash != "" && body.Len() > 0 {
@@ -685,7 +723,7 @@ func reengageReady(d triage.Decision, req capture.Request, sess *session, cwd st
 	return ui.OrchReady{Orch: ui.BuildOrch(sess.drv, re), Asker: sess.asker(cwd)}
 }
 
-func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *session, title string) int {
+func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *session, title string, bridge *askbridge.Bridge) int {
 	raw, err := os.ReadFile(d.Path)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: read cache entry: %v\n", err)
@@ -742,6 +780,12 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *
 		readyCh <- reengageReady(d, req, sess, cwd)
 	}()
 	ui.SetPendingReady(readyCh)
+
+	// No-mux ask overlay: stash the bridge for ui.Main (the cached-serve path reshapes
+	// os.Args to `run`, so it can't thread the bridge as a parameter). Re-engagement
+	// (regenerate/followup) re-invokes the agent, whose `ask` then reaches the overlay.
+	// nil when a real mux is present (the float ask path is unchanged).
+	ui.SetAskBridge(bridge)
 
 	// Stage 4 (spec §C amend-on-rerun): this is a cache HIT — we are SERVING an
 	// existing playbook for this context. Stash its body as the served base so a

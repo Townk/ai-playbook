@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/Townk/ai-playbook/internal/askbridge"
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
@@ -95,6 +96,17 @@ var pendingAnswerRegen func() (io.ReadCloser, error)
 // ui.Main() invocation (the `answer` cached-serve path). Consumed (and cleared) by
 // Main. The returned reader streams the fresh prose; the closure also re-caches it.
 func SetAnswerRegen(fn func() (io.ReadCloser, error)) { pendingAnswerRegen = fn }
+
+// pendingAskBridge is the no-mux agent-ask bridge consumed by the next Main() call.
+// The cached-serve path (serveCachedPlaybook) reshapes os.Args to the `run` entry and
+// can't thread a value through that seam, so it stashes the bridge here; Main attaches
+// it to the model (m.askBridge) and clears it. nil → no in-viewer ask overlay (the
+// mux-present float path, or no bridge created).
+var pendingAskBridge *askbridge.Bridge
+
+// SetAskBridge stashes the no-mux ask bridge for the next ui.Main() invocation
+// (the cached-serve path). Consumed (and cleared) by Main.
+func SetAskBridge(b *askbridge.Bridge) { pendingAskBridge = b }
 
 // OrchReady carries the lazily-opened orchestrator (and its request-input asker)
 // delivered on the pendingReady channel by the async-startup path: main.go opens
@@ -238,6 +250,16 @@ func Main() int {
 	if err != nil {
 		// No TTY (tests / pipes): drain the stream, strip control records, render
 		// once, and exit.
+		//
+		// Deadlock guard (mirrors RunStream): this branch never raises the ask
+		// overlay, so auto-cancel any pending agent ask on the bridge while draining
+		// so a re-engagement ask never blocks the tools goroutine forever.
+		if pendingAskBridge != nil {
+			stop := make(chan struct{})
+			defer close(stop)
+			go drainAskCancel(pendingAskBridge, stop)
+			pendingAskBridge = nil
+		}
 		var b strings.Builder
 		buf := make([]byte, 4096)
 		rd := bufio.NewReader(src)
@@ -323,12 +345,14 @@ func Main() int {
 	servedBase := pendingServedBase
 	askerFn := pendingAsker
 	answerRegen := pendingAnswerRegen
+	askBridge := pendingAskBridge
 	pendingReengage = nil    // consume once, regardless of whether an orch was built
 	pendingDriver = nil      // ditto: the session owns the driver's lifecycle
 	pendingActivity = nil    // ditto: the session owns the activity channel's lifecycle
 	pendingServedBase = ""   // ditto: served-base amend stash is consume-once
 	pendingAsker = nil       // ditto: the `f` asker stash is consume-once
 	pendingAnswerRegen = nil // ditto: the cached-answer regenerate stash is consume-once
+	pendingAskBridge = nil   // ditto: the no-mux ask-bridge stash is consume-once
 
 	// Force TrueColor: zellij's alt-screen pane underreports the color profile
 	// during bubbletea's auto-detection, causing colors to be downsampled.
@@ -351,6 +375,7 @@ func Main() int {
 	m.servedBase = servedBase
 	m.asker = askerFn
 	m.answerRegen = answerRegen
+	m.askBridge = askBridge
 	prog := tea.NewProgram(
 		m,
 		tea.WithInput(tty),

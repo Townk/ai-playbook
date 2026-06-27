@@ -11,6 +11,7 @@ import (
 	"github.com/charmbracelet/colorprofile"
 	"github.com/mattn/go-runewidth"
 
+	"github.com/Townk/ai-playbook/internal/askbridge"
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
@@ -46,6 +47,12 @@ type StreamOptions struct {
 	// §D): proactive user-initiated amend. The session builds it from its
 	// floatinput.Asker. nil (off-zellij / no selfExe) → `f` is a no-op.
 	Asker AskFunc
+	// AskBridge, when non-nil, routes the agent's `ask` tool to an in-viewer overlay
+	// (the no-mux ask). The model drains pending asks and raises the dialog. nil → no
+	// overlay (the mux-present float path, or tests). Only set on the interactive
+	// null-mux path; the headless no-TTY branch below auto-cancels asks to avoid a
+	// deadlock (it never raises the overlay).
+	AskBridge *askbridge.Bridge
 }
 
 // RunStream renders + drives a playbook from a live input stream in-process. It
@@ -77,6 +84,16 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 	if err != nil {
 		// No TTY (tests / pipes): drain (teeing), strip control records, render
 		// once, exit. The tee still receives the full raw stream.
+		//
+		// Deadlock guard: this branch never raises the ask overlay, so an agent
+		// `ask` on the bridge would block the tools goroutine (and this drain loop)
+		// forever. Auto-cancel every pending ask while draining so the agent always
+		// gets a definite, non-hanging reply. The goroutine stops cleanly on return.
+		if opts.AskBridge != nil {
+			stop := make(chan struct{})
+			defer close(stop)
+			go drainAskCancel(opts.AskBridge, stop)
+		}
 		var b strings.Builder
 		buf := make([]byte, 4096)
 		rd := bufio.NewReader(src)
@@ -136,6 +153,7 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 	m.parser = parser
 	m.activity = opts.Activity
 	m.asker = opts.Asker
+	m.askBridge = opts.AskBridge
 	prog := tea.NewProgram(
 		m,
 		tea.WithInput(tty),
