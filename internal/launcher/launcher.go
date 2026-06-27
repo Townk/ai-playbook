@@ -94,16 +94,18 @@ func Troubleshoot() int {
 		return launch(m, selfExe, req, author.ClassifyRequest)
 	}
 
-	// Null-mux inline path: when no request was given on the CLI (or env), read it
-	// from stdin so the user can still supply one without a float.
-	if cliRequest == "" {
-		if r, ok := readRequestStdin(os.Stdin, os.Stdout); ok {
-			req.UserRequest = r
+	// Null-mux UX (no multiplexer): inline input box for an interactive request,
+	// or the plain runInline for an explicit request (Task 3 replaces the explicit
+	// branch with explicitProgress). The mux-present paths (float launch above;
+	// real-mux+explicit runInline below) are unchanged.
+	if mux.IsNull(m) {
+		if cliRequest == "" {
+			return inlineInput(req, m)
 		}
+		return runInline(req, m) // Task 3 replaces this with explicitProgress
 	}
 
-	// Inline path: classify + route in the current pane (command → print it, answer
-	// → print prose, escalate → run the full session inline via ui.Main).
+	// Real mux + explicit request: unchanged inline classify+route.
 	return runInline(req, m)
 }
 
