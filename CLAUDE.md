@@ -8,7 +8,7 @@ for the feature roadmap; design lives under `docs/architecture/` and `docs/speci
 
 - `go build ./...` · `go vet ./...` · `go test ./...` (the `ui` suite is slow, ~2 min — allow time).
 - Format: `gofmt -w <files>`; CI gates on `gofmt -l` being empty.
-- Install the binary: `go install .` (deploys to `$GOBIN` / `~/.local/share/go/bin`).
+- Install the binary: `go install ./cmd/ai-playbook` (deploys to `$GOBIN` / `~/.local/share/go/bin`).
 - Lint (once CI lands): `golangci-lint run`.
 
 ## Commits
