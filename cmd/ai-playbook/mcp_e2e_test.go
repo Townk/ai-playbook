@@ -25,7 +25,8 @@ func TestE2E_MCPForwardsToBackend(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("# minimal\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	d, err := driver.Open(driver.Options{Env: append(os.Environ(), "ZDOTDIR="+zdot)})
+	// Pin zsh: zsh-specific fixture; the default now honors $SHELL (bash on CI).
+	d, err := driver.Open(driver.Options{Shell: "zsh", Env: append(os.Environ(), "ZDOTDIR="+zdot)})
 	if err != nil {
 		t.Fatalf("driver: %v", err)
 	}

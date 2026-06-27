@@ -36,7 +36,7 @@ func newReengageModel(t *testing.T, canned string) (model, *fakeAgent) {
 	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	d, err := driver.Open(driver.Options{Env: append(os.Environ(), "ZDOTDIR="+zdot)})
+	d, err := driver.Open(driver.Options{Shell: "zsh", Env: append(os.Environ(), "ZDOTDIR="+zdot)})
 	if err != nil {
 		t.Fatalf("driver.Open: %v", err)
 	}
@@ -382,7 +382,7 @@ func newReengageEventsModel(t *testing.T, delta, final string) (model, *fakeEven
 	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("\n"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	d, err := driver.Open(driver.Options{Env: append(os.Environ(), "ZDOTDIR="+zdot)})
+	d, err := driver.Open(driver.Options{Shell: "zsh", Env: append(os.Environ(), "ZDOTDIR="+zdot)})
 	if err != nil {
 		t.Fatalf("driver.Open: %v", err)
 	}

@@ -24,7 +24,10 @@ func newTestDriver(t *testing.T) *Driver {
 	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte(rc), 0644); err != nil {
 		t.Fatal(err)
 	}
-	d, err := Open(Options{Env: append(os.Environ(), "ZDOTDIR="+zdot)})
+	// Pin zsh explicitly: this fixture is zsh-specific (ZDOTDIR rc, the `print`
+	// builtin, add-zsh-hook). The default now honors $SHELL — bash on CI — so the
+	// ambient default must not be relied on here.
+	d, err := Open(Options{Shell: "zsh", Env: append(os.Environ(), "ZDOTDIR="+zdot)})
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}

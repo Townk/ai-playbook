@@ -200,7 +200,8 @@ func TestBuildEnvLookup_NilDriver(t *testing.T) {
 func TestBuildEnvLookup_LiveDriver(t *testing.T) {
 	minimalZDOTDIR(t)
 	t.Setenv("AAPB_ENVLOOKUP_PROBE", "probe-value")
-	drv, err := driver.Open(driver.Options{Cwd: t.TempDir()})
+	// Pin zsh: uses the zsh minimalZDOTDIR fixture; default now honors $SHELL (bash on CI).
+	drv, err := driver.Open(driver.Options{Shell: "zsh", Cwd: t.TempDir()})
 	if err != nil {
 		t.Fatalf("driver.Open: %v", err)
 	}
