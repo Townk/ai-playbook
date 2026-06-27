@@ -193,3 +193,52 @@ func containsExact(argv []string, want string) bool {
 	}
 	return false
 }
+
+// MuxConfigured returns false for the baked-in Default (no user config, no [mux]).
+func TestDefault_MuxConfiguredFalse(t *testing.T) {
+	if Default().MuxConfigured() {
+		t.Fatal("Default() must have MuxConfigured() == false")
+	}
+}
+
+// MuxConfigured returns true after loading a config that includes a [mux] key.
+func TestMuxConfigured_TrueWithMuxSection(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	cfgDir := filepath.Join(dir, "ai-playbook")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"),
+		[]byte("[mux]\ndump-screen = \"tmux capture-pane -p\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.MuxConfigured() {
+		t.Fatal("config with [mux] section must have MuxConfigured() == true")
+	}
+}
+
+// MuxConfigured returns false when only [agent] is configured (no [mux] section).
+func TestMuxConfigured_FalseWithOnlyAgentSection(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	cfgDir := filepath.Join(dir, "ai-playbook")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"),
+		[]byte("[agent]\nharness = \"pi\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.MuxConfigured() {
+		t.Fatal("config with only [agent] section must have MuxConfigured() == false")
+	}
+}

@@ -242,6 +242,53 @@ func TestSpawnFloat_ExecsStub(t *testing.T) {
 	}
 }
 
+// Select returns Null when $ZELLIJ is unset and the config has no [mux] section.
+func TestSelect_NullWhenNoZellijAndNoConfig(t *testing.T) {
+	noenv := func(string) string { return "" }
+	m := Select(noenv, config.Default())
+	if !IsNull(m) {
+		t.Fatal("Select with no ZELLIJ and Default config must return Null()")
+	}
+}
+
+// Select returns a non-null (templated) Mux when $ZELLIJ is set, even with Default config.
+func TestSelect_NonNullWhenZellijSet(t *testing.T) {
+	zellijenv := func(s string) string {
+		if s == "ZELLIJ" {
+			return "0"
+		}
+		return ""
+	}
+	m := Select(zellijenv, config.Default())
+	if IsNull(m) {
+		t.Fatal("Select with ZELLIJ set must not return Null()")
+	}
+}
+
+// Select returns a non-null Mux when the user config has a [mux] section
+// (MuxConfigured() == true), even without $ZELLIJ.
+func TestSelect_NonNullWhenMuxConfigured(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", dir)
+	cfgDir := filepath.Join(dir, "ai-playbook")
+	if err := os.MkdirAll(cfgDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "config.toml"),
+		[]byte("[mux]\ndump-screen = \"tmux capture-pane -p\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("config.Load: %v", err)
+	}
+	noenv := func(string) string { return "" }
+	m := Select(noenv, cfg)
+	if IsNull(m) {
+		t.Fatal("Select with MuxConfigured must not return Null()")
+	}
+}
+
 func assertArgv(t *testing.T, got, want []string) {
 	t.Helper()
 	if len(got) != len(want) {

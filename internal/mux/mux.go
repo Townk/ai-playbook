@@ -18,6 +18,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -81,6 +82,18 @@ func FromConfig(cfg *config.Config) Mux {
 	return &templated{tpl: cfg.Mux}
 }
 
+// Select picks the right Mux for the current environment. It returns Null() when
+// no multiplexer is present — i.e. getenv("ZELLIJ") returns "" AND the user has
+// not configured a [mux] section (cfg.MuxConfigured() is false). Otherwise it
+// returns the config-driven (templated) Mux so existing zellij behavior is
+// unchanged for callers that do have a multiplexer.
+func Select(getenv func(string) string, cfg *config.Config) Mux {
+	if getenv("ZELLIJ") == "" && !cfg.MuxConfigured() {
+		return Null()
+	}
+	return FromConfig(cfg)
+}
+
 // Load builds a Mux from the user's merged config (config.Load), falling back to
 // the baked-in default profile if the config cannot be loaded. Convenience for
 // call sites that just want "the configured mux" without threading a *Config.
@@ -89,7 +102,7 @@ func Load() Mux {
 	if err != nil {
 		cfg = config.Default()
 	}
-	return FromConfig(cfg)
+	return Select(os.Getenv, cfg)
 }
 
 // percent renders n as a "<n>%" size string, empty when n <= 0 (template default).

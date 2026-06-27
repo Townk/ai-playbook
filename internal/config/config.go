@@ -61,7 +61,17 @@ type Agent struct {
 type Config struct {
 	Mux   Mux   `toml:"mux"`
 	Agent Agent `toml:"agent"`
+	// muxConfigured is set true by loadFrom when the decoded user TOML contained a
+	// [mux] section with at least one non-empty key. It is unexported so the TOML
+	// decoder ignores it; it is never set on the Default() profile.
+	muxConfigured bool
 }
+
+// MuxConfigured reports whether the user's config file contained a [mux] section.
+// When false, and $ZELLIJ is also unset, callers should select the null no-op Mux
+// because no terminal multiplexer is active. It is always false for Default(),
+// which carries no user-supplied data.
+func (c *Config) MuxConfigured() bool { return c.muxConfigured }
 
 // Default returns a fresh copy of the baked-in default profile. The mux defaults
 // are the zellij commands the binary used before it was config-driven, so a
@@ -143,6 +153,11 @@ func loadFrom(base *Config, path string, data []byte) (*Config, error) {
 	var user Config
 	if err := toml.Unmarshal(data, &user); err != nil {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
+	}
+	// Detect a user-supplied [mux] section: Mux has only string fields (comparable),
+	// so a zero-value means the user omitted [mux] entirely.
+	if user.Mux != (Mux{}) {
+		base.muxConfigured = true
 	}
 	mergeStr(&base.Mux.OpenFloatingPane, user.Mux.OpenFloatingPane)
 	mergeStr(&base.Mux.OpenInputFloat, user.Mux.OpenInputFloat)
