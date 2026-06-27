@@ -52,9 +52,10 @@ import (
 // broker AI_PLAYBOOK_RUN_TIMEOUT default of 120s).
 const runTimeout = 120 * time.Second
 
-// askUnavailableMsg is the sentinel reply for the deferred float-backed ask: the
-// real interactive ask needs the mux/topology, so until that lands the backend
-// returns a definite "unavailable" answer rather than hanging the agent.
+// askUnavailableMsg is the sentinel reply when an ask cannot be completed: the
+// user cancelled (no submitted answer), the ask type is unsupported, or no Ask
+// backend is wired (unsupported context). The no-mux interactive path wires the
+// AskBridge overlay; nil Deps.Ask means no backend at all.
 const askUnavailableMsg = "interactive ask not available in this context"
 
 // AskFunc spawns an input float and returns the user's answer. It is the seam
@@ -233,11 +234,11 @@ func (s *Server) doRemember(req request) reply {
 	return reply{OK: true}
 }
 
-// doAsk is the user-input channel. With an Ask seam wired (the float plumbing),
-// it spawns an input FLOAT for the agent's question and returns the user's
-// submitted answer; a cancel (no answer) returns the unavailable sentinel so the
-// agent gets a definite, non-hanging reply. Without an Ask seam (no-mux fallback)
-// it returns the sentinel directly.
+// doAsk is the user-input channel. With an Ask seam wired (the float plumbing on
+// the mux-present path, or the bridge adapter on the no-mux interactive path),
+// it returns the user's submitted answer; a cancel or unsubmitted answer returns
+// the unavailable sentinel so the agent always gets a definite, non-hanging reply.
+// Without an Ask seam (nil) it returns the sentinel directly (unsupported context).
 func (s *Server) doAsk(req request) reply {
 	if s.deps.Ask == nil {
 		return reply{Unavailable: true, Error: askUnavailableMsg}

@@ -112,17 +112,10 @@ func inlineInput(req capture.Request, m mux.Mux) int {
 
 	tty, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
 	if err != nil {
-		// No controlling terminal (pipe/CI): fall back to the line read so a
-		// request can still be supplied. (Removed in the cleanup task once the
-		// explicit-only contract is accepted.)
-		if r, ok := readRequestStdin(os.Stdin, os.Stdout); ok {
-			req.UserRequest = r
-			cls, cerr := classifyInline(req, func(string) {})
-			if cerr != nil {
-				cls = author.Classification{Kind: author.KindEscalate}
-			}
-			return routeInline(req, cls, m)
-		}
+		// No controlling terminal: the inline box needs a TTY. Supply the request
+		// explicitly (CLI arg / $AI_PLAYBOOK_USER_REQUEST) in non-interactive
+		// contexts. Nothing to do here.
+		fmt.Fprintln(os.Stderr, "ai-playbook: no terminal for inline input; pass the request as an argument")
 		return 0
 	}
 	defer tty.Close()

@@ -43,8 +43,9 @@ import (
 //
 // An explicit request on the CLI (args after `troubleshoot`, or
 // $AI_PLAYBOOK_USER_REQUEST) SKIPS the float — the request is already known. Off a
-// mux (no zellij) there is no float/pane to spawn; the launcher runs the session
-// INLINE in the current pane (the pre-topology behavior), so headless and SSH
+// mux (no zellij) there is no float/pane to spawn; the launcher renders the inline
+// input box for an interactive request (inlineInput) or the explicit-progress
+// classify (explicitProgress) — both run in the current pane, so headless and SSH
 // contexts still work.
 // launcherRoute reports whether the troubleshoot path should use the float/pane
 // topology: true when a real multiplexer is present AND no explicit request was

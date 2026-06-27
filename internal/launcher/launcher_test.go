@@ -1049,6 +1049,28 @@ func TestRunInline_EscalateRoute(t *testing.T) {
 	}
 }
 
+// TestLauncherRoute asserts the routing predicate:
+//   - null mux → false (never float, regardless of request)
+//   - real mux + empty request → true (use the float)
+//   - real mux + explicit request → false (skip the float, request already known)
+func TestLauncherRoute(t *testing.T) {
+	nullM := mux.Null()
+	realM := &launchMux{} // non-null: mux.IsNull returns false for it
+
+	if launcherRoute(nullM, "") {
+		t.Error("null mux + empty request: want false (inline, not float)")
+	}
+	if launcherRoute(nullM, "some request") {
+		t.Error("null mux + explicit request: want false")
+	}
+	if !launcherRoute(realM, "") {
+		t.Error("real mux + empty request: want true (use float)")
+	}
+	if launcherRoute(realM, "some request") {
+		t.Error("real mux + explicit request: want false")
+	}
+}
+
 // TestRunInline_ClassifyErrorEscalates asserts a classify error degrades to the
 // escalate branch (the safe default), matching launch's behavior.
 func TestRunInline_ClassifyErrorEscalates(t *testing.T) {

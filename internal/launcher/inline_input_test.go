@@ -129,3 +129,14 @@ func TestInlineInput_SubmitRoutesClassification(t *testing.T) {
 		t.Fatalf("inlineInput exit = %d, want 7 (escalate seam)", code)
 	}
 }
+
+// With no controlling terminal and no explicit request, inlineInput exits 0
+// without attempting a stdin line read (the plain-stdin read is superseded).
+func TestInlineInput_NoTTYNoRequestExitsCleanly(t *testing.T) {
+	if _, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err == nil {
+		t.Skip("controlling terminal present; this asserts the no-TTY branch")
+	}
+	if code := inlineInput(capture.Request{CWD: "/p"}, mux.Null()); code != 0 {
+		t.Fatalf("no-TTY inlineInput exit = %d, want 0", code)
+	}
+}

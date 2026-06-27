@@ -67,6 +67,26 @@ func TestAskOverlay_EscCancelsAndRespondsUnsubmitted(t *testing.T) {
 	}
 }
 
+func TestAskOverlay_EscCancelsAndReplies(t *testing.T) {
+	b := askbridge.New()
+	answered := make(chan askbridge.Answer, 1)
+	go func() { answered <- b.Ask("name?", "line", nil) }()
+
+	m := newModel("agent", "# P")
+	m.width, m.height, m.askBridge = 80, 24, b
+	req := <-b.Requests()
+	m2, _ := m.Update(askOpenMsg{req: req})
+	m = m2.(model)
+	m3, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m = m3.(model)
+	if m.askMode {
+		t.Error("esc must close the overlay")
+	}
+	if a := <-answered; a.Submitted {
+		t.Fatalf("esc answer = %+v, want Submitted=false", a)
+	}
+}
+
 func TestAskOverlay_ChooseDeliversChoicesAndResponds(t *testing.T) {
 	b := askbridge.New()
 	answered := make(chan askbridge.Answer, 1)
