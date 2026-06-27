@@ -165,7 +165,7 @@ started.
 **Settled decisions:** `proj:`-prefixed = project, unprefixed = global. `create`
 writes store+cache but never _serves_ a cache hit. Cache badge gated to `assist`
 only. Detailed spec:
-`docs/superpowers/specs/2026-06-26-live-playbook-store-phase1.md` (ephemeral).
+`docs/specifications/phase-1-live-playbook-store.md`.
 
 **Open:** `create` runs in the invoking pane vs a docked pane.
 

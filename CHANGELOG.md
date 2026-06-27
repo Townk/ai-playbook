@@ -1,0 +1,41 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+### Added
+
+- Single Go binary unifying and replacing the retired shell-script stack;
+  harness-agnostic design (Claude harness today), invoked directly or bound to a
+  shell key.
+- `assist` triage (command / answer / escalate) with routing.
+- Cache-by-kind: a repeat command/answer/playbook is served without re-classify;
+  a cached answer invalidates in place (reload re-runs the cheap classify).
+- In-process re-engagement: regenerate / follow-up / wrap-up.
+- Auto-follow-up on a failed verify; native verify-success confirm (green
+  ask-style buttons, `c` to generate).
+- The wave thinking animation.
+- Replace-protection: never persist a non-playbook over the resolved troubleshoot.
+- Front matter (`name`/`description`/`category`/`tags`/`env`) with `finalize`
+  backfill.
+- Multi-language run blocks (shell plus python/node/ruby/perl via interpreter
+  heredocs).
+- MCP tools backend (run / ask / remember) over a unix socket, dialing the shared
+  shell driver.
+
+### Changed
+
+- Performance: classify runs thinking-OFF (~2.6s vs ~7–9s); async session open so
+  cached playbooks render instantly and shell buttons enable when ready; answers
+  skip the driver.
+- Rebrand: environment variables renamed to `AI_PLAYBOOK_*`; `ai-playbook` labels
+  and cache schema; corrected system-prompt tool references (MCP run/ask/remember).
+
+### Removed
+
+- The retired zsh + `libexec/` shell stack.
+- Dead FIFO plumbing, including `--results-fifo` and the broker process.

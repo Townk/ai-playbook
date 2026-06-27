@@ -32,6 +32,28 @@ for the feature roadmap; design lives under `docs/architecture/` and `docs/speci
   approved version is committed. Architectural decisions get an ADR under
   `docs/architecture/adrs/`.
 
+## Tracking (BACKLOG.md & CHANGELOG.md)
+
+- **BACKLOG (`docs/BACKLOG.md`)**: read it at the **start** of a work session. When
+  you find a bug, hit a limitation, or defer a task, **ADD** it under Bugs/Tasks/
+  Ideas as `- [ ] <one-liner> (YYYY-MM-DD)`. When you finish a backlog item,
+  **REMOVE** it (and add a CHANGELOG entry if it is user-facing). Keep it lean —
+  prune done/stale items. It is **TACTICAL only**; strategy/phases live in
+  `docs/ROADMAP.md`.
+- **CHANGELOG (`CHANGELOG.md`)**: follow [keepachangelog.com](https://keepachangelog.com).
+  Every **user-facing** change (feature, fix, breaking change, removal,
+  deprecation) gets an entry under `## [Unreleased]` in the correct group
+  (Added/Changed/Deprecated/Removed/Fixed/Security) **in the same commit as the
+  change**. Internal-only refactors don't need an entry. On a release: rename
+  `[Unreleased]` → `[X.Y.Z] - DATE`, add a fresh empty `[Unreleased]`, and tag.
+
+## Documentation
+
+`docs/ROADMAP.md` (roadmap) · `docs/architecture/` (overview + ADRs) ·
+`docs/specifications/` (engineering specs) · `docs/guides/` (user guides) ·
+`docs/configuration.md` (config reference) · `docs/BACKLOG.md` (tactical tracker) ·
+`CHANGELOG.md` (user-facing changes).
+
 ## Verify before claiming done
 
 Run `go build/vet/test ./...` green and `gofmt -l` clean before committing; quote the
