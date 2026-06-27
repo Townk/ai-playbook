@@ -48,7 +48,7 @@ func hslice(s string, start, width int) string {
 			// Copy verbatim; zero display width.
 			j := i
 			i += 2 // skip ESC [
-			for i < n && !(s[i] >= 0x40 && s[i] <= 0x7e) {
+			for i < n && (s[i] < 0x40 || s[i] > 0x7e) {
 				i++
 			}
 			if i < n {

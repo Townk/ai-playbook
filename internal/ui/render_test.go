@@ -494,7 +494,7 @@ func TestCodeBlockButtonsShell(t *testing.T) {
 	if runB.Width != 2 || play.Width != 2 || copyB.Width != 2 {
 		t.Fatalf("button width must be 2 (glyph+trailing space)")
 	}
-	if !(runB.Col < play.Col && play.Col < copyB.Col) {
+	if runB.Col >= play.Col || play.Col >= copyB.Col {
 		t.Fatalf("run must be left of play left of copy: %d vs %d vs %d", runB.Col, play.Col, copyB.Col)
 	}
 	if runB.Line != play.Line || play.Line != copyB.Line {

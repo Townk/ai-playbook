@@ -343,7 +343,7 @@ func shquote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) 
 func sanitizeKey(id string) string {
 	b := []byte(id)
 	for i, c := range b {
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_') {
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' {
 			b[i] = '_'
 		}
 	}

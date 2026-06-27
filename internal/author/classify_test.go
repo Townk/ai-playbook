@@ -79,7 +79,7 @@ func TestClassifyRequest_SuccessCommandNotDowngraded(t *testing.T) {
 	req := sampleClassifyRequest() // Kind question, Exit "0"
 	req.Command = "git log --since='7 days ago' -n 3 --oneline"
 	const out = `{"kind":"command","content":"git log --since='7 days ago' -n 3 --oneline"}`
-	cls, err, _ := runClassify(t, req, out, "")
+	cls, _, err := runClassify(t, req, out, "")
 	if err != nil {
 		t.Fatalf("ClassifyRequest: %v", err)
 	}
@@ -97,7 +97,7 @@ func TestClassifyRequest_TitleTruncatedTo30Runes(t *testing.T) {
 	// 50-char title + surrounding whitespace; must come back ≤30 runes, trimmed.
 	const long = "   This Title Is Far Too Long To Fit In A Pane Header   "
 	out := `{"kind":"answer","content":"ok","title":` + jsonQuote(long) + `}`
-	cls, err, _ := runClassify(t, sampleClassifyRequest(), out, "")
+	cls, _, err := runClassify(t, sampleClassifyRequest(), out, "")
 	if err != nil {
 		t.Fatalf("ClassifyRequest: %v", err)
 	}
@@ -134,7 +134,7 @@ func jsonQuote(s string) string {
 // runClassify drives ClassifyRequest against a fake harness emitting resultText,
 // capturing the owned argv so the triage-model + no-MCP invariants can be asserted.
 // triageModel sets cfg [agent].triage_model (empty → leave the default).
-func runClassify(t *testing.T, req capture.Request, resultText, triageModel string) (Classification, error, []string) {
+func runClassify(t *testing.T, req capture.Request, resultText, triageModel string) (Classification, []string, error) {
 	t.Helper()
 	bin := fakeMetadataHarness(t, resultText)
 	cfg := config.Default()
@@ -153,7 +153,7 @@ func runClassify(t *testing.T, req capture.Request, resultText, triageModel stri
 			return exec.Command(bin, args...)
 		},
 	})
-	return cls, err, gotArgs
+	return cls, gotArgs, err
 }
 
 // modelArg returns the value following --model in the owned argv, or "".
@@ -170,7 +170,7 @@ func modelArg(args []string) string {
 // authoring model) and attaches NO --mcp-config.
 func TestClassifyRequest_ParsesCommand(t *testing.T) {
 	const out = `{"kind":"command","content":"git log -3 --since='1 week ago'"}`
-	cls, err, args := runClassify(t, sampleClassifyRequest(), out, "")
+	cls, args, err := runClassify(t, sampleClassifyRequest(), out, "")
 	if err != nil {
 		t.Fatalf("ClassifyRequest: %v", err)
 	}
@@ -192,7 +192,7 @@ func TestClassifyRequest_ParsesCommand(t *testing.T) {
 // A configured triage_model is what the classify argv carries.
 func TestClassifyRequest_UsesConfiguredTriageModel(t *testing.T) {
 	const out = `{"kind":"answer","content":"Use git log."}`
-	_, err, args := runClassify(t, sampleClassifyRequest(), out, "claude-3-5-haiku-latest")
+	_, args, err := runClassify(t, sampleClassifyRequest(), out, "claude-3-5-haiku-latest")
 	if err != nil {
 		t.Fatalf("ClassifyRequest: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestClassifyRequest_FailedCommandGuard(t *testing.T) {
 	req.Exit = "2"
 	// The model parrots the failed command back (with extra spacing).
 	const out = `{"kind":"command","content":"make   build"}`
-	cls, err, _ := runClassify(t, req, out, "")
+	cls, _, err := runClassify(t, req, out, "")
 	if err != nil {
 		t.Fatalf("ClassifyRequest: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestClassifyRequest_FailedCommandGuard(t *testing.T) {
 // An unknown kind normalizes to escalate.
 func TestClassifyRequest_UnknownKind(t *testing.T) {
 	const out = `{"kind":"banana","content":"whatever"}`
-	cls, err, _ := runClassify(t, sampleClassifyRequest(), out, "")
+	cls, _, err := runClassify(t, sampleClassifyRequest(), out, "")
 	if err != nil {
 		t.Fatalf("ClassifyRequest: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestClassifyRequest_UnknownKind(t *testing.T) {
 // --exclude-dynamic-system-prompt-sections, with no --mcp-config.
 func TestClassifyRequest_BareArgv(t *testing.T) {
 	const out = `{"kind":"answer","content":"ok"}`
-	_, err, args := runClassify(t, sampleClassifyRequest(), out, "")
+	_, args, err := runClassify(t, sampleClassifyRequest(), out, "")
 	if err != nil {
 		t.Fatalf("ClassifyRequest: %v", err)
 	}
@@ -332,7 +332,7 @@ func TestClassifyRequest_OnTextAccumulates(t *testing.T) {
 
 // A non-JSON response fails both attempts → escalate + a clear error.
 func TestClassifyRequest_NonJSONEscalatesWithError(t *testing.T) {
-	cls, err, _ := runClassify(t, sampleClassifyRequest(), "Sorry, I can't help right now.", "")
+	cls, _, err := runClassify(t, sampleClassifyRequest(), "Sorry, I can't help right now.", "")
 	if err == nil {
 		t.Fatal("expected an error for non-JSON output")
 	}

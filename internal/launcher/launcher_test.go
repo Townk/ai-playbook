@@ -1054,7 +1054,7 @@ func TestRunInline_EscalateRoute(t *testing.T) {
 // the `assist` case and the deprecated `troubleshoot` alias) calls. A pure
 // compile-time guard — the behavior is covered by the launch/runInline tests.
 func TestAssistSymbol(t *testing.T) {
-	var _ func() int = Assist
+	var _ func() int = Assist //nolint:staticcheck // QF1011: explicit type IS the compile-time guard
 }
 
 // TestLauncherRoute asserts the routing predicate:

@@ -20,7 +20,6 @@ _(none — phase work lives in the roadmap)_
 - [ ] Rename the value-passing env prefix `AAS_` → `AAPB_` (`AAS_OUT/ERR/EXIT` are leftover "ai-assist" naming; user-facing in generated playbooks → careful migration, or keep + document the legacy name) (2026-06-27)
 - [ ] internal/ui test suite is slow on CI (~10min+ under -race on 2-core runners) — parallelize / reduce per-test zsh-driver spawns (2026-06-27)
 - [ ] Coverage pass toward ~90% — unit-testable packages first: mcpserver 42%, input 66%, capture 70%, triage 73%, tools/floatinput 77%; launcher/cmd orchestration needs integration tests (harder) (2026-06-27)
-- [ ] Migrate golangci-lint v1→v2 (modernize; v1 is EOL) — `checkout@v5`/`setup-go@v6` already bumped (2026-06-27)
 - [ ] Make the author/agent prompt shell-aware: `internal/author/prompt.go:143` hardcodes `set -e` + shell idioms; should adapt to `cfg.Driver.Shell` so a non-zsh shell gets correct guidance (2026-06-27)
 - [ ] view-diff in a null-mux inline TUI shows a raw "mux: no multiplexer available" — thread the selected mux into `internal/ui` + soften the message (2026-06-27)
 - [ ] 2-tier integration config — residual: the named-preset selectors are DONE and uniform (`[mux] backend`, `[driver] shell`, `[agent] harness`) and mux has per-command overrides; consider whether shell/AI want per-command/per-aspect overrides too (likely not needed — revisit if a use case appears) (2026-06-27)

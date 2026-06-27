@@ -64,7 +64,7 @@ func fakeMetadataHarness(t *testing.T, resultText string) string {
 
 // runMeta drives PlaybookMetadata against a fake harness emitting resultText,
 // capturing the owned argv so the no-MCP invariant can be asserted.
-func runMeta(t *testing.T, resultText string) (Metadata, error, []string) {
+func runMeta(t *testing.T, resultText string) (Metadata, []string, error) {
 	t.Helper()
 	bin := fakeMetadataHarness(t, resultText)
 	cfg := config.Default()
@@ -79,7 +79,7 @@ func runMeta(t *testing.T, resultText string) (Metadata, error, []string) {
 			return exec.Command(bin, args...)
 		},
 	})
-	return meta, err, gotArgs
+	return meta, gotArgs, err
 }
 
 const cannedMetadataJSON = `{
@@ -120,7 +120,7 @@ func assertCannedMetadata(t *testing.T, meta Metadata) {
 // argv carries no --mcp-config even though MCPConfigPath was set), and the system
 // prompt is MetadataPrompt(doc).
 func TestPlaybookMetadata_ParsesCleanJSON(t *testing.T) {
-	meta, err, args := runMeta(t, cannedMetadataJSON)
+	meta, args, err := runMeta(t, cannedMetadataJSON)
 	if err != nil {
 		t.Fatalf("PlaybookMetadata: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestPlaybookMetadata_ParsesCleanJSON(t *testing.T) {
 // extracts the outer {...}).
 func TestPlaybookMetadata_ToleratesFenceAndWhitespace(t *testing.T) {
 	wrapped := "\n\nHere is the metadata:\n```json\n" + cannedMetadataJSON + "\n```\n\n"
-	meta, err, _ := runMeta(t, wrapped)
+	meta, _, err := runMeta(t, wrapped)
 	if err != nil {
 		t.Fatalf("PlaybookMetadata (fenced): %v", err)
 	}
@@ -150,7 +150,7 @@ func TestPlaybookMetadata_ToleratesFenceAndWhitespace(t *testing.T) {
 // the classification failure. (The fake harness emits the same non-JSON each run,
 // so the single retry also fails, exercising the retry-then-error path.)
 func TestPlaybookMetadata_NonJSONErrorsAfterRetry(t *testing.T) {
-	_, err, _ := runMeta(t, "Sorry, I can't classify this playbook right now.")
+	_, _, err := runMeta(t, "Sorry, I can't classify this playbook right now.")
 	if err == nil {
 		t.Fatal("expected an error for non-JSON output")
 	}

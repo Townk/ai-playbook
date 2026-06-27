@@ -1878,7 +1878,7 @@ func TestAutoFollowupOneTimeScrollThenNoMovement(t *testing.T) {
 	// The announcement is now visible within the body window (it is the top row, or
 	// pulled up by clampScroll when it sits at the very end of the doc).
 	want := followupAnnouncement(1)
-	var annIdx int = -1
+	var annIdx = -1
 	for i := m.yOff; i < len(m.lines) && i < m.yOff+m.body(); i++ {
 		if strings.Contains(m.lines[i].Text, want) {
 			annIdx = i

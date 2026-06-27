@@ -398,7 +398,7 @@ func writeRunLog(id, out, errOut string) string {
 func sanitizeLogID(id string) string {
 	b := []byte(id)
 	for i, c := range b {
-		if !(c >= 'A' && c <= 'Z' || c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '_' || c == '-') {
+		if (c < 'A' || c > 'Z') && (c < 'a' || c > 'z') && (c < '0' || c > '9') && c != '_' && c != '-' {
 			b[i] = '_'
 		}
 	}

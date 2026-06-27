@@ -86,9 +86,10 @@ func (p *streamParser) feed(chunk []byte) []streamEvent {
 			p.state = psLabel // for 't' we keep the label; unknown cmds just skip to closing DLE
 		case psLabel:
 			if b == dle {
-				if p.cmd == 't' {
+				switch p.cmd {
+				case 't':
 					events = append(events, thinkEvent{string(p.label)})
-				} else if p.cmd == 'q' {
+				case 'q':
 					events = append(events, quitEvent{})
 				}
 				p.label = p.label[:0]
