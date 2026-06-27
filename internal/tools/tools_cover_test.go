@@ -213,7 +213,11 @@ func TestDial_ErrNoReply(t *testing.T) {
 		if err != nil {
 			return
 		}
-		conn.Close() // close immediately, no reply written
+		// Drain the client's request line FIRST so its write completes, THEN
+		// close with no reply. Closing mid-write races to a "broken pipe" on the
+		// client instead of the clean EOF that yields errNoReply.
+		_, _ = bufio.NewReader(conn).ReadString('\n')
+		conn.Close()
 	}()
 
 	_, err := Dial(socket, Call{Tool: "run", Cmd: "echo hi"})
