@@ -4,6 +4,7 @@
 //
 //	assist         AI producer: capture → triage → author a playbook → drive it
 //	               (troubleshoot is a deprecated alias)
+//	create <prompt> author a playbook directly (force-author; no triage/cache serve)
 //	run <file.md>  playbook runtime: render + orchestrate a playbook artifact
 //	input          the multi-line input widget
 //	selftest       drive the user's real shell and report (validates the driver)
@@ -47,6 +48,8 @@ func main() {
 		os.Exit(launcher.Assist())
 	case "troubleshoot": // deprecated alias → assist (the ZLE trigger is repointed)
 		os.Exit(launcher.Assist())
+	case "create":
+		os.Exit(launcher.CreateMain())
 	case "list":
 		os.Exit(launcher.ListMain())
 	case "search":
@@ -81,7 +84,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ai-playbook {assist [<prompt>]|list [--format human|fuzzy-data-source|json]|search <query> [--format ...]|show <slug>|edit <slug>|session [--request <json>]|run <file.md>|answer --request <json> --content <file> [--cached <iso>] [--title <t>] [--cwd <dir>]|finalize [--dry-run] <file.md>|mcp --socket <path>|input|selftest}")
+	fmt.Fprintln(os.Stderr, "usage: ai-playbook {assist [<prompt>]|create <prompt> [--template <t>]|list [--format human|fuzzy-data-source|json]|search <query> [--format ...]|show <slug>|edit <slug>|session [--request <json>]|run <file.md>|answer --request <json> --content <file> [--cached <iso>] [--title <t>] [--cwd <dir>]|finalize [--dry-run] <file.md>|mcp --socket <path>|input|selftest}")
 }
 
 // mcpMain is the `ai-playbook mcp --socket <path>` subcommand: an MCP stdio
