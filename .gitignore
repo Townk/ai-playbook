@@ -4,3 +4,6 @@
 # Build / release / coverage artifacts.
 /dist/
 /coverage.out
+
+# superpowers SDD scratch ledger
+/.superpowers/
