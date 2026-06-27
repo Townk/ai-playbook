@@ -11,6 +11,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/tools"
 	"github.com/Townk/ai-playbook/internal/triage"
 	"github.com/Townk/ai-playbook/internal/ui"
@@ -21,7 +22,7 @@ import (
 // cached-render path can proceed without blocking on the shell's blank-pane startup.
 func TestOpenSessionAsync_DeliversOnce(t *testing.T) {
 	minimalZDOTDIR(t)
-	ch := openSessionAsync(capture.Request{ProjectRoot: t.TempDir()})
+	ch := openSessionAsync(capture.Request{ProjectRoot: t.TempDir()}, mux.Null())
 	if c := cap(ch); c != 1 {
 		t.Errorf("openSessionAsync channel cap = %d, want 1 (buffered so the goroutine never blocks)", c)
 	}
@@ -56,10 +57,12 @@ func TestReengageReady_NilSession_Degraded(t *testing.T) {
 // TestReengageReady_LiveSession_BuildsOrch asserts that a live session yields a fully
 // wired OrchReady: a non-nil orchestrator (built via ui.BuildOrch with the session's
 // shared driver + the re-engagement context) and the request-input-float asker.
+// We pass a non-null mux (&launchMux{}) so session.asker returns a non-nil closure
+// (it is nil for the null mux because the TUI owns the terminal inline).
 func TestReengageReady_LiveSession_BuildsOrch(t *testing.T) {
 	minimalZDOTDIR(t)
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir())
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()})
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, &launchMux{})
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -180,7 +183,7 @@ func minimalZDOTDIR(t *testing.T) {
 // agent and the playbook drive the same shell.
 func TestOpenSession_SharedDriverAndToolsBackend(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()})
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null())
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -236,7 +239,7 @@ func TestAuthoringAgent_InvokesClaudeWithMCPConfig(t *testing.T) {
 	argvFile := filepath.Join(t.TempDir(), "argv")
 	t.Setenv("AI_PLAYBOOK_CLAUDE_BIN", fakeClaude(t, argvFile))
 
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()})
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null())
 	if sess == nil {
 		t.Fatal("openSession returned nil")
 	}

@@ -46,6 +46,15 @@ import (
 // mux (no zellij) there is no float/pane to spawn; the launcher runs the session
 // INLINE in the current pane (the pre-topology behavior), so headless and SSH
 // contexts still work.
+// launcherRoute reports whether the troubleshoot path should use the float/pane
+// topology: true when a real multiplexer is present AND no explicit request was
+// given on the CLI (so the user must be prompted via the float). When the mux is
+// null (no multiplexer) or an explicit request is already known, the caller uses
+// the inline fallback path instead.
+func launcherRoute(m mux.Mux, cliRequest string) bool {
+	return cliRequest == "" && !mux.IsNull(m)
+}
+
 func Troubleshoot() int {
 	dbgInit(os.Getenv("AI_PLAYBOOK_DEBUG_LOG"))
 	cliRequest := strings.TrimSpace(strings.Join(os.Args[2:], " "))
@@ -72,11 +81,11 @@ func Troubleshoot() int {
 	dbg("troubleshoot: cmd=%q exit=%q kind=%q cwd=%q root=%q paneID=%q cliReq=%q",
 		req.Command, req.Exit, req.Kind, req.CWD, req.ProjectRoot, paneID, cliRequest)
 
-	// In Zellij with no explicit request: ask via the input float, then spawn the
-	// docked session pane. Off-Zellij (or with an explicit request and no pane id)
-	// run the session inline — there is no pane to dock into.
-	inZellij := os.Getenv("ZELLIJ") != "" || paneID != ""
-	if cliRequest == "" && inZellij {
+	// With a real multiplexer and no explicit request: ask via the input float, then
+	// spawn the docked session pane. Without a multiplexer (null mux) or when the
+	// request is already known, run the session inline in the current pane — so
+	// headless and SSH contexts still work.
+	if launcherRoute(m, cliRequest) {
 		selfExe, err := os.Executable()
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: cannot resolve self: %v\n", err)
@@ -85,9 +94,17 @@ func Troubleshoot() int {
 		return launch(m, selfExe, req, author.ClassifyRequest)
 	}
 
-	// Inline path (off-Zellij, or explicit request given): classify + route in the
-	// current pane (command → print it, answer → print prose, escalate → session).
-	return runInline(req)
+	// Null-mux inline path: when no request was given on the CLI (or env), read it
+	// from stdin so the user can still supply one without a float.
+	if cliRequest == "" {
+		if r, ok := readRequestStdin(os.Stdin, os.Stdout); ok {
+			req.UserRequest = r
+		}
+	}
+
+	// Inline path: classify + route in the current pane (command → print it, answer
+	// → print prose, escalate → run the full session inline via ui.Main).
+	return runInline(req, m)
 }
 
 // requestHistoryPath is the JSONL request-history file for the troubleshoot
@@ -587,11 +604,13 @@ func AnswerMain() int {
 	return ui.Main()
 }
 
-// runInline is the off-Zellij / explicit-request path (no float, no panes): classify
+// runInline is the null-mux / explicit-request path (no float, no panes): classify
 // the request and route it simply (stage C). command → print the command for the
-// user to run; answer → print the prose; escalate → run the session inline (current
-// behavior). A classify error escalates (the safe default).
-func runInline(req capture.Request) int {
+// user to run; answer → print the prose; escalate → run the full session inline
+// (ui.Main full-screen TUI). A classify error escalates (the safe default).
+// m is threaded through so the inline session uses the same mux decision the
+// launcher already made (never re-loads it).
+func runInline(req capture.Request, m mux.Mux) int {
 	cfg, _ := config.Load()
 	cls, err := author.ClassifyRequest(req, author.AuthorOptions{Cfg: cfg})
 	if err != nil {
@@ -606,7 +625,7 @@ func runInline(req capture.Request) int {
 		fmt.Println(cls.Content)
 		return 0
 	default:
-		return runSession(req, "")
+		return runSession(req, "", m)
 	}
 }
 

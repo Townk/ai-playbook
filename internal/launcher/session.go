@@ -45,6 +45,10 @@ func SessionMain() int {
 	ui.SetDebugLog(debugLog) // the ui pkg traces too; the pane got --debug-log as a flag (env dropped)
 	dbg("session: start requestPath=%q", requestPath)
 
+	// Load the mux once here and thread it through so openSession never re-loads it
+	// independently — launcher and session always agree on null-vs-templated.
+	m := mux.Load()
+
 	var req capture.Request
 	if requestPath != "" {
 		r, err := readRequestJSON(requestPath)
@@ -62,13 +66,13 @@ func SessionMain() int {
 			paneID = "terminal_" + p
 		}
 		req = capture.Capture(capture.Options{
-			Mux:         mux.Load(),
+			Mux:         m,
 			Atuin:       capture.NewAtuin(),
 			PaneID:      paneID,
 			UserRequest: os.Getenv("AI_PLAYBOOK_USER_REQUEST"),
 		})
 	}
-	return runSession(req, titleFlag)
+	return runSession(req, titleFlag, m)
 }
 
 // runSession is the session BODY (was the inline troubleshoot): route the request
@@ -77,7 +81,10 @@ func SessionMain() int {
 // into the same render+drive path, and cache it on completion. It owns the shared
 // driver + tools backend (openSession) so authoring and the run blocks drive the
 // SAME live shell.
-func runSession(req capture.Request, title string) int {
+//
+// m is the already-selected mux threaded from the launcher (or SessionMain) so the
+// session never re-loads it — launcher and session always agree on null-vs-templated.
+func runSession(req capture.Request, title string, m mux.Mux) int {
 	dbgEnv("runSession")
 	c := cache.Open()
 	noCache := os.Getenv("AI_PLAYBOOK_NO_CACHE") != ""
@@ -96,7 +103,7 @@ func runSession(req capture.Request, title string) int {
 	// want to pay that before rendering, so the session is built in the background
 	// and the render path proceeds immediately; serveCachedPlaybook delivers the
 	// orchestrator (built from the session's driver) to the ui once it lands.
-	sessCh := openSessionAsync(req)
+	sessCh := openSessionAsync(req, m)
 
 	switch d.Outcome {
 	case triage.Hit:
@@ -124,9 +131,10 @@ func runSession(req capture.Request, title string) int {
 // blank-pane startup completes. The buffer guarantees the goroutine never blocks
 // on the send even if the caller never reads (e.g. the cached path closes after
 // ui.Main via the done latch), so there's no leak.
-func openSessionAsync(req capture.Request) <-chan *session {
+// m is threaded from the caller (never re-loaded) so all paths agree on null-vs-templated.
+func openSessionAsync(req capture.Request, m mux.Mux) <-chan *session {
 	ch := make(chan *session, 1)
-	go func() { ch <- openSession(req) }()
+	go func() { ch <- openSession(req, m) }()
 	return ch
 }
 
@@ -151,14 +159,16 @@ func prefillTemplate(req capture.Request) string {
 
 // session bundles the per-troubleshoot shared resources: the single live shell
 // driver (shared by authoring tools and the ui run blocks), the tools backend
-// serving it over a unix socket, the socket path, and the path to this binary
-// (for the claude --mcp-config). A nil *session means tools setup failed and the
-// session runs in the no-agent-tools fallback (the ui opens its own driver).
+// serving it over a unix socket, the socket path, the path to this binary
+// (for the claude --mcp-config), and the selected mux. A nil *session means tools
+// setup failed and the session runs in the no-agent-tools fallback (the ui opens
+// its own driver).
 type session struct {
 	drv     *driver.Driver
 	srv     *tools.Server
 	socket  string
 	selfExe string
+	m       mux.Mux // already-selected mux (never re-loaded); used for ask seam + asker
 }
 
 // activityBuffer is the depth of the authoring fan-out's activity channel: enough
@@ -169,7 +179,12 @@ const ActivityBuffer = 16
 // unix socket. The driver's cwd is the request's project root (else its cwd).
 // Returns nil on any failure (driver open, socket dir, or Serve) so the caller
 // degrades to no-tools authoring rather than aborting.
-func openSession(req capture.Request) *session {
+//
+// m is the already-selected mux (threaded from the launcher / SessionMain): when
+// m is the null mux (no multiplexer), the ask seam falls back to stdin so the
+// agent's `ask` tool still works in headless/SSH contexts. When m is a real mux,
+// the float ask is wired as before.
+func openSession(req capture.Request, m mux.Mux) *session {
 	cwd := req.ProjectRoot
 	if cwd == "" {
 		cwd = req.CWD
@@ -187,14 +202,19 @@ func openSession(req capture.Request) *session {
 	socket := filepath.Join(dir, "tools.sock")
 	selfExe, _ := os.Executable()
 
-	// Ask seam (the ask-FLOAT): when we can resolve our own binary, the agent's
-	// `ask` tool spawns `ai-playbook input … --out <tmp>` in a float and returns
-	// the user's answer. Without selfExe we can't spawn ourselves, so ask stays the
-	// unavailable sentinel (deps.Ask nil).
+	// Ask seam: when a real multiplexer is present and we can resolve our own binary,
+	// the agent's `ask` tool spawns `ai-playbook input … --out <tmp>` in a float.
+	// When the mux is null (no multiplexer) we fall back to reading the answer from
+	// stdin (the inline session already owns the terminal, so the float path is
+	// unavailable). Without selfExe the ask seam stays nil (deps.Ask nil).
 	var ask tools.AskFunc
 	if selfExe != "" {
-		asker := floatinput.Asker{SelfExe: selfExe, Mux: mux.Load()}
-		ask = asker.Ask
+		if mux.IsNull(m) {
+			ask = stdinAsk(os.Stdin, os.Stdout)
+		} else {
+			asker := floatinput.Asker{SelfExe: selfExe, Mux: m}
+			ask = asker.Ask
+		}
 	}
 
 	// The agent's live activity (reasoning + tool calls) is no longer surfaced via
@@ -214,7 +234,7 @@ func openSession(req capture.Request) *session {
 		os.RemoveAll(dir)
 		return nil
 	}
-	return &session{drv: drv, srv: srv, socket: socket, selfExe: selfExe}
+	return &session{drv: drv, srv: srv, socket: socket, selfExe: selfExe, m: m}
 }
 
 // close tears down the tools backend, the shared driver, and the socket temp dir.
@@ -247,12 +267,14 @@ func (s *session) authoringAgent() author.Agent {
 // spawns `ai-playbook input … --out` in a float (the same floatinput.Asker the
 // agent's `ask` tool uses), opened in cwd, and returns the user's typed adjustment.
 // The ui passes a prompt ("What should I change?"); the Request is fixed text type.
-// Returns nil when we can't spawn ourselves (no selfExe / nil session) → `f` no-ops.
+// Returns nil when we can't spawn ourselves (no selfExe / nil session) or when the
+// mux is null — with no multiplexer the terminal is owned by the inline TUI and we
+// can't open a float, so the `f` keybind no-ops (same as the no-selfExe case).
 func (s *session) asker(cwd string) ui.AskFunc {
-	if s == nil || s.selfExe == "" {
+	if s == nil || s.selfExe == "" || mux.IsNull(s.m) {
 		return nil
 	}
-	a := floatinput.Asker{SelfExe: s.selfExe, Mux: mux.Load()}
+	a := floatinput.Asker{SelfExe: s.selfExe, Mux: s.m}
 	return func(prompt string) (string, bool) {
 		res, err := a.Ask(floatinput.Request{Type: "text", Prompt: prompt, Cwd: cwd})
 		if err != nil {
