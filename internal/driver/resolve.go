@@ -7,10 +7,9 @@ import (
 )
 
 // errUnsupportedShell is returned by resolveShell when the requested or
-// $SHELL-derived shell has no adapter registered yet. Tasks 4–5 will register
-// the bash and POSIX sh adapters, at which point only truly unknown names reach
-// this error.
-var errUnsupportedShell = errors.New("driver: unsupported shell; only zsh is supported (bash/sh adapters pending)")
+// $SHELL-derived shell has no adapter registered yet. Task 5 will register the
+// POSIX sh adapter, at which point only truly unknown names reach this error.
+var errUnsupportedShell = errors.New("driver: unsupported shell; only zsh and bash are supported (sh adapter pending)")
 
 // resolveShell picks the shell binary path and its shellAdapter from a selector
 // string. sel may be "", "auto", "zsh", "bash", or "sh"; "" behaves identically
@@ -20,7 +19,8 @@ var errUnsupportedShell = errors.New("driver: unsupported shell; only zsh is sup
 //  1. zsh by name: if look("zsh") succeeds, use zshAdapter.
 //  2. $SHELL fallback: take filepath.Base(getenv("SHELL")).
 //     - "zsh": try look(getenv("SHELL")) (the absolute path), use zshAdapter if found.
-//     - "bash" / "sh": return errUnsupportedShell (adapter registered in Tasks 4–5).
+//     - "bash": try look(getenv("SHELL")) (the absolute path), use bashAdapter if found.
+//     - "sh": return errUnsupportedShell (adapter registered in Task 5).
 //     - anything else / SHELL unset: return errUnsupportedShell.
 //
 // All-absent policy: errUnsupportedShell (the sh fallback is deferred to Task 5
@@ -38,8 +38,11 @@ func resolveShell(sel string, getenv func(string) string, look func(string) (str
 		return b, zshAdapter{}, nil
 
 	case "bash":
-		// Adapter registered in Task 4.
-		return "", nil, errUnsupportedShell
+		b, lerr := look("bash")
+		if lerr != nil {
+			return "", nil, fmt.Errorf("driver: bash requested but not found on PATH: %w", lerr)
+		}
+		return b, bashAdapter{}, nil
 
 	case "sh":
 		// Adapter registered in Task 5.
@@ -60,8 +63,13 @@ func resolveShell(sel string, getenv func(string) string, look func(string) (str
 				if b, lerr := look(shellEnv); lerr == nil {
 					return b, zshAdapter{}, nil
 				}
-			case "bash", "sh":
-				// Recognised but not yet supported.
+			case "bash":
+				// bash at an absolute path (e.g. $SHELL=/bin/bash but not on $PATH as "bash").
+				if b, lerr := look(shellEnv); lerr == nil {
+					return b, bashAdapter{}, nil
+				}
+			case "sh":
+				// Recognised but not yet supported (adapter registered in Task 5).
 				return "", nil, errUnsupportedShell
 			}
 		}

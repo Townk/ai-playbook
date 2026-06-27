@@ -77,8 +77,8 @@ func TestResolveShell(t *testing.T) {
 			wantA:   "zsh",
 		},
 		{
-			// zsh absent, $SHELL=/bin/bash — bash has no adapter yet (Task 4).
-			name: "auto + zsh absent + SHELL=/bin/bash → errUnsupportedShell",
+			// zsh absent, $SHELL=/bin/bash — bash adapter registered in Task 4.
+			name: "auto + zsh absent + SHELL=/bin/bash → bash",
 			sel:  "",
 			getenv: func(k string) string {
 				if k == "SHELL" {
@@ -86,16 +86,18 @@ func TestResolveShell(t *testing.T) {
 				}
 				return ""
 			},
-			look:    makeLook("/bin/bash"), // bash present but no adapter
-			wantErr: errUnsupportedShell,
+			look:    makeLook("/bin/bash"),
+			wantBin: "/bin/bash",
+			wantA:   "bash",
 		},
 		{
-			// Explicit "bash" selector — no adapter yet (Task 4).
-			name:    "explicit bash → errUnsupportedShell",
+			// Explicit "bash" selector — adapter registered in Task 4.
+			name:    "explicit bash → bash adapter",
 			sel:     "bash",
 			getenv:  noShellEnv,
-			look:    zshOnPath,
-			wantErr: errUnsupportedShell,
+			look:    makeLook("bash"),
+			wantBin: "bash",
+			wantA:   "bash",
 		},
 		{
 			// Explicit "sh" selector — no adapter yet (Task 5).
