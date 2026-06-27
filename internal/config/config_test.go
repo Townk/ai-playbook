@@ -273,3 +273,53 @@ func TestMuxConfigured_FalseWithOnlyAgentSection(t *testing.T) {
 		t.Fatal("config with only [agent] section must have MuxConfigured() == false")
 	}
 }
+
+// ── [store] section + store-dir resolver ─────────────────────────────────────
+
+// Default GlobalStoreDir: no [store].global → derives from AI_PLAYBOOK_DATA_DIR+"/playbooks".
+func TestGlobalStoreDir_Default(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", tmp)
+	cfg := Default()
+	got := cfg.GlobalStoreDir()
+	want := tmp + "/playbooks"
+	if got != want {
+		t.Fatalf("GlobalStoreDir default = %q, want %q", got, want)
+	}
+}
+
+// [store].global = "~/pb" → tilde expanded to $HOME/pb.
+func TestGlobalStoreDir_TildeExpanded(t *testing.T) {
+	data := []byte("[store]\nglobal = \"~/pb\"\n")
+	cfg, err := loadFrom(Default(), "test.toml", data)
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	home, _ := os.UserHomeDir()
+	want := filepath.Join(home, "pb")
+	if got := cfg.GlobalStoreDir(); got != want {
+		t.Fatalf("GlobalStoreDir tilde = %q, want %q", got, want)
+	}
+}
+
+// [store].project = "/abs/pb" → returned verbatim by ProjectStoreDir.
+func TestProjectStoreDir_Abs(t *testing.T) {
+	data := []byte("[store]\nproject = \"/abs/pb\"\n")
+	cfg, err := loadFrom(Default(), "test.toml", data)
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if got := cfg.ProjectStoreDir("/proj"); got != "/abs/pb" {
+		t.Fatalf("ProjectStoreDir abs = %q, want /abs/pb", got)
+	}
+}
+
+// Default project store: relative default joined onto projectRoot.
+func TestProjectStoreDir_Default(t *testing.T) {
+	cfg := Default()
+	got := cfg.ProjectStoreDir("/proj")
+	want := "/proj/.ai-playbook/playbooks"
+	if got != want {
+		t.Fatalf("ProjectStoreDir default = %q, want %q", got, want)
+	}
+}

@@ -382,3 +382,14 @@ func TestGitBranch_RealRepo(t *testing.T) {
 		t.Fatal("gitBranch returned empty branch")
 	}
 }
+
+// ── ProjectRoot ──────────────────────────────────────────────────────────────
+
+// AI_PLAYBOOK_PROJECT_ROOT env var takes priority over git detection and cwd.
+func TestProjectRoot_EnvWins(t *testing.T) {
+	t.Setenv("AI_PLAYBOOK_PROJECT_ROOT", "/from/env")
+	got := ProjectRoot()
+	if got != "/from/env" {
+		t.Fatalf("ProjectRoot = %q, want /from/env", got)
+	}
+}

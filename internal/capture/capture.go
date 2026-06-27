@@ -205,6 +205,25 @@ func splitLines(s string) []string {
 	return parts
 }
 
+// ProjectRoot resolves the current project root for the project-local store.
+// Priority:
+//  1. $AI_PLAYBOOK_PROJECT_ROOT (explicit override)
+//  2. git toplevel of the current working directory
+//  3. the current working directory itself
+func ProjectRoot() string {
+	if v := os.Getenv("AI_PLAYBOOK_PROJECT_ROOT"); v != "" {
+		return v
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	if root, ok := gitToplevel(cwd); ok {
+		return root
+	}
+	return cwd
+}
+
 // ── Live shims (thin; not unit-tested against a live system) ────────────────
 
 // gitToplevel runs `git -C <dir> rev-parse --show-toplevel`.

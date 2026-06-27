@@ -18,6 +18,8 @@ import (
 	"strings"
 
 	"github.com/BurntSushi/toml"
+
+	"github.com/Townk/ai-playbook/internal/cache"
 )
 
 // Mux holds the command templates for terminal-multiplexer actions. Each value
@@ -68,11 +70,27 @@ type Agent struct {
 	Thinking    string `toml:"thinking"`
 }
 
+// Store holds the directory configuration for the playbook stores.
+//
+// Global: explicit path for the global playbook store. An empty string means
+// "derive from the data-dir root" (cache.DefaultRoot()+"/playbooks"), so
+// AI_PLAYBOOK_DATA_DIR still wins over any compiled-in path. A "~" or "~/"
+// prefix is expanded to the user's home directory.
+//
+// Project: path for the project-local playbook store. Default is
+// ".ai-playbook/playbooks" (relative → joined onto the project root). An
+// absolute path or tilde-prefix is used verbatim (tilde-expanded).
+type Store struct {
+	Global  string `toml:"global"`
+	Project string `toml:"project"`
+}
+
 // Config is the merged ai-playbook configuration.
 type Config struct {
 	Mux    Mux    `toml:"mux"`
 	Agent  Agent  `toml:"agent"`
 	Driver Driver `toml:"driver"`
+	Store  Store  `toml:"store"`
 	// muxConfigured is set true by loadFrom when the decoded user TOML contained a
 	// [mux] section with at least one non-empty key. It is unexported so the TOML
 	// decoder ignores it; it is never set on the Default() profile.
@@ -121,6 +139,9 @@ func Default() *Config {
 		// Explicit default so a no-config run always spawns zsh; driver.resolveShell
 		// treats "" identically, but an explicit default avoids hidden coupling.
 		Driver: Driver{Shell: "zsh"},
+		// Global left empty so the resolver derives it from cache.DefaultRoot() at
+		// call time, honouring AI_PLAYBOOK_DATA_DIR without baking a literal path.
+		Store: Store{Project: ".ai-playbook/playbooks"},
 	}
 }
 
@@ -185,6 +206,8 @@ func loadFrom(base *Config, path string, data []byte) (*Config, error) {
 	mergeStr(&base.Agent.Bin, user.Agent.Bin)
 	mergeStr(&base.Agent.Thinking, user.Agent.Thinking)
 	mergeStr(&base.Driver.Shell, user.Driver.Shell)
+	mergeStr(&base.Store.Global, user.Store.Global)
+	mergeStr(&base.Store.Project, user.Store.Project)
 	return base, nil
 }
 
@@ -193,6 +216,53 @@ func mergeStr(dst *string, v string) {
 	if v != "" {
 		*dst = v
 	}
+}
+
+// expandTilde expands a leading "~" or "~/" in p to the user's home directory.
+// Any other prefix is returned unchanged.
+func expandTilde(p string) string {
+	if p == "~" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return p
+		}
+		return home
+	}
+	if strings.HasPrefix(p, "~/") {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return p
+		}
+		return filepath.Join(home, p[2:])
+	}
+	return p
+}
+
+// GlobalStoreDir returns the resolved path to the global playbook store.
+// If Store.Global is non-empty it is tilde-expanded and returned verbatim.
+// Otherwise the default is cache.DefaultRoot()+"/playbooks", which honours
+// AI_PLAYBOOK_DATA_DIR without baking a literal home-dir path.
+func (c *Config) GlobalStoreDir() string {
+	if c.Store.Global != "" {
+		return expandTilde(c.Store.Global)
+	}
+	return filepath.Join(cache.DefaultRoot(), "playbooks")
+}
+
+// ProjectStoreDir returns the resolved path to the project-local playbook store.
+// Store.Project defaults to ".ai-playbook/playbooks" when empty. If the resolved
+// path is absolute or begins with "~" it is returned verbatim (tilde-expanded);
+// otherwise it is joined onto projectRoot.
+func (c *Config) ProjectStoreDir(projectRoot string) string {
+	p := c.Store.Project
+	if p == "" {
+		p = ".ai-playbook/playbooks"
+	}
+	p = expandTilde(p)
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return filepath.Join(projectRoot, p)
 }
 
 // Subst is the set of placeholder values for a single template expansion. A
