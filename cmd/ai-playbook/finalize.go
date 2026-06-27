@@ -13,6 +13,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/internal/launcher"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
 
@@ -173,7 +174,7 @@ func driverEnvLookup() (lookup func(string) (string, bool), closeFn func()) {
 		return miss, func() {}
 	}
 	envm := map[string]string{}
-	res := d.Run("env", defaultEnvDumpTimeout)
+	res := d.Run("env", launcher.DefaultEnvDumpTimeout)
 	if res.Exit == 0 {
 		for _, line := range strings.Split(res.Out, "\n") {
 			if i := strings.IndexByte(line, '='); i > 0 {

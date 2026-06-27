@@ -13,6 +13,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/launcher"
 )
 
 // drainActivity reads the activity channel to close, returning everything it saw.
@@ -76,7 +77,7 @@ func TestAuthorEventsFanOut_Integration(t *testing.T) {
 		t.Fatalf("AuthorEvents: %v", err)
 	}
 
-	reader, activity, fo := agentstream.FanOut(events, closeFn, activityBuffer)
+	reader, activity, fo := agentstream.FanOut(events, closeFn, launcher.ActivityBuffer)
 	defer reader.Close()
 
 	actCh := make(chan []string, 1)
