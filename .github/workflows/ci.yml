@@ -23,6 +23,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Install zsh (the shell driver and its tests spawn a zsh shell)
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
       - name: Build
         run: go build ./...
 
