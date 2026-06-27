@@ -211,6 +211,8 @@ func Main() int {
 	fs.StringVar(&cachedStr, "cached", "", "ISO-8601 timestamp: when set, show a 'cached' badge pill in the header (cache replay)")
 	var cwd string
 	fs.StringVar(&cwd, "cwd", "", "working dir for the in-process shell driver (default: dir of <file.md>, else $PWD)")
+	var fileFlag string
+	fs.StringVar(&fileFlag, "file", "", "playbook file to render (alternative to the positional arg)")
 	// os.Args[1] is the "run" subcommand (dispatched from the root main); flags
 	// start at os.Args[2:]. Guard for direct/odd invocations.
 	argv := os.Args[2:]
@@ -218,6 +220,15 @@ func Main() int {
 		argv = nil
 	}
 	_ = fs.Parse(argv) // flag.ExitOnError: Parse never returns a non-nil error
+
+	// Source file: --file takes precedence over the bare positional. The positional
+	// stays supported for back-compat (serveCachedPlaybook/show migrate to --file via
+	// the launcher reshape; a direct `run <file.md>` still works). When both are set,
+	// --file wins.
+	file := fileFlag
+	if file == "" {
+		file = fs.Arg(0)
+	}
 
 	var cachedAt time.Time
 	isCached := false
@@ -240,7 +251,7 @@ func Main() int {
 	// finalized/served playbook that carries front matter. Empty for stdin streams
 	// and for files without a front-matter description.
 	playbookSubtitle := ""
-	if file := fs.Arg(0); file != "" {
+	if file != "" {
 		// `ai-playbook run <file.md>` — render a finalized playbook artifact from a
 		// file (also the cached-serve path). Read it fully, strip any preamble above
 		// the H1 title, and use the playbook title as the pager header. The stripped
@@ -323,7 +334,7 @@ func Main() int {
 		// are still consumed below — they don't need the driver.
 		driverPending = true
 	} else if pendingAnswerRegen == nil {
-		if file := fs.Arg(0); file != "" {
+		if file != "" {
 			// Reuse the session's shared driver when stashed (the troubleshoot
 			// cached-replay path), so run blocks execute in the shell the tools
 			// backend exposes; else open our own. A session-supplied driver is owned

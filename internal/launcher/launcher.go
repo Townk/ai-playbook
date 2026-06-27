@@ -608,7 +608,10 @@ func AnswerMain() int {
 	if cwd != "" {
 		argv = append(argv, "--cwd", cwd)
 	}
-	argv = append(argv, contentFile)
+	// Pass the prose file via --file (not a bare positional): ui.Main honors --file as
+	// the source. This bypasses RunMain (and adapt-on-run) deliberately — the prose
+	// file carries no front matter, so it renders as-is.
+	argv = append(argv, "--file", contentFile)
 	os.Args = argv
 	return ui.Main()
 }

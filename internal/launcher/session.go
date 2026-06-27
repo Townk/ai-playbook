@@ -856,7 +856,10 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *
 		// cached playbook's own H1 until/unless the user regenerates).
 		argv = append(argv, "--title", title)
 	}
-	argv = append(argv, tmp)
+	// Pass the temp file via --file (not a bare positional): ui.Main honors --file as
+	// the source. This bypasses RunMain (and adapt-on-run) deliberately — the temp
+	// file carries no front matter, so it renders as-is.
+	argv = append(argv, "--file", tmp)
 	os.Args = argv
 	code := ui.Main()
 

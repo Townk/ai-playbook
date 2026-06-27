@@ -21,12 +21,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/launcher"
 	"github.com/Townk/ai-playbook/internal/mcpserver"
-	"github.com/Townk/ai-playbook/internal/ui"
 )
 
 // version is the binary's version string. It defaults to "dev" for local
@@ -61,11 +59,9 @@ func main() {
 	case "session":
 		os.Exit(launcher.SessionMain())
 	case "run":
-		// The `run` subcommand opens its own driver; honor the configured shell.
-		// ui stays config-agnostic — it receives the selector as DATA via SetShell.
-		cfg, _ := config.Load()
-		ui.SetShell(cfg.Driver.Shell)
-		os.Exit(ui.Main())
+		// RunMain owns config loading + the configured-shell hand-off and resolves
+		// the --playbook/--file/bare argument before rendering via ui.Main.
+		os.Exit(launcher.RunMain())
 	case "answer":
 		os.Exit(launcher.AnswerMain())
 	case "finalize":
