@@ -1,7 +1,9 @@
 package floatinput
 
 import (
+	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -17,7 +19,8 @@ type recordMux struct {
 	floats   [][]string       // argv of each input float
 	lastOpts mux.SpawnOptions // the last SpawnInputFloat opts (geometry assertions)
 	answer   string           // value the simulated float "submits" to --out
-	cancel   bool             // when true, write nothing (simulate cancel)
+	cancel   bool             // when true, write cancel marker (simulate dismiss)
+	spawnErr error            // when non-nil, SpawnInputFloat returns this error
 }
 
 func (m *recordMux) DumpScreen(string) (string, error)  { return "", nil }
@@ -30,6 +33,9 @@ func (m *recordMux) SpawnFloat(mux.SpawnOptions) error  { return nil }
 // opts (argv + absolute geometry) and simulates the floated `input --out <file>`
 // writing the submitted value (or the cancel marker).
 func (m *recordMux) SpawnInputFloat(opts mux.SpawnOptions) error {
+	if m.spawnErr != nil {
+		return m.spawnErr
+	}
 	m.lastOpts = opts
 	m.floats = append(m.floats, opts.Cmd)
 	out := outFromArgv(opts.Cmd)
@@ -206,4 +212,212 @@ func after(ss []string, key string) string {
 		}
 	}
 	return ""
+}
+
+// ---------------------------------------------------------------------------
+// AskThinking tests
+// ---------------------------------------------------------------------------
+
+// TestAskThinking_Submit verifies the happy path: the float writes the answer
+// file, poll_ reads it, AskThinking returns Submitted=true plus the out path.
+// It also checks that --thinking is present in the spawned argv, confirming
+// buildCmd wires the flag when req.Thinking is set.
+func TestAskThinking_Submit(t *testing.T) {
+	m := &recordMux{answer: "my question"}
+	a := Asker{SelfExe: "/path/ai-playbook", Mux: m, poll: time.Millisecond}
+	res, out, err := a.AskThinking(Request{Type: "text", Title: "Ask", Prompt: "What?"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// AskThinking leaves the temp dir for the async .done consumer; clean up here.
+	if out != "" {
+		defer os.RemoveAll(filepath.Dir(out))
+	}
+	if !res.Submitted {
+		t.Fatal("expected Submitted=true")
+	}
+	if res.Value != "my question" {
+		t.Fatalf("value = %q, want %q", res.Value, "my question")
+	}
+	if out == "" {
+		t.Fatal("expected non-empty out path")
+	}
+	if !contains(m.floats[0], "--thinking") {
+		t.Errorf("AskThinking should pass --thinking to the float\nargv: %v", m.floats[0])
+	}
+}
+
+// TestAskThinking_Cancel verifies that a dismissed float (cancel marker written)
+// results in Submitted=false without error.
+func TestAskThinking_Cancel(t *testing.T) {
+	m := &recordMux{cancel: true}
+	a := Asker{SelfExe: "/path/ai-playbook", Mux: m, poll: time.Millisecond, Timeout: 50 * time.Millisecond}
+	res, out, err := a.AskThinking(Request{Type: "text"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out != "" {
+		defer os.RemoveAll(filepath.Dir(out))
+	}
+	if res.Submitted {
+		t.Fatal("expected Submitted=false on cancel")
+	}
+}
+
+// TestAskThinking_SpawnError verifies that a mux spawn failure is propagated as
+// an error (and the temp dir is cleaned up by AskThinking).
+func TestAskThinking_SpawnError(t *testing.T) {
+	m := &recordMux{spawnErr: errors.New("pane spawn failed")}
+	a := Asker{SelfExe: "/path/ai-playbook", Mux: m, poll: time.Millisecond}
+	_, _, err := a.AskThinking(Request{Type: "text"})
+	if err == nil {
+		t.Fatal("expected error from spawn failure, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Ask spawn-error path
+// ---------------------------------------------------------------------------
+
+// TestAsk_SpawnError verifies that Ask propagates a mux spawn failure.
+func TestAsk_SpawnError(t *testing.T) {
+	m := &recordMux{spawnErr: errors.New("pane spawn failed")}
+	a := Asker{SelfExe: "/path/ai-playbook", Mux: m, poll: time.Millisecond}
+	_, err := a.Ask(Request{Type: "text"})
+	if err == nil {
+		t.Fatal("expected error from spawn failure, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// buildCmd --thinking flag
+// ---------------------------------------------------------------------------
+
+// TestBuildCmd_ThinkingFlag verifies the --thinking flag: present for text
+// requests with Thinking=true, absent for non-text types regardless of the
+// field value.
+func TestBuildCmd_ThinkingFlag(t *testing.T) {
+	a := Asker{SelfExe: "/path/ai-playbook"}
+	cmd := a.buildCmd(Request{Type: "text", Thinking: true}, "/tmp/out")
+	if !contains(cmd, "--thinking") {
+		t.Errorf("buildCmd(text, Thinking=true) missing --thinking\ncmd: %v", cmd)
+	}
+	// Non-text type must NOT receive --thinking even when the field is set.
+	cmd2 := a.buildCmd(Request{Type: "choose", Thinking: true, Choices: []string{"a"}}, "/tmp/out")
+	if contains(cmd2, "--thinking") {
+		t.Errorf("buildCmd(choose, Thinking=true) must not pass --thinking\ncmd: %v", cmd2)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// poll_ timeout path (no file, no cancel marker)
+// ---------------------------------------------------------------------------
+
+// TestPoll_TimeoutWithoutFile drives poll_ to its timeout exit: neither the
+// answer file nor the cancel marker is written, so the loop exhausts the
+// deadline and returns Submitted=false. Uses a short poll+timeout so the test
+// runs in a few milliseconds.
+func TestPoll_TimeoutWithoutFile(t *testing.T) {
+	dir, err := os.MkdirTemp("", "floatinput-poll-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	out := filepath.Join(dir, "answer")
+	a := Asker{poll: time.Millisecond, Timeout: 5 * time.Millisecond}
+	res := a.poll_(out)
+	if res.Submitted {
+		t.Fatal("expected Submitted=false after timeout with no file")
+	}
+}
+
+// TestPoll_DefaultPollInterval exercises the default-interval branch
+// (a.poll == 0 → interval = pollInterval). Writing the cancel file before
+// calling poll_ ensures the loop exits on the first iteration so the test
+// completes without sleeping through a full pollInterval (100 ms).
+func TestPoll_DefaultPollInterval(t *testing.T) {
+	dir, err := os.MkdirTemp("", "floatinput-poll-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	out := filepath.Join(dir, "answer")
+	// Pre-write the cancel marker so the loop returns immediately.
+	if err := os.WriteFile(out+cancelSuffix, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := Asker{poll: 0, Timeout: time.Second} // poll=0 triggers interval=pollInterval
+	res := a.poll_(out)
+	if res.Submitted {
+		t.Fatal("expected Submitted=false")
+	}
+}
+
+// TestPoll_DefaultTimeout exercises the default-timeout branch
+// (a.Timeout == 0 → timeout = defaultTimeout). Pre-writing the cancel file
+// keeps the test instant despite the 30-minute default deadline.
+func TestPoll_DefaultTimeout(t *testing.T) {
+	dir, err := os.MkdirTemp("", "floatinput-poll-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+	out := filepath.Join(dir, "answer")
+	if err := os.WriteFile(out+cancelSuffix, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	a := Asker{poll: time.Millisecond, Timeout: 0} // Timeout=0 triggers defaultTimeout
+	res := a.poll_(out)
+	if res.Submitted {
+		t.Fatal("expected Submitted=false")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// measureHeight success path
+// ---------------------------------------------------------------------------
+
+// TestMeasureHeight_ValidOutput exercises the success return of measureHeight
+// (the path skipped when SelfExe is not a real binary). A minimal shell script
+// that echoes a valid integer is used as a stand-in for the ai-playbook binary.
+func TestMeasureHeight_ValidOutput(t *testing.T) {
+	dir, err := os.MkdirTemp("", "floatinput-measure-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	// Write a tiny helper that outputs a valid height and exits 0.
+	script := filepath.Join(dir, "fake-playbook")
+	const scriptBody = "#!/bin/sh\necho 15\n"
+	if err := os.WriteFile(script, []byte(scriptBody), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	a := Asker{SelfExe: script}
+	h := a.measureHeight(Request{Type: "text"})
+	if h != 15 {
+		t.Errorf("measureHeight = %d, want 15", h)
+	}
+}
+
+// TestMeasureHeight_ZeroOutputFallsBack verifies that an output of "0" (or
+// any non-positive integer) triggers the fallback height.
+func TestMeasureHeight_ZeroOutputFallsBack(t *testing.T) {
+	dir, err := os.MkdirTemp("", "floatinput-measure-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(dir)
+
+	script := filepath.Join(dir, "fake-playbook-zero")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\necho 0\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	a := Asker{SelfExe: script}
+	h := a.measureHeight(Request{Type: "text"})
+	if h != fallbackHeight {
+		t.Errorf("measureHeight with output=0 = %d, want fallbackHeight %d", h, fallbackHeight)
+	}
 }
