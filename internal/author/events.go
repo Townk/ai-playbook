@@ -1,6 +1,7 @@
 package author
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -237,7 +238,10 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 		}
 		cmd.Env = append(cmd.Env, extraEnv...)
 	}
-	cmd.Stderr = os.Stderr
+	// Capture stderr (don't pipe to the terminal — it bled into the no-mux inline
+	// UI); surface it only when the process fails. See author.go withStderr.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return nil, nil, err
@@ -256,7 +260,7 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 	}()
 
 	wait := func() error {
-		return cmd.Wait()
+		return withStderr(cmd.Wait(), &stderr)
 	}
 	return events, wait, nil
 }

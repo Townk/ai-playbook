@@ -1,14 +1,49 @@
 package author
 
 import (
+	"bytes"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/kb"
 )
+
+// maxStderrTail caps how much captured harness stderr we surface on failure.
+const maxStderrTail = 2 << 10 // 2 KiB
+
+// The harness (claude) writes routine chatter to stderr — e.g. its
+// untrusted-workspace permission warnings. Piping that straight to os.Stderr
+// polluted the no-mux INLINE UI (the input box renders on /dev/tty; the
+// harness's stderr bled around it). So we CAPTURE the harness's stderr into a
+// buffer and surface it only when the process FAILS (where it is diagnostic).
+// Genuine start-time errors (e.g. "claude not found") are returned by
+// exec.Start itself, so they are unaffected.
+
+// stderrTail returns the trimmed, capped tail of captured stderr.
+func stderrTail(b *bytes.Buffer) string {
+	s := strings.TrimSpace(b.String())
+	if len(s) > maxStderrTail {
+		s = "…" + s[len(s)-maxStderrTail:]
+	}
+	return s
+}
+
+// withStderr annotates a non-nil process error with the captured stderr tail so
+// failures stay diagnostic; on success (nil error) the captured chatter is dropped.
+func withStderr(err error, b *bytes.Buffer) error {
+	if err == nil {
+		return nil
+	}
+	if tail := stderrTail(b); tail != "" {
+		return fmt.Errorf("%w\n%s", err, tail)
+	}
+	return err
+}
 
 // Agent runs the capable agent with the given system prompt and user message and
 // returns its stdout as a STREAM (io.ReadCloser) so the ui can render the produced
@@ -98,7 +133,9 @@ func runClaude(systemPrompt, userMessage string, extraArgs []string) (io.ReadClo
 	args = append(args, "--append-system-prompt", systemPrompt, userMessage)
 
 	cmd := exec.Command(claudeBin(), args...)
-	cmd.Stderr = os.Stderr
+	// Capture stderr (don't pipe to the terminal); surface it only on failure.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
@@ -107,14 +144,16 @@ func runClaude(systemPrompt, userMessage string, extraArgs []string) (io.ReadClo
 	if err := cmd.Start(); err != nil {
 		return nil, err
 	}
-	return &procStream{ReadCloser: stdout, cmd: cmd}, nil
+	return &procStream{ReadCloser: stdout, cmd: cmd, stderr: &stderr}, nil
 }
 
 // procStream wraps the command's stdout pipe so Close also reaps the process
-// (Wait), preventing a zombie and surfacing a non-zero exit to the caller.
+// (Wait), preventing a zombie and surfacing a non-zero exit to the caller. The
+// captured stderr is attached to a non-zero-exit error and dropped on success.
 type procStream struct {
 	io.ReadCloser
-	cmd *exec.Cmd
+	cmd    *exec.Cmd
+	stderr *bytes.Buffer
 }
 
 func (p *procStream) Close() error {
@@ -123,5 +162,5 @@ func (p *procStream) Close() error {
 	if cerr != nil {
 		return cerr
 	}
-	return werr
+	return withStderr(werr, p.stderr)
 }
