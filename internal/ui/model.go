@@ -150,6 +150,11 @@ type model struct {
 	askMode   bool
 	ask       *input.Ask
 	askReq    askbridge.Request
+	// askCompletion, when set, fires when a VIEWER-initiated overlay (not a bridge
+	// agent ask) completes: handleAskKey calls it instead of askReq.Respond, and the
+	// returned msg becomes the update result. The no-mux `refine` (f) path sets it to
+	// route the typed refinement into an fChangeMsg amend. nil → the bridge path.
+	askCompletion func(value string, submitted bool) tea.Msg
 
 	// streaming + thinking
 	thinking      bool
@@ -1092,28 +1097,37 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
-		case "f":
-			// Stage 5 (spec §D): `f` is the user-initiated proactive amend. It opens the
-			// request-input float ("What should I change?"), the user types a free-form
-			// adjustment, and the agent re-authors the DISPLAYED document in AMEND mode
-			// (base=m.md — amend what's shown) → REPLACE draft. Repeatable (each `f`
-			// amends the new content); `w` then commits. Only meaningful while settled
-			// (not mid-stream) and only when an asker is wired (off-zellij/tests → no-op).
+		case "r":
+			// `r` is REFINE: the playbook is final (nothing pending from the model), but
+			// the user can refine it. It captures a free-form adjustment and the agent
+			// re-authors the DISPLAYED document in AMEND mode (base=m.md) → REPLACE draft.
+			// Repeatable (each refine amends the new content); `w` then commits. Only while
+			// settled (not mid-stream). MUX → the request-input float (m.asker); NO-MUX →
+			// the same in-viewer ask overlay the agent's `ask` tool uses (m.askBridge).
 			if m.streaming {
 				return m, nil
 			}
-			if m.asker == nil {
-				m.status = "follow-up unavailable in this mode"
-				return m, nil
+			base := m.md // snapshot now so a later stream can't race the amend base
+			if m.asker != nil {
+				// MUX: spawn the float + poll OFF the event loop, feed back an fChangeMsg.
+				ask := m.asker
+				return m, func() tea.Msg {
+					value, submitted := ask("What should I change?")
+					return fChangeMsg{base: base, value: value, submitted: submitted}
+				}
 			}
-			// Spawn the float + poll OFF the event loop, then feed the answer back as an
-			// fChangeMsg. The base is snapshotted now so a later stream can't race it.
-			ask := m.asker
-			base := m.md
-			return m, func() tea.Msg {
-				value, submitted := ask("What should I change?")
-				return fChangeMsg{base: base, value: value, submitted: submitted}
+			if m.askBridge != nil {
+				// NO-MUX: open the in-viewer ask overlay (reused from the agent-ask path);
+				// its completion routes the refinement into the amend via fChangeMsg.
+				m.askMode = true
+				m.askCompletion = func(value string, submitted bool) tea.Msg {
+					return fChangeMsg{base: base, value: value, submitted: submitted}
+				}
+				m.ask = input.NewAsk("ai-playbook", "What should I change?", "", "text", nil)
+				return m, m.ask.Init()
 			}
+			m.status = "refine unavailable in this mode"
+			return m, nil
 		case "y":
 			// Confirm "Yes" (spec §A): the verify-success resolved — generate the final
 			// playbook draft (REPLACE). Only meaningful while the confirm row is shown.

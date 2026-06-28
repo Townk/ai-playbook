@@ -1974,10 +1974,10 @@ func (f *fakeAsker) fn(prompt string) (string, bool) {
 	return f.value, f.submitted
 }
 
-// Stage 5 (spec §D): pressing `f` with an asker wired issues a cmd that calls the
+// Refine (spec §D): pressing `r` with a (mux) asker wired issues a cmd that calls the
 // asker; the resulting fChangeMsg carries the snapshotted pager content as the base
 // and the typed value, and is submitted.
-func TestFKeyIssuesAskCmd(t *testing.T) {
+func TestRefineKeyIssuesAskCmd(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "", "")
 	m.md = "# Playbook — current\n\nstep\n"
 	m.streaming = false
@@ -1985,15 +1985,15 @@ func TestFKeyIssuesAskCmd(t *testing.T) {
 	fk := &fakeAsker{value: "also configure the NDK", submitted: true}
 	m.asker = fk.fn
 
-	nm, cmd := m.Update(key("f"))
+	nm, cmd := m.Update(key("r"))
 	m = nm.(model)
 	if cmd == nil {
-		t.Fatal("`f` with an asker must issue a cmd")
+		t.Fatal("`r` with an asker must issue a cmd")
 	}
 	msg := cmd()
 	fc, ok := msg.(fChangeMsg)
 	if !ok {
-		t.Fatalf("`f` cmd must yield an fChangeMsg, got %T", msg)
+		t.Fatalf("`r` cmd must yield an fChangeMsg, got %T", msg)
 	}
 	if fk.calls != 1 {
 		t.Fatalf("asker calls = %d, want 1", fk.calls)
@@ -2096,31 +2096,32 @@ func TestFChangeEmptyValueIsNoOp(t *testing.T) {
 	}
 }
 
-// Stage 5 (spec §D): with no asker wired (off-zellij / tests), `f` is a no-op (a brief
+// Refine (spec §D): with no asker AND no overlay bridge, `r` is a no-op (a brief
 // status, no cmd, no draft).
-func TestFKeyNilAskerNoOp(t *testing.T) {
+func TestRefineKeyNilAskerNoOp(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "x", "x")
 	m.md = "# Playbook — current\n\nstep\n"
 	m.streaming = false
 	m.asker = nil
+	m.askBridge = nil // no float asker AND no overlay bridge → refine is a genuine no-op
 	m.reflow()
 
-	nm, cmd := m.Update(key("f"))
+	nm, cmd := m.Update(key("r"))
 	m = nm.(model)
 	if cmd != nil {
-		t.Error("`f` with no asker must be a no-op (nil cmd)")
+		t.Error("`r` with no asker/bridge must be a no-op (nil cmd)")
 	}
 	if m.finalDraft {
-		t.Error("`f` with no asker must not mark a draft")
+		t.Error("`r` with no asker/bridge must not mark a draft")
 	}
 	if fe.calls != 0 {
-		t.Errorf("`f` with no asker must not call the producer, calls=%d", fe.calls)
+		t.Errorf("`r` with no asker/bridge must not call the producer, calls=%d", fe.calls)
 	}
 }
 
-// Stage 5 (spec §D): `f` while streaming is a no-op — amends only apply to settled
+// Refine (spec §D): `r` while streaming is a no-op — amends only apply to settled
 // content (and must not be issued while a generation is in flight).
-func TestFKeyWhileStreamingNoOp(t *testing.T) {
+func TestRefineKeyWhileStreamingNoOp(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "x", "x")
 	m.md = "# Playbook — current\n\nstep\n"
 	m.streaming = true
@@ -2128,13 +2129,13 @@ func TestFKeyWhileStreamingNoOp(t *testing.T) {
 	m.asker = fk.fn
 	m.reflow()
 
-	nm, cmd := m.Update(key("f"))
+	nm, cmd := m.Update(key("r"))
 	_ = nm.(model)
 	if cmd != nil {
-		t.Error("`f` while streaming must be a no-op (nil cmd)")
+		t.Error("`r` while streaming must be a no-op (nil cmd)")
 	}
 	if fk.calls != 0 {
-		t.Errorf("`f` while streaming must not call the asker, calls=%d", fk.calls)
+		t.Errorf("`r` while streaming must not call the asker, calls=%d", fk.calls)
 	}
 }
 

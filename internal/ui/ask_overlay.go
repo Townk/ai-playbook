@@ -40,6 +40,15 @@ func (m *model) handleAskKey(msg tea.Msg) tea.Cmd {
 	if !done {
 		return cmd
 	}
+	// A VIEWER-initiated overlay (refine) routes its result to askCompletion and does
+	// NOT reply to the agent or re-arm the bridge — it wasn't a bridge ask.
+	if complete := m.askCompletion; complete != nil {
+		m.askMode = false
+		m.ask = nil
+		m.askCompletion = nil
+		out := complete(value, submitted)
+		return func() tea.Msg { return out }
+	}
 	m.askReq.Respond(askbridge.Answer{Value: value, Submitted: submitted})
 	m.askMode = false
 	m.ask = nil

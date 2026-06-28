@@ -44,6 +44,35 @@ func TestAskOverlay_OpensAndRespondsOnSubmit(t *testing.T) {
 	}
 }
 
+// `f` (refine) in no-mux — no float asker, but an ask bridge present — opens the
+// SAME in-viewer overlay the agent's ask uses, and routes its result into an amend
+// (fChangeMsg) rather than a bridge reply. Previously this no-op'd.
+func TestRefineNoMuxOpensOverlayAndAmends(t *testing.T) {
+	m := newModel("agent", "# T\n\n```bash {id=fix}\nx\n```\n")
+	m.width, m.height = 100, 30
+	m.streaming = false
+	m.reflow()
+	m.asker = nil                 // no-mux: no request-input float
+	m.askBridge = askbridge.New() // overlay capability present
+	base := m.md
+	m2, cmd := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	m = m2.(model)
+	if !m.askMode || m.ask == nil {
+		t.Fatal("refine in no-mux must open the in-viewer ask overlay")
+	}
+	if m.askCompletion == nil || cmd == nil {
+		t.Fatal("refine must set askCompletion and return the overlay Init cmd")
+	}
+	if !strings.Contains(m.viewString(), "What should I change?") {
+		t.Error("overlay must show the refine prompt")
+	}
+	out := m.askCompletion("use yarn", true)
+	fc, ok := out.(fChangeMsg)
+	if !ok || fc.base != base || fc.value != "use yarn" || !fc.submitted {
+		t.Fatalf("askCompletion must produce fChangeMsg{base,value,submitted}, got %#v", out)
+	}
+}
+
 func TestAskOverlay_EscCancelsAndRespondsUnsubmitted(t *testing.T) {
 	b := askbridge.New()
 	answered := make(chan askbridge.Answer, 1)

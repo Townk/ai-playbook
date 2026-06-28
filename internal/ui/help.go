@@ -23,7 +23,7 @@ var helpSections = []helpSection{
 		{"Actions", []helpBind{
 			{"󱁐", "hint mode for keyboard-only click"},
 			{"󰳽", "mouse clicks activate buttons"},
-			{"f", "follow-up with agent manually"},
+			{"r", "refine the playbook"},
 			{"w", "wrap-up work in the playbook"},
 			{"c", "generate a playbook for the solution"},
 			{"d", "view original → adapted diff (adapted run)"},
