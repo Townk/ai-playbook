@@ -25,14 +25,15 @@ type Section struct {
 // ContentItem is one prose or code element. Kind discriminates which fields apply
 // (a flat discriminator, not a oneOf, for tool-use reliability).
 type ContentItem struct {
-	Kind     string   `json:"kind" jsonschema:"one of: text, callout, code"`
-	Text     string   `json:"text,omitempty" jsonschema:"for kind=text or kind=callout: literate markdown prose (callout renders as a blockquote note)"`
-	Lang     string   `json:"lang,omitempty" jsonschema:"for kind=code: the language/interpreter — bash|zsh|sh|python|diff|console|…"`
-	Code     string   `json:"code,omitempty" jsonschema:"for kind=code: the block content"`
-	ID       string   `json:"id,omitempty" jsonschema:"for kind=code: optional stable id for value-passing; we auto-assign when omitted"`
-	Needs    []string `json:"needs,omitempty" jsonschema:"for kind=code: ids of earlier blocks this one depends on"`
-	Rollback string   `json:"rollback,omitempty" jsonschema:"for kind=code: the id of the block this one rolls back"`
-	Static   bool     `json:"static,omitempty" jsonschema:"for kind=code: true if the block is non-runnable (console output / illustrative)"`
+	Kind       string   `json:"kind" jsonschema:"one of: text, callout, code"`
+	Text       string   `json:"text,omitempty" jsonschema:"for kind=text or kind=callout: literate markdown prose"`
+	Admonition string   `json:"admonition,omitempty" jsonschema:"for kind=callout: the callout type — one of note|tip|important|warning|caution (default note); selects the icon + color"`
+	Lang       string   `json:"lang,omitempty" jsonschema:"for kind=code: the language/interpreter — bash|zsh|sh|python|diff|console|…"`
+	Code       string   `json:"code,omitempty" jsonschema:"for kind=code: the block content"`
+	ID         string   `json:"id,omitempty" jsonschema:"for kind=code: optional stable id for value-passing; we auto-assign when omitted"`
+	Needs      []string `json:"needs,omitempty" jsonschema:"for kind=code: ids of earlier blocks this one depends on"`
+	Rollback   string   `json:"rollback,omitempty" jsonschema:"for kind=code: the id of the block this one rolls back"`
+	Static     bool     `json:"static,omitempty" jsonschema:"for kind=code: true if the block is non-runnable (console output / illustrative)"`
 }
 
 // Step is a single command used for the top-level verify.

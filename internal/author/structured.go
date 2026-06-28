@@ -21,7 +21,10 @@ func StructuredToolInstruction() string {
 		"- `intro`: optional lead prose.\n" +
 		"- `sections[]`: each has a `heading` and an ordered `content[]`. Each content item is one of:\n" +
 		"  - `{kind:\"text\", text}` — literate prose (markdown).\n" +
-		"  - `{kind:\"callout\", text}` — a note/warning (rendered as a blockquote).\n" +
+		"  - `{kind:\"callout\", text, admonition}` — a STYLED callout (icon + color). Set " +
+		"`admonition` to one of `note`, `tip`, `important`, `warning`, `caution`. Use them " +
+		"deliberately: `warning`/`caution` for risky or destructive steps, `important` for " +
+		"must-knows, `tip` for shortcuts, `note` for asides.\n" +
 		"  - `{kind:\"code\", lang, code, id?, needs?, rollback?, static?}` — a block. Mark non-runnable " +
 		"output (console transcripts, illustrations) `static:true`. Use `id`+`needs` for value-passing " +
 		"between runnable blocks (omit `id` to have one assigned).\n" +

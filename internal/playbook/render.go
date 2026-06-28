@@ -23,7 +23,11 @@ func Render(pb Playbook) string {
 				writeProse(&b, it.Text)
 			case "callout":
 				if s := strings.TrimSpace(it.Text); s != "" {
-					b.WriteString("\n")
+					typ := strings.ToUpper(strings.TrimSpace(it.Admonition))
+					if typ == "" {
+						typ = "NOTE"
+					}
+					b.WriteString("\n> [!" + typ + "]\n")
 					b.WriteString(blockquote(s))
 				}
 			case "code":

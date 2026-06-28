@@ -12,6 +12,9 @@ func TestStructuredToolInstruction_MandatesSubmit(t *testing.T) {
 		"project_bound",   // explains the gating bool
 		"do NOT write",    // forbids markdown output
 		"callout",         // explains content kinds
+		"admonition",      // names the callout-type field
+		"warning",         // lists at least one callout type
+		"caution",         // …and another
 		"verify",          // explains the verify field
 	} {
 		if !strings.Contains(s, want) {
