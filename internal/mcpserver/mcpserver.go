@@ -13,10 +13,12 @@ package mcpserver
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/Townk/ai-playbook/internal/playbook"
 	"github.com/Townk/ai-playbook/internal/tools"
 )
 
@@ -72,6 +74,11 @@ func newServer(socketPath string) *mcp.Server {
 		Description: "Ask the user a question and return their answer. The only way to get input from the user.",
 	}, askHandler(socketPath))
 
+	mcp.AddTool(server, &mcp.Tool{
+		Name:        "submit_playbook",
+		Description: "Submit the FINISHED playbook as structured data. This is your FINAL action and your deliverable — do NOT write the playbook as markdown in your reply; call this tool with the playbook object instead. The host renders the markdown. If it returns a validation error, fix the object and call submit_playbook again.",
+	}, submitPlaybookHandler(socketPath))
+
 	return server
 }
 
@@ -121,6 +128,14 @@ func renderResult(tool string, res tools.Result) string {
 			return res.Error // the "interactive ask not available in this context" sentinel
 		}
 		return res.Answer
+	case "submit_playbook":
+		if res.Error != "" {
+			return "validation error: " + res.Error
+		}
+		if res.OK {
+			return "saved"
+		}
+		return "not saved"
 	default:
 		return fmt.Sprintf("%+v", res)
 	}
@@ -144,5 +159,16 @@ func askHandler(socketPath string) mcp.ToolHandlerFor[askInput, any] {
 	return func(_ context.Context, _ *mcp.CallToolRequest, in askInput) (*mcp.CallToolResult, any, error) {
 		r, err := forward(socketPath, tools.Call{Tool: "ask", Prompt: in.Prompt, Type: in.Type})
 		return r, nil, err
+	}
+}
+
+func submitPlaybookHandler(socketPath string) mcp.ToolHandlerFor[playbook.Playbook, any] {
+	return func(_ context.Context, _ *mcp.CallToolRequest, in playbook.Playbook) (*mcp.CallToolResult, any, error) {
+		raw, err := json.Marshal(in)
+		if err != nil {
+			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "could not encode playbook: " + err.Error()}}}, nil, nil
+		}
+		r, ferr := forward(socketPath, tools.Call{Tool: "submit_playbook", Playbook: raw})
+		return r, nil, ferr
 	}
 }

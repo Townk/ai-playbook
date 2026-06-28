@@ -2,6 +2,7 @@ package mcpserver
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"net"
 	"os"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/Townk/ai-playbook/internal/playbook"
 	"github.com/Townk/ai-playbook/internal/tools"
 )
 
@@ -135,6 +137,69 @@ func TestForward_BackendUnreachable(t *testing.T) {
 	}
 	if !res.IsError {
 		t.Errorf("forward to a dead backend should set IsError")
+	}
+}
+
+func TestForward_SubmitPlaybook(t *testing.T) {
+	fb := startFakeBackend(t, tools.Result{OK: true})
+
+	pb := playbook.Playbook{Title: "T", Sections: []playbook.Section{{Heading: "S",
+		Content: []playbook.ContentItem{{Kind: "code", Lang: "bash", Code: "x", ID: "fix"}}}}}
+	raw, _ := json.Marshal(pb)
+	res, err := forward(fb.socket, tools.Call{Tool: "submit_playbook", Playbook: raw})
+	if err != nil {
+		t.Fatalf("forward: %v", err)
+	}
+	if res.IsError {
+		t.Errorf("healthy submit should not be IsError: %+v", res)
+	}
+	got := fb.lastCall()
+	if got.Tool != "submit_playbook" || len(got.Playbook) == 0 {
+		t.Errorf("backend got %+v, want submit_playbook with payload", got)
+	}
+	if txt := contentText(t, res); !strings.Contains(txt, "saved") {
+		t.Errorf("ok submit result = %q, want 'saved'", txt)
+	}
+}
+
+// TestSubmitPlaybook_SchemaShape asserts that the submit_playbook tool's input
+// schema is generated from playbook.Playbook (i.e. it mentions the playbook
+// fields). The brief uses srv.ListTools which does not exist on *mcp.Server;
+// ListTools lives on mcp.ClientSession. We connect a client to the server via
+// mcp.NewInMemoryTransports and call cs.ListTools instead.
+func TestSubmitPlaybook_SchemaShape(t *testing.T) {
+	ctx := context.Background()
+	srv := newServer("/tmp/unused.sock")
+	st, ct := mcp.NewInMemoryTransports()
+	if _, err := srv.Connect(ctx, st, nil); err != nil {
+		t.Fatalf("server.Connect: %v", err)
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	cs, err := client.Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatalf("client.Connect: %v", err)
+	}
+	defer cs.Close()
+
+	result, err := cs.ListTools(ctx, &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	var sp *mcp.Tool
+	for _, tl := range result.Tools {
+		if tl.Name == "submit_playbook" {
+			sp = tl
+			break
+		}
+	}
+	if sp == nil {
+		t.Fatal("submit_playbook tool not registered")
+	}
+	schema, _ := json.Marshal(sp.InputSchema)
+	for _, want := range []string{"title", "sections", "verify", "project_bound"} {
+		if !strings.Contains(string(schema), want) {
+			t.Errorf("submit_playbook input schema missing %q:\n%s", want, schema)
+		}
 	}
 }
 
