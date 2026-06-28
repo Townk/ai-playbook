@@ -21,20 +21,20 @@ func (zshAdapter) job(p jobParams) string {
 	qo := shquote(p.o)
 	qe := shquote(p.e)
 	vp := "" +
-		"export LAST_EXCODE=${(q)__aapb_rc}\n" +
+		"export LAST_EXCODE=${(q)__apb_rc}\n" +
 		"export LAST_STDOUT=${(q)\"$(<" + qo + ")\"}\n" +
 		"export LAST_STDERR=${(q)\"$(<" + qe + ")\"}\n"
 	if p.id != "" {
 		key := p.key
 		vp += "" +
-			"export AAPB_OUT_" + key + "=${(q)\"$(<" + qo + ")\"}\n" +
-			"export AAPB_ERR_" + key + "=${(q)\"$(<" + qe + ")\"}\n" +
-			"export AAPB_EXIT_" + key + "=${(q)__aapb_rc}\n"
+			"export APB_OUT_" + key + "=${(q)\"$(<" + qo + ")\"}\n" +
+			"export APB_ERR_" + key + "=${(q)\"$(<" + qe + ")\"}\n" +
+			"export APB_EXIT_" + key + "=${(q)__apb_rc}\n"
 	}
 	return "( trap " + shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) </dev/null >" + p.o + " 2>" + p.e + "\n" +
-		"__aapb_rc=$?\n" +
-		"if [[ $__aapb_rc -eq 141 ]]; then __aapb_rc=0; fi\n" +
+		"__apb_rc=$?\n" +
+		"if [[ $__apb_rc -eq 141 ]]; then __apb_rc=0; fi\n" +
 		"if [[ -s " + qcwd + " ]]; then builtin cd -- \"$(< " + qcwd + ")\" 2>/dev/null; fi\n" +
 		vp +
-		"print -r -- " + sentinel + "${__aapb_rc}" + sentinel + "\n"
+		"print -r -- " + sentinel + "${__apb_rc}" + sentinel + "\n"
 }

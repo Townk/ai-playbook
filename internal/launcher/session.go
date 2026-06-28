@@ -762,7 +762,7 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *
 	body := cache.Body(content)
 	created, _ := cache.Field(content, "created_at")
 
-	f, err := os.CreateTemp("", "aapb-cached-*.md")
+	f, err := os.CreateTemp("", "apb-cached-*.md")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
 		return 1

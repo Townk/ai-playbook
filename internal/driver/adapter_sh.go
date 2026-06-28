@@ -13,18 +13,18 @@ package driver
 //   - cd/pwd:        plain     (dash has no `builtin`)
 //   - cwd trap:      pwd >| <path>  (>| verified to work in dash for noclobber override)
 //   - value-quoting: a pure-shell single-quote quoter (decision (b)) — dash lacks
-//     printf %q and ${(q)}; sed is avoided (BSD/GNU sed differ). __aapb_q wraps a
+//     printf %q and ${(q)}; sed is avoided (BSD/GNU sed differ). __apb_q wraps a
 //     value in '…' and rewrites each embedded ' as '\” using POSIX parameter
-//     expansion + printf only, so $AAPB_OUT_<id>/$LAST_STDOUT are stored
+//     expansion + printf only, so $APB_OUT_<id>/$LAST_STDOUT are stored
 //     shell-quoted (word-split/glob-safe to re-expand), matching zsh/bash.
 type shAdapter struct{}
 
 // shQuoterFunc is the pure-shell single-quote quoter emitted into the job script.
 // It single-quote-escapes $1: open with ', append each chunk up to an embedded ',
 // emit '\” for that ', then close with '. Uses only POSIX parameter expansion
-// (%% / #) and printf — no external tools. Round-trip: eval "x=$(__aapb_q "$v")"
+// (%% / #) and printf — no external tools. Round-trip: eval "x=$(__apb_q "$v")"
 // reproduces $v exactly (verified by TestShQuoterRoundTrip).
-const shQuoterFunc = `__aapb_q() { __r=$1; __o="'"; while [ -n "$__r" ]; do case "$__r" in *\'*) __o="$__o${__r%%\'*}'\''"; __r=${__r#*\'};; *) __o="$__o$__r"; __r=;; esac; done; printf '%s' "$__o'"; }`
+const shQuoterFunc = `__apb_q() { __r=$1; __o="'"; while [ -n "$__r" ]; do case "$__r" in *\'*) __o="$__o${__r%%\'*}'\''"; __r=${__r#*\'};; *) __o="$__o$__r"; __r=;; esac; done; printf '%s' "$__o'"; }`
 
 func (shAdapter) name() string                    { return "sh" }
 func (shAdapter) spawnArgs() []string             { return []string{"-i"} }
@@ -42,20 +42,20 @@ func (shAdapter) job(p jobParams) string {
 	// Value-passing: store the pure-shell single-quote-quoted capture so it
 	// re-expands word-split- and glob-safely. Exit codes are bare integers.
 	vp := shQuoterFunc + "\n" +
-		"export LAST_EXCODE=$__aapb_rc\n" +
-		"export LAST_STDOUT=\"$(__aapb_q \"$(cat " + qo + ")\")\"" + "\n" +
-		"export LAST_STDERR=\"$(__aapb_q \"$(cat " + qe + ")\")\"" + "\n"
+		"export LAST_EXCODE=$__apb_rc\n" +
+		"export LAST_STDOUT=\"$(__apb_q \"$(cat " + qo + ")\")\"" + "\n" +
+		"export LAST_STDERR=\"$(__apb_q \"$(cat " + qe + ")\")\"" + "\n"
 	if p.id != "" {
 		key := p.key
 		vp += "" +
-			"export AAPB_OUT_" + key + "=\"$(__aapb_q \"$(cat " + qo + ")\")\"" + "\n" +
-			"export AAPB_ERR_" + key + "=\"$(__aapb_q \"$(cat " + qe + ")\")\"" + "\n" +
-			"export AAPB_EXIT_" + key + "=$__aapb_rc\n"
+			"export APB_OUT_" + key + "=\"$(__apb_q \"$(cat " + qo + ")\")\"" + "\n" +
+			"export APB_ERR_" + key + "=\"$(__apb_q \"$(cat " + qe + ")\")\"" + "\n" +
+			"export APB_EXIT_" + key + "=$__apb_rc\n"
 	}
 	return "( trap " + shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) </dev/null >" + p.o + " 2>" + p.e + "\n" +
-		"__aapb_rc=$?\n" +
-		"if [ $__aapb_rc -eq 141 ]; then __aapb_rc=0; fi\n" +
+		"__apb_rc=$?\n" +
+		"if [ $__apb_rc -eq 141 ]; then __apb_rc=0; fi\n" +
 		"if [ -s " + qcwd + " ]; then cd -- \"$(cat " + qcwd + ")\" 2>/dev/null; fi\n" +
 		vp +
-		"printf '%s\\n' " + sentinel + "${__aapb_rc}" + sentinel + "\n"
+		"printf '%s\\n' " + sentinel + "${__apb_rc}" + sentinel + "\n"
 }

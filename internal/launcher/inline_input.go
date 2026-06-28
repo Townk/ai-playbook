@@ -68,7 +68,7 @@ func classifyInline(req capture.Request, onTail func(string)) (author.Classifica
 // write it to a temp markdown file and reuse ui.Main via the os.Args-reshaped
 // `run` entry (the same reshape serveCachedPlaybook/AnswerMain use).
 func viewProse(content, title, cwd string) int {
-	f, err := os.CreateTemp("", "aapb-inline-answer-*.md")
+	f, err := os.CreateTemp("", "apb-inline-answer-*.md")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook: %v\n", err)
 		return 1

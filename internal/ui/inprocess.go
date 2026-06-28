@@ -377,7 +377,7 @@ func (m *model) commitPlaybookCmd(body string) tea.Cmd {
 // lives for the session so the user can inspect a failed run's output (mirroring
 // the broker, which left per-run logs on disk).
 func writeRunLog(id, out, errOut string) string {
-	f, err := os.CreateTemp("", "aapb-run-"+sanitizeLogID(id)+"-*.log")
+	f, err := os.CreateTemp("", "apb-run-"+sanitizeLogID(id)+"-*.log")
 	if err != nil {
 		return ""
 	}

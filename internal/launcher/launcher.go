@@ -467,7 +467,7 @@ func extractJSONContent(s string) string {
 // Both launcher answer routes (cache HIT and MISS) go through here; a freshly
 // classified answer has no --cached, so its badge only appears once re-cached.
 func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content, title, created string) int {
-	f, err := os.CreateTemp("", "aapb-answer-*.md")
+	f, err := os.CreateTemp("", "apb-answer-*.md")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
 		return 1
@@ -654,7 +654,7 @@ func runInline(req capture.Request, m mux.Mux) int {
 // launcher then exits — the docked pane is the session. The temp file is NOT
 // removed here (the spawned pane reads it asynchronously and removes it itself).
 func spawnSession(m mux.Mux, selfExe string, req capture.Request, title string) int {
-	f, err := os.CreateTemp("", "aapb-request-*.json")
+	f, err := os.CreateTemp("", "apb-request-*.json")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
 		return 1

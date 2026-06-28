@@ -21,10 +21,10 @@ import (
 )
 
 // runInput is the `run` tool's arguments: a command to execute in the user's real
-// shell, with an optional block id for value-passing (AAPB_OUT_<id>).
+// shell, with an optional block id for value-passing (APB_OUT_<id>).
 type runInput struct {
 	Cmd string `json:"cmd" jsonschema:"the command line to run in the user's real interactive shell (their cwd and environment)"`
-	ID  string `json:"id,omitempty" jsonschema:"optional short id; exports AAPB_OUT_<id>/AAPB_ERR_<id>/AAPB_EXIT_<id> so a later call can reference this command's output"`
+	ID  string `json:"id,omitempty" jsonschema:"optional short id; exports APB_OUT_<id>/APB_ERR_<id>/APB_EXIT_<id> so a later call can reference this command's output"`
 }
 
 // rememberInput is the `remember` tool's arguments: a distilled fact to persist

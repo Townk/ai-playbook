@@ -80,7 +80,7 @@ type Deps struct {
 // request is the inbound RPC: tool selector + the union of per-tool fields.
 type request struct {
 	Tool        string `json:"tool"`
-	ID          string `json:"id,omitempty"`          // run: block id for value-passing (AAPB_OUT_<id>)
+	ID          string `json:"id,omitempty"`          // run: block id for value-passing (APB_OUT_<id>)
 	Cmd         string `json:"cmd,omitempty"`         // run: the command line
 	Fact        string `json:"fact,omitempty"`        // remember: the distilled fact
 	ProjectRoot string `json:"projectRoot,omitempty"` // remember: override target (else Deps.ProjectRoot)
@@ -208,7 +208,7 @@ func (s *Server) dispatch(req request) reply {
 }
 
 // doRun executes the command in the session shell via the driver (RunID, so the
-// agent's block id value-passes AAPB_OUT_<id>/LAST_* like an authored run block).
+// agent's block id value-passes APB_OUT_<id>/LAST_* like an authored run block).
 // This runs in the USER's real environment — the whole point of the backend.
 func (s *Server) doRun(req request) reply {
 	res := s.deps.Driver.RunID(req.ID, req.Cmd, runTimeout)

@@ -37,11 +37,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `[driver] shell` set it honors the login shell when its basename names a supported
   shell (zsh/bash/sh), falling back `zsh` → `bash` → `sh`. Pin a specific shell with
   `[driver] shell`. **Behavior change** (ADR-0007); a zsh user is unaffected.
-- **Run-block value-passing env vars renamed** `AAS_*` → `AAPB_*`: the exported
-  variables are now `AAPB_OUT_<id>`, `AAPB_ERR_<id>`, and `AAPB_EXIT_<id>` (were
+- **Run-block value-passing env vars renamed** `AAS_*` → `APB_*`: the exported
+  variables are now `APB_OUT_<id>`, `APB_ERR_<id>`, and `APB_EXIT_<id>` (were
   `AAS_OUT_<id>`, `AAS_ERR_<id>`, `AAS_EXIT_<id>`). The old prefix was a leftover
   from the retired "ai-assist" shell stack. If you have saved playbooks that reference
-  the old names, update them: `s/\$AAS_/\$AAPB_/g`. The store is days old so few if
+  the old names, update them: `s/\$AAS_/\$APB_/g`. The store is days old so few if
   any saved playbooks should be affected.
 
 ## [0.3.0] - 2026-06-26

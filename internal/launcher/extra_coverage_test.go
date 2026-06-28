@@ -199,7 +199,7 @@ func TestBuildEnvLookup_NilDriver(t *testing.T) {
 // shell env once and reflects it — a set var hits, an absent one misses.
 func TestBuildEnvLookup_LiveDriver(t *testing.T) {
 	minimalZDOTDIR(t)
-	t.Setenv("AAPB_ENVLOOKUP_PROBE", "probe-value")
+	t.Setenv("APB_ENVLOOKUP_PROBE", "probe-value")
 	// Pin zsh: uses the zsh minimalZDOTDIR fixture; default now honors $SHELL (bash on CI).
 	drv, err := driver.Open(driver.Options{Shell: "zsh", Cwd: t.TempDir()})
 	if err != nil {
@@ -208,10 +208,10 @@ func TestBuildEnvLookup_LiveDriver(t *testing.T) {
 	defer drv.Close()
 
 	lookup := buildEnvLookup(drv)
-	if v, ok := lookup("AAPB_ENVLOOKUP_PROBE"); !ok || v != "probe-value" {
+	if v, ok := lookup("APB_ENVLOOKUP_PROBE"); !ok || v != "probe-value" {
 		t.Errorf("live lookup of the probe var = (%q,%v), want (probe-value,true)", v, ok)
 	}
-	if _, ok := lookup("AAPB_DEFINITELY_UNSET_VAR_XYZ"); ok {
+	if _, ok := lookup("APB_DEFINITELY_UNSET_VAR_XYZ"); ok {
 		t.Error("an unset var must miss")
 	}
 }

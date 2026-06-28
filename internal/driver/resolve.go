@@ -4,7 +4,7 @@ package driver
 //
 //  1. Author-prompt shell-awareness (SEPARATE backlog item): the agent/author
 //     prompt still hardcodes zsh/bash shell features — it tells the model "Shell
-//     blocks run under `set -e`" and to use `$AAPB_OUT_*` value-passing
+//     blocks run under `set -e`" and to use `$APB_OUT_*` value-passing
 //     (internal/author/prompt.go, the "Shell blocks run under `set -e`" guidance
 //     near prompt.go:143). POSIX sh has no `set -o pipefail` and differs on a few
 //     idioms, so the prompt should be made shell-aware (parameterized on

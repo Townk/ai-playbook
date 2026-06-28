@@ -78,18 +78,18 @@ func TestServe_RunValuePassing(t *testing.T) {
 	d := newTestDriver(t)
 	socket := serveTest(t, Deps{Driver: d})
 
-	// run with an id exports AAPB_OUT_<id>; a later run on the SAME driver sees it
+	// run with an id exports APB_OUT_<id>; a later run on the SAME driver sees it
 	// (the backend uses one shared session shell), proving value-passing rides the
 	// shared driver.
 	if _, err := Dial(socket, Call{Tool: "run", ID: "first", Cmd: "print -r -- carried"}); err != nil {
 		t.Fatalf("Dial run first: %v", err)
 	}
-	res, err := Dial(socket, Call{Tool: "run", Cmd: "print -r -- $AAPB_OUT_first"})
+	res, err := Dial(socket, Call{Tool: "run", Cmd: "print -r -- $APB_OUT_first"})
 	if err != nil {
 		t.Fatalf("Dial run second: %v", err)
 	}
 	if res.Out != "carried" {
-		t.Errorf("value-passing: AAPB_OUT_first = %q, want %q", res.Out, "carried")
+		t.Errorf("value-passing: APB_OUT_first = %q, want %q", res.Out, "carried")
 	}
 }
 

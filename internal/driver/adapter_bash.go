@@ -30,22 +30,22 @@ func (bashAdapter) job(p jobParams) string {
 	// printf %q quotes a value so it re-expands word-split- and glob-safely.
 	// macOS ships bash 3.2 which lacks ${var@Q}, so printf %q is the portable
 	// bash quoting primitive. Numbers (exit codes) are their own printf %q output,
-	// so __aapb_rc is used bare there — printf %q of an integer is the integer.
+	// so __apb_rc is used bare there — printf %q of an integer is the integer.
 	vp := "" +
-		"export LAST_EXCODE=$__aapb_rc\n" +
+		"export LAST_EXCODE=$__apb_rc\n" +
 		"export LAST_STDOUT=\"$(printf %q \"$(<" + qo + ")\")\"" + "\n" +
 		"export LAST_STDERR=\"$(printf %q \"$(<" + qe + ")\")\"" + "\n"
 	if p.id != "" {
 		key := p.key
 		vp += "" +
-			"export AAPB_OUT_" + key + "=\"$(printf %q \"$(<" + qo + ")\")\"" + "\n" +
-			"export AAPB_ERR_" + key + "=\"$(printf %q \"$(<" + qe + ")\")\"" + "\n" +
-			"export AAPB_EXIT_" + key + "=$__aapb_rc\n"
+			"export APB_OUT_" + key + "=\"$(printf %q \"$(<" + qo + ")\")\"" + "\n" +
+			"export APB_ERR_" + key + "=\"$(printf %q \"$(<" + qe + ")\")\"" + "\n" +
+			"export APB_EXIT_" + key + "=$__apb_rc\n"
 	}
 	return "( trap " + shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) </dev/null >" + p.o + " 2>" + p.e + "\n" +
-		"__aapb_rc=$?\n" +
-		"if [ $__aapb_rc -eq 141 ]; then __aapb_rc=0; fi\n" +
+		"__apb_rc=$?\n" +
+		"if [ $__apb_rc -eq 141 ]; then __apb_rc=0; fi\n" +
 		"if [ -s " + qcwd + " ]; then builtin cd -- \"$(< " + qcwd + ")\" 2>/dev/null; fi\n" +
 		vp +
-		"printf '%s\\n' " + sentinel + "${__aapb_rc}" + sentinel + "\n"
+		"printf '%s\\n' " + sentinel + "${__apb_rc}" + sentinel + "\n"
 }

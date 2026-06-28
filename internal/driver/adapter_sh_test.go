@@ -32,7 +32,7 @@ func TestShAdapterTokens(t *testing.T) {
 		id: "fix", key: "fix",
 	})
 
-	for _, want := range []string{"printf '%s\\n'", "$(cat", "__aapb_q"} {
+	for _, want := range []string{"printf '%s\\n'", "$(cat", "__apb_q"} {
 		if !strings.Contains(jobWithID, want) {
 			t.Errorf("job (id case) must contain %q\ngot: %q", want, jobWithID)
 		}
@@ -42,18 +42,18 @@ func TestShAdapterTokens(t *testing.T) {
 			t.Errorf("job (id case) must NOT contain %q\ngot: %q", forbidden, jobWithID)
 		}
 	}
-	// AAPB_* exports must be present when id is set.
-	for _, want := range []string{"AAPB_OUT_fix", "AAPB_ERR_fix", "AAPB_EXIT_fix"} {
+	// APB_* exports must be present when id is set.
+	for _, want := range []string{"APB_OUT_fix", "APB_ERR_fix", "APB_EXIT_fix"} {
 		if !strings.Contains(jobWithID, want) {
 			t.Errorf("job (id case) must contain %q\ngot: %q", want, jobWithID)
 		}
 	}
 
-	// job without id — AAPB_* absent; LAST_* present.
+	// job without id — APB_* absent; LAST_* present.
 	jobNoID := a.job(jobParams{
 		cmdline: "echo hi", o: "/d/o", e: "/d/e", cwdf: "/d/cwd",
 	})
-	for _, forbidden := range []string{"AAPB_OUT_", "AAPB_ERR_", "AAPB_EXIT_"} {
+	for _, forbidden := range []string{"APB_OUT_", "APB_ERR_", "APB_EXIT_"} {
 		if strings.Contains(jobNoID, forbidden) {
 			t.Errorf("job (no-id case) must NOT contain %q\ngot: %q", forbidden, jobNoID)
 		}
@@ -91,7 +91,7 @@ func TestShQuoterRoundTrip(t *testing.T) {
 		// Build a script that defines the quoter, quotes v, eval's it back into
 		// `back`, and prints back delimited by sentinels so we can compare exactly.
 		script := shQuoterFunc + "\n" +
-			"q=$(__aapb_q \"$1\")\n" +
+			"q=$(__apb_q \"$1\")\n" +
 			"eval \"back=$q\"\n" +
 			"printf '<<%s>>' \"$back\"\n"
 		out, runErr := exec.Command(shBin, "-c", script, "sh", v).Output()

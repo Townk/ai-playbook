@@ -41,18 +41,18 @@ func TestBashAdapterTokens(t *testing.T) {
 			t.Errorf("job (id case) must NOT contain %q (zsh token)\ngot: %q", forbidden, jobWithID)
 		}
 	}
-	// AAPB_* exports must be present when id is set.
-	for _, want := range []string{"AAPB_OUT_fix", "AAPB_ERR_fix", "AAPB_EXIT_fix"} {
+	// APB_* exports must be present when id is set.
+	for _, want := range []string{"APB_OUT_fix", "APB_ERR_fix", "APB_EXIT_fix"} {
 		if !strings.Contains(jobWithID, want) {
 			t.Errorf("job (id case) must contain %q\ngot: %q", want, jobWithID)
 		}
 	}
 
-	// job without id — AAPB_* must be absent; LAST_* must be present.
+	// job without id — APB_* must be absent; LAST_* must be present.
 	jobNoID := a.job(jobParams{
 		cmdline: "echo hi", o: "/d/o", e: "/d/e", cwdf: "/d/cwd",
 	})
-	for _, forbidden := range []string{"AAPB_OUT_", "AAPB_ERR_", "AAPB_EXIT_"} {
+	for _, forbidden := range []string{"APB_OUT_", "APB_ERR_", "APB_EXIT_"} {
 		if strings.Contains(jobNoID, forbidden) {
 			t.Errorf("job (no-id case) must NOT contain %q\ngot: %q", forbidden, jobNoID)
 		}

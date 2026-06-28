@@ -224,7 +224,7 @@ func finalizeSummary(file, full string) string {
 // target. The temp file is removed on any failure before the rename.
 func atomicWrite(path string, data []byte) error {
 	dir := filepath.Dir(path)
-	f, err := os.CreateTemp(dir, ".aapb-finalize-*")
+	f, err := os.CreateTemp(dir, ".apb-finalize-*")
 	if err != nil {
 		return err
 	}
