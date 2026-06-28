@@ -255,7 +255,11 @@ func (m model) render() string {
 		hint = h.hint()
 	}
 	if m.inline {
-		return inlineLayout(prompt, m.fld.view(inlineBoxWidth, true), hint)
+		inlinePrompt := prompt
+		if m.prompt != "" {
+			inlinePrompt = lipgloss.NewStyle().Foreground(lipgloss.Color(inlineDescColor)).Render(m.prompt)
+		}
+		return inlineLayout(inlinePrompt, m.fld.view(inlineBoxWidth, true), hint)
 	}
 	iW := m.innerW()
 	sections := []string{}
@@ -269,17 +273,25 @@ func (m model) render() string {
 // inlineBoxWidth is the fixed column width of the no-mux input box.
 const inlineBoxWidth = 50
 
+// inlineIndent is the left indent on the no-mux description and hint TEXT lines
+// (not the box).
+const inlineIndent = "  "
+
+// inlineDescColor renders the no-mux description line in the viewer's H2 color
+// (colPeach #fab387) rather than body Text. Exploratory — under evaluation.
+const inlineDescColor = "#fab387"
+
 // inlineLayout stacks the three no-mux elements: the description line, the
-// (self-bordered) box, and the hint/activity line — with a 1-space left indent on
-// the top and bottom TEXT lines (not the box), and NO blank lines between them.
-// No title bar / outer frame (those are the mux float's chrome).
+// (self-bordered) box, and the hint/activity line — with inlineIndent on the top
+// and bottom TEXT lines (not the box), and NO blank lines between them. No title
+// bar / outer frame (those are the mux float's chrome).
 func inlineLayout(top, box, bottom string) string {
 	var rows []string
 	if top != "" {
-		rows = append(rows, " "+top)
+		rows = append(rows, inlineIndent+top)
 	}
 	rows = append(rows, box)
-	rows = append(rows, " "+bottom)
+	rows = append(rows, inlineIndent+bottom)
 	return strings.Join(rows, "\n")
 }
 

@@ -58,13 +58,13 @@ func TestInlineRender_BoxWidthIndentNoBlanks(t *testing.T) {
 	if maxW != inlineBoxWidth {
 		t.Errorf("box width = %d, want %d", maxW, inlineBoxWidth)
 	}
-	// Description (first) and hint (last) lines carry a 1-space indent; the box
+	// Description (first) and hint (last) lines carry the inlineIndent; the box
 	// border lines do not.
-	if !strings.HasPrefix(lines[0], " ") {
-		t.Error("description line must have a 1-space leading indent")
+	if !strings.HasPrefix(lines[0], inlineIndent) {
+		t.Errorf("description line must have the %d-space indent", len(inlineIndent))
 	}
-	if !strings.HasPrefix(lines[len(lines)-1], " ") {
-		t.Error("hint line must have a 1-space leading indent")
+	if !strings.HasPrefix(lines[len(lines)-1], inlineIndent) {
+		t.Errorf("hint line must have the %d-space indent", len(inlineIndent))
 	}
 	if strings.HasPrefix(lines[1], " ") {
 		t.Error("the box must NOT be indented")
