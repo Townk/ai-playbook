@@ -288,8 +288,8 @@ func TestActivityMsgUpdatesThinkingLine(t *testing.T) {
 
 	m2, _ := m.Update(activityMsg{summary: "run: gg build", ok: true})
 	m = m2.(model)
-	if m.activityLine != "run: gg build" {
-		t.Fatalf("activityLine = %q, want %q", m.activityLine, "run: gg build")
+	if m.progress.activity != "run: gg build" {
+		t.Fatalf("activityLine = %q, want %q", m.progress.activity, "run: gg build")
 	}
 	view := strip(m.viewString())
 	if !strings.Contains(view, "run: gg build") {
@@ -302,8 +302,8 @@ func TestActivityMsgUpdatesThinkingLine(t *testing.T) {
 	// Real playbook content arrives → the activity line is cleared.
 	m3, _ := m.Update(streamEventsMsg{events: []streamEvent{textEvent{text: "# Diagnosis\n"}}})
 	m = m3.(model)
-	if m.activityLine != "" {
-		t.Errorf("activityLine must clear when real content arrives, got %q", m.activityLine)
+	if m.progress.activity != "" {
+		t.Errorf("activityLine must clear when real content arrives, got %q", m.progress.activity)
 	}
 }
 
@@ -432,7 +432,7 @@ func (f *fakeEventsProducer) fn(kind orchestrator.ReengageKind, base, change str
 
 // Part 2b: a followup over the EVENT path re-arms with the orchestrator's fan-out,
 // carrying a live activity channel into the model. The reArmStreamMsg swaps
-// m.activity to that feed, and an activityMsg off it updates m.activityLine while
+// m.activity to that feed, and an activityMsg off it updates m.progress.activity while
 // thinking — mirroring how the initial authoring shows live reasoning.
 func TestInProcessFollowupEventPathWiresActivity(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# Revised\n", "# Revised fix\n")
@@ -473,8 +473,8 @@ func TestInProcessFollowupEventPathWiresActivity(t *testing.T) {
 	m.thinking = true
 	m2, _ := m.Update(activityMsg{summary: "run: make build", ok: true, ch: m.activity})
 	m = m2.(model)
-	if m.activityLine != "run: make build" {
-		t.Errorf("activityLine = %q, want the re-engagement tool summary", m.activityLine)
+	if m.progress.activity != "run: make build" {
+		t.Errorf("activityLine = %q, want the re-engagement tool summary", m.progress.activity)
 	}
 }
 
@@ -501,7 +501,7 @@ func TestStaleActivityFeedIgnoredAfterReArm(t *testing.T) {
 	// A summary from the STALE feed must not paint the activity line.
 	m3, _ := m.Update(activityMsg{summary: "stale: do not show", ok: true, ch: stale})
 	m = m3.(model)
-	if m.activityLine == "stale: do not show" {
+	if m.progress.activity == "stale: do not show" {
 		t.Error("a stale feed's summary must not paint the activity line")
 	}
 }
@@ -556,7 +556,7 @@ func TestFollowupReArmDoesNotAutoScroll(t *testing.T) {
 }
 
 // Issue #2: two successive follow-up re-arms must EACH deliver a non-nil, FRESH
-// activity channel that the model swaps in and that updates m.activityLine — the
+// activity channel that the model swaps in and that updates m.progress.activity — the
 // 2nd/3rd round must show live activity exactly like the first (no dead feed). This
 // drives the real resultMsg verify-fail auto-fire path twice.
 func TestTwoSuccessiveFollowupsLiveActivity(t *testing.T) {
@@ -604,11 +604,11 @@ func TestTwoSuccessiveFollowupsLiveActivity(t *testing.T) {
 		}
 		// Pump the fresh subscription to drain its summaries: the activityMsg handler
 		// re-issues activityWaitCmd, so follow that chain until a non-empty summary
-		// updates m.activityLine (the empty TextDelta is dropped by collapseLine).
+		// updates the activity (the empty TextDelta is dropped by collapseLine).
 		m.thinking = true
-		m.activityLine = ""
+		m.progress.activity = ""
 		next := firstActivityWait(c)
-		for i := 0; i < 20 && next != nil && m.activityLine == ""; i++ {
+		for i := 0; i < 20 && next != nil && m.progress.activity == ""; i++ {
 			msg := next()
 			am, ok := msg.(activityMsg)
 			if !ok {
@@ -618,7 +618,7 @@ func TestTwoSuccessiveFollowupsLiveActivity(t *testing.T) {
 			m = nm3.(model)
 			next = c3
 		}
-		if m.activityLine == "" {
+		if m.progress.activity == "" {
 			t.Errorf("%s: activityLine never updated off the fresh feed (dead feed)", label)
 		}
 		// End this round (closes the round's stream) so the next verify can re-fire.

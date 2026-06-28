@@ -178,7 +178,7 @@ func TestViewThinkingMode(t *testing.T) {
 				m.width, m.height = d[0], d[1]
 				m.thinking = true
 				m.thinkLabel = "Working…"
-				m.spinTicks = 15 // 1s
+				m.progress.ticks = 15 // 1s
 				m.reflow()
 				if tc.md == "overflow" {
 					// Simulate follow: scroll to bottom.
@@ -235,7 +235,7 @@ func TestViewThinkingMode(t *testing.T) {
 		m.width, m.height = 80, 24
 		m.thinking = true
 		m.thinkLabel = "Working…"
-		m.spinTicks = 0
+		m.progress.ticks = 0
 		m.reflow()
 		got := m.viewString()
 		lines := strings.Split(got, "\n")

@@ -391,3 +391,14 @@ func TestStartTickContinuePathKeepsRunning(t *testing.T) {
 		t.Errorf("startTick during a continuing loop must return nil, got %T", c)
 	}
 }
+
+func TestModelThinkingRendersWidget(t *testing.T) {
+	m := newModel("agent", "")
+	m.width, m.height = 80, 24
+	m.thinking = true
+	m.progress.SetActivity("diagnosing the failure")
+	out := m.viewString()
+	if !strings.Contains(out, "diagnosing the failure") {
+		t.Fatalf("thinking block must render the ProgressWidget activity, got %q", out)
+	}
+}

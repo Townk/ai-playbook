@@ -13,7 +13,7 @@ func TestViewShowsSpinnerWhenThinking(t *testing.T) {
 	m.width, m.height = 80, 24
 	m.thinking = true
 	m.thinkLabel = "Working…"
-	m.spinTicks = 30 // 3s
+	m.progress.ticks = 30 // 3s
 	m.reflow()
 	out := m.viewString()
 	if !strings.Contains(strip(out), "Working… 3s") {
@@ -37,7 +37,7 @@ func TestViewNoSpinnerWhenNotThinking(t *testing.T) {
 // TestThinkingSpinnerAnimatesInView is the Bug B regression guard: with
 // thinking=true and NO running block, processing successive spinTickMsg must
 // change the rendered spinner frame in the View output. The thinking spinner is
-// composed LIVE in normalLines (reading m.spinFrame each View call), not from the
+// composed LIVE in normalLines (reading m.progress each View call), not from the
 // cached reflow buffer (m.lines) — so the authoring/re-engagement wait, during
 // which only spinTickMsg + activityMsg arrive (no block reflow), still animates.
 func TestThinkingSpinnerAnimatesInView(t *testing.T) {

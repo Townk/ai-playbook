@@ -22,26 +22,26 @@ func TestThinkingLifecycle(t *testing.T) {
 	}
 
 	// A think record re-arms the spinner and resets the timer.
-	m.spinTicks = 50
+	m.progress.ticks = 50
 	m2, _ = m.Update(streamEventsMsg{events: []streamEvent{thinkEvent{"Searching…"}}})
 	m = m2.(model)
 	if !m.thinking || m.thinkLabel != "Searching…" {
 		t.Fatalf("want thinking Searching…, got thinking=%v label=%q", m.thinking, m.thinkLabel)
 	}
-	if m.spinTicks != 0 {
-		t.Fatalf("new thinking session must reset timer, got %d", m.spinTicks)
+	if m.progress.ticks != 0 {
+		t.Fatalf("new thinking session must reset timer, got %d", m.progress.ticks)
 	}
 
 	// A second think record (already thinking) replaces the label WITHOUT
 	// resetting the timer.
-	m.spinTicks = 33
+	m.progress.ticks = 33
 	m2, _ = m.Update(streamEventsMsg{events: []streamEvent{thinkEvent{"Reading 12 files…"}}})
 	m = m2.(model)
 	if m.thinkLabel != "Reading 12 files…" {
 		t.Fatalf("label = %q, want Reading 12 files…", m.thinkLabel)
 	}
-	if m.spinTicks != 33 {
-		t.Fatalf("in-place label replace must keep the timer running, got %d", m.spinTicks)
+	if m.progress.ticks != 33 {
+		t.Fatalf("in-place label replace must keep the timer running, got %d", m.progress.ticks)
 	}
 
 	// Empty-label record falls back to the default.
@@ -77,8 +77,8 @@ func TestThinkingSurvivesActivityThenEndsOnText(t *testing.T) {
 	if !m.thinking {
 		t.Fatal("activity must not end thinking")
 	}
-	if m.activityLine != "❯ make build" {
-		t.Fatalf("activity line = %q, want ❯ make build", m.activityLine)
+	if m.progress.activity != "❯ make build" {
+		t.Fatalf("activity line = %q, want ❯ make build", m.progress.activity)
 	}
 
 	// The spinner + activity line both render while thinking.
@@ -93,8 +93,8 @@ func TestThinkingSurvivesActivityThenEndsOnText(t *testing.T) {
 	// A later activity summary replaces the line; still thinking.
 	m2, _ = m.Update(activityMsg{summary: "❯ go test ./...", ok: true})
 	m = m2.(model)
-	if !m.thinking || m.activityLine != "❯ go test ./..." {
-		t.Fatalf("activity update: thinking=%v line=%q", m.thinking, m.activityLine)
+	if !m.thinking || m.progress.activity != "❯ go test ./..." {
+		t.Fatalf("activity update: thinking=%v line=%q", m.thinking, m.progress.activity)
 	}
 
 	// First real playbook text ends thinking, clears the activity line, renders doc.
@@ -103,8 +103,8 @@ func TestThinkingSurvivesActivityThenEndsOnText(t *testing.T) {
 	if m.thinking {
 		t.Fatal("real playbook text must end thinking")
 	}
-	if m.activityLine != "" {
-		t.Fatalf("activity line must clear on real text, got %q", m.activityLine)
+	if m.progress.activity != "" {
+		t.Fatalf("activity line must clear on real text, got %q", m.progress.activity)
 	}
 	if m.md != "# Fix\n" {
 		t.Fatalf("md = %q, want the playbook text", m.md)
@@ -118,7 +118,7 @@ func TestThinkingSurvivesActivityThenEndsOnText(t *testing.T) {
 func TestEmptyTextEventDoesNotEndThinking(t *testing.T) {
 	m := newModel("T", "")
 	m.thinking = true
-	m.activityLine = "⟳ working"
+	m.progress.activity = "⟳ working"
 
 	for _, empty := range []string{"", "   ", "\n", "\t \n"} {
 		m2, _ := m.Update(streamEventsMsg{events: []streamEvent{textEvent{empty}}})
@@ -126,8 +126,8 @@ func TestEmptyTextEventDoesNotEndThinking(t *testing.T) {
 		if !m.thinking {
 			t.Fatalf("empty text %q must not end thinking", empty)
 		}
-		if m.activityLine != "⟳ working" {
-			t.Fatalf("empty text %q must not clear the activity line, got %q", empty, m.activityLine)
+		if m.progress.activity != "⟳ working" {
+			t.Fatalf("empty text %q must not clear the activity line, got %q", empty, m.progress.activity)
 		}
 	}
 
@@ -145,8 +145,8 @@ func TestSpinTickAdvancesOnlyWhileThinking(t *testing.T) {
 	m.thinking = true
 	m2, cmd := m.Update(spinTickMsg{})
 	m = m2.(model)
-	if m.spinFrame != 1 || m.spinTicks != 1 {
-		t.Fatalf("tick should advance frame+ticks, got frame=%d ticks=%d", m.spinFrame, m.spinTicks)
+	if m.progress.frame != 1 || m.progress.ticks != 1 {
+		t.Fatalf("tick should advance frame+ticks, got frame=%d ticks=%d", m.progress.frame, m.progress.ticks)
 	}
 	if cmd == nil {
 		t.Fatal("tick while thinking must re-issue the tick command")

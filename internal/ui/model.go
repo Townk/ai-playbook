@@ -55,8 +55,8 @@ func reassertHideCursor() tea.Cmd { return tea.Raw(hideCursorSeq) }
 // startTick returns the single spinner tick loop, or nil if a loop is already
 // live. External entry points (Init, thinkEvent, click handlers, regenerate,
 // wrap-up, follow-up) call this instead of tickCmd directly so that at most one
-// 100ms loop ever exists — overlapping loops would advance spinTicks multiple
-// times per tick and race the seconds counter. The loop's own continuation (the
+// 100ms loop ever exists — overlapping loops would advance the elapsed counter
+// multiple times per tick and race the seconds counter. The loop's own continuation (the
 // spinTickMsg CONTINUE path) re-issues tickCmd directly; the STOP path clears
 // tickRunning.
 func (m *model) startTick() tea.Cmd {
@@ -160,8 +160,7 @@ type model struct {
 	thinking      bool
 	thinkLabel    string
 	defaultLabel  string
-	spinFrame     int
-	spinTicks     int // 100ms ticks within the current thinking session (seconds = /10)
+	progress      ProgressWidget // spinner frame, elapsed ticks, and activity summary
 	streaming     bool
 	follow        bool      // auto-scroll to bottom while streaming
 	justAnnounced bool      // set by announceFollowup so beginFollowupInProc skips its own `---` (the announcement already framed the attempt with a separator ABOVE the phrase)
@@ -229,11 +228,6 @@ type model struct {
 	// tools backend is wired (the no-tools fallback) — then no activity is shown and
 	// the spinner still animates. Set by RunStream from StreamOptions.Activity.
 	activity <-chan string
-
-	// activityLine is the latest agent tool-call summary, shown under the "Working…"
-	// line while thinking/streaming. Cleared when real playbook content starts
-	// arriving (the first textEvent) so it never lingers over rendered content.
-	activityLine string
 
 	// followups counts how many auto-follow-ups have fired this session. The
 	// verify-fail auto-fire repeats on EACH failure while followups < maxFollowups;
@@ -585,17 +579,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						dbg("textEvent ends thinking: textlen=%d %q", len(e.text), collapseLine(e.text))
 					}
 					m.thinking = false
-					m.activityLine = ""
+					m.progress.SetActivity("")
 				}
 			case thinkEvent:
 				label := e.label
 				if label == "" {
 					label = m.defaultLabel
 				}
-				if !m.thinking { // new thinking session: reset the timer
+				if !m.thinking { // new thinking session: reset the widget
 					m.thinking = true
-					m.spinFrame = 0
-					m.spinTicks = 0
+					m.progress.Reset()
 					startedThinking = true
 				}
 				m.thinkLabel = label
@@ -712,8 +705,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		if m.thinking {
-			m.spinFrame++
-			m.spinTicks++
+			m.progress.Tick()
 		}
 		if !m.thinking && !running {
 			m.tickRunning = false
@@ -1425,9 +1417,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.thinking {
 			// The feed now carries the model's live REASONING as well as tool
 			// summaries (agentstream Reasoning/ToolActivity). Reasoning can be long or
-			// multi-line, so collapse to ONE trimmed line; the render then truncates it
-			// to the column width.
-			m.activityLine = collapseLine(msg.summary)
+			// multi-line; SetActivity collapses to one trimmed line and the render
+			// truncates it to the column width.
+			m.progress.SetActivity(msg.summary)
 		}
 		return m, m.activityWaitCmd()
 	case reArmStreamMsg:
@@ -1476,7 +1468,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// untouched — there is no live feed to swap in.
 		if msg.activity != nil {
 			m.activity = msg.activity
-			m.activityLine = ""
+			m.progress.SetActivity("")
 			cmds = append(cmds, m.activityWaitCmd())
 		}
 		return m, tea.Batch(cmds...)
@@ -2257,25 +2249,30 @@ func (m model) normalLines() []string {
 		// spinner, as long as there's room in the body. claude --print is silent for
 		// minutes during its tool-use phase, so this row shows the agent's latest tool
 		// call (e.g. "⟳ run: gg build") next to the animating spinner.
-		if m.activityLine != "" && spinRow+1 <= m.body()-1 {
+		if m.progress.activity != "" && spinRow+1 <= m.body()-1 {
 			actRow = spinRow + 1
 		}
 	}
+	// Pre-render the progress widget so we split it once, using the two parts at
+	// spinRow (spinner + elapsed) and actRow (activity line).
+	var progressSpinRow, progressActRow string
+	if spinRow >= 0 {
+		rendered := m.progress.Render(cw)
+		progressSpinRow, progressActRow, _ = strings.Cut(rendered, "\n")
+	}
 	for i := 0; i < m.body(); i++ {
 		if i == spinRow {
-			// Issue #3: use the dynamic working-progression label (workingLabel),
-			// computed from the elapsed wait (spinTicks/10 seconds), INSTEAD of the
-			// static m.thinkLabel. spinTicks resets per thinking session, so each
+			// Issue #3: use the dynamic working-progression label (workingLabel) via
+			// the ProgressWidget. The widget resets per thinking session, so each
 			// authoring/follow-up wait restarts at "Working…" and escalates on a 15s
 			// cadence, holding the tail. The progression is the desired behavior even
 			// when a non-default --thinking-label is configured — for the live wait we
 			// intentionally prefer the escalating reassurance over a static custom label.
-			elapsed := m.spinTicks / 10
-			out = append(out, pad("  "+padTo(spinnerLine(m.spinFrame, workingLabel(elapsed), elapsed), cw)+vscrollCell(spinRow, pos, size)))
+			out = append(out, pad("  "+padTo(progressSpinRow, cw)+vscrollCell(spinRow, pos, size)))
 			continue
 		}
 		if i == actRow {
-			out = append(out, pad("  "+padTo(activityLineStr(m.activityLine, cw), cw)+vscrollCell(actRow, pos, size)))
+			out = append(out, pad("  "+padTo(progressActRow, cw)+vscrollCell(actRow, pos, size)))
 			continue
 		}
 		if i < len(rows) {

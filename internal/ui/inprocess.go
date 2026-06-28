@@ -195,8 +195,7 @@ func (m *model) beginRegenerate() tea.Cmd {
 		m.md = ""
 		m.isCached = false
 		m.thinking = true
-		m.spinFrame = 0
-		m.spinTicks = 0
+		m.progress.Reset()
 		m.streaming = true
 		m.follow = false
 		m.yOff = 0
@@ -218,8 +217,7 @@ func (m *model) beginRegenerate() tea.Cmd {
 	m.md = ""
 	m.isCached = false
 	m.thinking = true
-	m.spinFrame = 0
-	m.spinTicks = 0
+	m.progress.Reset()
 	m.streaming = true
 	m.follow = false
 	// Issue #3: a re-generated document is a NEW document — scroll to the TOP and
@@ -252,8 +250,7 @@ func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
 	}
 	m.justAnnounced = false
 	m.thinking = true
-	m.spinFrame = 0
-	m.spinTicks = 0
+	m.progress.Reset()
 	m.streaming = true
 	// Issue #1: a follow-up must NOT yank the viewport to the bottom as the revised
 	// fix streams in — the user is reading the failed attempt. Keep follow=false so
@@ -320,8 +317,7 @@ func (m *model) beginFinalPlaybookGenerate(base, change string) tea.Cmd {
 	m.md = ""
 	m.isCached = false
 	m.thinking = true
-	m.spinFrame = 0
-	m.spinTicks = 0
+	m.progress.Reset()
 	m.streaming = true
 	m.follow = false
 	// Issue #3: the (re)generated final playbook is a NEW document — scroll to the
