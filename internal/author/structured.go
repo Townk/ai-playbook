@@ -12,7 +12,7 @@ func StructuredToolInstruction() string {
 		"- Use `run` ONLY to DIAGNOSE (reproduce the situation, inspect cwd/files/versions). " +
 		"It runs in the USER's real shell — keep it READ-ONLY; do NOT apply changes with it.\n" +
 		"- Use `ask` to get input from the user and `remember` for a durable project fact.\n" +
-		"- Your DELIVERABLE is a single `submit_playbook` call. do NOT write the playbook as " +
+		"- Your DELIVERABLE is a single `submit_playbook` call; do NOT write the playbook as " +
 		"markdown in your reply — call `submit_playbook` with the structured object. The host " +
 		"renders the markdown deterministically.\n" +
 		"\n" +
@@ -29,5 +29,7 @@ func StructuredToolInstruction() string {
 		"- `meta`: `description` (one line), `category`, `tags`, and `project_bound`. Set " +
 		"`project_bound:true` when the playbook is specific to a project/working directory; `false` for " +
 		"a general how-to that applies anywhere.\n" +
-		"Interleave prose and code freely inside a section (intro prose, a block, closing prose).\n"
+		"Interleave prose and code freely inside a section (intro prose, a block, closing prose). " +
+		"END the playbook with a short wrap-up section (e.g. a `Summary` or `Done` heading) that " +
+		"confirms the successful end state and any follow-ups — do not stop abruptly after the last command.\n"
 }
