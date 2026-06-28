@@ -392,6 +392,31 @@ func TestStartTickContinuePathKeepsRunning(t *testing.T) {
 	}
 }
 
+// TestStructuredStreamRendersBodyOnEOF verifies that in structured mode:
+// (a) narration textEvents are drained (not accumulated as m.md), and
+// (b) on stream EOF, m.md is set from bodyProvider() so the existing
+// finalDraft processing runs on the captured rendered playbook.
+func TestStructuredStreamRendersBodyOnEOF(t *testing.T) {
+	m := newModel("agent", "")
+	m.width, m.height = 80, 24
+	m.streaming, m.thinking = true, true
+	m.finalDraft = true
+	m.structured = true
+	m.bodyProvider = func() string { return "# Restore wrapper\n\n```bash {id=fix}\necho hi\n```\n" }
+	// A narration textEvent must NOT become the playbook in structured mode.
+	m1, _ := m.Update(streamEventsMsg{events: []streamEvent{textEvent{text: "let me diagnose…"}}})
+	m = m1.(model)
+	if strings.Contains(m.md, "diagnose") {
+		t.Fatalf("structured mode must drain narration, not accumulate it: md=%q", m.md)
+	}
+	// On EOF, m.md becomes the captured rendered playbook.
+	m2, _ := m.Update(streamEventsMsg{eof: true})
+	m = m2.(model)
+	if !strings.Contains(m.md, "# Restore wrapper") || !strings.Contains(m.md, "{id=fix}") {
+		t.Fatalf("structured EOF must render bodyProvider(): md=%q", m.md)
+	}
+}
+
 func TestModelThinkingRendersWidget(t *testing.T) {
 	m := newModel("agent", "")
 	m.width, m.height = 80, 24

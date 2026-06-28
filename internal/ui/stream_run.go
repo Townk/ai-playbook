@@ -59,6 +59,16 @@ type StreamOptions struct {
 	// null-mux path; the headless no-TTY branch below auto-cancels asks to avoid a
 	// deadlock (it never raises the overlay).
 	AskBridge *askbridge.Bridge
+	// Structured, when true, switches the viewer into structured mode: the input
+	// stream carries the agent's narration (not the playbook — the playbook arrives
+	// via submit_playbook → OnPlaybook → Body), so narration is drained on each
+	// textEvent and Body() is called at stream EOF to set m.md before the existing
+	// finalDraft processing (preamble-strip, title, junk-guard) runs on it.
+	// The captured structured playbook is treated as a final draft (w persists, r refines).
+	Structured bool
+	// Body, when non-nil, returns the captured rendered playbook at stream EOF in
+	// structured mode (typically playbook.Render(session.lastPB)). Consumed once at EOF.
+	Body func() string
 }
 
 // RunStream renders + drives a playbook from a live input stream in-process. It
@@ -160,6 +170,11 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 	m.activity = opts.Activity
 	m.asker = opts.Asker
 	m.askBridge = opts.AskBridge
+	m.structured = opts.Structured
+	m.bodyProvider = opts.Body
+	if opts.Structured {
+		m.finalDraft = true // the captured structured playbook is a final draft (w persists, r refines)
+	}
 	prog := tea.NewProgram(
 		m,
 		tea.WithInput(tty),

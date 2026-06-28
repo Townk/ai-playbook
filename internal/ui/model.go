@@ -320,6 +320,16 @@ type model struct {
 	// float can't be spawned (off-zellij / tests / no selfExe) → `f` is a no-op. Set
 	// by Main/RunStream from the consume-once SetAsker stash / StreamOptions.Asker.
 	asker AskFunc
+
+	// structured marks that this stream carries the agent's narration, NOT the
+	// playbook (the playbook arrives via submit_playbook → OnPlaybook → bodyProvider).
+	// When true, textEvents are drained (not accumulated as m.md) and on stream EOF
+	// m.md is set from bodyProvider() so the existing finalDraft processing runs on
+	// the captured rendered playbook. Set by RunStream from StreamOptions.Structured.
+	structured bool
+	// bodyProvider, when non-nil, returns the captured rendered playbook at stream EOF
+	// in structured mode. Set by RunStream from StreamOptions.Body.
+	bodyProvider func() string
 }
 
 // AskFunc opens the request-input float with the given prompt (the floatinput Type
@@ -566,6 +576,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		for _, ev := range msg.events {
 			switch e := ev.(type) {
 			case textEvent:
+				if m.structured {
+					break // structured authoring: stream carries narration, not the playbook; drain it
+				}
 				m.md += e.text // cheap append; reflow is coalesced (renderTickMsg)
 				m.dirty = true
 				// Real playbook content arriving ends the thinking phase: the spinner +
@@ -608,6 +621,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// it narrated/applied instead of WRITING {id=fix}/{id=verify} blocks (a
 			// prompt-compliance gap), vs blocks>0 not visible (a render gap).
 			dbg("stream EOF: md=%dB blocks=%d head=%q", len(m.md), len(m.blocks), collapseLine(m.md))
+			// Structured mode: the stream carried the agent's narration, not the
+			// playbook. On EOF, replace m.md with the captured rendered playbook from
+			// bodyProvider so the existing finalDraft processing (preamble-strip,
+			// title, junk-guard) runs on it. Reflow immediately so m.blocks is
+			// populated — isValidPlaybook requires blocks > 0 for a real playbook.
+			if m.structured && m.bodyProvider != nil {
+				m.md = m.bodyProvider()
+				m.dirty = false // suppress flushRender no-op; reflow directly below
+				m.reflow()
+			}
 			// Finalized-playbook draft: strip any preamble above the H1 title and set
 			// the pager header to the playbook title. Gated on finalDraft so a
 			// troubleshoot transcript (non-finalDraft EOF) is left untouched (default
