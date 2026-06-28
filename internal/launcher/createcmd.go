@@ -156,10 +156,11 @@ func createDecision(req capture.Request) triage.Decision {
 
 // realCreateAuthor is the production force-author step: open the shared session
 // (so the run blocks drive the user's real shell, exactly like assist's escalate)
-// and author a fresh playbook via authorPlaybook with a force-author decision.
-// authorPlaybook streams into the pager with ui.RunStream (no --cached → no
-// badge) and persists through Reengage{StoreDir: cfg.GlobalStoreDir()} + the
-// cache entry.
+// and author a fresh playbook with a force-author decision. Unlike assist/escalate
+// (which stream the build into the fullscreen viewer), create shows INLINE PROGRESS
+// while authoring (createAuthorWithProgress) and only then opens the viewer with the
+// COMPLETE playbook. It persists through Reengage{StoreDir: cfg.GlobalStoreDir()} +
+// the cache entry, and never passes --cached (no badge).
 func realCreateAuthor(req capture.Request, m mux.Mux) int {
 	c := cache.Open()
 	noCache := os.Getenv("AI_PLAYBOOK_NO_CACHE") != ""
@@ -169,7 +170,8 @@ func realCreateAuthor(req capture.Request, m mux.Mux) int {
 	shell := cfg.Driver.Shell
 
 	// No-mux ask bridge: with no multiplexer there is no float to host the agent's
-	// `ask`, so route asks to the in-viewer overlay (mirrors runSession).
+	// `ask`, so route asks to the inline ask box during authoring (and the in-viewer
+	// overlay during the driving phase). nil when a real mux is present (the float).
 	var bridge *askbridge.Bridge
 	if mux.IsNull(m) {
 		bridge = askbridge.New()
@@ -178,8 +180,5 @@ func realCreateAuthor(req capture.Request, m mux.Mux) int {
 	if sess != nil {
 		defer sess.close()
 	}
-	// title="" — create has no classify-supplied label; the playbook's H1 heads
-	// the pager. No --cached is ever passed (authorPlaybook uses ui.RunStream
-	// directly), so the cached/regenerate badge stays off.
-	return authorPlaybook(req, d, c, noCache, sess, "")
+	return createAuthorWithProgress(req, d, c, noCache, sess, cfg)
 }

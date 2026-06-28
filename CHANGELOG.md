@@ -28,6 +28,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `create <prompt>` now shows **inline progress** while authoring — the spinner +
+  `Waiting…` + elapsed + model-activity line render below the shell prompt (not the
+  fullscreen viewer) — and only then opens the viewer with the **complete** playbook
+  (no live-stream takeover). The flow is identical with or without a multiplexer, and
+  the authoring agent's `ask` is supported throughout (float with a mux; an inline ask
+  box, paused/resumed around the progress line, without one).
 - Authored playbooks now target the configured shell: `sh` runs receive POSIX-only
   guidance (no `[[ ]]`, arrays, or bash/zsh extensions); `bash` and `zsh` runs are
   identified explicitly. The effective shell is resolved from `[driver] shell` (or
