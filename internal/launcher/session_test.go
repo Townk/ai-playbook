@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/floatinput"
 	"github.com/Townk/ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/internal/playbook"
 	"github.com/Townk/ai-playbook/internal/tools"
 	"github.com/Townk/ai-playbook/internal/triage"
 	"github.com/Townk/ai-playbook/internal/ui"
@@ -489,5 +491,45 @@ func TestStrippedAmendBase(t *testing.T) {
 	noFM := "# Playbook — Y\n\nstep\n"
 	if strippedAmendBase(noFM) != noFM {
 		t.Errorf("no-FM body must be unchanged, got %q", strippedAmendBase(noFM))
+	}
+}
+
+// TestEscalate_AuthorsStructured is the Phase B1 integration test for escalate: the
+// authoring agent submits a structured playbook (faked tool call to the live tools
+// backend), and the shared structured-authoring body closure (structuredBody)
+// resolves to the DETERMINISTIC render of the captured playbook (sess.lastPB) — the
+// same final draft RunStream renders on EOF in structured mode. Mirrors Phase A's
+// TestCreate_StructuredRenderAndSeam harness (real openSession + tools.Serve).
+func TestEscalate_AuthorsStructured(t *testing.T) {
+	minimalZDOTDIR(t)
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	if sess == nil {
+		t.Fatal("openSession returned nil (driver/tools setup failed)")
+	}
+	defer sess.close()
+
+	pb := playbook.Playbook{
+		Title: "Fix the build",
+		Sections: []playbook.Section{{Heading: "Fix", Content: []playbook.ContentItem{
+			{Kind: "code", Lang: "bash", Code: "make", ID: "fix"}}}},
+		Meta: playbook.Meta{Description: "fix it", ProjectBound: true},
+	}
+	raw, _ := json.Marshal(pb)
+
+	// The agent's submit_playbook tool call hits the backend → OnPlaybook → sess.lastPB.
+	res, err := tools.Dial(sess.socket, tools.Call{Tool: "submit_playbook", Playbook: raw})
+	if err != nil || !res.OK {
+		t.Fatalf("submit: %+v err=%v", res, err)
+	}
+	if sess.lastPB.Load() == nil {
+		t.Fatal("submit_playbook did not capture into sess.lastPB")
+	}
+
+	// The shared body() closure: escalate's RunStream renders this on EOF as the
+	// finalDraft. With a captured playbook it is playbook.Render(sess.lastPB) — the
+	// fan-out fallback is never consulted.
+	body := structuredBody(sess, nil)
+	if !strings.Contains(body, "# Fix the build") || !strings.Contains(body, "```bash {id=fix}") {
+		t.Fatalf("escalate body must be the rendered captured playbook: %s", body)
 	}
 }

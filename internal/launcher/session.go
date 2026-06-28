@@ -405,56 +405,55 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		Events:      buildReengageEvents(req, sess),
 		Cache:       c,
 		RequestJSON: requestJSON(req),
-		Metadata:    buildMetadataSeam(sess),
-		EnvLookup:   buildEnvLookup(sharedDrv),
-		StoreDir:    cfg.GlobalStoreDir(),
+		// Structured authoring folds classification into the single submit_playbook
+		// call, so the captured pb's Meta drives the saved front matter + project_bound
+		// (capturedMetaSeam, mirroring create's newCreateReengage) — NO metadata model
+		// pass. Falls back to the model classifier only when nothing was submitted.
+		Metadata:  capturedMetaSeam(sess),
+		EnvLookup: buildEnvLookup(sharedDrv),
+		StoreDir:  cfg.GlobalStoreDir(),
 	}
 	if !d.Disabled && !noCache {
 		reengage.CtxHash = d.CtxHash
 		reengage.ReqHash = d.ReqHash
 	}
 
-	// INITIAL authoring runs the OWNED claude stream-json invocation (AuthorEvents):
-	// the normalized event stream is fanned into the ui's EXISTING reader-based
-	// playbook stream + activity line, so the wait shows the model's live REASONING
-	// + tool activity while the playbook still streams. The mcp-config wires the
-	// agent's run/ask/remember tools to this session's backend.
-	mcpPath, removeMCP := sess.writeMCPConfig()
-	events, closeFn, err := author.AuthorEvents(req, author.AuthorOptions{
-		Cfg:           cfg,
-		MCPConfigPath: mcpPath,
-	})
+	// INITIAL authoring runs the SHARED structured-authoring core (structuredStream):
+	// the OWNED claude stream-json invocation (AuthorEvents, Structured: true) is fanned
+	// into a narration reader + activity feed, while the agent submits the playbook via
+	// submit_playbook → OnPlaybook → sess.lastPB. The viewer (RunStream, Structured:
+	// true) shows the ProgressWidget while draining narration, then renders body() (the
+	// captured playbook) on EOF as the finalDraft. The failure context
+	// (req.Command/Exit/Scrollback) flows through author's SystemPrompt/BuildUserMessage
+	// unchanged. The mcp-config wires the agent's run/ask/remember tools to this backend.
+	cs, err := structuredStream(req, sess, cfg)
 	if err != nil {
 		// Fallback: the harness binary may be missing or the harness unsupported.
-		// Author via the existing text path so authoring still works.
-		dbg("authorPlaybook: AuthorEvents failed (%v); falling back to text author path", err)
-		removeMCP()
+		// Author via the existing (markdown) text path so authoring still works.
+		dbg("authorPlaybook: structured author stream failed (%v); falling back to text author path", err)
 		return authorPlaybookText(req, d, c, noCache, reengage, cwd, sharedDrv, title, bridgeOf(sess), cfg.Driver.Shell)
 	}
+	defer cs.close()
 
-	// Fan the events into the playbook reader + activity feed; Body() holds the
-	// accumulated playbook for the cache once the reader hits EOF.
-	reader, activity, fo := agentstream.FanOut(events, closeFn, ActivityBuffer)
-	defer reader.Close()
-	defer removeMCP()
-
-	code := ui.RunStream(reader, ui.StreamOptions{
-		Harness:   "Claude Code",
-		Title:     title,
-		Cwd:       cwd,
-		Shell:     cfg.Driver.Shell, // configured shell for RunStream's own-driver fallback
-		Driver:    sharedDrv,
-		Reengage:  reengage,
-		Activity:  activity,
-		Asker:     sess.asker(cwd), // `f` proactive amend (spec §D)
-		AskBridge: bridgeOf(sess),  // no-mux agent `ask` → in-viewer overlay
+	code := ui.RunStream(cs.reader, ui.StreamOptions{
+		Harness:    "Claude Code",
+		Title:      title,
+		Cwd:        cwd,
+		Shell:      cfg.Driver.Shell, // configured shell for RunStream's own-driver fallback
+		Driver:     sharedDrv,
+		Reengage:   reengage,
+		Activity:   cs.activity,
+		Asker:      sess.asker(cwd), // `f` proactive amend (spec §D)
+		AskBridge:  bridgeOf(sess),  // no-mux agent `ask` → in-viewer overlay
+		Structured: true,            // drain narration; render the captured playbook on EOF
+		Body:       cs.body,         // the captured rendered playbook (finalDraft on EOF)
 	})
 
-	// Cache-store on completion — only when the cache wasn't disabled/bypassed and
-	// the keys are valid. The body comes from the fan-out (TextDelta accumulation,
-	// or Final's authoritative text). The disabled guard (failure with empty
-	// scrollback) and the no-cache bypass both leave the entry unstored.
-	body := fo.Body()
+	// Cache-store on completion — only when the cache wasn't disabled/bypassed and the
+	// keys are valid. The body is the DETERMINISTIC render of the captured structured
+	// playbook (fan-out text fallback only if the model submitted nothing). The disabled
+	// guard (failure with empty scrollback) and the no-cache bypass leave it unstored.
+	body := cs.body()
 	if !d.Disabled && !noCache && d.CtxHash != "" && d.ReqHash != "" && body != "" {
 		if _, serr := c.Store(d.CtxHash, d.ReqHash, "playbook", body, nil, requestJSON(req)); serr != nil {
 			fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: cache store: %v\n", serr)

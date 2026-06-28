@@ -218,17 +218,22 @@ type createStream struct {
 // createStreamFn is the author-stream seam: production runs the owned AuthorEvents
 // invocation and fans it out; tests inject a canned reader/activity/body so the
 // create core runs without a live harness.
-var createStreamFn = realCreateStream
+var createStreamFn = structuredStream
 
-// realCreateStream opens the owned authoring event stream (AuthorEvents) wired to
-// the session's tools backend and fans it into a reader + activity feed + body
-// accumulator. A nil session authors without tools (writeMCPConfig is nil-safe).
-func realCreateStream(req capture.Request, sess *session, cfg *config.Config) (createStream, error) {
+// structuredStream is the SHARED structured-authoring core for both create (inline
+// progress host) and escalate (in-viewer structured RunStream): it opens the owned
+// authoring event stream (AuthorEvents with Structured: true — the agent authors via
+// submit_playbook DATA, not {id=…} markdown) wired to the session's tools backend and
+// fans it into a reader + activity feed + body accumulator. The body() closure prefers
+// the deterministic render of the captured playbook (sess.lastPB) over the accumulated
+// stream text (see structuredBody). A nil session authors without tools (writeMCPConfig
+// is nil-safe).
+func structuredStream(req capture.Request, sess *session, cfg *config.Config) (createStream, error) {
 	mcpPath, removeMCP := sess.writeMCPConfig()
 	events, closeFn, err := author.AuthorEvents(req, author.AuthorOptions{
 		Cfg:           cfg,
 		MCPConfigPath: mcpPath,
-		Structured:    true, // create authors via submit_playbook (DATA), not {id=…} markdown
+		Structured:    true, // author via submit_playbook (DATA), not {id=…} markdown
 	})
 	if err != nil {
 		removeMCP()
@@ -238,20 +243,27 @@ func realCreateStream(req capture.Request, sess *session, cfg *config.Config) (c
 	return createStream{
 		reader:   reader,
 		activity: activity,
-		// Prefer the DETERMINISTIC render of the captured structured playbook (the agent
-		// submitted it via submit_playbook → OnPlaybook → sess.lastPB). Fall back to the
-		// accumulated stream text only when the model misbehaved and submitted nothing,
-		// so create never dead-ends.
-		body: func() string {
-			if sess != nil {
-				if last := sess.lastPB.Load(); last != nil {
-					return playbook.Render(*last)
-				}
-			}
-			return fo.Body()
-		},
-		close: func() { reader.Close(); removeMCP() },
+		body:     func() string { return structuredBody(sess, fo.Body) },
+		close:    func() { reader.Close(); removeMCP() },
 	}, nil
+}
+
+// structuredBody resolves the authored body in structured mode, shared by create's
+// inline progress host and escalate's in-viewer structured RunStream. It prefers the
+// DETERMINISTIC render of the captured structured playbook (the agent submitted it via
+// submit_playbook → OnPlaybook → sess.lastPB). It falls back to the accumulated stream
+// text (fallback, typically the fan-out's Body) only when the model misbehaved and
+// submitted nothing, so authoring never dead-ends.
+func structuredBody(sess *session, fallback func() string) string {
+	if sess != nil {
+		if last := sess.lastPB.Load(); last != nil {
+			return playbook.Render(*last)
+		}
+	}
+	if fallback != nil {
+		return fallback()
+	}
+	return ""
 }
 
 // createViewFn is the phase-2 viewer seam: production writes the complete playbook
