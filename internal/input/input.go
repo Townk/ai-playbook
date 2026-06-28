@@ -259,7 +259,7 @@ func (m model) render() string {
 		if m.prompt != "" {
 			inlinePrompt = lipgloss.NewStyle().Foreground(lipgloss.Color(inlineDescColor)).Render(m.prompt)
 		}
-		return inlineLayout(inlinePrompt, m.fld.view(inlineBoxWidth, true), hint)
+		return m.inlineLayout(inlinePrompt, m.fld.view(inlineBoxWidth, true), hint)
 	}
 	iW := m.innerW()
 	sections := []string{}
@@ -270,28 +270,41 @@ func (m model) render() string {
 	return renderFrame(m.theme, m.variant, m.title, sections, hint, m.width, m.padding, m.inset)
 }
 
-// inlineBoxWidth is the fixed column width of the no-mux input box.
-const inlineBoxWidth = 50
+const (
+	// inlineBoxWidth is the fixed column width of the no-mux input box + separator.
+	inlineBoxWidth = 78
+	// inlineBoxIndent is the leading indent on the separator and the box.
+	inlineBoxIndent = " "
+	// inlineTextIndent is the leading indent on the description and hint lines.
+	inlineTextIndent = "   "
+	// inlineDescColor renders the no-mux description in the viewer's H2 color
+	// (colPeach #fab387) rather than body Text. Exploratory — under evaluation.
+	inlineDescColor = "#fab387"
+)
 
-// inlineIndent is the left indent on the no-mux description and hint TEXT lines
-// (not the box).
-const inlineIndent = "  "
-
-// inlineDescColor renders the no-mux description line in the viewer's H2 color
-// (colPeach #fab387) rather than body Text. Exploratory — under evaluation.
-const inlineDescColor = "#fab387"
-
-// inlineLayout stacks the three no-mux elements: the description line, the
-// (self-bordered) box, and the hint/activity line — with inlineIndent on the top
-// and bottom TEXT lines (not the box), and NO blank lines between them. No title
-// bar / outer frame (those are the mux float's chrome).
-func inlineLayout(top, box, bottom string) string {
-	var rows []string
-	if top != "" {
-		rows = append(rows, inlineIndent+top)
+// indentLines prepends pad to every line of s (so a multi-line box indents whole).
+func indentLines(s, pad string) string {
+	lines := strings.Split(s, "\n")
+	for i := range lines {
+		lines[i] = pad + lines[i]
 	}
-	rows = append(rows, box)
-	rows = append(rows, inlineIndent+bottom)
+	return strings.Join(lines, "\n")
+}
+
+// inlineLayout stacks the no-mux UI top→bottom: a dark-grey separator rule, the
+// description line, the (self-bordered) box, and the hint/activity line. The
+// separator and box carry inlineBoxIndent (1 space); the description and hint
+// carry inlineTextIndent. No blank lines, no title bar / outer frame (the mux
+// float's chrome).
+func (m model) inlineLayout(top, box, bottom string) string {
+	sep := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Rule)).Render(strings.Repeat("─", inlineBoxWidth))
+	var rows []string
+	rows = append(rows, indentLines(sep, inlineBoxIndent))
+	if top != "" {
+		rows = append(rows, indentLines(top, inlineTextIndent))
+	}
+	rows = append(rows, indentLines(strings.TrimRight(box, "\n"), inlineBoxIndent))
+	rows = append(rows, indentLines(bottom, inlineTextIndent))
 	return strings.Join(rows, "\n")
 }
 
@@ -362,7 +375,7 @@ func (m model) renderThinking() string {
 	activity := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).
 		Render(truncateToWidth(m.thinkingLine, iW))
 	if m.inline {
-		return inlineLayout(top, box, activity)
+		return m.inlineLayout(top, box, activity)
 	}
 	return renderFrame(m.theme, m.variant, m.title, []string{top, box}, activity, m.width, m.padding, m.inset)
 }

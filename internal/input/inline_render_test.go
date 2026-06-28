@@ -34,9 +34,10 @@ func TestInlineRender_OmitsTitleAndOuterFrame(t *testing.T) {
 	}
 }
 
-// The no-mux layout: a fixed inlineBoxWidth-column box, a 1-space indent on the
-// description + hint lines (not the box), and NO blank lines between the three.
-func TestInlineRender_BoxWidthIndentNoBlanks(t *testing.T) {
+// The no-mux layout: a dark-grey separator rule on top, then description, box,
+// hint. Separator + box are inlineBoxWidth wide at inlineBoxIndent (1 space);
+// description + hint at inlineTextIndent (3 spaces); no blank lines.
+func TestInlineRender_LayoutStructure(t *testing.T) {
 	m := newInputModel(defaultTheme(), "default", "ai-playbook", "How can I help you today?", "x", "", 3, 1, 1, false, "")
 	m.inline = true
 	m.width = 120 // a wide terminal — the box must still be the fixed width
@@ -48,26 +49,36 @@ func TestInlineRender_BoxWidthIndentNoBlanks(t *testing.T) {
 			t.Errorf("line %d is blank; the inline layout must have no empty lines", i)
 		}
 	}
-	// The box (the widest lines) is exactly inlineBoxWidth columns.
+	// First line is the dark-grey separator rule: inlineBoxWidth columns of "─" at
+	// the box indent.
+	sep := lines[0]
+	if !strings.HasPrefix(sep, inlineBoxIndent) || strings.HasPrefix(sep, inlineTextIndent) {
+		t.Errorf("separator must carry the box indent, not the text indent: %q", sep)
+	}
+	if !strings.Contains(sep, strings.Repeat("─", inlineBoxWidth)) {
+		t.Errorf("first line must be the %d-col separator rule", inlineBoxWidth)
+	}
+	// The separator + box lines are inlineBoxWidth + the box indent wide.
+	wantW := inlineBoxWidth + len(inlineBoxIndent)
 	maxW := 0
 	for _, ln := range lines {
 		if w := lipgloss.Width(ln); w > maxW {
 			maxW = w
 		}
 	}
-	if maxW != inlineBoxWidth {
-		t.Errorf("box width = %d, want %d", maxW, inlineBoxWidth)
+	if maxW != wantW {
+		t.Errorf("widest line = %d, want %d (box %d + indent %d)", maxW, wantW, inlineBoxWidth, len(inlineBoxIndent))
 	}
-	// Description (first) and hint (last) lines carry the inlineIndent; the box
-	// border lines do not.
-	if !strings.HasPrefix(lines[0], inlineIndent) {
-		t.Errorf("description line must have the %d-space indent", len(inlineIndent))
+	// Description (line 1) and hint (last) carry the 3-space text indent; a box
+	// border line (line 2) carries only the 1-space box indent.
+	if !strings.HasPrefix(lines[1], inlineTextIndent) {
+		t.Errorf("description line must have the text indent (%d spaces)", len(inlineTextIndent))
 	}
-	if !strings.HasPrefix(lines[len(lines)-1], inlineIndent) {
-		t.Errorf("hint line must have the %d-space indent", len(inlineIndent))
+	if !strings.HasPrefix(lines[len(lines)-1], inlineTextIndent) {
+		t.Errorf("hint line must have the text indent (%d spaces)", len(inlineTextIndent))
 	}
-	if strings.HasPrefix(lines[1], " ") {
-		t.Error("the box must NOT be indented")
+	if !strings.HasPrefix(lines[2], inlineBoxIndent) || strings.HasPrefix(lines[2], inlineTextIndent) {
+		t.Errorf("box line must have the box indent (1 space), not the text indent: %q", lines[2])
 	}
 }
 
