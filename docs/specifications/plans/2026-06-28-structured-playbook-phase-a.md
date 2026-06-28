@@ -37,6 +37,7 @@ package playbook
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -73,19 +74,9 @@ func TestPlaybook_JSONRoundTrip(t *testing.T) {
 		t.Fatalf("project_bound lost")
 	}
 	// project_bound must serialize as the snake_case key the front matter uses.
-	if !contains(string(b), `"project_bound":true`) {
+	if !strings.Contains(string(b), `"project_bound":true`) {
 		t.Fatalf("project_bound json key wrong: %s", b)
 	}
-}
-
-func contains(s, sub string) bool { return len(s) >= len(sub) && (indexOf(s, sub) >= 0) }
-func indexOf(s, sub string) int {
-	for i := 0; i+len(sub) <= len(s); i++ {
-		if s[i:i+len(sub)] == sub {
-			return i
-		}
-	}
-	return -1
 }
 ```
 
