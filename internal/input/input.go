@@ -242,12 +242,10 @@ func (m model) render() string {
 	if m.thinking {
 		return m.renderThinking()
 	}
-	iW := m.innerW()
-	sections := []string{}
+	prompt := ""
 	if m.prompt != "" {
-		sections = append(sections, lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text)).Render(m.prompt))
+		prompt = lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text)).Render(m.prompt)
 	}
-	sections = append(sections, m.fld.view(iW, true))
 	// Prefer the field's own hint when it provides one (confirm/choose carry
 	// type-specific accelerators); text/line fields have none, so the generic
 	// submit/newline/cancel hint applies. This makes the embeddable Ask render the
@@ -257,26 +255,31 @@ func (m model) render() string {
 		hint = h.hint()
 	}
 	if m.inline {
-		return m.renderInline(sections, hint)
+		return inlineLayout(prompt, m.fld.view(inlineBoxWidth, true), hint)
 	}
+	iW := m.innerW()
+	sections := []string{}
+	if prompt != "" {
+		sections = append(sections, prompt)
+	}
+	sections = append(sections, m.fld.view(iW, true))
 	return renderFrame(m.theme, m.variant, m.title, sections, hint, m.width, m.padding, m.inset)
 }
 
-// renderInline lays out the reduced no-mux UI: the body sections (description +
-// box) then the hint, with the same inset spacing the frame uses — but WITHOUT
-// the title bar and the outer rounded frame (those are the mux float's chrome).
-// The box keeps its own border (textField.view), so the result is exactly the
-// three spec elements: description line, bordered box, hint.
-func (m model) renderInline(sections []string, hint string) string {
+// inlineBoxWidth is the fixed column width of the no-mux input box.
+const inlineBoxWidth = 50
+
+// inlineLayout stacks the three no-mux elements: the description line, the
+// (self-bordered) box, and the hint/activity line — with a 1-space left indent on
+// the top and bottom TEXT lines (not the box), and NO blank lines between them.
+// No title bar / outer frame (those are the mux float's chrome).
+func inlineLayout(top, box, bottom string) string {
 	var rows []string
-	for i, sec := range sections {
-		if i > 0 {
-			rows = appendBlanks(rows, m.inset)
-		}
-		rows = append(rows, sec)
+	if top != "" {
+		rows = append(rows, " "+top)
 	}
-	rows = appendBlanks(rows, m.inset)
-	rows = append(rows, hint)
+	rows = append(rows, box)
+	rows = append(rows, " "+bottom)
 	return strings.Join(rows, "\n")
 }
 
@@ -329,25 +332,27 @@ func thinkingPromptColor(phase float64) string {
 // column as the text box), and the hint line is dropped. Same row count as the
 // normal render so the float pane fills without a gap.
 func (m model) renderThinking() string {
+	// Inline keeps the box at the fixed inlineBoxWidth so it doesn't jump width
+	// when the box transitions from input to the wave on submit.
 	iW := m.innerW()
-	sections := []string{
-		lipgloss.NewStyle().Foreground(lipgloss.Color(thinkingPromptColor(m.phase))).Render("Thinking…"),
+	if m.inline {
+		iW = inlineBoxWidth
 	}
+	top := lipgloss.NewStyle().Foreground(lipgloss.Color(thinkingPromptColor(m.phase))).Render("Thinking…")
+	var box string
 	if tf, ok := m.fld.(*textField); ok {
-		sections = append(sections, tf.thinkingView(iW, m.phase, m.theme.Border, thinkingWaveRed, m.theme.Accent))
+		box = tf.thinkingView(iW, m.phase, m.theme.Border, thinkingWaveRed, m.theme.Accent)
 	} else {
-		sections = append(sections, m.fld.view(iW, true))
+		box = m.fld.view(iW, true)
 	}
-	// The model-activity line goes in the HINT slot — inside the MODAL, two lines
-	// above the modal's bottom border (an inset blank above it, the padding blank
-	// below it), i.e. three lines below the input box. Dark grey, truncated to the
-	// modal inner width. (The waves stay full inside the input box.)
+	// The model-activity line goes in the bottom slot, dark grey, truncated to the
+	// box width. (The waves stay full inside the input box.)
 	activity := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).
 		Render(truncateToWidth(m.thinkingLine, iW))
 	if m.inline {
-		return m.renderInline(sections, activity)
+		return inlineLayout(top, box, activity)
 	}
-	return renderFrame(m.theme, m.variant, m.title, sections, activity, m.width, m.padding, m.inset)
+	return renderFrame(m.theme, m.variant, m.title, []string{top, box}, activity, m.width, m.padding, m.inset)
 }
 
 // truncateToWidth shortens s to at most w display columns (rune/width-safe, no

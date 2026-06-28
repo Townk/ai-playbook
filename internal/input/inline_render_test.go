@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // The inline (no-mux) render shows ONLY the three spec elements — description
@@ -30,6 +31,43 @@ func TestInlineRender_OmitsTitleAndOuterFrame(t *testing.T) {
 	m.inline = false
 	if framed := m.render(); !strings.Contains(framed, "▓▓▓") {
 		t.Error("framed render should still show the title bar (sanity)")
+	}
+}
+
+// The no-mux layout: a fixed inlineBoxWidth-column box, a 1-space indent on the
+// description + hint lines (not the box), and NO blank lines between the three.
+func TestInlineRender_BoxWidthIndentNoBlanks(t *testing.T) {
+	m := newInputModel(defaultTheme(), "default", "ai-playbook", "How can I help you today?", "x", "", 3, 1, 1, false, "")
+	m.inline = true
+	m.width = 120 // a wide terminal — the box must still be the fixed width
+	lines := strings.Split(m.render(), "\n")
+
+	// No blank lines anywhere.
+	for i, ln := range lines {
+		if strings.TrimSpace(ln) == "" {
+			t.Errorf("line %d is blank; the inline layout must have no empty lines", i)
+		}
+	}
+	// The box (the widest lines) is exactly inlineBoxWidth columns.
+	maxW := 0
+	for _, ln := range lines {
+		if w := lipgloss.Width(ln); w > maxW {
+			maxW = w
+		}
+	}
+	if maxW != inlineBoxWidth {
+		t.Errorf("box width = %d, want %d", maxW, inlineBoxWidth)
+	}
+	// Description (first) and hint (last) lines carry a 1-space indent; the box
+	// border lines do not.
+	if !strings.HasPrefix(lines[0], " ") {
+		t.Error("description line must have a 1-space leading indent")
+	}
+	if !strings.HasPrefix(lines[len(lines)-1], " ") {
+		t.Error("hint line must have a 1-space leading indent")
+	}
+	if strings.HasPrefix(lines[1], " ") {
+		t.Error("the box must NOT be indented")
 	}
 }
 
