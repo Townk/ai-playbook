@@ -236,18 +236,57 @@ deterministic + model (authoring model, no new knob).
 
 ## Phase 4 — Viewer affordances
 
-**Goal:** richer pager interaction for file-backed playbooks. **Status:** not
-started.
+**Goal:** richer pager interaction for file-backed playbooks + in-process diff
+review. **Status:** not started.
 
 **Features**
 
 - **"edit" tag-button** (like the cached badge): opens `$EDITOR <file>` in a new
   mux tab; the viewer **watches the file** (fsnotify, poll fallback) → re-render
-  on save. Shows only for file-backed (committed/store) playbooks.
+  on save. Shows only for file-backed (committed/store) playbooks. Requires
+  threading the on-disk source path into the model first.
+- **In-process diff view ([ADR-0008](architecture/adrs/0008-in-process-diff-view.md)):**
+  one pure-Go **side-by-side** (syntax-highlighted) renderer for both the
+  `diff`-block "view diff" button AND the adapt-on-run `d` overlay, presented
+  **mux-aware** — a floating pane when a mux is on, a viewer modal overlay when
+  off. Unified diff stays only for the inline block body. **Drops** the external
+  `hunk`/`delta`/`less` chain, `AI_PLAYBOOK_HUNK_BIN`, and the never-built "review
+  diff" (model-annotate + user-comment loop). Word-level intra-line highlight is
+  deferred polish.
 - (The **assisted-run** flow + execution log + `{rollback}` schema are
-  implemented in Phase 2; this phase is the standalone editing UX.)
+  implemented in Phase 2; this phase is the standalone editing UX + diff view.)
 
 **Open:** file-watch mechanism (fsnotify vs poll) per platform.
+
+---
+
+## Viewer/runner — path to feature-complete (excluding run-assisted)
+
+The viewer/runner is feature-complete when Phase 2 (run engine) and Phase 4
+(viewer affordances) land **minus the run-assisted feature** (the `--assisted`
+mode, its per-step "Proceed?" confirm, the assisted "Roll back?" confirm, and the
+assisted-run button). Crucially, **none of the items below are entangled with
+run-assisted** — they are the shared substrate run-assisted later sits on top of.
+
+**Already shipped (baseline):** default-pager run + drive, value-passing,
+verify + native confirm + auto-follow-up, copy/play, apply/undo-diff,
+adapt-on-run + "adapted from" banner + `d` overlay, regenerate/followup/wrap-up/
+commit re-engagement, the no-mux inline input + ask overlay.
+
+**Remaining (recommended sequence):**
+
+1. **Execution log** (Phase 2) — structured per-step `{command, exit, output}` →
+   a run summary + a log file under the data dir (today: ad-hoc `/tmp` per-block
+   logs). *Shared substrate — build first.*
+2. **`{rollback=<id>}` schema parse** (Phase 2) — add the field to the block parser.
+   *Unblocks rollback.*
+3. **`--auto` mode + `--no-auto-rollback`** (Phase 2) — headless run loop,
+   stop-on-first-failure.
+4. **Auto rollback flow** (Phase 2) — reverse-order rollback of completed steps
+   on failure; no rollback blocks → stop + log.
+5. **Source-path threading → "edit" button → file-watching** (Phase 4).
+6. **In-process side-by-side diff view** (Phase 4, [ADR-0008](architecture/adrs/0008-in-process-diff-view.md))
+   — independent; can run in parallel from the start.
 
 ---
 
