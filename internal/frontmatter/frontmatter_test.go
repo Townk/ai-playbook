@@ -371,6 +371,18 @@ func TestParse_UnterminatedIsNotFrontMatter(t *testing.T) {
 	}
 }
 
+func TestFrontMatter_ProjectBoundRoundTrip(t *testing.T) {
+	fm := FrontMatter{Name: "N", ProjectBound: true}
+	full := Prepend(fm, "body")
+	if !strings.Contains(full, "project_bound: true") {
+		t.Fatalf("project_bound not assembled:\n%s", full)
+	}
+	got, _, ok := Parse(full)
+	if !ok || !got.ProjectBound {
+		t.Fatalf("project_bound did not round-trip: ok=%v fm=%+v", ok, got)
+	}
+}
+
 // TestAssemble_WorkdirRoundTrip verifies that the Workdir field survives a
 // full Assemble → Parse round-trip without loss or corruption.
 func TestAssemble_WorkdirRoundTrip(t *testing.T) {

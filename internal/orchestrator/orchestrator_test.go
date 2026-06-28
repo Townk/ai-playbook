@@ -353,6 +353,20 @@ func TestCommitPlaybook_HonorsStoreDir(t *testing.T) {
 	}
 }
 
+func TestBuildFrontMatter_ProjectBound(t *testing.T) {
+	re := &Reengage{
+		Req:      capture.Request{},
+		Metadata: func(string) (PlaybookMeta, error) { return PlaybookMeta{Description: "d", ProjectBound: true}, nil },
+	}
+	fm := re.buildFrontMatter("# Playbook — T\n\n```bash {id=fix}\nx\n```\n")
+	if !fm.ProjectBound {
+		t.Fatalf("buildFrontMatter must copy ProjectBound from the seam meta")
+	}
+	if fm.Description != "d" {
+		t.Fatalf("description = %q, want d", fm.Description)
+	}
+}
+
 // TestCommitPlaybook_NoStoreDir_FallsBackToDataRoot asserts the back-compat
 // path: when StoreDir is empty, CommitPlaybook writes under dataRoot/playbooks.
 func TestCommitPlaybook_NoStoreDir_FallsBackToDataRoot(t *testing.T) {

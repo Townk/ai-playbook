@@ -211,15 +211,16 @@ func BuildEnv(refNames []string, notes map[string]string, lookup func(string) (s
 // programmatic provenance fields are inputs supplied by the caller; the
 // classification fields originate from the model.
 type FrontMatter struct {
-	Name        string              `yaml:"name"`
-	Description string              `yaml:"description,omitempty"`
-	Category    string              `yaml:"category,omitempty"`
-	Tags        []string            `yaml:"tags,omitempty"`
-	Env         map[string]EnvValue `yaml:"env,omitempty"`
-	Created     string              `yaml:"created,omitempty"`
-	ProjectRoot string              `yaml:"project_root,omitempty"`
-	Workdir     string              `yaml:"workdir,omitempty"`
-	Request     string              `yaml:"request,omitempty"`
+	Name         string              `yaml:"name"`
+	Description  string              `yaml:"description,omitempty"`
+	Category     string              `yaml:"category,omitempty"`
+	Tags         []string            `yaml:"tags,omitempty"`
+	Env          map[string]EnvValue `yaml:"env,omitempty"`
+	Created      string              `yaml:"created,omitempty"`
+	ProjectRoot  string              `yaml:"project_root,omitempty"`
+	Workdir      string              `yaml:"workdir,omitempty"`
+	ProjectBound bool                `yaml:"project_bound,omitempty" json:"project_bound,omitempty"`
+	Request      string              `yaml:"request,omitempty"`
 }
 
 // Assemble marshals the front matter to a YAML document fenced by "---"

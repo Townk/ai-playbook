@@ -198,9 +198,10 @@ type Reengage struct {
 // CommitPlaybook path. main.go maps author.Metadata → PlaybookMeta, building
 // EnvNotes (env-var-name → why) from author.Metadata.ImportantEnvVars.
 type PlaybookMeta struct {
-	Description string
-	Category    string
-	Tags        []string
+	Description  string
+	Category     string
+	Tags         []string
+	ProjectBound bool
 	// EnvNotes maps an env-var name to the model's one-line rationale (why). It feeds
 	// frontmatter.BuildEnv's notes argument: both a union source of var names and the
 	// per-var why recorded in the front matter (never redacted — a rationale).
@@ -488,15 +489,16 @@ func (re *Reengage) buildFrontMatter(body string) frontmatter.FrontMatter {
 	env := frontmatter.BuildEnv(frontmatter.ScanEnvRefs(body), meta.EnvNotes, lookup, home)
 
 	return frontmatter.FrontMatter{
-		Name:        title,
-		Description: meta.Description,
-		Category:    meta.Category,
-		Tags:        meta.Tags,
-		Env:         env,
-		Created:     time.Now().Format("2006-01-02"),
-		ProjectRoot: frontmatter.NormalizeHome(re.Req.ProjectRoot, home),
-		Workdir:     frontmatter.NormalizeHome(re.Req.ProjectRoot, home),
-		Request:     re.Req.UserRequest,
+		Name:         title,
+		Description:  meta.Description,
+		Category:     meta.Category,
+		Tags:         meta.Tags,
+		Env:          env,
+		Created:      time.Now().Format("2006-01-02"),
+		ProjectRoot:  frontmatter.NormalizeHome(re.Req.ProjectRoot, home),
+		Workdir:      frontmatter.NormalizeHome(re.Req.ProjectRoot, home),
+		ProjectBound: meta.ProjectBound,
+		Request:      re.Req.UserRequest,
 	}
 }
 
