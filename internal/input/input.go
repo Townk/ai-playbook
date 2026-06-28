@@ -89,6 +89,12 @@ type model struct {
 	// the channel inlineSubmit returns (instead of the float's <out>.done file).
 	inlineSubmit func(value string) <-chan ThinkUpdate
 	inlineThink  <-chan ThinkUpdate
+
+	// inline renders the reduced no-mux layout: ONLY the description line, the
+	// (self-bordered) input box, and the hint — no title bar and no outer frame
+	// (those belong to the mux float). Set by RunInline. See ADR-0006 / the
+	// inline-ask spec.
+	inline bool
 }
 
 // initialModel keeps the original signature the existing tests call (text, 1/1
@@ -250,7 +256,28 @@ func (m model) render() string {
 	if h, ok := m.fld.(interface{ hint() string }); ok {
 		hint = h.hint()
 	}
+	if m.inline {
+		return m.renderInline(sections, hint)
+	}
 	return renderFrame(m.theme, m.variant, m.title, sections, hint, m.width, m.padding, m.inset)
+}
+
+// renderInline lays out the reduced no-mux UI: the body sections (description +
+// box) then the hint, with the same inset spacing the frame uses — but WITHOUT
+// the title bar and the outer rounded frame (those are the mux float's chrome).
+// The box keeps its own border (textField.view), so the result is exactly the
+// three spec elements: description line, bordered box, hint.
+func (m model) renderInline(sections []string, hint string) string {
+	var rows []string
+	for i, sec := range sections {
+		if i > 0 {
+			rows = appendBlanks(rows, m.inset)
+		}
+		rows = append(rows, sec)
+	}
+	rows = appendBlanks(rows, m.inset)
+	rows = append(rows, hint)
+	return strings.Join(rows, "\n")
 }
 
 // thinking-state wave palette: the same trio --wave-demo uses — theme Border as
@@ -317,6 +344,9 @@ func (m model) renderThinking() string {
 	// modal inner width. (The waves stay full inside the input box.)
 	activity := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted)).
 		Render(truncateToWidth(m.thinkingLine, iW))
+	if m.inline {
+		return m.renderInline(sections, activity)
+	}
 	return renderFrame(m.theme, m.variant, m.title, sections, activity, m.width, m.padding, m.inset)
 }
 

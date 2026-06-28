@@ -124,12 +124,14 @@ func inlineInput(req capture.Request, m mux.Mux) int {
 	}
 	defer tty.Close()
 
+	dbg("inlineInput: start (box on /dev/tty); waiting for submit")
 	res, rerr := inlineRunFn(tty, input.InlineRequest{
 		Title:   "ai-playbook",
 		Prompt:  "How can I help you today?",
 		Value:   prefillTemplate(req),
 		History: requestHistoryPath(),
 	}, func(value string) <-chan input.ThinkUpdate {
+		dbg("inlineInput: SUBMIT received value=%q; classify start", value)
 		ch := make(chan input.ThinkUpdate, 8)
 		go func() {
 			defer close(ch)
@@ -141,6 +143,7 @@ func inlineInput(req capture.Request, m mux.Mux) int {
 				default: // drop if the model hasn't drained — the line is cosmetic
 				}
 			})
+			dbg("inlineInput: classify done kind=%q err=%v", cls.Kind, cerr)
 			clsCh <- clsResult{cls: cls, err: cerr}
 			select {
 			case ch <- input.ThinkUpdate{Done: true}:
@@ -149,6 +152,7 @@ func inlineInput(req capture.Request, m mux.Mux) int {
 		}()
 		return ch
 	})
+	dbg("inlineInput: RunInline returned submitted=%v err=%v value=%q", res.Submitted, rerr, res.Value)
 	if rerr != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook: inline input: %v\n", rerr)
 		return 1
@@ -162,6 +166,7 @@ func inlineInput(req capture.Request, m mux.Mux) int {
 	if r.err != nil {
 		cls = author.Classification{Kind: author.KindEscalate}
 	}
+	dbg("inlineInput: routing kind=%q", cls.Kind)
 	return routeInline(req, cls, m)
 }
 

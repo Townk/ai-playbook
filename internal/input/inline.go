@@ -73,6 +73,7 @@ func RunInline(w *os.File, req InlineRequest, onSubmit func(value string) <-chan
 	}
 	m := newInputModel(defaultTheme(), "default", req.Title, req.Prompt, req.Value, "", h, 1, 1, false, "")
 	m.inlineSubmit = onSubmit
+	m.inline = true // reduced layout: description + bordered box + hint only (no title/frame)
 	applyHistory(&m, req.History)
 
 	fm, err := tea.NewProgram(
