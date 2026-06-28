@@ -1163,6 +1163,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, reassertHideCursor()
 			}
 			return m, nil
+		case "ctrl+x":
+			// HIDDEN debug affordance (not in the help): dump the current raw document
+			// as-is so a malformed render can be captured + reproduced.
+			if path := dumpDocument(m.md); path != "" {
+				m.status = "dumped document → " + path
+			} else {
+				m.status = "document dump failed"
+			}
+			return m, nil
 		// Vertical: line
 		case "down", "j":
 			m.yOff++
