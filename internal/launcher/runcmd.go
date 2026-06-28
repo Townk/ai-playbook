@@ -230,17 +230,33 @@ func liveAdapt(sys, user string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Drain the adapt stream in the background (collect the body, feed an activity
+	// tail) while the inline progress host renders the spinner + Waiting… + activity
+	// line on /dev/tty — the SAME host create uses. Without this the multi-second
+	// adapt model call looks like a frozen terminal. No mux ask bridge (adapt has no
+	// tools), so reqs is nil. done quits the host once the stream hits EOF.
+	activity := make(chan string, 8)
+	done := make(chan struct{})
 	var final, deltas strings.Builder
 	haveFinal := false
-	for e := range events {
-		switch e.Kind {
-		case agentstream.Final:
-			final.WriteString(e.Text)
-			haveFinal = true
-		case agentstream.TextDelta:
-			deltas.WriteString(e.Text)
+	go func() {
+		defer close(done)
+		defer close(activity)
+		for e := range events {
+			switch e.Kind {
+			case agentstream.Final:
+				final.WriteString(e.Text)
+				haveFinal = true
+			case agentstream.TextDelta:
+				deltas.WriteString(e.Text)
+				select {
+				case activity <- thinkingTail(deltas.String(), thinkingTailRunes):
+				default: // host hasn't drained — the line is cosmetic, drop it
+				}
+			}
 		}
-	}
+	}()
+	runCreateProgress(activity, nil, done)
 	if werr := wait(); werr != nil {
 		return "", werr
 	}
