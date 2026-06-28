@@ -272,6 +272,9 @@ func (s *Server) doSubmitPlaybook(req request) reply {
 	if s.deps.OnPlaybook == nil {
 		return reply{Error: "submit_playbook unavailable in this context"}
 	}
+	if len(req.Playbook) == 0 {
+		return reply{Error: "submit_playbook requires a playbook field"}
+	}
 	var pb playbook.Playbook
 	if err := json.Unmarshal(req.Playbook, &pb); err != nil {
 		return reply{Error: "could not parse playbook: " + err.Error()}

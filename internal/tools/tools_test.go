@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Townk/ai-playbook/internal/driver"
@@ -211,6 +212,47 @@ func TestServe_UnknownTool(t *testing.T) {
 func TestServe_NilDriver(t *testing.T) {
 	if _, err := Serve(filepath.Join(t.TempDir(), "x.sock"), Deps{}); err == nil {
 		t.Errorf("Serve with nil driver should error")
+	}
+}
+
+func TestServe_SubmitPlaybookEmptyPayload(t *testing.T) {
+	d := newTestDriver(t)
+	called := false
+	socket := serveTest(t, Deps{Driver: d, OnPlaybook: func(playbook.Playbook) { called = true }})
+
+	// No Playbook field → should be rejected before OnPlaybook is called.
+	res, err := Dial(socket, Call{Tool: "submit_playbook"})
+	if err != nil {
+		t.Fatalf("Dial submit (empty): %v", err)
+	}
+	if !strings.Contains(res.Error, "requires") {
+		t.Errorf("empty submit error = %q, want contains %q", res.Error, "requires")
+	}
+	if called {
+		t.Error("OnPlaybook must not be called for an empty-payload submit")
+	}
+}
+
+func TestServe_SubmitPlaybookNoHandler(t *testing.T) {
+	d := newTestDriver(t)
+	// No OnPlaybook wired → submit_playbook must return unavailable error.
+	socket := serveTest(t, Deps{Driver: d})
+
+	pb := playbook.Playbook{
+		Title:    "T",
+		Sections: []playbook.Section{{Heading: "S", Content: []playbook.ContentItem{{Kind: "code", Lang: "bash", Code: "echo hi", ID: "fix"}}}},
+	}
+	raw, _ := json.Marshal(pb)
+
+	res, err := Dial(socket, Call{Tool: "submit_playbook", Playbook: raw})
+	if err != nil {
+		t.Fatalf("Dial submit (no handler): %v", err)
+	}
+	if res.OK {
+		t.Error("submit without OnPlaybook must not return ok=true")
+	}
+	if res.Error == "" {
+		t.Error("submit without OnPlaybook must return a non-empty error")
 	}
 }
 

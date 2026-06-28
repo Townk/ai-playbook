@@ -17,12 +17,18 @@ func Validate(pb Playbook, requireVerify bool) error {
 	}
 	runnable := 0
 	seen := map[string]bool{}
+	if pb.Verify != nil {
+		seen["verify"] = true
+	}
 	for si, sec := range pb.Sections {
 		for ci, it := range sec.Content {
 			switch it.Kind {
 			case "text", "callout":
 				// prose: nothing structural to check
 			case "code":
+				if strings.TrimSpace(it.Lang) == "" {
+					errs = append(errs, fmt.Sprintf("section %d content %d: code block requires a lang", si, ci))
+				}
 				if !it.Static {
 					runnable++
 					if it.ID != "" {
@@ -36,6 +42,9 @@ func Validate(pb Playbook, requireVerify bool) error {
 				errs = append(errs, fmt.Sprintf("section %d content %d: unknown kind %q (want text|callout|code)", si, ci, it.Kind))
 			}
 		}
+	}
+	if pb.Verify != nil && strings.TrimSpace(pb.Verify.Lang) == "" {
+		errs = append(errs, "verify command requires a lang")
 	}
 	if runnable == 0 {
 		errs = append(errs, "at least one runnable (non-static) code block is required")

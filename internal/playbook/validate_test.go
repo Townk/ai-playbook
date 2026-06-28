@@ -29,6 +29,15 @@ func TestValidate_Violations(t *testing.T) {
 		}}}}, false, "duplicate id"},
 		{"missing verify", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{{Kind: "code", Lang: "bash", Code: "x", ID: "fix"}}}}}, true, "verify"},
 		{"bad kind", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{{Kind: "bogus"}, {Kind: "code", Lang: "bash", Code: "x", ID: "a"}}}}}, false, "kind"},
+		// Fix 1: empty lang on a code block.
+		{"empty lang code", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "", Code: "echo x", ID: "fix"},    // empty lang — should error
+			{Kind: "code", Lang: "bash", Code: "echo y", ID: "ok"}, // valid runnable block
+		}}}}, false, "lang"},
+		// Fix 2: content block id "verify" collides with the top-level verify reservation.
+		{"dup id verify", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "bash", Code: "echo ok", ID: "verify"},
+		}}}, Verify: &Step{Lang: "bash", Code: "ok"}}, false, "duplicate id"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

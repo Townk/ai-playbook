@@ -219,7 +219,7 @@ type FrontMatter struct {
 	Created      string              `yaml:"created,omitempty"`
 	ProjectRoot  string              `yaml:"project_root,omitempty"`
 	Workdir      string              `yaml:"workdir,omitempty"`
-	ProjectBound bool                `yaml:"project_bound,omitempty" json:"project_bound,omitempty"`
+	ProjectBound bool                `yaml:"project_bound,omitempty"`
 	Request      string              `yaml:"request,omitempty"`
 }
 

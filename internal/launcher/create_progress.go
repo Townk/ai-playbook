@@ -303,6 +303,8 @@ func capturedMetaSeam(sess *session) func(doc string) (orchestrator.PlaybookMeta
 		if sess != nil {
 			if last := sess.lastPB.Load(); last != nil {
 				m := last.Meta
+				// EnvNotes is intentionally nil: the structured schema carries no env
+				// vars; buildFrontMatter still scans the rendered body for env refs.
 				return orchestrator.PlaybookMeta{
 					Description:  m.Description,
 					Category:     m.Category,
