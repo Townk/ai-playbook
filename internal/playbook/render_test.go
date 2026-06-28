@@ -30,7 +30,7 @@ func sample() Playbook {
 
 func TestRender_Golden(t *testing.T) {
 	got := Render(sample())
-	want := "# Playbook — Restore the Gradle wrapper\n" +
+	want := "# Restore the Gradle wrapper\n" +
 		"\nYou ran `gg build` and it failed.\n" +
 		"\n## Goal & error\n" +
 		"\nThe wrapper jar is missing.\n" +

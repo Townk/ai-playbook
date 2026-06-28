@@ -5,11 +5,11 @@
 package playbook
 
 // Playbook is the whole document. Title is the playbook name (rendered as the H1
-// "# Playbook — <Title>" and used as the saved front-matter name). Front matter
-// other than the title is carried in Meta and assembled at save time — Render
-// emits the BODY only.
+// "# <Title>" and used as the saved front-matter name). Front matter other than
+// the title is carried in Meta and assembled at save time — Render emits the BODY
+// only.
 type Playbook struct {
-	Title    string    `json:"title" jsonschema:"the playbook name; rendered as the H1 title '# Playbook — <title>'. A short imperative phrase, e.g. 'Restore the Gradle wrapper'."`
+	Title    string    `json:"title" jsonschema:"the playbook name; rendered as the H1 title. A short imperative phrase, e.g. 'Restore the Gradle wrapper'."`
 	Intro    string    `json:"intro,omitempty" jsonschema:"optional lead prose before the first section (markdown)"`
 	Sections []Section `json:"sections" jsonschema:"the ordered sections of the playbook; at least one"`
 	Verify   *Step     `json:"verify,omitempty" jsonschema:"the final outcome-check command, rendered as the {id=verify} block. Include it for a troubleshooting/fix playbook."`

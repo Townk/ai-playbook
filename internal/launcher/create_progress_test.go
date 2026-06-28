@@ -312,7 +312,7 @@ func TestCreate_StructuredRenderAndSeam(t *testing.T) {
 
 	// The captured playbook renders deterministically (body-only markdown).
 	body := playbook.Render(*sess.lastPB.Load())
-	if !strings.Contains(body, "# Playbook — Restore wrapper") || !strings.Contains(body, "```bash {id=fix}") {
+	if !strings.Contains(body, "# Restore wrapper") || !strings.Contains(body, "```bash {id=fix}") {
 		t.Fatalf("rendered body wrong:\n%s", body)
 	}
 

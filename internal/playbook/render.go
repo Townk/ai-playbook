@@ -7,11 +7,11 @@ import (
 
 // Render turns a structured Playbook into the canonical markdown BODY (no front
 // matter — that is assembled at save from Meta). The output satisfies
-// ui.ValidatePlaybook: an H1 "# Playbook — <Title>" + ≥1 fenced block. Blank
-// lines separate every element so goldmark parses each as its own block.
+// ui.ValidatePlaybook: an H1 "# <Title>" + ≥1 fenced block. Blank lines separate
+// every element so goldmark parses each as its own block.
 func Render(pb Playbook) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# Playbook — %s\n", pb.Title)
+	fmt.Fprintf(&b, "# %s\n", pb.Title)
 	writeProse(&b, pb.Intro)
 
 	auto := 0
