@@ -32,8 +32,8 @@ func TestProgressWidget_TickAndElapsed(t *testing.T) {
 		t.Fatalf("Elapsed() = %d, want 15 (155 ticks / 10)", w.Elapsed())
 	}
 	// At 15s the phrase has escalated past the first entry.
-	if got := w.Render(80); strings.Contains(got, "Working… ") && !strings.Contains(got, "15s") {
-		t.Errorf("render at 15s = %q, want elapsed 15s", got)
+	if got := w.Render(80); !strings.Contains(got, "15s") {
+		t.Errorf("render at 15s must show elapsed 15s, got %q", got)
 	}
 }
 

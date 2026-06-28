@@ -273,8 +273,8 @@ var createViewFn = createViewPlaybook
 
 // newCreateReengage builds the re-engagement context the create flow persists under
 // and threads into the phase-2 viewer (so the viewer's run blocks drive the session
-// shell and the `w`-key wrap-up CommitPlaybook writes the store file). It mirrors
-// authorPlaybook's Reengage construction exactly: StoreDir from cfg.GlobalStoreDir()
+// shell and the `w`-key wrap-up CommitPlaybook writes the store file). create's newCreateReengage
+// and escalate's inline Reengage (session.go) are field-identical: StoreDir from cfg.GlobalStoreDir()
 // and the createDecision cache keys (only when the cache wasn't disabled/bypassed).
 func newCreateReengage(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, sess *session, cfg *config.Config) *orchestrator.Reengage {
 	var sharedDrv *driver.Driver

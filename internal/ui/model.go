@@ -628,7 +628,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// populated — isValidPlaybook requires blocks > 0 for a real playbook.
 			if m.structured && m.bodyProvider != nil {
 				m.md = m.bodyProvider()
-				m.dirty = false // suppress flushRender no-op; reflow directly below
+				m.dirty = false // reflow synchronously below — don't defer a render tick
 				m.reflow()
 			}
 			// Finalized-playbook draft: strip any preamble above the H1 title and set
@@ -642,6 +642,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// A real playbook has an H1 title AND at least one runnable block. If this
 				// draft is NOT a real playbook, restore the troubleshoot we replaced and
 				// do NOT keep or persist the junk.
+				// NOTE: a structured playbook with no runnable block would be junk-guarded here; troubleshooting playbooks always carry a fix/verify block (revisit in B2/B3).
 				if !isValidPlaybook(m.md, len(m.blocks)) {
 					dbg("invalid final playbook (title=%q blocks=%d) — restoring troubleshoot, skipping persist", title, len(m.blocks))
 					m.md = m.preFinalMd

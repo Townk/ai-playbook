@@ -289,7 +289,7 @@ func TestActivityMsgUpdatesThinkingLine(t *testing.T) {
 	m2, _ := m.Update(activityMsg{summary: "run: gg build", ok: true})
 	m = m2.(model)
 	if m.progress.activity != "run: gg build" {
-		t.Fatalf("activityLine = %q, want %q", m.progress.activity, "run: gg build")
+		t.Fatalf("m.progress.activity = %q, want %q", m.progress.activity, "run: gg build")
 	}
 	view := strip(m.viewString())
 	if !strings.Contains(view, "run: gg build") {
@@ -303,7 +303,7 @@ func TestActivityMsgUpdatesThinkingLine(t *testing.T) {
 	m3, _ := m.Update(streamEventsMsg{events: []streamEvent{textEvent{text: "# Diagnosis\n"}}})
 	m = m3.(model)
 	if m.progress.activity != "" {
-		t.Errorf("activityLine must clear when real content arrives, got %q", m.progress.activity)
+		t.Errorf("m.progress.activity must clear when real content arrives, got %q", m.progress.activity)
 	}
 }
 
@@ -474,7 +474,7 @@ func TestInProcessFollowupEventPathWiresActivity(t *testing.T) {
 	m2, _ := m.Update(activityMsg{summary: "run: make build", ok: true, ch: m.activity})
 	m = m2.(model)
 	if m.progress.activity != "run: make build" {
-		t.Errorf("activityLine = %q, want the re-engagement tool summary", m.progress.activity)
+		t.Errorf("m.progress.activity = %q, want the re-engagement tool summary", m.progress.activity)
 	}
 }
 
@@ -619,7 +619,7 @@ func TestTwoSuccessiveFollowupsLiveActivity(t *testing.T) {
 			next = c3
 		}
 		if m.progress.activity == "" {
-			t.Errorf("%s: activityLine never updated off the fresh feed (dead feed)", label)
+			t.Errorf("%s: m.progress.activity never updated off the fresh feed (dead feed)", label)
 		}
 		// End this round (closes the round's stream) so the next verify can re-fire.
 		nm4, _ := m.Update(streamEventsMsg{eof: true})
