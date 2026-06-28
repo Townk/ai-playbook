@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/kb"
 )
 
@@ -105,7 +106,8 @@ func TestAuthor_UsesEmbeddedPromptAndAssembledMessage(t *testing.T) {
 
 	// It was called with the embedded system prompt + the assembled user message.
 	// With no KB file present, the folded-in KB is empty.
-	wantSys := SystemPrompt(req, "")
+	// Author auto-resolves the shell from $SHELL; mirror that here.
+	wantSys := SystemPrompt(req, "", driver.ResolveShellName(""))
 	if fa.gotSystem != wantSys {
 		t.Errorf("agent system prompt did not match SystemPrompt(req)\n--- got ---\n%s", fa.gotSystem)
 	}
@@ -150,7 +152,7 @@ func TestAuthor_FoldsInOnDiskKB(t *testing.T) {
 // must contain the load-bearing instructions (block schema, value-passing refs,
 // the verify-fold-in rule) so a botched port is caught.
 func TestSystemPrompt_LoadBearingSections(t *testing.T) {
-	sys := SystemPrompt(sampleFailure(), "")
+	sys := SystemPrompt(sampleFailure(), "", "zsh")
 	wants := []string{
 		"LITERATE TROUBLESHOOTING PLAYBOOK",           // failure structure
 		"{id=fix}",                                    // block-schema id marker
@@ -172,7 +174,7 @@ func TestSystemPrompt_LoadBearingSections(t *testing.T) {
 
 func TestSystemPrompt_GeneralBranch(t *testing.T) {
 	req := capture.Request{Kind: "question", Exit: "0", UserRequest: "q", ProjectRoot: "/p", Project: capture.Project{Name: "p"}}
-	sys := SystemPrompt(req, "")
+	sys := SystemPrompt(req, "", "zsh")
 	if !strings.Contains(sys, "LITERATE HOW-TO PLAYBOOK") {
 		t.Errorf("general branch must use the HOW-TO structure:\n%s", sys)
 	}
@@ -185,11 +187,65 @@ func TestSystemPrompt_GeneralBranch(t *testing.T) {
 }
 
 func TestSystemPrompt_KBFoldedIn(t *testing.T) {
-	sys := SystemPrompt(sampleFailure(), "uses bazel, not make")
+	sys := SystemPrompt(sampleFailure(), "uses bazel, not make", "zsh")
 	if !strings.Contains(sys, "## What we already know about this project") {
 		t.Errorf("KB header missing when KB non-empty")
 	}
 	if !strings.Contains(sys, "uses bazel, not make") {
 		t.Errorf("KB content missing")
+	}
+}
+
+// TestSystemPrompt_ShellAwareness_SH verifies that a `sh`-targeted prompt names
+// sh explicitly and includes POSIX-only restrictions (mentioning [[ as forbidden).
+func TestSystemPrompt_ShellAwareness_SH(t *testing.T) {
+	sys := SystemPrompt(sampleFailure(), "", "sh")
+
+	// Must identify the shell explicitly.
+	if !strings.Contains(sys, "execute under `sh` (POSIX shell)") {
+		t.Errorf("sh prompt missing POSIX shell identification\n--- prompt ---\n%s", sys)
+	}
+	// Must instruct avoiding [[.
+	if !strings.Contains(sys, "NOT `[[ ]]`") {
+		t.Errorf("sh prompt must warn against [[ ]] (bash/zsh extension)\n--- prompt ---\n%s", sys)
+	}
+	// Must not claim zsh or bash as the target.
+	if strings.Contains(sys, "execute under `zsh`") {
+		t.Errorf("sh prompt must not identify the shell as zsh")
+	}
+	if strings.Contains(sys, "execute under `bash`") {
+		t.Errorf("sh prompt must not identify the shell as bash")
+	}
+	// Portable core must still be present.
+	if !strings.Contains(sys, "set -e") {
+		t.Errorf("sh prompt must still contain set -e guidance")
+	}
+}
+
+// TestSystemPrompt_ShellAwareness_Zsh verifies that a zsh-targeted prompt names
+// zsh and does NOT impose the POSIX-only restriction.
+func TestSystemPrompt_ShellAwareness_Zsh(t *testing.T) {
+	sys := SystemPrompt(sampleFailure(), "", "zsh")
+
+	if !strings.Contains(sys, "execute under `zsh`") {
+		t.Errorf("zsh prompt missing shell identification\n--- prompt ---\n%s", sys)
+	}
+	// POSIX-only restriction must be absent for zsh.
+	if strings.Contains(sys, "NOT `[[ ]]`") {
+		t.Errorf("zsh prompt must not impose POSIX-only restriction (NOT `[[ ]]` must not appear)")
+	}
+}
+
+// TestSystemPrompt_ShellAwareness_Bash verifies that a bash-targeted prompt names
+// bash and does NOT impose the POSIX-only restriction.
+func TestSystemPrompt_ShellAwareness_Bash(t *testing.T) {
+	sys := SystemPrompt(sampleFailure(), "", "bash")
+
+	if !strings.Contains(sys, "execute under `bash`") {
+		t.Errorf("bash prompt missing shell identification\n--- prompt ---\n%s", sys)
+	}
+	// POSIX-only restriction must be absent for bash.
+	if strings.Contains(sys, "NOT `[[ ]]`") {
+		t.Errorf("bash prompt must not impose POSIX-only restriction (NOT `[[ ]]` must not appear)")
 	}
 }

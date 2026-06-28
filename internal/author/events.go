@@ -9,6 +9,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/kb"
 )
 
@@ -138,7 +139,14 @@ type AuthorOptions struct {
 // The returned func() error waits for the process to exit (reaping it) and
 // returns its exit error; call it after draining the channel.
 func AuthorEvents(req capture.Request, opts AuthorOptions) (<-chan agentstream.Event, func() error, error) {
-	sys := SystemPrompt(req, KnowledgeBase(kb.Load(req.ProjectRoot)))
+	// Resolve the effective shell from cfg so the authoring prompt names the right
+	// shell and gives shell-appropriate guidance (POSIX-only for sh, etc.).
+	cfg := opts.Cfg
+	if cfg == nil {
+		cfg = config.Default()
+	}
+	shell := driver.ResolveShellName(cfg.Driver.Shell)
+	sys := SystemPrompt(req, KnowledgeBase(kb.Load(req.ProjectRoot)), shell)
 	user := BuildUserMessage(req)
 	return RunHarnessEvents(sys, user, opts)
 }

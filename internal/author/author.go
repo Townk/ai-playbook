@@ -6,6 +6,7 @@ import (
 	"os/exec"
 
 	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/kb"
 )
 
@@ -25,7 +26,7 @@ type Agent func(systemPrompt, userMessage string) (io.ReadCloser, error)
 // about this project" section, exactly as assist::system_prompt did with the
 // $kb_path file. (The KB WRITE/remember path is deferred — see package kb.)
 func Author(req capture.Request, agent Agent) (io.ReadCloser, error) {
-	sys := SystemPrompt(req, KnowledgeBase(kb.Load(req.ProjectRoot)))
+	sys := SystemPrompt(req, KnowledgeBase(kb.Load(req.ProjectRoot)), driver.ResolveShellName(""))
 	user := BuildUserMessage(req)
 	return agent(sys, user)
 }

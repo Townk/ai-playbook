@@ -10,6 +10,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/driver"
 )
 
 // fakeAgent records the system prompt it was called with and returns a canned
@@ -63,7 +64,9 @@ func TestRegenerate_StreamsAndMode(t *testing.T) {
 	if fa.calls != 1 {
 		t.Errorf("agent calls = %d, want 1", fa.calls)
 	}
-	if fa.gotSystem != author.SystemPrompt(sampleReq(), "") {
+	// Author auto-resolves the shell from $SHELL; mirror that here so the
+	// comparison is environment-portable (both sides use the same resolution).
+	if fa.gotSystem != author.SystemPrompt(sampleReq(), "", driver.ResolveShellName("")) {
 		t.Errorf("regenerate did not use the standard authoring prompt")
 	}
 }

@@ -468,6 +468,8 @@ func buildReengageEvents(req capture.Request, sess *session) orchestrator.Events
 		// Per-invocation mcp-config so the re-engaged agent reaches the live backend.
 		mcpPath, removeMCP := sess.writeMCPConfig()
 
+		cfg, _ := config.Load()
+
 		var sys, user string
 		switch kind {
 		case orchestrator.KindReengageFollowup:
@@ -479,11 +481,11 @@ func buildReengageEvents(req capture.Request, sess *session) orchestrator.Events
 			sys = author.FinalPlaybookPrompt(req, base, change)
 			user = author.BuildUserMessage(req)
 		default: // KindReengageRegenerate → the standard authoring prompt + folded KB
-			sys = author.SystemPrompt(req, author.KnowledgeBase(kb.Load(req.ProjectRoot)))
+			sys = author.SystemPrompt(req, author.KnowledgeBase(kb.Load(req.ProjectRoot)), driver.ResolveShellName(cfg.Driver.Shell))
 			user = author.BuildUserMessage(req)
 		}
 
-		cfg, _ := config.Load()
+		// cfg already loaded above.
 		events, wait, err := author.RunHarnessEvents(sys, user, author.AuthorOptions{
 			Cfg:           cfg,
 			MCPConfigPath: mcpPath,

@@ -28,6 +28,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Authored playbooks now target the configured shell: `sh` runs receive POSIX-only
+  guidance (no `[[ ]]`, arrays, or bash/zsh extensions); `bash` and `zsh` runs are
+  identified explicitly. The effective shell is resolved from `[driver] shell` (or
+  `$SHELL` when unset) and injected into the authoring prompt.
 - The multiplexer integration is now **OFF by default** (was: auto-enabled inside
   zellij). Opt in with `[mux] backend = "zellij"`. The `$ZELLIJ`-presence
   auto-enable is removed; per-command `[mux]` template overrides remain as tier-2.

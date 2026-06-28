@@ -25,6 +25,32 @@ import (
 	"github.com/Townk/ai-playbook/internal/capture"
 )
 
+// shellGuidance returns the shell-specific line(s) to prepend to the run-block
+// guidance section of the authoring prompt. It identifies the executing shell
+// for the model so it produces syntactically appropriate run blocks.
+//
+//   - "sh": POSIX-only instructions — warns against bash/zsh extensions.
+//   - "bash" / "zsh": single identification line; extensions are available.
+//   - anything else: empty (no shell claim; portable guidance still applies).
+//
+// The returned string is either empty or ends with "\n" so it can be
+// concatenated directly before the universal set -e guidance.
+func shellGuidance(shell string) string {
+	switch shell {
+	case "sh":
+		return "Shell blocks execute under `sh` (POSIX shell). Use only POSIX-compatible syntax:\n" +
+			"`[ ]` for tests (NOT `[[ ]]`), `printf` (NOT `print`), `$(…)` for command\n" +
+			"substitution; avoid bash/zsh extensions (no arrays, no process substitution\n" +
+			"`<(…)`, no `${var@Q}`).\n"
+	case "bash":
+		return "Shell blocks execute under `bash`.\n"
+	case "zsh":
+		return "Shell blocks execute under `zsh`.\n"
+	default:
+		return ""
+	}
+}
+
 // KnowledgeBase is the per-project distilled-facts block the shell interpolates
 // as "## What we already know about this project". Author loads it from disk via
 // kb.Load (the Go port of assist::kb_path/kb_ensure) keyed on req.ProjectRoot;
@@ -42,8 +68,14 @@ type KnowledgeBase string
 // "verify re-runs the original failed command in a SEPARATE block" instruction
 // are all preserved.
 //
-// kb is the optional knowledge-base block (empty for now — see KnowledgeBase).
-func SystemPrompt(req capture.Request, kb KnowledgeBase) string {
+// shell is the resolved executing-shell name ("zsh", "bash", or "sh") — pass the
+// result of driver.ResolveShellName(cfg.Driver.Shell). When shell is "sh" the
+// prompt adds POSIX-only restrictions so the model avoids bash/zsh extensions.
+// For "bash"/"zsh" it names the shell without extra restrictions. For an empty or
+// unknown value no shell identification is emitted (safe fallback).
+//
+// kb is the optional knowledge-base block (empty when none — see KnowledgeBase).
+func SystemPrompt(req capture.Request, kb KnowledgeBase, shell string) string {
 	// Project display fields mirror the shell's REQ_* fallbacks.
 	projectName := req.Project.Name
 	if projectName == "" {
@@ -140,7 +172,7 @@ apply, output capture, and needs-gating on that id. Use:
     `+"`git apply`"+`. Do NOT emit a bare fragment of changed lines, and do NOT put
     the target filename only in prose — the file headers ARE how the viewer and
     apply know the target.
-Shell blocks run under `+"`set -e`"+`: a block FAILS at its FIRST failing command, so
+%sShell blocks run under `+"`set -e`"+`: a block FAILS at its FIRST failing command, so
 a later command cannot mask an earlier failure. If a non-zero exit is expected
 (a probe like `+"`command -v foo`"+` or `+"`grep …`"+`), guard it with `+"`|| true`"+`.
 If a step uses a previous step's output, tag it {id=next needs=fix} and reference
@@ -162,6 +194,7 @@ Finish with a short summary and the recommended next step.
 		userRequest, outputBlock, kbBlock,
 		taskLine,
 		structure,
+		shellGuidance(shell),
 	)
 }
 

@@ -22,6 +22,8 @@ package driver
 import (
 	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 )
 
@@ -29,6 +31,22 @@ import (
 // (zsh, bash, or POSIX sh) can be found anywhere — not on PATH by name, not via
 // $SHELL, and not even sh as the final fallback.
 var errUnsupportedShell = errors.New("driver: no supported shell found (zsh, bash, or sh)")
+
+// ResolveShellName returns the shell name ("zsh", "bash", or "sh") that the
+// driver would use for the given selector. sel follows the same rules as
+// Config.Driver.Shell: "" / "auto" honour $SHELL and fall back through
+// zsh → bash → sh; "zsh", "bash", "sh" select explicitly.
+//
+// On any error (unknown selector, shell not on PATH, etc.) the fallback is "sh",
+// the most conservative and portable choice, so callers that construct the
+// authoring prompt always get a usable shell name.
+func ResolveShellName(sel string) string {
+	_, a, err := resolveShell(sel, os.Getenv, exec.LookPath)
+	if err != nil {
+		return "sh"
+	}
+	return a.name()
+}
 
 // resolveShell picks the shell binary path and its shellAdapter from a selector
 // string. sel may be "", "auto", "zsh", "bash", or "sh"; "" behaves identically

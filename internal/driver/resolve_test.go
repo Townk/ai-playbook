@@ -6,6 +6,20 @@ import (
 	"testing"
 )
 
+// TestResolveShellName exercises the exported helper that callers outside the
+// package (e.g. internal/author) use to get the effective shell name.
+func TestResolveShellName(t *testing.T) {
+	// Explicit "sh": universally available; must return "sh".
+	if got := ResolveShellName("sh"); got != "sh" {
+		t.Errorf("ResolveShellName(%q) = %q, want %q", "sh", got, "sh")
+	}
+
+	// Unknown selector → resolveShell returns an error → fallback must be "sh".
+	if got := ResolveShellName("fish"); got != "sh" {
+		t.Errorf("ResolveShellName(%q) = %q, want %q (error-fallback)", "fish", got, "sh")
+	}
+}
+
 func TestResolveShell(t *testing.T) {
 	// makeLook returns an injected look function: calls that match an entry in
 	// found return (name, nil); all others return an error.
