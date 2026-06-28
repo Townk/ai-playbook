@@ -71,6 +71,35 @@ func TestRegenerateButtonAbsentWhenNoPathWired(t *testing.T) {
 
 // Stage 2 (spec §E): the `w` key now MANUALLY FINALIZES by generating the final
 // playbook draft — an IN-PROCESS-only action (it needs Reengage). With no
+// A create-style viewer marks its already-rendered playbook a final draft
+// (finalDraft=true, not yet committed). Pressing `w` must PERSIST it via
+// CommitPlaybook — NOT re-run the final-playbook generation pass (which would reset
+// m.md and stream a second playbook in, producing a duplicate H1 + the spurious
+// "ai-playbook — agent" header the create flow regressed on).
+func TestWrapUpPersistsFinalDraftNotGenerate(t *testing.T) {
+	m, _ := newReengageModel(t, "SHOULD-NOT-BE-GENERATED")
+	m.width = 100
+	m.md = "# Restore the wrapper\n\n```bash {id=fix}\necho hi\n```\n"
+	m.finalDraft = true
+	m.committed = false
+	m.reflow()
+	before := m.md
+	nm, cmd := m.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})
+	got := nm.(model)
+	if got.status != "finalizing…" {
+		t.Fatalf("w on a finalDraft should persist (status finalizing…), got %q", got.status)
+	}
+	if got.md != before {
+		t.Fatalf("persist must not reset md (generation would); md = %q", got.md)
+	}
+	if got.streaming {
+		t.Fatal("persist must not start streaming (generation would)")
+	}
+	if cmd == nil {
+		t.Fatal("w persist should return the commit cmd")
+	}
+}
+
 // orchestrator wired (standalone mode), `w` is a no-op: the old wrapup emission is
 // retired (the native confirm + FinalPlaybook replaces the agent-ask wrap-up). It
 // must NOT start a thinking session and must return a nil cmd.

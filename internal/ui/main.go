@@ -120,6 +120,17 @@ var pendingShell string
 // Consumed (and cleared) by Main. Mirrors SetDriver/SetAskBridge.
 func SetShell(s string) { pendingShell = s }
 
+// pendingFinalDraft, when true, starts the next Main()'s model with finalDraft=true
+// (committed=false, persistOnFinish=false). The create flow sets it so the viewer
+// treats the already-rendered structured playbook as a FINAL DRAFT: `w` PERSISTS it
+// (CommitPlaybook via the injected metadata seam), and the EOF branch sets the pager
+// title from the playbook's H1 — instead of running a final-playbook GENERATION pass.
+// Consume-once. persistOnFinish stays false, so there is NO auto-persist on open.
+var pendingFinalDraft bool
+
+// SetFinalDraft marks the next Main()'s document as an already-final playbook draft.
+func SetFinalDraft(fd bool) { pendingFinalDraft = fd }
+
 // OrchReady carries the lazily-opened orchestrator (and its request-input asker)
 // delivered on the pendingReady channel by the async-startup path: main.go opens
 // the shell driver + builds the orchestrator in the BACKGROUND while ui.Main
@@ -389,14 +400,16 @@ func Main() int {
 	askerFn := pendingAsker
 	answerRegen := pendingAnswerRegen
 	askBridge := pendingAskBridge
-	pendingReengage = nil    // consume once, regardless of whether an orch was built
-	pendingDriver = nil      // ditto: the session owns the driver's lifecycle
-	pendingActivity = nil    // ditto: the session owns the activity channel's lifecycle
-	pendingServedBase = ""   // ditto: served-base amend stash is consume-once
-	pendingAsker = nil       // ditto: the `f` asker stash is consume-once
-	pendingAnswerRegen = nil // ditto: the cached-answer regenerate stash is consume-once
-	pendingAskBridge = nil   // ditto: the no-mux ask-bridge stash is consume-once
-	pendingShell = ""        // ditto: the configured-shell stash is consume-once
+	finalDraft := pendingFinalDraft
+	pendingReengage = nil     // consume once, regardless of whether an orch was built
+	pendingDriver = nil       // ditto: the session owns the driver's lifecycle
+	pendingActivity = nil     // ditto: the session owns the activity channel's lifecycle
+	pendingServedBase = ""    // ditto: served-base amend stash is consume-once
+	pendingAsker = nil        // ditto: the `f` asker stash is consume-once
+	pendingAnswerRegen = nil  // ditto: the cached-answer regenerate stash is consume-once
+	pendingAskBridge = nil    // ditto: the no-mux ask-bridge stash is consume-once
+	pendingShell = ""         // ditto: the configured-shell stash is consume-once
+	pendingFinalDraft = false // ditto: the create final-draft flag is consume-once
 
 	// Force TrueColor: zellij's alt-screen pane underreports the color profile
 	// during bubbletea's auto-detection, causing colors to be downsampled.
@@ -422,6 +435,7 @@ func Main() int {
 	m.asker = askerFn
 	m.answerRegen = answerRegen
 	m.askBridge = askBridge
+	m.finalDraft = finalDraft
 	prog := tea.NewProgram(
 		m,
 		tea.WithInput(tty),

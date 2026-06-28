@@ -397,6 +397,8 @@ func createViewPlaybook(body string, sess *session, re *orchestrator.Reengage, c
 	ui.SetShell(cfg.Driver.Shell)   // own-driver fallback honors the configured shell
 	ui.SetReengage(re)              // regenerate / `w`-wrap-up CommitPlaybook (store file)
 	ui.SetAskBridge(bridgeOf(sess)) // no-mux re-engagement `ask` → in-viewer overlay
+	ui.SetFinalDraft(true)          // the rendered structured playbook IS a final draft: `w` persists (no re-generate)
+	ui.SetAsker(sess.asker(cwd))    // `f` proactive amend — same asker the troubleshoot viewer gets (float in mux; no-op in no-mux)
 
 	argv := []string{os.Args[0], "run"}
 	if cwd != "" {
