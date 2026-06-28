@@ -23,6 +23,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/kb"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/playbook"
 	"github.com/Townk/ai-playbook/internal/tools"
 	"github.com/Townk/ai-playbook/internal/triage"
 	"github.com/Townk/ai-playbook/internal/ui"
@@ -187,6 +188,9 @@ type session struct {
 	selfExe string
 	m       mux.Mux           // already-selected mux (never re-loaded); used for ask seam + asker
 	bridge  *askbridge.Bridge // no-mux ask overlay bridge (nil when a real mux is present)
+
+	pb     chan playbook.Playbook // submit_playbook capture (buffered 1)
+	lastPB *playbook.Playbook     // the most recent captured playbook (for the meta seam)
 }
 
 // bridgeAskFunc adapts an askbridge.Bridge to a tools.AskFunc: the agent's `ask`
@@ -255,6 +259,21 @@ func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell
 		ask = bridgeAskFunc(bridge)
 	}
 
+	// Build the session struct BEFORE tools.Serve so the submit_playbook capture
+	// closure can close over it: the authoring agent calls submit_playbook → backend
+	// → OnPlaybook → it stores the validated playbook on sess.lastPB (read by the
+	// captured-meta seam) and non-blocking-sends onto sess.pb. The buffered (cap 1)
+	// channel guarantees OnPlaybook never blocks the backend dispatch goroutine.
+	pbCh := make(chan playbook.Playbook, 1)
+	sess := &session{drv: drv, socket: socket, selfExe: selfExe, m: m, bridge: bridge, pb: pbCh}
+	onPlaybook := func(p playbook.Playbook) {
+		sess.lastPB = &p
+		select {
+		case pbCh <- p:
+		default:
+		}
+	}
+
 	// The agent's live activity (reasoning + tool calls) is no longer surfaced via
 	// the tools backend's OnActivity hook — the normalized agentstream event stream
 	// (AuthorEvents → fanOut) now feeds the ui activity line directly. tools.Serve
@@ -265,6 +284,7 @@ func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell
 		ProjectRoot: req.ProjectRoot,
 		Cwd:         cwd,
 		Ask:         ask,
+		OnPlaybook:  onPlaybook,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: tools.Serve failed (%v); authoring without agent tools\n", err)
@@ -272,7 +292,8 @@ func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell
 		os.RemoveAll(dir)
 		return nil
 	}
-	return &session{drv: drv, srv: srv, socket: socket, selfExe: selfExe, m: m, bridge: bridge}
+	sess.srv = srv
+	return sess
 }
 
 // bridgeOf returns the session's no-mux ask bridge, or nil for a nil session. It

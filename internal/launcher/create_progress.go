@@ -32,6 +32,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/playbook"
 	"github.com/Townk/ai-playbook/internal/triage"
 	"github.com/Townk/ai-playbook/internal/ui"
 )
@@ -233,6 +234,7 @@ func realCreateStream(req capture.Request, sess *session, cfg *config.Config) (c
 	events, closeFn, err := author.AuthorEvents(req, author.AuthorOptions{
 		Cfg:           cfg,
 		MCPConfigPath: mcpPath,
+		Structured:    true, // create authors via submit_playbook (DATA), not {id=…} markdown
 	})
 	if err != nil {
 		removeMCP()
@@ -242,8 +244,17 @@ func realCreateStream(req capture.Request, sess *session, cfg *config.Config) (c
 	return createStream{
 		reader:   reader,
 		activity: activity,
-		body:     fo.Body,
-		close:    func() { reader.Close(); removeMCP() },
+		// Prefer the DETERMINISTIC render of the captured structured playbook (the agent
+		// submitted it via submit_playbook → OnPlaybook → sess.lastPB). Fall back to the
+		// accumulated stream text only when the model misbehaved and submitted nothing,
+		// so create never dead-ends.
+		body: func() string {
+			if sess != nil && sess.lastPB != nil {
+				return playbook.Render(*sess.lastPB)
+			}
+			return fo.Body()
+		},
+		close: func() { reader.Close(); removeMCP() },
 	}, nil
 }
 
@@ -268,7 +279,7 @@ func newCreateReengage(req capture.Request, d triage.Decision, c *cache.Cache, n
 		Events:      buildReengageEvents(req, sess),
 		Cache:       c,
 		RequestJSON: requestJSON(req),
-		Metadata:    buildMetadataSeam(sess),
+		Metadata:    capturedMetaSeam(sess),
 		EnvLookup:   buildEnvLookup(sharedDrv),
 		StoreDir:    cfg.GlobalStoreDir(),
 	}
@@ -277,6 +288,27 @@ func newCreateReengage(req capture.Request, d triage.Decision, c *cache.Cache, n
 		re.ReqHash = d.ReqHash
 	}
 	return re
+}
+
+// capturedMetaSeam returns the structured playbook's meta as the front-matter
+// classification — NO metadata model pass. The create flow folds classification
+// into the single submit_playbook call, so the captured pb's Meta is authoritative.
+// Falls back to the model classifier (buildMetadataSeam) only if create produced no
+// structured playbook (the text-fallback path), so the commit still gets a
+// classification.
+func capturedMetaSeam(sess *session) func(doc string) (orchestrator.PlaybookMeta, error) {
+	return func(doc string) (orchestrator.PlaybookMeta, error) {
+		if sess != nil && sess.lastPB != nil {
+			m := sess.lastPB.Meta
+			return orchestrator.PlaybookMeta{
+				Description:  m.Description,
+				Category:     m.Category,
+				Tags:         m.Tags,
+				ProjectBound: m.ProjectBound,
+			}, nil
+		}
+		return buildMetadataSeam(sess)(doc)
+	}
 }
 
 // createAuthorWithProgress is the changed `create` author path: open the owned

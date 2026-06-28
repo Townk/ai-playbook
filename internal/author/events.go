@@ -112,6 +112,12 @@ type AuthorOptions struct {
 	// run on the triage model without disturbing the authoring path (which keeps
 	// using cfg [agent].Model). Empty → the configured Model is used as before.
 	ModelOverride string
+	// Structured, when true, appends StructuredToolInstruction() instead of
+	// ToolInstruction when MCPConfigPath is set: the create flow directs the model to
+	// diagnose with run/ask and return the playbook as DATA via submit_playbook (the
+	// host renders the markdown), rather than writing {id=…} markdown itself. Only the
+	// create path sets it; the markdown authoring paths leave it false.
+	Structured bool
 	// Bare, when true, strips the owned claude argv to a BARE quick-model call: it
 	// REPLACES the default system prompt (--system-prompt, not --append-system-prompt)
 	// and adds --strict-mcp-config + --exclude-dynamic-system-prompt-sections, so the
@@ -193,7 +199,11 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 	case "claude":
 		sys := systemPrompt
 		if opts.MCPConfigPath != "" {
-			sys += ToolInstruction
+			if opts.Structured {
+				sys += StructuredToolInstruction()
+			} else {
+				sys += ToolInstruction
+			}
 		}
 		// Per-invocation model override (the classify pass selects the triage model)
 		// falls back to the configured authoring model when unset.

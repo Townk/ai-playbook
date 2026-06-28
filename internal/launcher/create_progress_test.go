@@ -1,6 +1,7 @@
 package launcher
 
 import (
+	"encoding/json"
 	"io"
 	"os"
 	"strings"
@@ -14,6 +15,9 @@ import (
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/playbook"
+	"github.com/Townk/ai-playbook/internal/tools"
+	"github.com/Townk/ai-playbook/internal/triage"
 )
 
 // ── progress+ask host ───────────────────────────────────────────────────────
@@ -272,4 +276,56 @@ func mustRead(t *testing.T, path string) string {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	return string(b)
+}
+
+// TestCreate_StructuredRenderAndSeam is the Phase A integration test: create
+// authors via submit_playbook — a (faked) agent tool call delivers a structured
+// playbook to the session's tools backend, the create stream's body is the
+// DETERMINISTIC render of the captured playbook, and the reengage Metadata seam
+// returns the captured schema meta (Description/Category/Tags/ProjectBound) with
+// NO metadata model pass. It drives the REAL openSession wiring (a live tools.Serve
+// whose Deps.OnPlaybook stores into sess.lastPB / sess.pb).
+func TestCreate_StructuredRenderAndSeam(t *testing.T) {
+	minimalZDOTDIR(t)
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	if sess == nil {
+		t.Fatal("openSession returned nil (driver/tools setup failed)")
+	}
+	defer sess.close()
+
+	pb := playbook.Playbook{
+		Title:    "Restore wrapper",
+		Sections: []playbook.Section{{Heading: "Fix", Content: []playbook.ContentItem{{Kind: "code", Lang: "bash", Code: "gradle wrapper", ID: "fix"}}}},
+		Meta:     playbook.Meta{Description: "Restore the wrapper", Category: "Android / build", Tags: []string{"gradle"}, ProjectBound: true},
+	}
+	raw, _ := json.Marshal(pb)
+
+	// Simulate the agent's tool call hitting the backend (the MCP adapter forwards a
+	// submit_playbook Call to exactly this socket). OnPlaybook captures into sess.
+	res, err := tools.Dial(sess.socket, tools.Call{Tool: "submit_playbook", Playbook: raw})
+	if err != nil || !res.OK {
+		t.Fatalf("submit: %+v err=%v", res, err)
+	}
+	if sess.lastPB == nil {
+		t.Fatal("submit_playbook did not capture into sess.lastPB")
+	}
+
+	// The captured playbook renders deterministically (body-only markdown).
+	body := playbook.Render(*sess.lastPB)
+	if !strings.Contains(body, "# Playbook — Restore wrapper") || !strings.Contains(body, "```bash {id=fix}") {
+		t.Fatalf("rendered body wrong:\n%s", body)
+	}
+
+	// The create reengage Metadata seam returns the captured meta — NO model call.
+	re := newCreateReengage(capture.Request{}, triage.Decision{Disabled: true}, nil, true, sess, config.Default())
+	meta, err := re.Metadata(body)
+	if err != nil {
+		t.Fatalf("seam err: %v", err)
+	}
+	if meta.Description != "Restore the wrapper" || !meta.ProjectBound || meta.Category != "Android / build" {
+		t.Fatalf("seam meta = %+v, want captured schema meta", meta)
+	}
+	if len(meta.Tags) != 1 || meta.Tags[0] != "gradle" {
+		t.Fatalf("seam meta tags = %v, want [gradle]", meta.Tags)
+	}
 }
