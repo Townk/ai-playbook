@@ -33,36 +33,42 @@ free-form markdown — never fully eliminates drift).
 ```
 Playbook {
   title:   string                 // → "# Playbook — <title>"
-  intro?:  string                 // optional lead prose (markdown)
+  intro?:  string                 // optional lead prose before the first section (markdown)
   sections: [ Section {
      heading: string              // → "## <heading>"
-     body?:   string              // prose around the steps (markdown)
-     steps: [ Step {
-        prose?:    string         // literate lead-in for THIS step (markdown)
-        lang:      string         // bash|zsh|sh|python|diff|console|…
-        code:      string         // block content
-        id?:       string         // we auto-assign when omitted
-        needs?:    [string]       // value-passing deps
-        rollback?: string         // rollback-for id
-        static:    bool           // non-runnable (console/illustrative)
+     content: [ ContentItem {     // ORDERED, heterogeneous flow (prose & code interleave)
+        kind:      "text" | "callout" | "code"
+        text?:     string         // kind=text|callout — literate markdown
+        lang?:     string         // kind=code — bash|zsh|sh|python|diff|console|…
+        code?:     string         // kind=code — block content
+        id?:       string         // kind=code — we auto-assign when omitted
+        needs?:    [string]       // kind=code — value-passing deps
+        rollback?: string         // kind=code — rollback-for id
+        static?:   bool           // kind=code — non-runnable (console/illustrative)
      } ]
   } ]
-  verify?: Step                   // the {id=verify} outcome-check
-  meta: { name, description, category, tags[], workdir? }
+  verify?: { lang, code, needs?[] }  // the outcome-check (rendered last as {id=verify})
+  meta: { name, description, category, tags[], project_bound }
 }
 ```
 
-The **prose/body/intro fields stay free markdown** (narrative quality preserved);
-everything structural — H1, `##` headings, fenced blocks, block tags, front
-matter — is ours to render, so the model cannot mis-place it.
+A section's `content` is an ORDERED, heterogeneous list — pure-text sections
+(scenario/goal/constraint), prose → code → *closing* prose, and callouts all fall
+out naturally (real playbooks interleave freely; a rigid "step = prose + block"
+did not fit). The **text/callout/intro fields stay free markdown** (narrative
+quality preserved); everything structural — H1, `##` headings, callout framing,
+fenced blocks, block tags, front matter — is ours to render, so the model cannot
+mis-place it. `kind` is a flat discriminator (not a nested `oneOf`) for tool-use
+reliability.
 
 ## Rendering (deterministic)
 
 - `title` → `# Playbook — <title>`; `intro` → prose under it.
-- each `section` → `## <heading>` + `body`; each `step` → `prose` then a fenced
-  block ```` ```<lang> {id=<id> needs=… rollback=… static} ````.
+- each `section` → `## <heading>`, then its `content[]` IN ORDER:
+  `text` → prose; `callout` → a `> ` note; `code` → a fenced block
+  ```` ```<lang> {id=<id> needs=… rollback=… static} ````.
 - `verify` → a final ```` {id=verify needs=…} ```` block.
-- `meta` → the YAML front matter (name/description/category/tags/env/workdir).
+- `meta` → the YAML front matter.
 - We own id assignment (auto when omitted), uniqueness, and tag emission.
 
 ## Single authoring pass (drop the separate finalize model call)
@@ -80,9 +86,23 @@ a measured mitigation, not a default.
 
 ## Metadata folded in
 
-`meta` (name/description/category/tags/workdir) is part of the same
-`submit_playbook` call, so the **separate `PlaybookMetadata` model pass is
-dropped** — one model round-trip instead of two.
+The `meta` block (front-matter fields) is part of the same `submit_playbook`
+call, so the **separate `PlaybookMetadata` model pass is dropped** — one model
+round-trip instead of two.
+
+`project_bound` (bool, model-supplied) replaces the stored `workdir` path and
+gates adapt-on-run:
+
+- **`false`** — the playbook is a general how-to; **skip adapt-on-run** and
+  render as-is (nothing to specialize, faster).
+- **`true`** — the playbook is specific to a project/working directory;
+  adapt-on-run targets the **heuristic project root of the current working
+  directory** (`capture.ProjectRoot` / `projectRootFn`). No stored path, no
+  target-dir prompt — run a project-bound playbook from within the project you
+  want it applied to.
+
+This removes `resolveTargetDir`'s stored-workdir + ask-the-user branches entirely
+(Phase B).
 
 ## Validation & retry
 
@@ -107,10 +127,11 @@ activity line, not a stream.)
   `submit_playbook` tool, and schema+semantic validation/retry; migrate
   **`create`** (already collect-then-render → lowest risk). **Prove prose quality
   vs today's free-markdown output.**
-- **Phase B** (after A validates): escalate-author, adapt-on-run, and the
-  re-engagement producers (regenerate / followup / proactive-amend). Collapse
-  finalize to persist-only on `w`. Add the structured polish pass only if Phase A
-  showed it is needed.
+- **Phase B** (after A validates): escalate-author, adapt-on-run (now gated on
+  `project_bound`, targeting the heuristic project root — no stored workdir/prompt),
+  and the re-engagement producers (regenerate / followup / proactive-amend).
+  Collapse finalize to persist-only on `w`. Add the structured polish pass only if
+  Phase A showed it is needed.
 
 ## Tradeoffs / risks
 
