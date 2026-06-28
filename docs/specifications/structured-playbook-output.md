@@ -94,17 +94,18 @@ viewer opens already in the "final draft" state (`finalDraft=true`,
 
 - **`w`** persists the displayed playbook (CommitPlaybook + the folded-in metadata
   seam) — it does NOT re-generate (which previously prepended a second H1).
-- **`f`** (proactive amend) re-authors the displayed playbook with a user change —
-  wired with the same asker the troubleshoot viewer uses.
+- **`r`** (REFINE) re-authors the displayed playbook with a user change — the
+  playbook is final, but the user can refine it. Wired with the same asker the
+  troubleshoot viewer uses.
 - **regenerate** and the run blocks work via the same reengage/driver wiring.
 
 The rendered H1 is the plain title (`# <title>`, no `Playbook —` prefix), and the
 viewer titles its header from it.
 
-No-mux `f`: instead of the float-based asker (which no-ops without a mux), `f` in
+No-mux `r`: instead of the float-based asker (which no-ops without a mux), `r` in
 no-mux opens the **same in-viewer ask overlay the agent's `ask` tool uses** (the
 askBridge overlay the viewer already hosts) to capture "What should I change?",
-then proceeds with the amend. So `f` works in both mux (float) and no-mux
+then proceeds with the amend. So `r` works in both mux (float) and no-mux
 (overlay). This improves the troubleshoot path too.
 
 ## Metadata folded in
