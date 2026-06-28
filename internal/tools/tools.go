@@ -46,6 +46,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/floatinput"
 	"github.com/Townk/ai-playbook/internal/kb"
+	"github.com/Townk/ai-playbook/internal/playbook"
 )
 
 // runTimeout bounds a single agent-issued `run` (matches the orchestrator /
@@ -75,17 +76,21 @@ type Deps struct {
 	KBRoot      string // kb data-dir root; "" → kb.DefaultRoot()
 	Cwd         string // working dir an ask-float opens in (the request's project root)
 	Ask         AskFunc
+	// OnPlaybook, when set, receives a validated structured playbook submitted via
+	// the submit_playbook tool. nil → submit_playbook replies "unavailable".
+	OnPlaybook func(pb playbook.Playbook)
 }
 
 // request is the inbound RPC: tool selector + the union of per-tool fields.
 type request struct {
-	Tool        string `json:"tool"`
-	ID          string `json:"id,omitempty"`          // run: block id for value-passing (APB_OUT_<id>)
-	Cmd         string `json:"cmd,omitempty"`         // run: the command line
-	Fact        string `json:"fact,omitempty"`        // remember: the distilled fact
-	ProjectRoot string `json:"projectRoot,omitempty"` // remember: override target (else Deps.ProjectRoot)
-	Prompt      string `json:"prompt,omitempty"`      // ask: the question
-	Type        string `json:"type,omitempty"`        // ask: free|line|confirm|choose
+	Tool        string          `json:"tool"`
+	ID          string          `json:"id,omitempty"`          // run: block id for value-passing (APB_OUT_<id>)
+	Cmd         string          `json:"cmd,omitempty"`         // run: the command line
+	Fact        string          `json:"fact,omitempty"`        // remember: the distilled fact
+	ProjectRoot string          `json:"projectRoot,omitempty"` // remember: override target (else Deps.ProjectRoot)
+	Prompt      string          `json:"prompt,omitempty"`      // ask: the question
+	Type        string          `json:"type,omitempty"`        // ask: free|line|confirm|choose
+	Playbook    json.RawMessage `json:"playbook,omitempty"`    // submit_playbook: the structured playbook
 }
 
 // reply is the outbound RPC: the union of per-tool result fields. Unused fields
@@ -202,6 +207,8 @@ func (s *Server) dispatch(req request) reply {
 		return s.doRemember(req)
 	case "ask":
 		return s.doAsk(req)
+	case "submit_playbook":
+		return s.doSubmitPlaybook(req)
 	default:
 		return reply{Exit: -1, Error: "unknown tool: " + req.Tool}
 	}
@@ -256,4 +263,22 @@ func (s *Server) doAsk(req request) reply {
 		return reply{Unavailable: true, Error: askUnavailableMsg}
 	}
 	return reply{Answer: res.Value}
+}
+
+// doSubmitPlaybook decodes a structured playbook, validates it, and (on success)
+// hands it to Deps.OnPlaybook. A validation failure is returned as reply.Error so
+// the MCP adapter surfaces it as a tool error and the model re-submits.
+func (s *Server) doSubmitPlaybook(req request) reply {
+	if s.deps.OnPlaybook == nil {
+		return reply{Error: "submit_playbook unavailable in this context"}
+	}
+	var pb playbook.Playbook
+	if err := json.Unmarshal(req.Playbook, &pb); err != nil {
+		return reply{Error: "could not parse playbook: " + err.Error()}
+	}
+	if err := playbook.Validate(pb, false); err != nil {
+		return reply{Error: err.Error()}
+	}
+	s.deps.OnPlaybook(pb)
+	return reply{OK: true}
 }

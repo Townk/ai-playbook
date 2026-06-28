@@ -11,13 +11,14 @@ import (
 // shape package-internal `request` decodes). Adapters (the MCP server, the future
 // pi/cursor adapters) build a Call from their typed tool args and hand it to Dial.
 type Call struct {
-	Tool        string `json:"tool"`
-	ID          string `json:"id,omitempty"`
-	Cmd         string `json:"cmd,omitempty"`
-	Fact        string `json:"fact,omitempty"`
-	ProjectRoot string `json:"projectRoot,omitempty"`
-	Prompt      string `json:"prompt,omitempty"`
-	Type        string `json:"type,omitempty"`
+	Tool        string          `json:"tool"`
+	ID          string          `json:"id,omitempty"`
+	Cmd         string          `json:"cmd,omitempty"`
+	Fact        string          `json:"fact,omitempty"`
+	ProjectRoot string          `json:"projectRoot,omitempty"`
+	Prompt      string          `json:"prompt,omitempty"`
+	Type        string          `json:"type,omitempty"`
+	Playbook    json.RawMessage `json:"playbook,omitempty"`
 }
 
 // Result is the backend's reply, decoded (the same shape package-internal `reply`

@@ -1,6 +1,7 @@
 package tools
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -8,6 +9,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/floatinput"
 	"github.com/Townk/ai-playbook/internal/kb"
+	"github.com/Townk/ai-playbook/internal/playbook"
 )
 
 // newTestDriver opens a real driver against a minimal controlled ZDOTDIR (no
@@ -209,5 +211,43 @@ func TestServe_UnknownTool(t *testing.T) {
 func TestServe_NilDriver(t *testing.T) {
 	if _, err := Serve(filepath.Join(t.TempDir(), "x.sock"), Deps{}); err == nil {
 		t.Errorf("Serve with nil driver should error")
+	}
+}
+
+func TestServe_SubmitPlaybook(t *testing.T) {
+	d := newTestDriver(t)
+	var got playbook.Playbook
+	gotN := 0
+	socket := serveTest(t, Deps{Driver: d, OnPlaybook: func(pb playbook.Playbook) { got = pb; gotN++ }})
+
+	pb := playbook.Playbook{
+		Title:    "T",
+		Sections: []playbook.Section{{Heading: "S", Content: []playbook.ContentItem{{Kind: "code", Lang: "bash", Code: "echo hi", ID: "fix"}}}},
+		Meta:     playbook.Meta{Description: "d", ProjectBound: true},
+	}
+	raw, _ := json.Marshal(pb)
+
+	res, err := Dial(socket, Call{Tool: "submit_playbook", Playbook: raw})
+	if err != nil {
+		t.Fatalf("Dial submit: %v", err)
+	}
+	if !res.OK || res.Error != "" {
+		t.Fatalf("submit reply = %+v, want ok", res)
+	}
+	if gotN != 1 || got.Title != "T" || !got.Meta.ProjectBound {
+		t.Fatalf("OnPlaybook got %d calls, pb=%+v", gotN, got)
+	}
+
+	// An invalid playbook (no runnable block) is rejected and NOT delivered.
+	bad, _ := json.Marshal(playbook.Playbook{Title: "T", Sections: []playbook.Section{{Heading: "S"}}})
+	res, err = Dial(socket, Call{Tool: "submit_playbook", Playbook: bad})
+	if err != nil {
+		t.Fatalf("Dial bad submit: %v", err)
+	}
+	if res.OK || res.Error == "" {
+		t.Fatalf("bad submit should be rejected, got %+v", res)
+	}
+	if gotN != 1 {
+		t.Fatalf("invalid submit must not call OnPlaybook (calls=%d)", gotN)
 	}
 }
