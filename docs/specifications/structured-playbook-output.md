@@ -159,6 +159,17 @@ activity line, not a stream.)
   Collapse finalize to persist-only on `w`. Add the structured polish pass only if
   Phase A showed it is needed.
 
+## Follow-ups (own spec, post-Phase-A)
+
+**File-change representation** — its own focused spec, paired with the ADR-0008
+diff work (shared viewer/runner surface): three distinct block roles — run a
+command / **edit an existing file** (a `diff` block, rendered + apply-as-patch) /
+**create a new file** (a `file=<path>` tagged code block: body IS the content, no
+hunk math, deterministic write via base64 round-trip, rendered as "new file:
+<path>" with a create action). Retire heredoc-for-file-creation. Needs: schema
+`file` field, renderer tag, `Block.File` + parser, viewer render, runner
+write-action, prompt vocabulary.
+
 ## Tradeoffs / risks
 
 - **Prose quality** under a schema can be terser than free markdown; the
