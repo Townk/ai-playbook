@@ -37,8 +37,9 @@ Playbook {
   sections: [ Section {
      heading: string              // → "## <heading>"
      content: [ ContentItem {     // ORDERED, heterogeneous flow (prose & code interleave)
-        kind:      "text" | "callout" | "code"
-        text?:     string         // kind=text|callout — literate markdown
+        kind:        "text" | "callout" | "code"
+        text?:       string       // kind=text|callout — literate markdown
+        admonition?: string       // kind=callout — note|tip|important|warning|caution (default note)
         lang?:     string         // kind=code — bash|zsh|sh|python|diff|console|…
         code?:     string         // kind=code — block content
         id?:       string         // kind=code — we auto-assign when omitted
@@ -65,7 +66,8 @@ reliability.
 
 - `title` → `# Playbook — <title>`; `intro` → prose under it.
 - each `section` → `## <heading>`, then its `content[]` IN ORDER:
-  `text` → prose; `callout` → a `> ` note; `code` → a fenced block
+  `text` → prose; `callout` → a `> [!<ADMONITION>]` admonition (note/tip/important/
+  warning/caution — the viewer styles each with an icon + color); `code` → a fenced block
   ```` ```<lang> {id=<id> needs=… rollback=… static} ````.
 - `verify` → a final ```` {id=verify needs=…} ```` block.
 - `meta` → the YAML front matter.
