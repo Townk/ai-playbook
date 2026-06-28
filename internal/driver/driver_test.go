@@ -35,6 +35,17 @@ func newTestDriver(t *testing.T) *Driver {
 	return d
 }
 
+// historyOff runs in the MAIN context at Open (via runMain): HISTFILE=/dev/null
+// must persist to a later Run — proof the driver's commands won't be saved to the
+// user's shell history. (Removing atuin's hooks can't be unit-tested without
+// atuin; HISTFILE is the observable main-context effect.)
+func TestHistoryOff_DisablesHistfileInMainContext(t *testing.T) {
+	d := newTestDriver(t)
+	if r := d.Run("print -r -- $HISTFILE", 5*time.Second); r.Out != "/dev/null" {
+		t.Errorf("HISTFILE after Open = %q, want /dev/null (historyOff main-context effect)", r.Out)
+	}
+}
+
 func TestResolvesFunctionAndAlias(t *testing.T) {
 	d := newTestDriver(t)
 	if r := d.Run("tfn", 10*time.Second); r.Out != "FN_OK" || r.Exit != 0 {

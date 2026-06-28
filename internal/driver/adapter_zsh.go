@@ -15,6 +15,23 @@ func (zshAdapter) cdCmd(target string) string {
 	return "builtin cd -- " + shquote(target) + " 2>/dev/null"
 }
 
+// historyOff stops the driver's `source <job>` lines from being saved to the zsh
+// history file or recorded by atuin: HISTFILE=/dev/null + SAVEHIST=0 disable the
+// on-disk save; removing atuin's preexec/precmd hooks stops atuin from recording
+// (atuin captures every interactive command via those hooks, independent of
+// HISTFILE). Runs once in the MAIN context before any job is sourced, so even the
+// first source-line isn't stored (atuin's precmd is gone before it would fire).
+func (zshAdapter) historyOff() string {
+	return "HISTFILE=/dev/null; SAVEHIST=0; " +
+		"autoload -Uz add-zsh-hook 2>/dev/null; " +
+		"add-zsh-hook -d preexec _atuin_preexec 2>/dev/null; " +
+		"add-zsh-hook -d precmd _atuin_precmd 2>/dev/null"
+}
+
+func (zshAdapter) sentinelEcho() string {
+	return "print -r -- " + sentinel + "0" + sentinel
+}
+
 func (zshAdapter) job(p jobParams) string {
 	qcwd := shquote(p.cwdf)
 	trapBody := "builtin pwd >| " + qcwd

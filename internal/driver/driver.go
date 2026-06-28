@@ -108,6 +108,9 @@ func Open(opts Options) (*Driver, error) {
 		d.Close()
 		return nil, err
 	}
+	// Stop the driver's own commands (`source <job>` lines) from polluting the
+	// user's shell/atuin history — run ONCE in the main context before anything else.
+	d.runMain(d.a.historyOff(), 5*time.Second)
 	d.run("stty -echo 2>/dev/null", 5*time.Second) // cosmetic: trim echo noise
 	if opts.Cwd != "" {
 		d.cwd = opts.Cwd
@@ -121,6 +124,23 @@ func Open(opts Options) (*Driver, error) {
 // group. Safe to call serially. Equivalent to RunID("", cmd, timeout).
 func (d *Driver) Run(cmd string, timeout time.Duration) Result {
 	return d.RunID("", cmd, timeout)
+}
+
+// runMain executes cmd in the shell's MAIN context — NOT inside the errexit
+// subshell that runID wraps the user command in — and waits for completion. This
+// is for one-time session setup whose effect must persist on the main shell
+// (currently historyOff: disabling history/atuin recording). cmd and a
+// main-context sentinel echo are sent as one raw line; the result is discarded
+// (best-effort). Called once from Open before any user command, so it needs no
+// runMu lock.
+func (d *Driver) runMain(cmd string, timeout time.Duration) {
+	if cmd == "" {
+		return
+	}
+	d.clearBuf()
+	d.setStopped(false)
+	d.send(cmd + "; " + d.a.sentinelEcho())
+	d.waitSentinel(timeout)
 }
 
 // RunID is Run with value-passing. In the hosted shell's main context — AFTER the

@@ -20,4 +20,12 @@ type shellAdapter interface {
 	sourceCmd(jobPath string) string // command to source the job script
 	cdCmd(target string) string      // command to cd into target
 	job(p jobParams) string          // the full job-script body
+	// historyOff is a one-time MAIN-context command (run via driver.runMain at
+	// session start) that stops the driver's commands from polluting the user's
+	// shell/atuin history — the driver spawns an interactive shell for fidelity,
+	// but its `source <job>` lines should never be recorded. Empty = nothing to do.
+	historyOff() string
+	// sentinelEcho prints the driver's sentinel (with exit 0) in the MAIN context,
+	// so runMain can sync on a raw command that is NOT wrapped in job()'s subshell.
+	sentinelEcho() string
 }

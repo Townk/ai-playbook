@@ -22,6 +22,19 @@ func (bashAdapter) cdCmd(target string) string {
 	return "builtin cd -- " + shquote(target) + " 2>/dev/null"
 }
 
+// historyOff disables on-disk history (HISTFILE=/dev/null, `set +o history`) and
+// drops the DEBUG trap + PROMPT_COMMAND that bash-preexec (which atuin hooks into)
+// uses to record commands. Best-effort: the driver's bash session is dedicated to
+// running playbook steps, so clearing these prompt hooks is safe here.
+func (bashAdapter) historyOff() string {
+	return "HISTFILE=/dev/null; export HISTFILE; set +o history 2>/dev/null; " +
+		"trap - DEBUG 2>/dev/null; PROMPT_COMMAND="
+}
+
+func (bashAdapter) sentinelEcho() string {
+	return "printf '%s\\n' " + shquote(sentinel+"0"+sentinel)
+}
+
 func (bashAdapter) job(p jobParams) string {
 	qcwd := shquote(p.cwdf)
 	trapBody := "builtin pwd >| " + qcwd

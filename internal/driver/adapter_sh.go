@@ -34,6 +34,16 @@ func (shAdapter) cdCmd(target string) string {
 	return "cd -- " + shquote(target) + " 2>/dev/null"
 }
 
+// historyOff disables on-disk history. POSIX sh/dash has no atuin integration of
+// its own and minimal interactive history, so HISTFILE=/dev/null suffices.
+func (shAdapter) historyOff() string {
+	return "HISTFILE=/dev/null; export HISTFILE"
+}
+
+func (shAdapter) sentinelEcho() string {
+	return "printf '%s\\n' " + shquote(sentinel+"0"+sentinel)
+}
+
 func (shAdapter) job(p jobParams) string {
 	qcwd := shquote(p.cwdf)
 	trapBody := "pwd >| " + qcwd
