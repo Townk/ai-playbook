@@ -113,8 +113,11 @@ func SystemPrompt(req capture.Request, kb KnowledgeBase, shell string) string {
 		}
 		outputBlock = "\n\nRelevant terminal output (the failure):\n" + scroll
 		taskLine = "Diagnose the failure: explain what is going on and how to fix it."
-		structure = "Write your answer as a LITERATE TROUBLESHOOTING PLAYBOOK — a document a teammate\n" +
-			"without the full context can follow — in three parts:\n\n" +
+		structure = "BEGIN the document with a single H1 title line — exactly `# Playbook — <short task>` — " +
+			"as the VERY FIRST line. Do NOT write any conversational preamble before it (no \"Here's the picture…\", " +
+			"no \"Everything's clear now\"). Everything after the title is the playbook body.\n\n" +
+			"Write the body as a LITERATE TROUBLESHOOTING PLAYBOOK — a document a teammate\n" +
+			"without the full context can follow — in three parts (as `##` sections under the title):\n\n" +
 			"1. Goal & error — what the user was trying to do and the error they saw (concise).\n" +
 			"2. Why it happens — the root cause (concise).\n" +
 			"3. Fix steps — prose that walks through the fix, with the runnable steps woven in\n" +
@@ -126,8 +129,11 @@ func SystemPrompt(req capture.Request, kb KnowledgeBase, shell string) string {
 			"and offer to try another fix. Do NOT fold the re-run into the fix block or prose."
 	} else {
 		taskLine = "Answer the user's request directly. This is a general request, NOT a troubleshooting case: there is no failure here — do NOT invent or diagnose an error, and do NOT treat the last command as a problem."
-		structure = "Write your answer as a LITERATE HOW-TO PLAYBOOK — a document a teammate can\n" +
-			"follow — in two parts:\n\n" +
+		structure = "BEGIN the document with a single H1 title line — exactly `# Playbook — <short task>` — " +
+			"as the VERY FIRST line. Do NOT write any conversational preamble before it (no \"Here's how…\", " +
+			"no \"Sure, you can…\"). Everything after the title is the playbook body.\n\n" +
+			"Write the body as a LITERATE HOW-TO PLAYBOOK — a document a teammate can\n" +
+			"follow — in two parts (as `##` sections under the title):\n\n" +
 			"1. Goal — what the user wants to accomplish (one line).\n" +
 			"2. How — prose that walks through it, with the runnable steps woven in as fenced\n" +
 			"   code blocks. Do NOT just dump a list of commands."
@@ -182,7 +188,8 @@ Show captured error output or sample output as a console block (or tag it
 For example, an illustrative block starts with: `+"```"+`console {static}
 
 Do NOT apply changes yourself — the user reviews and runs each step from the
-playbook. Keep the preamble short; spend your words on the steps.
+playbook. The document MUST begin with the `+"`# Playbook — <task>`"+` H1 title as its
+first line (no conversational preamble before it); spend your words on the steps.
 
 Never write secrets, credentials, or raw environment dumps into a remembered
 fact or into your answer.
