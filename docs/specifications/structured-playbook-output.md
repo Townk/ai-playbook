@@ -165,10 +165,14 @@ activity line, not a stream.)
 diff work (shared viewer/runner surface): three distinct block roles — run a
 command / **edit an existing file** (a `diff` block, rendered + apply-as-patch) /
 **create a new file** (a `file=<path>` tagged code block: body IS the content, no
-hunk math, deterministic write via base64 round-trip, rendered as "new file:
-<path>" with a create action). Retire heredoc-for-file-creation. Needs: schema
-`file` field, renderer tag, `Block.File` + parser, viewer render, runner
-write-action, prompt vocabulary.
+hunk math, deterministic write via base64 round-trip). Retire
+heredoc-for-file-creation. Needs: schema `file` field, renderer tag, `Block.File` +
+parser, viewer render, runner write-action, prompt vocabulary.
+
+New-file block tab rendering (user spec): the block-type **icon** as normal, but in
+place of the type **label** show the **relative file path**; then the action
+separator and a single **`create`** button. On click, `create` writes the file and
+toggles to **`undo`** — mirroring the diff block's apply/revert toggle.
 
 ## Tradeoffs / risks
 
