@@ -249,8 +249,10 @@ func realCreateStream(req capture.Request, sess *session, cfg *config.Config) (c
 		// accumulated stream text only when the model misbehaved and submitted nothing,
 		// so create never dead-ends.
 		body: func() string {
-			if sess != nil && sess.lastPB != nil {
-				return playbook.Render(*sess.lastPB)
+			if sess != nil {
+				if last := sess.lastPB.Load(); last != nil {
+					return playbook.Render(*last)
+				}
 			}
 			return fo.Body()
 		},
@@ -298,14 +300,16 @@ func newCreateReengage(req capture.Request, d triage.Decision, c *cache.Cache, n
 // classification.
 func capturedMetaSeam(sess *session) func(doc string) (orchestrator.PlaybookMeta, error) {
 	return func(doc string) (orchestrator.PlaybookMeta, error) {
-		if sess != nil && sess.lastPB != nil {
-			m := sess.lastPB.Meta
-			return orchestrator.PlaybookMeta{
-				Description:  m.Description,
-				Category:     m.Category,
-				Tags:         m.Tags,
-				ProjectBound: m.ProjectBound,
-			}, nil
+		if sess != nil {
+			if last := sess.lastPB.Load(); last != nil {
+				m := last.Meta
+				return orchestrator.PlaybookMeta{
+					Description:  m.Description,
+					Category:     m.Category,
+					Tags:         m.Tags,
+					ProjectBound: m.ProjectBound,
+				}, nil
+			}
 		}
 		return buildMetadataSeam(sess)(doc)
 	}

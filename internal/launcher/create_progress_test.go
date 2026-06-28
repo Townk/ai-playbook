@@ -306,12 +306,12 @@ func TestCreate_StructuredRenderAndSeam(t *testing.T) {
 	if err != nil || !res.OK {
 		t.Fatalf("submit: %+v err=%v", res, err)
 	}
-	if sess.lastPB == nil {
+	if sess.lastPB.Load() == nil {
 		t.Fatal("submit_playbook did not capture into sess.lastPB")
 	}
 
 	// The captured playbook renders deterministically (body-only markdown).
-	body := playbook.Render(*sess.lastPB)
+	body := playbook.Render(*sess.lastPB.Load())
 	if !strings.Contains(body, "# Playbook — Restore wrapper") || !strings.Contains(body, "```bash {id=fix}") {
 		t.Fatalf("rendered body wrong:\n%s", body)
 	}

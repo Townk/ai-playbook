@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Townk/ai-playbook/internal/agentstream"
@@ -189,8 +190,7 @@ type session struct {
 	m       mux.Mux           // already-selected mux (never re-loaded); used for ask seam + asker
 	bridge  *askbridge.Bridge // no-mux ask overlay bridge (nil when a real mux is present)
 
-	pb     chan playbook.Playbook // submit_playbook capture (buffered 1)
-	lastPB *playbook.Playbook     // the most recent captured playbook (for the meta seam)
+	lastPB atomic.Pointer[playbook.Playbook] // the most recent captured playbook (for the meta seam)
 }
 
 // bridgeAskFunc adapts an askbridge.Bridge to a tools.AskFunc: the agent's `ask`
@@ -262,16 +262,11 @@ func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell
 	// Build the session struct BEFORE tools.Serve so the submit_playbook capture
 	// closure can close over it: the authoring agent calls submit_playbook → backend
 	// → OnPlaybook → it stores the validated playbook on sess.lastPB (read by the
-	// captured-meta seam) and non-blocking-sends onto sess.pb. The buffered (cap 1)
-	// channel guarantees OnPlaybook never blocks the backend dispatch goroutine.
-	pbCh := make(chan playbook.Playbook, 1)
-	sess := &session{drv: drv, socket: socket, selfExe: selfExe, m: m, bridge: bridge, pb: pbCh}
+	// captured-meta seam via atomic.Load, so no data race). Store is the sole writer;
+	// Load is called only after the claude round-trip completes on the create goroutine.
+	sess := &session{drv: drv, socket: socket, selfExe: selfExe, m: m, bridge: bridge}
 	onPlaybook := func(p playbook.Playbook) {
-		sess.lastPB = &p
-		select {
-		case pbCh <- p:
-		default:
-		}
+		sess.lastPB.Store(&p)
 	}
 
 	// The agent's live activity (reasoning + tool calls) is no longer surfaced via
