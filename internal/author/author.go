@@ -128,6 +128,10 @@ func runClaude(systemPrompt, userMessage string, extraArgs []string) (io.ReadClo
 		"--print", "--output-format", "text",
 		"--permission-mode", claudePermissionMode(),
 		"--model", claudeModel(),
+		// Only the MCP servers we pass (via extraArgs' --mcp-config), never the
+		// user's global ones — same time-to-first-token win as the stream path
+		// (ClaudeArgs). See its comment.
+		"--strict-mcp-config",
 	}
 	args = append(args, extraArgs...)
 	args = append(args, "--append-system-prompt", systemPrompt, userMessage)

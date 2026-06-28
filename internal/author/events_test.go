@@ -23,13 +23,15 @@ func TestClaudeArgs_OwnedInvocation(t *testing.T) {
 		"--model\x00opus",
 		"--mcp-config\x00/tmp/mcp.json",
 		"--append-system-prompt\x00SYS",
+		"--strict-mcp-config", // skip the user's global MCP servers on every path
 	} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("argv missing %q\n got: %v", want, args)
 		}
 	}
-	// The authoring path uses none of the bare flags.
-	for _, bad := range []string{"--system-prompt", "--strict-mcp-config", "--exclude-dynamic-system-prompt-sections"} {
+	// The authoring path keeps the dynamic sections + appends (not replaces) the
+	// system prompt — only the bare classify uses these.
+	for _, bad := range []string{"--system-prompt", "--exclude-dynamic-system-prompt-sections"} {
 		for _, a := range args {
 			if a == bad {
 				t.Errorf("authoring argv must not contain bare flag %q: %v", bad, args)

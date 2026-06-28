@@ -43,6 +43,12 @@ func ClaudeArgs(model, mcpConfigPath, systemPrompt, userMessage string, bare boo
 		"--output-format", "stream-json",
 		"--verbose",
 		"--include-partial-messages",
+		// Use ONLY the MCP servers we pass via --mcp-config (or none) — NEVER the
+		// user's global/project MCP servers (Gmail/Calendar/Drive/…). Each of those
+		// is a process spawn + handshake at startup, irrelevant to authoring/adapt/
+		// classify, and a major chunk of time-to-first-token. Applies to every path
+		// (the bare classify already relied on it).
+		"--strict-mcp-config",
 	}
 	if model != "" {
 		args = append(args, "--model", model)
@@ -52,7 +58,6 @@ func ClaudeArgs(model, mcpConfigPath, systemPrompt, userMessage string, bare boo
 	}
 	if bare {
 		args = append(args,
-			"--strict-mcp-config",
 			"--exclude-dynamic-system-prompt-sections",
 			"--system-prompt", systemPrompt,
 			userMessage,
