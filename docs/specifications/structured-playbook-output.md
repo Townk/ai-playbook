@@ -84,6 +84,29 @@ A structured *polish/generalize* pass is held **in reserve**: reintroduce it onl
 if Phase A shows a single pass yields terse or under-generalized playbooks. It is
 a measured mitigation, not a default.
 
+## `create` IS the post-troubleshooting phase
+
+Formal principle: **`ai-playbook create` generates a playbook *skipping the
+troubleshooting phase*; every feature available in the post-troubleshooting phase
+is available the moment the created playbook is shown.** Concretely, the create
+viewer opens already in the "final draft" state (`finalDraft=true`,
+`committed=false`), so:
+
+- **`w`** persists the displayed playbook (CommitPlaybook + the folded-in metadata
+  seam) — it does NOT re-generate (which previously prepended a second H1).
+- **`f`** (proactive amend) re-authors the displayed playbook with a user change —
+  wired with the same asker the troubleshoot viewer uses.
+- **regenerate** and the run blocks work via the same reengage/driver wiring.
+
+The rendered H1 is the plain title (`# <title>`, no `Playbook —` prefix), and the
+viewer titles its header from it.
+
+No-mux `f`: instead of the float-based asker (which no-ops without a mux), `f` in
+no-mux opens the **same in-viewer ask overlay the agent's `ask` tool uses** (the
+askBridge overlay the viewer already hosts) to capture "What should I change?",
+then proceeds with the amend. So `f` works in both mux (float) and no-mux
+(overlay). This improves the troubleshoot path too.
+
 ## Metadata folded in
 
 The `meta` block (front-matter fields) is part of the same `submit_playbook`
