@@ -47,10 +47,8 @@ import (
 // (the drain reached EOF). mux-present asks go to the float and never reach the
 // bridge, so reqCh is simply nil there.
 type progressAskModel struct {
-	width    int
-	frame    int
-	ticks    int // 100ms ticks; seconds = ticks/10
-	activity string
+	width int
+	pw    ui.ProgressWidget
 
 	// channels driving the model.
 	act  <-chan string
@@ -112,12 +110,11 @@ func (m progressAskModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		return m, nil
 	case paTickMsg:
-		m.frame++
-		m.ticks++
+		m.pw.Tick()
 		return m, paTick()
 	case paActMsg:
 		if msg.ok && msg.s != "" {
-			m.activity = msg.s
+			m.pw.SetActivity(msg.s)
 		}
 		if !msg.ok {
 			return m, nil // activity channel closed; stop re-arming
@@ -149,7 +146,7 @@ func (m progressAskModel) View() tea.View {
 	if m.ask != nil {
 		return tea.NewView(m.ask.View(input.FloatWidthDefault))
 	}
-	return tea.NewView(ui.WaitingLine(m.frame, m.ticks/10, m.activity, m.width))
+	return tea.NewView(m.pw.Render(m.width))
 }
 
 // lastHeight is the rendered line count for the clear-on-exit step. At exit the ask
@@ -159,10 +156,7 @@ func (m progressAskModel) lastHeight() int {
 	if m.ask != nil {
 		return strings.Count(m.ask.View(input.FloatWidthDefault), "\n") + 1
 	}
-	if m.activity == "" {
-		return 1
-	}
-	return 2
+	return strings.Count(m.pw.Render(m.width), "\n") + 1
 }
 
 // runCreateProgressFn is the progress-host seam: production drives the inline tea

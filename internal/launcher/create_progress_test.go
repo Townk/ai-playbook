@@ -28,9 +28,6 @@ func TestProgressAskModel_ActivityUpdatesLine(t *testing.T) {
 	m := newProgressAskModel(nil, nil, nil)
 	mi, _ := m.Update(paActMsg{s: "running go test", ok: true})
 	m = mi.(progressAskModel)
-	if m.activity != "running go test" {
-		t.Fatalf("activity = %q, want %q", m.activity, "running go test")
-	}
 	if !strings.Contains(m.View().Content, "running go test") {
 		t.Errorf("View must render the activity line, got:\n%s", m.View().Content)
 	}
@@ -92,6 +89,19 @@ func TestProgressAskModel_AskRoundTrip(t *testing.T) {
 func TestProgressAskModel_NilBridgeNoSubscribe(t *testing.T) {
 	if paRecvAsk(nil) != nil {
 		t.Error("a nil ask channel must yield a nil command (no subscription)")
+	}
+}
+
+// TestProgressAskModel_RendersWidget asserts the inline progress view renders via
+// the embedded ProgressWidget (spinner + activity) after Tick/SetActivity.
+func TestProgressAskModel_RendersWidget(t *testing.T) {
+	m := newProgressAskModel(nil, nil, nil)
+	m.width = 80
+	m.pw.Tick() // advance one tick via the embedded widget
+	m.pw.SetActivity("compiling")
+	out := m.View()
+	if !strings.Contains(out.Content, "compiling") {
+		t.Fatalf("inline progress view must render the widget activity, got %q", out.Content)
 	}
 }
 
