@@ -3,6 +3,8 @@ package ui
 import (
 	"reflect"
 	"testing"
+
+	"github.com/Townk/ai-playbook/internal/frontmatter"
 )
 
 func TestGroupSizes(t *testing.T) {
@@ -29,5 +31,28 @@ func TestGroupSizes(t *testing.T) {
 				t.Errorf("groupSizes(%d) produced out-of-range size %d", c.n, s)
 			}
 		}
+	}
+}
+
+func TestBuildConfirmVars(t *testing.T) {
+	env := map[string]frontmatter.EnvValue{
+		"PROJECT_ROOT":     {Why: "the project directory"},
+		"ANDROID_SDK_ROOT": {Why: "the SDK"},
+		"UNSET_VAR":        {Why: "not in shell"},
+	}
+	getenv := func(k string) string {
+		if k == "ANDROID_SDK_ROOT" {
+			return "/live/sdk"
+		}
+		return ""
+	}
+	got := buildConfirmVars(env, "/new/proj", getenv)
+	want := []confirmVar{
+		{"ANDROID_SDK_ROOT", "/live/sdk", "the SDK"},
+		{"PROJECT_ROOT", "/new/proj", "the project directory"},
+		{"UNSET_VAR", "", "not in shell"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("buildConfirmVars = %v, want %v", got, want)
 	}
 }
