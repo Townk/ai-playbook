@@ -279,6 +279,37 @@ func TestRealCreateAuthor_NullMuxReachesStreamSeam(t *testing.T) {
 	}
 }
 
+// TestCapturedMetaSeam_MapsEnv asserts that a captured playbook's meta.Env slice
+// surfaces in the seam's EnvNotes (name→why) without a metadata model pass.
+// It drives the REAL openSession wiring (live tools.Serve) — mirroring the
+// TestCreate_StructuredRenderAndSeam harness — so sess.lastPB is populated via
+// tools.Dial before capturedMetaSeam is called.
+func TestCapturedMetaSeam_MapsEnv(t *testing.T) {
+	minimalZDOTDIR(t)
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	if sess == nil {
+		t.Fatal("openSession returned nil (driver/tools setup failed)")
+	}
+	defer sess.close()
+
+	pb := playbook.Playbook{
+		Title:    "T",
+		Sections: []playbook.Section{{Heading: "S", Content: []playbook.ContentItem{{Kind: "code", Lang: "bash", Code: "echo ok", ID: "run"}}}},
+		Meta:     playbook.Meta{Env: []playbook.EnvVar{{Name: "FOO", Why: "bar"}}},
+	}
+	raw, _ := json.Marshal(pb)
+
+	res, err := tools.Dial(sess.socket, tools.Call{Tool: "submit_playbook", Playbook: raw})
+	if err != nil || !res.OK {
+		t.Fatalf("submit: %+v err=%v", res, err)
+	}
+
+	meta, err := capturedMetaSeam(sess)("")
+	if err != nil || meta.EnvNotes["FOO"] != "bar" {
+		t.Fatalf("seam EnvNotes = %v err=%v, want FOO=bar", meta.EnvNotes, err)
+	}
+}
+
 func mustRead(t *testing.T, path string) string {
 	t.Helper()
 	b, err := os.ReadFile(path)

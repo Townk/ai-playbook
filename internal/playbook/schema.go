@@ -51,4 +51,11 @@ type Meta struct {
 	Category     string   `json:"category,omitempty" jsonschema:"a coarse category, e.g. 'Android / build' or 'macOS / networking'"`
 	Tags         []string `json:"tags,omitempty" jsonschema:"keywords for search"`
 	ProjectBound bool     `json:"project_bound" jsonschema:"true if this playbook is specific to a project/working directory; false for a general how-to that applies anywhere"`
+	Env          []EnvVar `json:"env,omitempty" jsonschema:"environment variables the playbook relies on (local resources, secrets) — declare each with name + why so a reader on another machine knows what to set"`
+}
+
+// EnvVar is one declared environment variable the playbook relies on.
+type EnvVar struct {
+	Name string `json:"name" jsonschema:"the variable name, e.g. ANDROID_SDK_ROOT"`
+	Why  string `json:"why,omitempty" jsonschema:"one line on what it is / why the playbook needs it"`
 }

@@ -6,6 +6,18 @@ import (
 	"testing"
 )
 
+func TestMeta_EnvRoundTrip(t *testing.T) {
+	in := Playbook{Title: "T", Meta: Meta{Env: []EnvVar{{Name: "ANDROID_SDK_ROOT", Why: "the SDK"}}}}
+	b, _ := json.Marshal(in)
+	if !strings.Contains(string(b), `"name":"ANDROID_SDK_ROOT"`) || !strings.Contains(string(b), `"why":"the SDK"`) {
+		t.Fatalf("env did not serialize: %s", b)
+	}
+	var out Playbook
+	if err := json.Unmarshal(b, &out); err != nil || len(out.Meta.Env) != 1 || out.Meta.Env[0].Name != "ANDROID_SDK_ROOT" {
+		t.Fatalf("env round-trip failed: %+v err=%v", out.Meta.Env, err)
+	}
+}
+
 func TestPlaybook_JSONRoundTrip(t *testing.T) {
 	in := Playbook{
 		Title: "Fix the wrapper",
