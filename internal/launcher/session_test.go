@@ -527,8 +527,9 @@ func TestEscalate_AuthorsStructured(t *testing.T) {
 
 	// The shared body() closure: escalate's RunStream renders this on EOF as the
 	// finalDraft. With a captured playbook it is playbook.Render(sess.lastPB) — the
-	// fan-out fallback is never consulted.
-	body := structuredBody(sess, nil)
+	// fan-out fallback is never consulted. Pass empty projectRoot/home: the block code
+	// ("make") contains no absolute paths, so portabilization is a no-op here.
+	body := structuredBody(sess, "", "", nil)
 	if !strings.Contains(body, "# Fix the build") || !strings.Contains(body, "```bash {id=fix}") {
 		t.Fatalf("escalate body must be the rendered captured playbook: %s", body)
 	}

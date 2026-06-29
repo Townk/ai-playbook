@@ -240,10 +240,11 @@ func structuredStream(req capture.Request, sess *session, cfg *config.Config) (c
 		return createStream{}, err
 	}
 	reader, activity, fo := agentstream.FanOut(events, closeFn, ActivityBuffer)
+	home, _ := os.UserHomeDir()
 	return createStream{
 		reader:   reader,
 		activity: activity,
-		body:     func() string { return structuredBody(sess, fo.Body) },
+		body:     func() string { return structuredBody(sess, req.ProjectRoot, home, fo.Body) },
 		close:    func() { reader.Close(); removeMCP() },
 	}, nil
 }
@@ -253,11 +254,17 @@ func structuredStream(req capture.Request, sess *session, cfg *config.Config) (c
 // DETERMINISTIC render of the captured structured playbook (the agent submitted it via
 // submit_playbook → OnPlaybook → sess.lastPB). It falls back to the accumulated stream
 // text (fallback, typically the fan-out's Body) only when the model misbehaved and
-// submitted nothing, so authoring never dead-ends.
-func structuredBody(sess *session, fallback func() string) string {
+// submitted nothing, so authoring never dead-ends. projectRoot + home are the authoring
+// machine's project root and home dir — used to Portabilize a project_bound playbook
+// (replace absolute paths with shell variables) before rendering.
+func structuredBody(sess *session, projectRoot, home string, fallback func() string) string {
 	if sess != nil {
 		if last := sess.lastPB.Load(); last != nil {
-			return playbook.Render(*last)
+			pb := *last
+			if pb.Meta.ProjectBound {
+				playbook.Portabilize(&pb, projectRoot, home)
+			}
+			return playbook.Render(pb)
 		}
 	}
 	if fallback != nil {

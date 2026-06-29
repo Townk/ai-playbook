@@ -367,6 +367,21 @@ func TestBuildFrontMatter_ProjectBound(t *testing.T) {
 	}
 }
 
+// TestBuildFrontMatter_DeclaresProjectRoot asserts that buildFrontMatter injects
+// PROJECT_ROOT into the env map when the metadata seam returns ProjectBound: true.
+func TestBuildFrontMatter_DeclaresProjectRoot(t *testing.T) {
+	re := &Reengage{
+		Req: capture.Request{},
+		Metadata: func(string) (PlaybookMeta, error) {
+			return PlaybookMeta{ProjectBound: true}, nil
+		},
+	}
+	fm := re.buildFrontMatter("# Playbook — T\n\n```bash {id=fix}\ncd $PROJECT_ROOT\n```\n")
+	if _, ok := fm.Env["PROJECT_ROOT"]; !ok {
+		t.Fatalf("project_bound front matter must declare PROJECT_ROOT, got env=%v", fm.Env)
+	}
+}
+
 // TestCommitPlaybook_NoStoreDir_FallsBackToDataRoot asserts the back-compat
 // path: when StoreDir is empty, CommitPlaybook writes under dataRoot/playbooks.
 func TestCommitPlaybook_NoStoreDir_FallsBackToDataRoot(t *testing.T) {

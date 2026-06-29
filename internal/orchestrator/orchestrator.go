@@ -488,6 +488,19 @@ func (re *Reengage) buildFrontMatter(body string) frontmatter.FrontMatter {
 	home, _ := os.UserHomeDir()
 	env := frontmatter.BuildEnv(frontmatter.ScanEnvRefs(body), meta.EnvNotes, lookup, home)
 
+	// PROJECT_ROOT is not in the shell, so BuildEnv cannot discover it via ScanEnvRefs
+	// on a portabilized body (it appears as a literal $PROJECT_ROOT, which IS a ref, but
+	// the lookup will miss it since it's not in the host shell). Declare it explicitly for
+	// project_bound playbooks so the host knows to set it at run time.
+	if meta.ProjectBound {
+		if env == nil {
+			env = map[string]frontmatter.EnvValue{}
+		}
+		if _, ok := env["PROJECT_ROOT"]; !ok {
+			env["PROJECT_ROOT"] = frontmatter.EnvValue{Why: "the project directory; the host sets it to your project root at run"}
+		}
+	}
+
 	return frontmatter.FrontMatter{
 		Name:         title,
 		Description:  meta.Description,

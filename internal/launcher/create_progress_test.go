@@ -319,6 +319,35 @@ func mustRead(t *testing.T, path string) string {
 	return string(b)
 }
 
+// TestStructuredBody_PortabilizesProjectBound asserts that a captured project_bound
+// playbook whose code block references the authoring project dir is portabilized
+// before render: the absolute project path is replaced with $PROJECT_ROOT.
+func TestStructuredBody_PortabilizesProjectBound(t *testing.T) {
+	minimalZDOTDIR(t)
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	if sess == nil {
+		t.Fatal("openSession returned nil (driver/tools setup failed)")
+	}
+	defer sess.close()
+
+	pb := playbook.Playbook{
+		Title: "T",
+		Meta:  playbook.Meta{ProjectBound: true},
+		Sections: []playbook.Section{{
+			Heading: "S",
+			Content: []playbook.ContentItem{
+				{Kind: "code", Lang: "bash", ID: "fix", Code: "cd /proj/app"},
+			},
+		}},
+	}
+	raw, _ := json.Marshal(pb)
+	_, _ = tools.Dial(sess.socket, tools.Call{Tool: "submit_playbook", Playbook: raw})
+	body := structuredBody(sess, "/proj", "/home", nil)
+	if !strings.Contains(body, "cd $PROJECT_ROOT/app") {
+		t.Fatalf("project_bound body must be portabilized: %s", body)
+	}
+}
+
 // TestCreate_StructuredRenderAndSeam is the Phase A integration test: create
 // authors via submit_playbook — a (faked) agent tool call delivers a structured
 // playbook to the session's tools backend, the create stream's body is the
