@@ -185,3 +185,19 @@ func TestForegroundPgrpIsRealPID(t *testing.T) {
 		t.Fatal("killing the command by pgrp did not end the run")
 	}
 }
+
+// RunMain exports a var in the main shell context, and the export persists to
+// a later Run. This is the use case for B2b confirmation gates that must inject
+// env vars into the same driver before a block runs.
+func TestRunMain_ExportPersists(t *testing.T) {
+	d, err := Open(Options{Shell: "bash"})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	d.RunMain("export B2B_TEST=hello", 5*time.Second)
+	res := d.Run("printf '%s' \"$B2B_TEST\"", 5*time.Second)
+	if res.Out != "hello" {
+		t.Fatalf("exported var not visible to later Run: output=%q", res.Out)
+	}
+}

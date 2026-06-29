@@ -126,6 +126,13 @@ func (d *Driver) Run(cmd string, timeout time.Duration) Result {
 	return d.RunID("", cmd, timeout)
 }
 
+// RunMain runs cmd in the driver's MAIN shell context (not the errexit subshell that
+// Run uses), so side effects like `export` persist for subsequent Run calls. It is the
+// exported counterpart to the internal runMain used at Open.
+func (d *Driver) RunMain(cmd string, timeout time.Duration) {
+	d.runMain(cmd, timeout)
+}
+
 // runMain executes cmd in the shell's MAIN context — NOT inside the errexit
 // subshell that runID wraps the user command in — and waits for completion. This
 // is for one-time session setup whose effect must persist on the main shell
