@@ -34,5 +34,12 @@ func StructuredToolInstruction() string {
 		"a general how-to that applies anywhere.\n" +
 		"Interleave prose and code freely inside a section (intro prose, a block, closing prose). " +
 		"END the playbook with a short wrap-up section (e.g. a `Summary` or `Done` heading) that " +
-		"confirms the successful end state and any follow-ups — do not stop abruptly after the last command.\n"
+		"confirms the successful end state and any follow-ups — do not stop abruptly after the last command.\n" +
+		"\n### Portability\n" +
+		"Reference machine- or project-specific local resources through shell variables, " +
+		"do not hardcode absolute paths: use `$PROJECT_ROOT` for anything under the project " +
+		"directory (the host sets it at run), `$HOME` for home paths, and the standard tool " +
+		"variables (`$ANDROID_SDK_ROOT`, `$JAVA_HOME`, …) for SDK/tool locations. Declare each " +
+		"non-standard variable the playbook relies on in `meta.env` (name + why) so a reader on " +
+		"another machine knows what to set.\n"
 }

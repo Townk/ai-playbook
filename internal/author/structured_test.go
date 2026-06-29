@@ -16,6 +16,10 @@ func TestStructuredToolInstruction_MandatesSubmit(t *testing.T) {
 		"warning",         // lists at least one callout type
 		"caution",         // …and another
 		"verify",          // explains the verify field
+		"$PROJECT_ROOT",   // portability guidance
+		"$HOME",           // portability guidance
+		"do not hardcode", // portability guidance
+		"meta.env",        // portability guidance
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("structured instruction missing %q", want)
