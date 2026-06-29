@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	diffpkg "github.com/Townk/ai-playbook/internal/diff"
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/launcher"
@@ -68,6 +69,8 @@ func main() {
 		os.Exit(finalize())
 	case "mcp":
 		os.Exit(mcpMain())
+	case "diff":
+		os.Exit(diffpkg.Main())
 	case "input":
 		os.Exit(input.Main())
 	case "-h", "--help", "help":
@@ -80,7 +83,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ai-playbook {assist [<prompt>]|create <prompt> [--template <t>]|list [--format human|fuzzy-data-source|json]|search <query> [--format ...]|show <slug>|edit <slug>|session [--request <json>]|run <file.md>|answer --request <json> --content <file> [--cached <iso>] [--title <t>] [--cwd <dir>]|finalize [--dry-run] <file.md>|mcp --socket <path>|input|selftest}")
+	fmt.Fprintln(os.Stderr, "usage: ai-playbook {assist [<prompt>]|create <prompt> [--template <t>]|list [--format human|fuzzy-data-source|json]|search <query> [--format ...]|show <slug>|edit <slug>|session [--request <json>]|run <file.md>|answer --request <json> --content <file> [--cached <iso>] [--title <t>] [--cwd <dir>]|finalize [--dry-run] <file.md>|diff <patchfile>|mcp --socket <path>|input|selftest}")
 }
 
 // mcpMain is the `ai-playbook mcp --socket <path>` subcommand: an MCP stdio
