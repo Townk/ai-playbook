@@ -2,6 +2,7 @@ package tools
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -291,5 +292,45 @@ func TestServe_SubmitPlaybook(t *testing.T) {
 	}
 	if gotN != 1 {
 		t.Fatalf("invalid submit must not call OnPlaybook (calls=%d)", gotN)
+	}
+}
+
+// TestServe_SubmitPlaybook_ValidateFileBlocksRejects asserts that when ValidateFileBlocks
+// returns an error the handler returns reply.Error with that message and does NOT call
+// OnPlaybook — the file= create-vs-edit gate fires before delivery.
+func TestServe_SubmitPlaybook_ValidateFileBlocksRejects(t *testing.T) {
+	d := newTestDriver(t)
+	called := false
+	fakeErr := errors.New(`file "main.go" already exists — use a diff block to edit an existing file (file= is for new files)`)
+	socket := serveTest(t, Deps{
+		Driver:     d,
+		OnPlaybook: func(playbook.Playbook) { called = true },
+		ValidateFileBlocks: func(pb playbook.Playbook) error {
+			return fakeErr
+		},
+	})
+
+	// A valid playbook with a file= block (lang required for the code block to pass Validate).
+	pb := playbook.Playbook{
+		Title: "T",
+		Sections: []playbook.Section{{Heading: "S", Content: []playbook.ContentItem{
+			{Kind: "code", Lang: "go", Code: "package main", File: "main.go"},
+		}}},
+		Meta: playbook.Meta{Description: "d", ProjectBound: true},
+	}
+	raw, _ := json.Marshal(pb)
+
+	res, err := Dial(socket, Call{Tool: "submit_playbook", Playbook: raw})
+	if err != nil {
+		t.Fatalf("Dial submit: %v", err)
+	}
+	if res.OK {
+		t.Error("ValidateFileBlocks error must prevent ok=true")
+	}
+	if !strings.Contains(res.Error, "diff") {
+		t.Errorf("reply.Error = %q, want message containing %q", res.Error, "diff")
+	}
+	if called {
+		t.Error("OnPlaybook must not be called when ValidateFileBlocks returns an error")
 	}
 }

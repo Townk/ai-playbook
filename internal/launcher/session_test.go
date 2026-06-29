@@ -536,6 +536,26 @@ func TestEscalate_AuthorsStructured(t *testing.T) {
 	}
 }
 
+// TestValidateFileBlocks_RejectsExistingPath asserts the launcher's file-block
+// validator rejects a file= path that already exists and suggests a diff block;
+// a new (non-existent) path is accepted.
+func TestValidateFileBlocks_RejectsExistingPath(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "exists.go"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check := fileBlockValidator(dir) // the launcher's checker constructor
+	pb := playbook.Playbook{Sections: []playbook.Section{{Content: []playbook.ContentItem{
+		{Kind: "code", File: "exists.go", Code: "y"}}}}}
+	if err := check(pb); err == nil || !strings.Contains(err.Error(), "diff") {
+		t.Fatalf("must reject existing file= path + suggest diff, got %v", err)
+	}
+	pb.Sections[0].Content[0].File = "new.go"
+	if err := check(pb); err != nil {
+		t.Fatalf("a new path must be accepted, got %v", err)
+	}
+}
+
 // TestReengageStructuredByKind asserts the AuthorOptions per kind: FinalPlaybook
 // and Regenerate author structured playbooks (submit_playbook); Followup stays
 // markdown (continues the troubleshoot with run/ask).

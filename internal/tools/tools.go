@@ -79,6 +79,12 @@ type Deps struct {
 	// OnPlaybook, when set, receives a validated structured playbook submitted via
 	// the submit_playbook tool. nil → submit_playbook replies "unavailable".
 	OnPlaybook func(pb playbook.Playbook)
+	// ValidateFileBlocks, when set, is called after schema validation and before
+	// OnPlaybook: it rejects the submission (as reply.Error) if any file= block
+	// targets a path that already exists in the project (the model should use a diff
+	// block to edit existing files). nil → skipped. The FS/project-root logic lives
+	// in the launcher, which injects it here so internal/tools stays FS-decoupled.
+	ValidateFileBlocks func(pb playbook.Playbook) error
 }
 
 // request is the inbound RPC: tool selector + the union of per-tool fields.
@@ -278,6 +284,11 @@ func (s *Server) doSubmitPlaybook(req request) reply {
 	}
 	if err := playbook.Validate(pb, false); err != nil {
 		return reply{Error: err.Error()}
+	}
+	if s.deps.ValidateFileBlocks != nil {
+		if err := s.deps.ValidateFileBlocks(pb); err != nil {
+			return reply{Error: err.Error()}
+		}
 	}
 	s.deps.OnPlaybook(pb)
 	return reply{OK: true}

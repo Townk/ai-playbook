@@ -275,11 +275,12 @@ func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell
 	// still runs the run/ask/remember execution the agent invokes; we just no longer
 	// observe it for DISPLAY.
 	srv, err := tools.Serve(socket, tools.Deps{
-		Driver:      drv,
-		ProjectRoot: req.ProjectRoot,
-		Cwd:         cwd,
-		Ask:         ask,
-		OnPlaybook:  onPlaybook,
+		Driver:             drv,
+		ProjectRoot:        req.ProjectRoot,
+		Cwd:                cwd,
+		Ask:                ask,
+		OnPlaybook:         onPlaybook,
+		ValidateFileBlocks: fileBlockValidator(req.ProjectRoot),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: tools.Serve failed (%v); authoring without agent tools\n", err)
@@ -289,6 +290,28 @@ func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell
 	}
 	sess.srv = srv
 	return sess
+}
+
+// fileBlockValidator returns a func that walks every code ContentItem with a
+// non-empty File field and rejects the submission if the file already exists under
+// projectRoot. The returned error is model-facing: it names the conflicting path
+// and directs the model to use a diff block instead. A path that does NOT exist is
+// accepted (nil error). An empty projectRoot causes filepath.Join to treat File as
+// relative to the process cwd — still functional.
+func fileBlockValidator(projectRoot string) func(playbook.Playbook) error {
+	return func(pb playbook.Playbook) error {
+		for _, sec := range pb.Sections {
+			for _, item := range sec.Content {
+				if item.Kind != "code" || item.File == "" {
+					continue
+				}
+				if _, err := os.Stat(filepath.Join(projectRoot, item.File)); err == nil {
+					return fmt.Errorf("file %q already exists — use a diff block to edit an existing file (file= is for new files)", item.File)
+				}
+			}
+		}
+		return nil
+	}
 }
 
 // bridgeOf returns the session's no-mux ask bridge, or nil for a nil session. It
