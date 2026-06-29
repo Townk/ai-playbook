@@ -28,6 +28,10 @@ func StructuredToolInstruction() string {
 		"  - `{kind:\"code\", lang, code, id?, needs?, rollback?, static?}` — a block. Mark non-runnable " +
 		"output (console transcripts, illustrations) `static:true`. Use `id`+`needs` for value-passing " +
 		"between runnable blocks (omit `id` to have one assigned).\n" +
+		"    File-change blocks: to **edit an existing file**, use a diff block (set `lang:\"diff\"` with a " +
+		"unified patch). To **create a new file**, set `file:<relative path>` alongside the target `lang`; " +
+		"the body is the new file's FULL content. Use `file=` ONLY for files that don't exist yet — " +
+		"edit existing files with a diff block.\n" +
 		"- `verify`: the final outcome-check command — include it for a fix/troubleshooting playbook.\n" +
 		"- `meta`: `description` (one line), `category`, `tags`, and `project_bound`. Set " +
 		"`project_bound:true` when the playbook is specific to a project/working directory; `false` for " +

@@ -5,6 +5,14 @@ import (
 	"testing"
 )
 
+func TestStructuredToolInstruction_FileChangeVocabulary(t *testing.T) {
+	for _, want := range []string{"lang:\"diff\"", "file:", "new file", "diff block"} {
+		if !strings.Contains(StructuredToolInstruction(), want) {
+			t.Errorf("structured instruction missing file-change vocabulary %q", want)
+		}
+	}
+}
+
 func TestStructuredToolInstruction_MandatesSubmit(t *testing.T) {
 	s := StructuredToolInstruction()
 	for _, want := range []string{
