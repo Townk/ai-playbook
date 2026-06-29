@@ -141,22 +141,28 @@ func TestRenderBlockQuote(t *testing.T) {
 	if !strings.Contains(got, "hello quote") {
 		t.Fatalf("quote text missing:\n%s", got)
 	}
-	if !strings.Contains(got, "▋") {
-		t.Fatalf("quote border glyph missing:\n%s", got)
+	// bordered frame: content rows use ▐ as the left bar
+	if !strings.Contains(got, "▐") {
+		t.Fatalf("quote left-bar glyph missing:\n%s", got)
 	}
 }
 
 func TestRenderQuoteDefaultAdmonition(t *testing.T) {
 	lines, _, _ := Render("> hello there friend", 40, nil, "")
-	// bare quote: NO header line — the first emitted line is a body line.
+	// bordered frame: lines[0] is the top border (🬞🬭…), lines[1] is the body row.
 	first := strip(lines[0].Text)
-	if !strings.HasPrefix(first, "▋ ") {
-		t.Fatalf("first line should be a body line starting with '▋ ', got: %q", first)
+	if !strings.HasPrefix(first, "🬞") {
+		t.Fatalf("first line should be the top border starting with '🬞', got: %q", first)
 	}
-	if !strings.Contains(first, "hello") {
-		t.Fatalf("first (body) line should contain the body text, got: %q", first)
+	// lines[1] is the body row: starts with ▐ (left bar) + space + body text.
+	body := strip(lines[1].Text)
+	if !strings.HasPrefix(body, "▐ ") {
+		t.Fatalf("second line should be a body line starting with '▐ ', got: %q", body)
 	}
-	// no line should contain the word "Quote" (no title header)
+	if !strings.Contains(body, "hello") {
+		t.Fatalf("body line should contain the body text, got: %q", body)
+	}
+	// no line should contain the word "Quote" (no title header for bare quote)
 	for _, l := range lines {
 		if strings.Contains(strip(l.Text), "Quote") {
 			t.Fatalf("bare quote should have no 'Quote' title header, but found it in: %q", strip(l.Text))
@@ -169,9 +175,14 @@ func TestRenderQuoteDefaultAdmonition(t *testing.T) {
 
 func TestRenderQuoteAdmonitionType(t *testing.T) {
 	lines, _, _ := Render("> [!note]\n> be careful here", 40, nil, "")
-	hdr := strip(lines[0].Text)
+	// bordered frame: lines[0] is the top border; lines[1] is the header row.
+	topBorder := strip(lines[0].Text)
+	if !strings.HasPrefix(topBorder, "🬞") {
+		t.Fatalf("expected top border starting with '🬞', got %q", topBorder)
+	}
+	hdr := strip(lines[1].Text)
 	if !strings.Contains(hdr, "Note") {
-		t.Fatalf("expected Note header, got %q", hdr)
+		t.Fatalf("expected Note header at lines[1], got %q", hdr)
 	}
 	body := joinText(lines)
 	if strings.Contains(body, "[!note]") {
@@ -184,8 +195,12 @@ func TestRenderQuoteAdmonitionType(t *testing.T) {
 
 func TestRenderQuoteExplicitQuoteType(t *testing.T) {
 	lines, _, _ := Render("> [!quote]\n> some quoted body", 40, nil, "")
-	// first line is the header: must contain "Quote" and the 󱆨 glyph
-	hdr := strip(lines[0].Text)
+	// bordered frame: lines[0] is the top border; lines[1] is the header row.
+	topBorder := strip(lines[0].Text)
+	if !strings.HasPrefix(topBorder, "🬞") {
+		t.Fatalf("[!quote] expected top border starting with '🬞', got %q", topBorder)
+	}
+	hdr := strip(lines[1].Text)
 	if !strings.Contains(hdr, "Quote") {
 		t.Fatalf("[!quote] header missing 'Quote' title: %q", hdr)
 	}
@@ -223,6 +238,36 @@ func TestBandFillsWidthWithBg(t *testing.T) {
 	}
 	if w := lipgloss.Width(result); w != 10 {
 		t.Fatalf("band width = %d, want 10", w)
+	}
+}
+
+func TestQuote_BorderedFrame(t *testing.T) {
+	lines, _, _ := Render("> [!NOTE]\n> Hello world\n", 30, nil, "")
+	joined := joinText(lines)
+	for _, want := range []string{"🬞", "🬭", "▐", "🬁", "🬂"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("callout missing frame glyph %q:\n%s", want, joined)
+		}
+	}
+	// content text sits 1 space after the left bar
+	if !strings.Contains(joined, "▐ ") {
+		t.Errorf("content not 1 space off the left bar:\n%s", joined)
+	}
+}
+
+func TestQuote_BareBlockquoteFallback(t *testing.T) {
+	lines, _, _ := Render("> just a quote\n", 30, nil, "")
+	joined := joinText(lines)
+	// bare blockquote is framed with the fallback accent — ▐ left bar present, no header title
+	if !strings.Contains(joined, "▐") {
+		t.Errorf("bare blockquote not framed:\n%s", joined)
+	}
+	// bare blockquote must also have the top/bottom border glyphs
+	if !strings.Contains(joined, "🬞") {
+		t.Errorf("bare blockquote missing top-left corner 🬞:\n%s", joined)
+	}
+	if !strings.Contains(joined, "🬁") {
+		t.Errorf("bare blockquote missing bottom-left corner 🬁:\n%s", joined)
 	}
 }
 

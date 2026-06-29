@@ -480,6 +480,17 @@ const (
 	glyphRetry    = "\U000F0450" // nf-md refresh/retry — re-engage the agent for a different fix
 )
 
+// Callout (admonition) bordered-frame glyphs — Symbols for Legacy Computing block.
+// Top-left corner and top/bottom border use sextant codepoints; left bar is a
+// half-block so it's always available in any Nerd Font.
+const (
+	calloutTL = "\U0001FB1E" // 🬞 U+1FB1E — top-left corner sextant
+	calloutTB = "\U0001FB2D" // 🬭 U+1FB2D — top border sextant
+	calloutCL = "▐"          // U+2590  — content left bar (right half-block)
+	calloutBL = "\U0001FB01" // 🬁 U+1FB01 — bottom-left corner sextant
+	calloutBB = "\U0001FB02" // 🬂 U+1FB02 — bottom border sextant
+)
+
 // code renders a (fenced) code block: chroma-highlighted, NOT wrapped, each
 // line padded to the target width with a continuous code background. Wide=true.
 // A decorative tab line (Wide=false) is emitted first: <leading pad><lang><" ❘ "><run? ><copy>.
@@ -937,11 +948,14 @@ func diffLineStyle(line string) (fg, bg string) {
 	}
 }
 
-// quote renders a block quote as a GitHub-style admonition.
+// quote renders a block quote as a bordered admonition frame.
 // It collects the child block text, optionally detects a [!TYPE] marker, then
-// emits a colored ▋ border on every line. A recognized [!TYPE] marker also
-// emits a header line with icon + title. A bare quote (no marker) emits only
-// the bordered body lines (no header) with a colOverlay0 border.
+// emits a 5-glyph bordered frame: top border row, content rows with a ▐ left
+// bar, and a bottom border row. Corner and left-bar cells use the accent color
+// on the document background; top/bottom sextant cells use the callout-bg tone
+// as their foreground on the document background. Content sits on a
+// darkened-accent background. No right-border glyph. A bare quote (no marker)
+// is framed with the colOverlay0 fallback accent and no header row.
 func (r *renderer) quote(n ast.Node, indent int) {
 	// Step 1: collect body text from child blocks.
 	var pieces []string
@@ -967,37 +981,61 @@ func (r *renderer) quote(n ast.Node, indent int) {
 		}
 	}
 
-	// Step 3: determine border color and dark background.
+	// Step 3: determine accent color and dark background.
 	color := colOverlay0
 	if a != nil {
 		color = a.color
 	}
-	bg := bgANSI(darken(color, 0.20))
+	calloutBgTone := darken(color, 0.20)
+	bg := bgANSI(calloutBgTone)
 
-	// Step 4: build styles.
-	borderGlyph := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render("▋")
+	// Step 4: build per-cell styles.
+	// Accent cells (TL corner, CL left bar, BL corner) — accent fg on document bg.
+	accentSty := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Background(lipgloss.Color(colBase))
+	// Tone cells (TB top border, BB bottom border) — callout-bg-tone fg on document bg.
+	toneSty := lipgloss.NewStyle().Foreground(lipgloss.Color(calloutBgTone)).Background(lipgloss.Color(colBase))
 	bodyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colText)).Italic(true)
 
-	// Step 5: emit header (only for recognized [!type] admonitions).
-	if a != nil {
-		headerText := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(a.icon + " " + a.title)
-		inner := borderGlyph + " " + headerText
-		r.lines = append(r.lines, Line{Text: band(inner, bg, r.width), Wide: false})
+	// Width available for content: total width minus the left-bar cell (1 col).
+	contentWidth := r.width - 1
+	if contentWidth < 1 {
+		contentWidth = 1
 	}
 
-	// Step 6: emit body lines. Wrap to width-3: border (1) + leading space (1) +
-	// text + a reserved trailing column so the background always pads at least one
-	// space past the text on the right (no text touching the band's right edge).
+	// Step 5: top border row — TL corner + (contentWidth) TB sextants, all on doc bg.
+	topRow := accentSty.Render(calloutTL) + strings.Repeat(toneSty.Render(calloutTB), contentWidth)
+	r.lines = append(r.lines, Line{Text: topRow, Wide: false})
+
+	// Step 6: content rows.
+	// Left bar: accent fg on document bg (single cell). Content: band over callout bg.
+	leftBar := accentSty.Render(calloutCL)
+
+	// Helper: emit one content row with the left bar + bg-banded content.
+	emitContent := func(text string) {
+		content := band(" "+text, bg, contentWidth)
+		r.lines = append(r.lines, Line{Text: leftBar + content, Wide: false})
+	}
+
+	// Header row (only for recognized [!type] admonitions).
+	if a != nil {
+		headerText := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Render(a.icon + " " + a.title)
+		emitContent(headerText)
+	}
+
+	// Body rows. Wrap to contentWidth-2: leading space (1) + text + trailing pad (1).
 	trimmed := strings.TrimSpace(body)
 	if trimmed != "" {
-		w := r.width - 3
+		w := contentWidth - 2
 		if w < 1 {
 			w = 1
 		}
 		wrapped := bodyStyle.Width(w).Render(trimmed)
 		for _, ln := range strings.Split(wrapped, "\n") {
-			inner := borderGlyph + " " + ln
-			r.lines = append(r.lines, Line{Text: band(inner, bg, r.width), Wide: false})
+			emitContent(ln)
 		}
 	}
+
+	// Step 7: bottom border row — BL corner + (contentWidth) BB sextants, all on doc bg.
+	botRow := accentSty.Render(calloutBL) + strings.Repeat(toneSty.Render(calloutBB), contentWidth)
+	r.lines = append(r.lines, Line{Text: botRow, Wide: false})
 }
