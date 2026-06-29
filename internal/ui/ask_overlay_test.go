@@ -160,7 +160,7 @@ func TestAskOverlay_StreamEventsPassThrough(t *testing.T) {
 
 	// Enter askMode with a live ask widget (mirrors openAsk).
 	m.askMode = true
-	m.ask = input.NewAsk("ai-playbook", "which env?", "", "line", nil)
+	m.ask = input.NewAsk("ai-playbook", "which env?", "", "line", nil, "", "")
 
 	// A streamEventsMsg carrying no events (EOF=false) should be processed by
 	// the main switch, which always issues readStream as its first cmd.

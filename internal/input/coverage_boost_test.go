@@ -607,7 +607,7 @@ func TestFormNextUnfilledAllFilled(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestAsk_Init_TextField(t *testing.T) {
-	a := NewAsk("T", "p?", "", "line", nil)
+	a := NewAsk("T", "p?", "", "line", nil, "", "")
 	// textField.initCmd returns textarea.Blink (non-nil)
 	if cmd := a.Init(); cmd == nil {
 		t.Fatal("Ask.Init for a line field must return a non-nil cmd")
@@ -615,13 +615,13 @@ func TestAsk_Init_TextField(t *testing.T) {
 }
 
 func TestAsk_Init_ConfirmField(t *testing.T) {
-	a := NewAsk("T", "p?", "", "confirm", nil)
+	a := NewAsk("T", "p?", "", "confirm", nil, "", "")
 	// confirmField.initCmd returns nil
 	_ = a.Init() // must not panic
 }
 
 func TestAsk_Init_ChooseField(t *testing.T) {
-	a := NewAsk("T", "pick", "", "choose", []string{"a", "b"})
+	a := NewAsk("T", "pick", "", "choose", []string{"a", "b"}, "", "")
 	// chooseField.initCmd returns nil
 	_ = a.Init() // must not panic
 }

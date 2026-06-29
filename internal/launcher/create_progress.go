@@ -125,7 +125,7 @@ func (m progressAskModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case paAskMsg:
 		// Pause the waiting line and embed the ask dialog (no re-arm until it resolves).
 		m.askReq = msg.req
-		m.ask = input.NewAsk("ai-playbook", msg.req.Prompt, "", msg.req.Type, msg.req.Choices)
+		m.ask = input.NewAsk("ai-playbook", msg.req.Prompt, "", msg.req.Type, msg.req.Choices, "", "")
 		return m, m.ask.Init()
 	}
 	// While an ask is open, route everything else (key presses, field cmds) to it.

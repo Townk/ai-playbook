@@ -26,14 +26,21 @@ const FloatWidthDefault = 57
 // value prefills the text variants; choices supplies the options for "choose".
 // The field constructors are exactly the ones the standalone `input` command uses
 // for each type, so the rendering and key handling are identical.
-func NewAsk(title, prompt, value, typ string, choices []string) *Ask {
+func NewAsk(title, prompt, value, typ string, choices []string, affLabel, negLabel string) *Ask {
 	theme := defaultTheme()
 	const variant = "default"
 
 	switch typ {
 	case "confirm":
+		aff, neg := affLabel, negLabel
+		if aff == "" {
+			aff = "Yes"
+		}
+		if neg == "" {
+			neg = "No"
+		}
 		m := newInputModel(theme, variant, title, prompt, "", "", 1, 1, 1, false, "")
-		m.fld = newConfirmField(theme, variant, "Yes", "No", false)
+		m.fld = newConfirmField(theme, variant, aff, neg, false)
 		m.width = FloatWidthDefault
 		return &Ask{m: m}
 	case "choose":

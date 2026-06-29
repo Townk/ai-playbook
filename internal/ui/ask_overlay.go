@@ -29,7 +29,7 @@ func recvAskCmd(b *askbridge.Bridge) tea.Cmd {
 func (m *model) openAsk(req askbridge.Request) tea.Cmd {
 	m.askMode = true
 	m.askReq = req
-	m.ask = input.NewAsk("ai-playbook", req.Prompt, "", req.Type, req.Choices)
+	m.ask = input.NewAsk("ai-playbook", req.Prompt, "", req.Type, req.Choices, "", "")
 	return m.ask.Init()
 }
 
