@@ -278,10 +278,6 @@ func (f *textField) thinkingView(innerW int, phase float64, blue, red, magenta s
 func (f *textField) value() string { return f.ta.Value() }
 func (f *textField) filled() bool  { return f.value() != "" }
 
-// lines returns the total rendered height of this field (textarea rows + box
-// border rows of 2).
-func (f *textField) lines(innerW int) int { return f.taHeight + boxBorder }
-
 func (f *textField) initCmd() tea.Cmd { return textarea.Blink }
 
 // --- helpers (moved from input.go) ------------------------------------------
@@ -301,8 +297,6 @@ func visualLineCount(f *textField) int {
 	}
 	return total
 }
-
-func scrollbar(f *textField) string { return scrollbarColored(f, "") }
 
 // scrollbarColored renders the scroll column; bg (when non-empty) backs every
 // cell with the selected background so the focused "other" box has no gaps.

@@ -126,9 +126,6 @@ func (f *confirmField) value() string {
 // filled always returns true — a confirm always has a value.
 func (f *confirmField) filled() bool { return true }
 
-// lines always returns 1 — the buttons row is a single line.
-func (f *confirmField) lines(innerW int) int { return 1 }
-
 // initCmd returns nil — confirm needs no cursor blink.
 func (f *confirmField) initCmd() tea.Cmd { return nil }
 

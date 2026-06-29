@@ -177,7 +177,6 @@ func (f *chooseField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
 
 // windowBounds returns the viewport slice [start, end) for the visible window,
 // and whether up/down scroll indicators should be shown.
-// This is the single source of truth used by both view() and lines().
 func (f *chooseField) windowBounds() (viewStart, viewEnd int, showUp, showDown bool) {
 	total := f.totalRows()
 	maxVis := maxVisibleRows
@@ -469,47 +468,6 @@ func (f *chooseField) filled() bool {
 		return true
 	}
 	return f.selected >= 0
-}
-
-// optionLineCount returns the number of visual lines a single option row at
-// index i occupies given innerW, accounting for label wrapping.
-// The "other" row always occupies 4 lines (2-row textarea + top/bottom border).
-func (f *chooseField) optionLineCount(i, innerW int) int {
-	if f.isOtherRow(i) {
-		// 1 heading line + the static 4-line box (otherField.lines() = taHeight +
-		// boxBorder = 4). Apply the same floor as view() so lines() == view().
-		boxW := innerW - gutterLen
-		if boxW < otherBoxMinW {
-			boxW = otherBoxMinW
-		}
-		return 1 + f.otherField.lines(boxW)
-	}
-	textColW := innerW - gutterLen
-	if textColW < 1 {
-		textColW = 1
-	}
-	ls := wrapLabel(f.options[i], textColW)
-	return len(ls)
-}
-
-// lines returns the rendered height of this field.
-// It mirrors the row count that view() emits: window rows + indicator rows.
-// The "other" row always counts as its box height (4 lines) regardless of
-// focus, so lines() is static for a given option set and width.
-// When option labels wrap, each extra visual line is counted.
-func (f *chooseField) lines(innerW int) int {
-	viewStart, viewEnd, showUp, showDown := f.windowBounds()
-	count := 0
-	for i := viewStart; i < viewEnd; i++ {
-		count += f.optionLineCount(i, innerW)
-	}
-	if showUp {
-		count++
-	}
-	if showDown {
-		count++
-	}
-	return count
 }
 
 // initCmd returns nil — the choose field needs no cursor blink.

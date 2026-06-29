@@ -272,11 +272,8 @@ func TestConfirmFieldValueBeforeSubmit(t *testing.T) {
 	}
 }
 
-func TestConfirmFieldLinesAndInitCmd(t *testing.T) {
+func TestConfirmFieldInitCmd(t *testing.T) {
 	f := newConfirmField(defaultTheme(), "default", "Yes", "No", false)
-	if n := f.lines(40); n != 1 {
-		t.Fatalf("confirmField.lines = %d, want 1 (single button row)", n)
-	}
 	if cmd := f.initCmd(); cmd != nil {
 		t.Fatal("confirmField.initCmd must return nil (no cursor blink needed)")
 	}
@@ -950,7 +947,7 @@ func TestScrollbarThumbClampToOne(t *testing.T) {
 	// (e.g. h=3, 100 lines: thumb = 9/100 = 0 < 1 → 1)
 	f := newTextField(defaultTheme(), strings.Repeat("x\n", 100), "", 3, false)
 	f.setWidth(40)
-	sb := scrollbar(f)
+	sb := scrollbarColored(f, "")
 	if !strings.Contains(sb, "┃") {
 		t.Fatal("scrollbar must show thumb (┃) for very long content")
 	}
@@ -1251,7 +1248,7 @@ func TestScrollbarColoredZeroHeight(t *testing.T) {
 	// h < 1 → clamped to 1; must not panic or return empty
 	f := newTextField(defaultTheme(), "line1\nline2", "", 3, false)
 	f.ta.SetHeight(0)
-	out := scrollbar(f)
+	out := scrollbarColored(f, "")
 	if out == "" {
 		t.Fatal("scrollbarColored with h=0 must produce non-empty output")
 	}
@@ -1475,15 +1472,6 @@ func TestChooseFilledMultiWithOtherText(t *testing.T) {
 	f, _, _ = f.handle(tea.KeyPressMsg{Code: 'x', Text: "x"}) // type into other field
 	if !f.(*chooseField).filled() {
 		t.Fatal("multi-select with other-field text must be filled")
-	}
-}
-
-func TestChooseFieldLinesNarrowWidth(t *testing.T) {
-	// optionLineCount textColW < 1 clamp: pass innerW=1 (< gutterLen=3)
-	f := newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "")
-	count := f.lines(1)
-	if count < 1 {
-		t.Fatalf("lines() with narrow innerW must return ≥ 1, got %d", count)
 	}
 }
 

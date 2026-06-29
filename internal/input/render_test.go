@@ -16,7 +16,7 @@ func strip(s string) string { return ansiRE.ReplaceAllString(s, "") }
 // TestRenderLayout pins the modal: a rounded outer border, then the title, rule,
 // boxed input with the prompt icon, and the new "·"-separated hint.
 func TestRenderLayout(t *testing.T) {
-	m := initialModel("hello world", "ai-playbook", 5)
+	m := newInputModel(defaultTheme(), "default", "ai-playbook", "", "hello world", "", 5, 1, 1, false, "")
 	m.width = 60
 	m.resize()
 	plain := strip(m.render())
@@ -112,7 +112,7 @@ func TestLineHasNoScrollbarOrNewline(t *testing.T) {
 // TestPopupInputArea pins the chrome budget against the named frame/box
 // constants rather than a magic number, and the input height against --height.
 func TestPopupInputArea(t *testing.T) {
-	m := initialModel("", "ai-playbook", 3)
+	m := newInputModel(defaultTheme(), "default", "ai-playbook", "", "", "", 3, 1, 1, false, "")
 	m.width = 57
 	m.resize()
 	wantW := 57 - (frameBorder + 2*frameHPad + boxBorder + boxPadL + iconCol + scrollGap + scrollCol)
@@ -126,7 +126,7 @@ func TestPopupInputArea(t *testing.T) {
 // not just logical lines: one long line (no newlines) that wraps past the
 // viewport must still show a thumb.
 func TestScrollbarWrappedLines(t *testing.T) {
-	m := initialModel(strings.Repeat("x", 200), "ai-playbook", 3) // 1 logical line → ~5 wrapped rows at width 40
+	m := newInputModel(defaultTheme(), "default", "ai-playbook", "", strings.Repeat("x", 200), "", 3, 1, 1, false, "") // 1 logical line → ~5 wrapped rows at width 40
 	m.width = 53
 	m.resize()
 	tf := m.fld.(*textField)
@@ -136,14 +136,14 @@ func TestScrollbarWrappedLines(t *testing.T) {
 	if tf.ta.LineCount() != 1 {
 		t.Fatalf("precondition: expected 1 logical line, got %d", tf.ta.LineCount())
 	}
-	if sb := scrollbar(tf); !strings.Contains(sb, "┃") {
+	if sb := scrollbarColored(tf, ""); !strings.Contains(sb, "┃") {
 		t.Fatalf("scrollbar should show a thumb for wrapped content, got %q", strip(sb))
 	}
 }
 
 // TestRenderFitsPane verifies no rendered line exceeds the pane width.
 func TestRenderFitsPane(t *testing.T) {
-	m := initialModel("a long enough value to exercise wrapping across the textarea width", "ai-playbook", 4)
+	m := newInputModel(defaultTheme(), "default", "ai-playbook", "", "a long enough value to exercise wrapping across the textarea width", "", 4, 1, 1, false, "")
 	m.width = 50
 	m.resize()
 	for i, l := range strings.Split(m.render(), "\n") {
@@ -157,7 +157,7 @@ func TestRenderFitsPane(t *testing.T) {
 // multi-line string inserts the full text (newlines included) without
 // triggering submit.
 func TestPasteMultiLine(t *testing.T) {
-	m := initialModel("", "ai-playbook", 5)
+	m := newInputModel(defaultTheme(), "default", "ai-playbook", "", "", "", 5, 1, 1, false, "")
 	m.width = 60
 	m.resize()
 
@@ -176,7 +176,7 @@ func TestPasteMultiLine(t *testing.T) {
 // TestTextUsesChevronIcon verifies that the rendered text input contains ❯
 // and not the old brain glyph.
 func TestTextUsesChevronIcon(t *testing.T) {
-	m := initialModel("hi", "ai-playbook", 3)
+	m := newInputModel(defaultTheme(), "default", "ai-playbook", "", "hi", "", 3, 1, 1, false, "")
 	m.width = 60
 	m.resize()
 	out := strip(m.render())

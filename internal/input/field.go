@@ -19,6 +19,5 @@ type field interface {
 	view(innerW int, focused bool) string             // interactive area only (no frame)
 	value() string
 	filled() bool
-	lines(innerW int) int
 	initCmd() tea.Cmd
 }

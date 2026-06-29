@@ -97,12 +97,6 @@ type model struct {
 	inline bool
 }
 
-// initialModel keeps the original signature the existing tests call (text, 1/1
-// padding/inset, default theme).
-func initialModel(value, title string, height int) model {
-	return newInputModel(defaultTheme(), "default", title, "", value, "", height, 1, 1, false, "")
-}
-
 func newInputModel(theme Theme, variant, title, prompt, value, placeholder string, height, padding, inset int, singleLine bool, icon string) model {
 	fld := newTextField(theme, value, placeholder, height, singleLine)
 	if icon != "" {

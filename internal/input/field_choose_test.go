@@ -105,41 +105,6 @@ func TestChooseEscCancel(t *testing.T) {
 	}
 }
 
-// linesMatchView asserts that lines(innerW) equals the number of lines
-// strip(view(innerW, true)) actually produces.
-func linesMatchView(t *testing.T, f field, innerW int, label string) {
-	t.Helper()
-	rendered := strip(f.view(innerW, true))
-	// count non-empty lines (view never emits trailing newlines, but be safe)
-	viewLines := len(strings.Split(rendered, "\n"))
-	got := f.lines(innerW)
-	if got != viewLines {
-		t.Errorf("%s: lines(%d)=%d but view renders %d lines\nrendered:\n%s",
-			label, innerW, got, viewLines, rendered)
-	}
-}
-
-func TestChooseLinesMatchViewShort(t *testing.T) {
-	// Short list (≤ cap): no scroll indicators expected.
-	opts := []string{"alpha", "beta", "gamma"}
-	f := field(newChooseField(defaultTheme(), "default", opts, false, ""))
-	linesMatchView(t, f, 40, "short list (3 options)")
-}
-
-func TestChooseLinesMatchViewLong(t *testing.T) {
-	// Long list (> cap = 8): scroll indicators must be counted.
-	opts := []string{"one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten"}
-	f := field(newChooseField(defaultTheme(), "default", opts, false, ""))
-	// Highlight is at 0, so viewStart=0 → no up-indicator; viewEnd=8 < 10 → down-indicator present.
-	linesMatchView(t, f, 40, "long list (10 options, highlight=0)")
-
-	// Move highlight to the middle so both indicators appear.
-	for i := 0; i < 5; i++ {
-		f, _, _ = f.handle(key('j'))
-	}
-	linesMatchView(t, f, 40, "long list (10 options, highlight=5, both indicators)")
-}
-
 func TestChooseOtherFilledWithActiveBuffer(t *testing.T) {
 	// Focus the other row, type text, do NOT press Enter → value() is non-empty and filled() is true.
 	// This covers the Tab-away-wedges-form bug: the form intercepts Tab before the field
@@ -158,16 +123,6 @@ func TestChooseOtherFilledWithActiveBuffer(t *testing.T) {
 	if !f.filled() {
 		t.Fatal("filled() must return true when other is active with non-empty buffer")
 	}
-}
-
-func TestChooseLinesMatchViewOtherActive(t *testing.T) {
-	// When the "other" row is highlighted (focus-to-type), the embedded textField
-	// renders as multiple physical lines; lines() must match the actual view() row count.
-	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…"))
-	// navigate to "other" row via arrows (focus-to-type flow)
-	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown})
-	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown})
-	linesMatchView(t, f, 40, "other-active (embedded textField rows must match lines())")
 }
 
 func TestChooseRowSpacingAndFullWidthHighlight(t *testing.T) {
@@ -364,16 +319,4 @@ func TestChooseMultiOtherTextPreservedAfterNavAway(t *testing.T) {
 	if !f.filled() {
 		t.Fatal("filled() must be true when other text was typed even after nav away")
 	}
-}
-
-// Finding B: lines() and view() must agree at both narrow (<=11) and normal (>=12) innerW
-// when the other row is focused.
-func TestChooseLinesMatchViewOtherNarrowWidth(t *testing.T) {
-	// innerW=8 is in the <=11 divergence range — before fix, lines() < view() row count.
-	f := field(newChooseField(defaultTheme(), "default", []string{"a"}, false, "Other…"))
-	// Navigate to the other row so it's focused (highlighted).
-	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown})
-	linesMatchView(t, f, 8, "other-focused narrow (innerW=8)")
-	// Normal width must still agree.
-	linesMatchView(t, f, 24, "other-focused normal (innerW=24)")
 }
