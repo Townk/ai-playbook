@@ -80,4 +80,3 @@ func assignIDs(blocks []Block) []Block {
 	}
 	return blocks
 }
-
