@@ -4,7 +4,6 @@ package tools
 // These complement tools_test.go by exercising the branches that the original
 // suite left at 0 % or below the target (~90 %):
 //
-//   - Server.Addr       (0 %)
 //   - dialError.Error   (0 %)
 //   - Server.Close      idempotent double-close branch (77.8 %)
 //   - Serve             net.Listen failure path (88.9 %)
@@ -25,25 +24,6 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/floatinput"
 )
-
-// TestServer_Addr verifies Addr returns the socket path the server is bound to.
-func TestServer_Addr(t *testing.T) {
-	d := newTestDriver(t)
-	dir, err := os.MkdirTemp("", "tsock")
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { os.RemoveAll(dir) })
-	socket := filepath.Join(dir, "t.sock")
-	srv, err := Serve(socket, Deps{Driver: d})
-	if err != nil {
-		t.Fatalf("Serve: %v", err)
-	}
-	t.Cleanup(func() { srv.Close() })
-	if got := srv.Addr(); got != socket {
-		t.Errorf("Addr() = %q, want %q", got, socket)
-	}
-}
 
 // TestServer_CloseIdempotent exercises the s.closed guard: a second Close call
 // must return nil without panicking or double-removing the socket.

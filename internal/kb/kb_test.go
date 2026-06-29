@@ -113,16 +113,3 @@ func TestAppendTo_EmptyFactIsNoop(t *testing.T) {
 		t.Fatalf("empty fact should not create a kb file (err=%v)", err)
 	}
 }
-
-// Append round-trips with Load: an appended fact is read back by the loader.
-func TestAppend_LoadRoundTrip(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
-	const project = "/Users/me/widget"
-	if err := Append(project, "deploys via fly.io"); err != nil {
-		t.Fatal(err)
-	}
-	if got := Load(project); string(got) != "- deploys via fly.io\n" {
-		t.Fatalf("Load after Append = %q", got)
-	}
-}

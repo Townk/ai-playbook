@@ -26,7 +26,7 @@
 // Tools:
 //   - run      — execute a command in the session shell via *driver.Driver.RunID;
 //     the load-bearing one (the agent runs `gg build` etc. in the user's env).
-//   - remember — append a distilled fact to the project KB (kb.Append).
+//   - remember — append a distilled fact to the project KB (kb.AppendTo).
 //   - ask      — the user-input channel. When the session wired an Asker (the
 //     float plumbing — selfExe + mux), `ask` spawns an input FLOAT and returns
 //     the user's submitted answer; on cancel it returns the unavailable sentinel
@@ -138,9 +138,6 @@ func Serve(socketPath string, deps Deps) (*Server, error) {
 	return s, nil
 }
 
-// Addr returns the socket path the server is listening on.
-func (s *Server) Addr() string { return s.ln.Addr().String() }
-
 // Close stops accepting connections and removes the socket file. Idempotent.
 func (s *Server) Close() error {
 	s.mu.Lock()
@@ -225,7 +222,7 @@ func (s *Server) doRun(req request) reply {
 // doRemember appends a distilled fact to the project KB (kb.AppendTo). The target
 // project root is the request override, else Deps.ProjectRoot; the data-dir root
 // is Deps.KBRoot, else kb.DefaultRoot. An empty fact is a no-op success (matching
-// kb.Append). Reply {ok:true} on success.
+// kb.AppendTo). Reply {ok:true} on success.
 func (s *Server) doRemember(req request) reply {
 	root := s.deps.KBRoot
 	if root == "" {

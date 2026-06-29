@@ -75,18 +75,8 @@ func LoadFrom(root, projectRoot string) KnowledgeBase {
 	return KnowledgeBase(b)
 }
 
-// Append ports `ai-assist-remember`: it appends a distilled fact to the
-// per-project knowledge base under the default data dir, as a "- <fact>" bullet
-// line, creating the projects/<key>/ directory as needed. An empty (after-trim)
-// fact is a no-op success (the shell rejected an empty fact; here the wrap-up
-// distillation is best-effort, so a blank fact is simply skipped rather than an
-// error). The fact's own newlines are flattened to spaces so one fact stays one
-// bullet line.
-func Append(projectRoot, fact string) error {
-	return AppendTo(DefaultRoot(), projectRoot, fact)
-}
-
-// AppendTo is Append against an explicit root (for tests / non-default data dirs).
+// AppendTo appends a distilled fact to the per-project knowledge base under an
+// explicit root (for tests / non-default data dirs).
 func AppendTo(root, projectRoot, fact string) error {
 	fact = strings.TrimSpace(fact)
 	if fact == "" {
