@@ -298,13 +298,7 @@ func (m *model) beginFinalPlaybookInProc() tea.Cmd {
 	// The troubleshoot content is the input the FINAL-PLAYBOOK prompt distills; grab
 	// it BEFORE the REPLACE reset clears m.md. The served base is independent of m.md
 	// (stashed on the cache-HIT serve), so it survives the reset.
-	cmd := m.beginFinalPlaybookGenerate(m.servedBase, m.md)
-	// This is a FINALIZE (confirm-yes / `w`-on-transcript), not an `f` amend: the
-	// stream-EOF handler must auto-persist a baseline so quitting before `w` still
-	// leaves a complete saved playbook with front matter (spec §D). The `f` amend path
-	// (fChangeMsg → beginFinalPlaybookGenerate directly) leaves this cleared.
-	m.persistOnFinish = true
-	return cmd
+	return m.beginFinalPlaybookGenerate(m.servedBase, m.md)
 }
 
 // beginFinalPlaybookGenerate is the shared REPLACE re-arm that both the confirm /
@@ -338,13 +332,11 @@ func (m *model) beginFinalPlaybookGenerate(base, change string) tea.Cmd {
 	// stays false so streaming content stays anchored at the top.
 	m.yOff = 0
 	m.pinTop = -1
-	// Mark the upcoming render a draft (not yet committed/persisted). Default the
-	// auto-persist intent OFF: this shared re-arm is also the `f` AMEND path, which must
-	// NOT auto-persist (it leaves an unsaved tweak). The FINALIZE caller
-	// (beginFinalPlaybookInProc) re-sets persistOnFinish=true after this returns.
+	// Mark the upcoming render a draft (not yet committed/persisted). The `f` AMEND
+	// path leaves an unsaved tweak that the `w`/quit-guard handles; the FINALIZE path
+	// (beginFinalPlaybookInProc → saveDecision) commits explicitly.
 	m.finalDraft = true
 	m.committed = false
-	m.persistOnFinish = false
 	m.reflow()
 	// Per-stream structured render: only enter structured mode when the Body closure
 	// is set (the event path with Task-1's live capture). The text-fallback path

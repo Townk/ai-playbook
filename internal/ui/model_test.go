@@ -107,6 +107,9 @@ func TestWrapUpKeyNoOrchIsNoOp(t *testing.T) {
 	m := newModel("T", "# Playbook\n")
 	m.width, m.height = 80, 24
 	m.streaming = false
+	// hadFollowup=true → saveDecision takes the re-author path, which returns nil
+	// when no orch is wired (beginFinalPlaybookGenerate early-return).
+	m.hadFollowup = true
 	m.reflow()
 
 	m2, cmd := m.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})

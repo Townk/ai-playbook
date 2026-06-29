@@ -991,14 +991,15 @@ func TestConfirmClickNoResolves(t *testing.T) {
 	}
 }
 
-// Stage 2 (spec §A): answering "Yes" (the `y` key) generates the FINAL-PLAYBOOK in
-// REPLACE mode as a DRAFT — the producer is called with KindReengageFinalPlaybook,
-// the rendered content is reset, thinking starts, and finalDraft is set / committed
-// stays false. The current troubleshoot content is threaded as the change.
+// Stage 2 (spec §A): answering "Yes" (the `y` key) when a follow-up diverged the run
+// (hadFollowup=true) re-authors the FINAL-PLAYBOOK in REPLACE mode as a DRAFT — the
+// producer is called with KindReengageFinalPlaybook, the rendered content is reset,
+// thinking starts, and finalDraft is set / committed stays false.
 func TestConfirmYesGeneratesFinalPlaybookReplaceDraft(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook — fix\n\n```bash {id=verify}\nclean playbook\n```\n", "# Playbook — fix\n\n```bash {id=verify}\nclean playbook\n```\n")
 	troubleshoot := "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	m.md = troubleshoot
+	m.hadFollowup = true // diverged run → re-author path
 	m.reflow()
 
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -1097,6 +1098,7 @@ func TestConfirmYesAmendsServedPlaybook(t *testing.T) {
 	troubleshoot := "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	m.servedBase = served // serving an existing playbook for this context
 	m.md = troubleshoot
+	m.hadFollowup = true // diverged run → re-author (amend) path
 	m.reflow()
 
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -1137,6 +1139,7 @@ func TestConfirmYesFreshWhenNoServedBase(t *testing.T) {
 	troubleshoot := "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	m.servedBase = "" // FRESH: no playbook served
 	m.md = troubleshoot
+	m.hadFollowup = true // diverged run → re-author (fresh) path
 	m.reflow()
 
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -1172,6 +1175,7 @@ func TestWGenerateAmendsServedPlaybook(t *testing.T) {
 	m.md = transcript
 	m.finalDraft = false
 	m.committed = false
+	m.hadFollowup = true // diverged run → re-author (amend) path
 	m.reflow()
 
 	nm, cmd := m.Update(key("w"))
@@ -1233,6 +1237,7 @@ func TestConfirmWordingByMode(t *testing.T) {
 func TestConfirmResolvesByClick(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.hadFollowup = true // diverged run → re-author path (generation expected)
 	m.reflow()
 
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
@@ -1271,11 +1276,12 @@ func TestConfirmResolvesByClick(t *testing.T) {
 	}
 }
 
-// Stage 2 (spec §E): the `w` key manually finalizes — it generates the same
-// final-playbook draft (REPLACE) as the confirm Yes, even without a pending confirm.
+// `w` on a diverged run (hadFollowup=true) re-authors the final-playbook draft
+// (REPLACE) — the same generation the confirm Yes triggers for the diverged path.
 func TestManualWGeneratesFinalPlaybookDraft(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot content\n"
+	m.hadFollowup = true // diverged run → re-author path
 	m.reflow()
 
 	nm, cmd := m.Update(key("w"))
@@ -1374,13 +1380,14 @@ func TestWAlreadySavedIsNoOp(t *testing.T) {
 	}
 }
 
-// Stage 3 (spec §E): `w` on a raw troubleshoot TRANSCRIPT (no draft yet) still
-// GENERATES the final-playbook draft — the stage-2 behavior, unchanged.
+// `w` on a transcript when the run diverged (hadFollowup=true) GENERATES the
+// final-playbook draft — re-authoring to fold in the resolution.
 func TestWGeneratesOnTranscript(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot transcript\n"
 	m.finalDraft = false
 	m.committed = false
+	m.hadFollowup = true // diverged run → re-author path
 	m.reflow()
 
 	nm, cmd := m.Update(key("w"))
@@ -1400,11 +1407,10 @@ func TestWGeneratesOnTranscript(t *testing.T) {
 	}
 }
 
-// Stage 4b (spec §D): confirm-Yes → generate → stream-EOF AUTO-persists a baseline.
-// The finalize generation is marked persistOnFinish, so at EOF the model fires the
-// commit (CommitPlaybook) and shows "finalizing…"; the playbookCommittedMsg result
-// flips committed=true. Quitting now leaves a complete saved playbook.
-func TestConfirmYesAutoPersistsBaselineAtEOF(t *testing.T) {
+// Stage 4b (spec §D): confirm-Yes with no follow-up → saveDecision → immediate
+// commit (the rendered playbook IS the result; no re-author needed). The commit cmd
+// fires right out of the key handler; driving the playbookCommittedMsg flips committed.
+func TestConfirmYesNoFollowupPersistsImmediately(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# Playbook — fix\n\n```bash {id=verify}\nclean playbook\n```\n", "# Playbook — fix\n\n```bash {id=verify}\nclean playbook\n```\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
 	m.reflow()
@@ -1414,54 +1420,40 @@ func TestConfirmYesAutoPersistsBaselineAtEOF(t *testing.T) {
 	if !m.confirmResolved {
 		t.Fatal("setup: confirm not set")
 	}
+	// hadFollowup defaults false → saveDecision takes the commit path.
 	nm2, cmd := m.Update(key("y"))
 	m = nm2.(model)
 	if cmd == nil {
-		t.Fatal("confirm Yes must trigger generation")
+		t.Fatal("confirm Yes (no followup) must return the commit cmd")
 	}
-	if !m.persistOnFinish {
-		t.Error("a FINALIZE (confirm-yes) generation must arm persistOnFinish")
+	// No generation started — streaming stays false.
+	if m.streaming {
+		t.Error("confirm Yes (no followup) must NOT start a re-author generation")
 	}
-
-	// Drain to EOF and capture the auto-persist cmd the finalDraft branch returns.
-	m, eofCmd := pumpReArmEOFCmd(t, m, cmd)
-	if eofCmd == nil {
-		t.Fatal("stream-EOF on a persistOnFinish finalize must return the auto-persist cmd")
-	}
-	if m.persistOnFinish {
-		t.Error("persistOnFinish must be reset after the auto-persist fires (no re-persist)")
-	}
-	if m.status != "finalizing…" {
-		t.Errorf("auto-persist must show the finalizing status, got %q", m.status)
-	}
-	// committed flips on the RESULT, not at EOF.
-	if m.committed {
-		t.Error("committed must not flip before the persist result")
-	}
-	pc, ok := eofCmd().(playbookCommittedMsg)
+	// Drive the commit cmd and verify committed flips.
+	pc, ok := cmd().(playbookCommittedMsg)
 	if !ok {
-		t.Fatalf("auto-persist cmd must yield a playbookCommittedMsg (CommitPlaybook called), got %T", eofCmd())
+		t.Fatalf("confirm Yes (no followup) cmd must yield a playbookCommittedMsg, got %T", cmd())
 	}
 	if pc.err != nil {
-		t.Fatalf("auto-persist CommitPlaybook must succeed, got %v", pc.err)
+		t.Fatalf("CommitPlaybook must succeed, got %v", pc.err)
 	}
 	nm3, _ := m.Update(pc)
 	m = nm3.(model)
 	if !m.committed {
-		t.Error("the auto-persist result must flip committed=true (the baseline)")
+		t.Error("commit result must flip committed=true")
 	}
 	if !strings.Contains(m.status, "saved playbook") {
-		t.Errorf("auto-persist result must show the saved path, got %q", m.status)
+		t.Errorf("commit result must show the saved path, got %q", m.status)
 	}
 }
 
-// Stage 4b (spec §D): an `f` AMEND → generate → stream-EOF does NOT auto-persist. The
-// amend path leaves persistOnFinish cleared, so EOF fires no commit and committed stays
-// false (an unsaved tweak the `w`/quit-guard handle).
+// An `f` AMEND → generate → stream-EOF does NOT auto-persist. EOF fires no commit
+// and committed stays false (an unsaved tweak the `w`/quit-guard handle).
 func TestFAmendDoesNotAutoPersistAtEOF(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook — tweaked\nrevised\n", "# Playbook — tweaked\nrevised\n")
-	// Start from a committed baseline (the auto-finish artifact) so the amend is the
-	// thing under test: it must make the doc dirty again.
+	// Start from a committed baseline so the amend is the thing under test:
+	// it must make the doc dirty again.
 	m.md = "# Playbook — fix\n\nbody\n"
 	m.finalDraft = true
 	m.committed = true
@@ -1472,9 +1464,6 @@ func TestFAmendDoesNotAutoPersistAtEOF(t *testing.T) {
 	m = nm.(model)
 	if cmd == nil {
 		t.Fatal("a submitted f amend must trigger generation")
-	}
-	if m.persistOnFinish {
-		t.Error("an f amend must NOT arm persistOnFinish")
 	}
 	if m.committed {
 		t.Error("the amend re-arm must reset committed=false (an unsaved tweak)")
@@ -1712,11 +1701,10 @@ func pumpReArm(t *testing.T, m model, cmd tea.Cmd) model {
 	return m2.(model)
 }
 
-// pumpReArmEOFCmd is like pumpReArm but captures the cmd the FIRST stream-EOF returns
-// (Stage 4b's auto-persist: the finalDraft+persistOnFinish branch returns a
-// commitPlaybookCmd). pumpReArm discards that cmd; this helper hands it back so a test
-// can assert/drive the auto-persist. Returns the settled model and the EOF cmd (nil if
-// the EOF branch did not fire a command — e.g. an `f` amend, which must NOT auto-persist).
+// pumpReArmEOFCmd is like pumpReArm but captures the cmd the FIRST stream-EOF returns.
+// pumpReArm discards that cmd; this helper hands it back so a test can assert/drive
+// whatever EOF returns. Returns the settled model and the EOF cmd (nil if the EOF branch
+// did not fire a command — e.g. an `f` amend, which must NOT auto-persist).
 func pumpReArmEOFCmd(t *testing.T, m model, cmd tea.Cmd) (model, tea.Cmd) {
 	t.Helper()
 	var rearm reArmStreamMsg
@@ -2277,11 +2265,12 @@ func TestConfirmEnterSelectsFocused(t *testing.T) {
 	}
 }
 
-// Enter on the DEFAULT focus (Yes) generates the final-playbook draft, and Space
-// selects the focused button too.
+// Enter on the DEFAULT focus (Yes) re-authors when the run diverged; Space also
+// selects the focused button.
 func TestConfirmSpaceSelectsFocusedYes(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\nclean\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.hadFollowup = true // diverged run → re-author path (generation expected)
 	m.reflow()
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
@@ -2303,6 +2292,7 @@ func TestConfirmSpaceSelectsFocusedYes(t *testing.T) {
 func TestConfirmYNStillWorkWithFocus(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\nclean\n", "# Playbook\nclean\n")
 	m.md = "# Troubleshoot\n\n```bash {id=verify}\nmake build\n```\n"
+	m.hadFollowup = true // diverged run → re-author path (generation expected)
 	m.reflow()
 	nm, _ := m.Update(resultMsg{ID: "verify", Exit: 0, Logpath: ""})
 	m = nm.(model)
@@ -2431,10 +2421,11 @@ func TestResolveConfirmYesGeneratesNoDismisses(t *testing.T) {
 	if mn.finalDraft || fn.calls != 0 {
 		t.Error("resolveConfirm(false) must not generate")
 	}
-	// Yes → generate.
+	// Yes (diverged run) → re-author (generate).
 	my, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	my.md = "# Troubleshoot\n"
 	my.confirmResolved = true
+	my.hadFollowup = true // diverged run → saveDecision takes the re-author path
 	cmd := my.resolveConfirm(true)
 	if cmd == nil {
 		t.Fatal("resolveConfirm(true) must generate")
@@ -2589,5 +2580,31 @@ func TestHadFollowup_SetByFollowup(t *testing.T) {
 	_ = m.beginFollowupStream("verify", "false")
 	if !m.hadFollowup {
 		t.Fatal("a follow-up must set hadFollowup")
+	}
+}
+
+func TestSaveDecision_NoFollowupPersists(t *testing.T) {
+	m := &model{hadFollowup: false, md: "# P\n\n```bash {id=fix}\ntrue\n```\n",
+		orch: orchWithReengage(t)}
+	cmd := m.saveDecision()
+	if cmd == nil {
+		t.Fatal("no-followup save must return the commit cmd")
+	}
+	// commit path must NOT start a generation (streaming stays false)
+	if m.streaming {
+		t.Fatal("no-followup save must NOT re-author (streaming must be false)")
+	}
+}
+
+func TestSaveDecision_FollowupReauthors(t *testing.T) {
+	m := &model{hadFollowup: true, orch: orchWithReengage(t)}
+	_ = m.saveDecision()
+	// beginFinalPlaybookGenerate resets hadFollowup so the re-authored doc is then final
+	if m.hadFollowup {
+		t.Fatal("re-author must reset hadFollowup")
+	}
+	// beginFinalPlaybookGenerate sets streaming=true to signal a generation is underway
+	if !m.streaming {
+		t.Fatal("re-author path must set streaming=true")
 	}
 }

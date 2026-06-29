@@ -279,14 +279,6 @@ type model struct {
 	finalDraft bool
 	committed  bool
 
-	// persistOnFinish marks that the in-flight final-playbook generation is a FINALIZE
-	// (confirm-yes / `w`-on-transcript) rather than an `f` AMEND (spec §D). It is set by
-	// beginFinalPlaybookInProc and cleared by the `f`-amend path (fChangeMsg). At
-	// stream-EOF the finalDraft branch reads it: persistOnFinish → auto-persist a
-	// baseline (commitPlaybookCmd; committed flips true on success) and reset the flag;
-	// an `f` amend leaves committed=false (an unsaved tweak the `w`/quit-guard handle).
-	persistOnFinish bool
-
 	// preFinalMd backs up the resolved troubleshoot displayed at the moment a FINAL
 	// playbook generation REPLACES it (beginFinalPlaybookGenerate sets m.md = ""). If
 	// the generation finishes with junk (a narration: no H1 / no runnable blocks) the
@@ -644,7 +636,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.md = m.preFinalMd
 					m.title = ""
 					m.finalDraft = false
-					m.persistOnFinish = false
 					m.status = "Couldn't generate a clean playbook — kept the troubleshoot. Press c to retry."
 					m.reflow()
 					return m, nil
@@ -660,19 +651,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.reengageStream != nil {
 				_ = m.reengageStream.Close()
 				m.reengageStream = nil
-			}
-			// Auto-finish baseline (spec §D): a FINALIZE generation (confirm-yes /
-			// `w`-on-transcript, marked persistOnFinish) auto-persists at EOF so quitting
-			// before `w` still leaves a complete saved playbook with front matter. An `f`
-			// AMEND leaves persistOnFinish cleared → no auto-persist, committed stays
-			// false (an unsaved tweak the `w`/quit-guard handle). Show a transient
-			// "finalizing…" while the (slow) metadata round-trip runs; the commit result
-			// (statusMsg) replaces it with the saved/err line and committed flips true on
-			// success. Reset the flag so a subsequent stream-EOF doesn't re-persist.
-			if m.finalDraft && m.persistOnFinish {
-				m.persistOnFinish = false
-				m.status = "finalizing…"
-				return m, m.commitPlaybookCmd(m.md)
 			}
 			return m, nil
 		}
@@ -1080,10 +1058,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.status = "finalizing…"
 					return m, m.commitPlaybookCmd(m.md)
 				}
-				dbg("w: manual finalize → generate final-playbook draft")
+				dbg("w: manual finalize → save decision (persist clean run / re-author diverged)")
 				m.wrappedUp = true
 				m.confirmResolved = false
-				if cmd := m.beginFinalPlaybookInProc(); cmd != nil {
+				if cmd := m.saveDecision(); cmd != nil {
 					return m, cmd
 				}
 			}
@@ -2413,6 +2391,17 @@ func (m *model) announceFollowup(attempt int) {
 	m.clampScroll()
 }
 
+// saveDecision finalizes the troubleshoot result: if the run diverged from the
+// proposed playbook (a follow-up occurred), re-author a fresh structured playbook
+// folding in the resolution; otherwise the rendered playbook IS the result, so
+// persist it as-is.
+func (m *model) saveDecision() tea.Cmd {
+	if m.hadFollowup {
+		return m.beginFinalPlaybookInProc() // re-author (resets hadFollowup via beginFinalPlaybookGenerate)
+	}
+	return m.commitPlaybookCmd(m.md)
+}
+
 // resolveConfirm answers the native verify-success confirm: yes → generate the
 // final-playbook draft (REPLACE); no → just DISMISS the confirm and do nothing (the
 // command already succeeded, so there is nothing to re-fix). After a No the user can
@@ -2424,7 +2413,7 @@ func (m *model) resolveConfirm(yes bool) tea.Cmd {
 	}
 	m.confirmResolved = false
 	if yes {
-		return m.beginFinalPlaybookInProc()
+		return m.saveDecision()
 	}
 	return nil
 }

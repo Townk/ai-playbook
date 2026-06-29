@@ -122,11 +122,10 @@ var pendingProjectRoot string
 func SetProjectRoot(root string) { pendingProjectRoot = root }
 
 // pendingFinalDraft, when true, starts the next Main()'s model with finalDraft=true
-// (committed=false, persistOnFinish=false). The create flow sets it so the viewer
-// treats the already-rendered structured playbook as a FINAL DRAFT: `w` PERSISTS it
-// (CommitPlaybook via the injected metadata seam), and the EOF branch sets the pager
-// title from the playbook's H1 — instead of running a final-playbook GENERATION pass.
-// Consume-once. persistOnFinish stays false, so there is NO auto-persist on open.
+// (committed=false). The create flow sets it so the viewer treats the already-rendered
+// structured playbook as a FINAL DRAFT: `w` PERSISTS it (CommitPlaybook via the
+// injected metadata seam), and the EOF branch sets the pager title from the playbook's
+// H1 — instead of running a final-playbook GENERATION pass. Consume-once.
 var pendingFinalDraft bool
 
 // SetFinalDraft marks the next Main()'s document as an already-final playbook draft.

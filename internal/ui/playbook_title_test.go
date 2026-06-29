@@ -181,14 +181,13 @@ func TestIsValidPlaybook(t *testing.T) {
 
 // TestFinalDraftEOFNarrationRestoresTroubleshoot verifies the safety guard: a
 // finalDraft EOF whose m.md is a narration (no H1, 0 blocks) restores the backed-up
-// troubleshoot, clears the draft/persist flags, sets a status, and persists NOTHING
+// troubleshoot, clears the draft flag, sets a status, and persists NOTHING
 // (nil cmd — no commitPlaybookCmd).
 func TestFinalDraftEOFNarrationRestoresTroubleshoot(t *testing.T) {
 	troubleshoot := "## Resolved troubleshoot\n\nthe good fix is here\n"
 	m := newModel("agent", "The playbook is above. Hope it helps.\n")
 	m.width, m.height = 80, 24
 	m.finalDraft = true
-	m.persistOnFinish = true
 	m.preFinalMd = troubleshoot
 	m.dirty = true
 
@@ -204,23 +203,20 @@ func TestFinalDraftEOFNarrationRestoresTroubleshoot(t *testing.T) {
 	if got.finalDraft {
 		t.Fatalf("finalDraft must be cleared")
 	}
-	if got.persistOnFinish {
-		t.Fatalf("persistOnFinish must be cleared")
-	}
 	if got.status == "" {
 		t.Fatalf("a status explaining the restore must be set")
 	}
 }
 
-// TestFinalDraftEOFValidPlaybookPersists verifies the happy path is unchanged: a
+// TestFinalDraftEOFValidPlaybookStripsAndTitles verifies the happy path: a
 // finalDraft EOF whose m.md IS a real playbook (H1 + a runnable block) strips the
-// preamble, sets the title, and (with persistOnFinish) returns the commit cmd.
-func TestFinalDraftEOFValidPlaybookPersists(t *testing.T) {
+// preamble and sets the title. Persistence is triggered explicitly by saveDecision,
+// not by auto-persist at EOF.
+func TestFinalDraftEOFValidPlaybookStripsAndTitles(t *testing.T) {
 	m, _ := newReengageModel(t, "")
 	m.md = "preamble above\n\n# Playbook — X\n\n```bash {id=verify}\nmake build\n```\n"
 	m.width, m.height = 80, 24
 	m.finalDraft = true
-	m.persistOnFinish = true
 	m.dirty = true
 
 	nm, cmd := m.Update(streamEventsMsg{eof: true})
@@ -235,8 +231,9 @@ func TestFinalDraftEOFValidPlaybookPersists(t *testing.T) {
 	if !strings.HasPrefix(got.md, "# Playbook — X") {
 		t.Fatalf("md must start at the H1, got %q", got.md)
 	}
-	if cmd == nil {
-		t.Fatalf("a valid playbook with persistOnFinish must return the commit cmd")
+	// No auto-persist: EOF does NOT fire a commit cmd; persistence happens via saveDecision.
+	if cmd != nil {
+		t.Fatalf("finalDraft EOF must NOT auto-persist — want nil cmd, got %T", cmd())
 	}
 }
 
