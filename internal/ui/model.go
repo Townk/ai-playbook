@@ -14,6 +14,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/Townk/ai-playbook/internal/askbridge"
+	idiff "github.com/Townk/ai-playbook/internal/diff"
 	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
@@ -145,6 +146,15 @@ type model struct {
 	helpLines   []Line
 	helpYOff    int
 	helpXOff    int
+
+	// no-mux in-viewer diff overlay: when diffMode is true the pager overlays a
+	// bordered scrollable side-by-side diff box (rendered by internal/diff) over the
+	// live document. Only raised on the no-mux path (m.asker == nil); mux-on keeps
+	// the existing emitAction→float path. Closed by q/esc.
+	diffMode  bool
+	diffLines []string
+	diffYOff  int
+	diffXOff  int
 
 	// no-mux ask overlay: when askBridge is set, a tea.Cmd drains pending agent
 	// asks (recvAskCmd); askMode raises the embedded ask dialog over the document
@@ -742,6 +752,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.reflow()
 		m.clampHelpScroll()
+		m.clampDiffScroll()
 		return m, nil
 	case tea.MouseClickMsg:
 		m.flashKey = ""
@@ -791,6 +802,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reflow()
 					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 				}
+				if b.Kind == "diff" || b.Kind == "view-diff" {
+					// NO-MUX: open the in-viewer side-by-side diff overlay.
+					// MUX: emit to the orchestrator (float viewer, Task 4).
+					if m.asker == nil {
+						rendered := idiff.Render(idiff.Parse(b.Payload), m.width-4, highlight)
+						m.diffLines = strings.Split(rendered, "\n")
+						m.diffMode = true
+						m.diffYOff = 0
+						m.diffXOff = 0
+						return m, nil
+					}
+					ac := m.emitAction(b)
+					m.reflow()
+					return m, tea.Batch(m.flashCmd(), ac)
+				}
 				if b.Kind == "regenerate" {
 					m.flashKey = "cached:regenerate"
 					// In-process: re-author via the orchestrator and re-arm the parser
@@ -835,7 +861,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		default:
 			return m, nil
 		}
-		if m.helpMode {
+		if m.diffMode {
+			m.diffYOff += delta
+			m.clampDiffScroll()
+		} else if m.helpMode {
 			m.helpYOff += delta
 			m.clampHelpScroll()
 		} else if !m.hintMode {
@@ -852,6 +881,41 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// afresh rather than silently exiting.
 		if s := msg.String(); s != "q" && s != "esc" && s != "ctrl+c" && s != "w" {
 			m.quitGuard = false
+		}
+		// Diff overlay: resolve before help/hint/normal handling.
+		if m.diffMode {
+			switch msg.String() {
+			case "esc", "q":
+				m.diffMode = false
+			case "down", "j":
+				m.diffYOff++
+			case "up", "k":
+				m.diffYOff--
+			case "ctrl+d":
+				m.diffYOff += diffHalf(m)
+			case "ctrl+u":
+				m.diffYOff -= diffHalf(m)
+			case "ctrl+f", "pgdown":
+				m.diffYOff += diffPage(m)
+			case "ctrl+b", "pgup":
+				m.diffYOff -= diffPage(m)
+			case "g", "home":
+				m.diffYOff = 0
+			case "G", "end":
+				m.diffYOff = len(m.diffLines)
+			case "right", "l":
+				m.diffXOff++
+			case "left", "h":
+				m.diffXOff--
+			case "L":
+				m.diffXOff += diffHalfW(m)
+			case "H":
+				m.diffXOff -= diffHalfW(m)
+			case "0", "^":
+				m.diffXOff = 0
+			}
+			m.clampDiffScroll()
+			return m, nil
 		}
 		// Help overlay: resolve before hint/normal handling.
 		if m.helpMode {
@@ -944,6 +1008,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						ac := m.emitAction(b)
 						m.reflow()
 						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
+					}
+					if b.Kind == "diff" || b.Kind == "view-diff" {
+						// NO-MUX: open the in-viewer side-by-side diff overlay.
+						// MUX: emit to the orchestrator (float viewer, Task 4).
+						if m.asker == nil {
+							rendered := idiff.Render(idiff.Parse(b.Payload), m.width-4, highlight)
+							m.diffLines = strings.Split(rendered, "\n")
+							m.diffMode = true
+							m.diffYOff = 0
+							m.diffXOff = 0
+							return m, nil
+						}
+						ac := m.emitAction(b)
+						m.reflow()
+						return m, tea.Batch(m.flashCmd(), ac)
 					}
 					if b.Kind == "regenerate" {
 						m.flashKey = "cached:regenerate"
@@ -1798,10 +1877,10 @@ func (m *model) clampHelpScroll() {
 // statusBar is the slim, mode-aware bottom hint.
 func (m model) statusBar() string {
 	st := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
-	if m.status != "" && !m.hintMode && !m.helpMode {
+	if m.status != "" && !m.hintMode && !m.helpMode && !m.diffMode {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render(m.status)
 	}
-	if m.hintMode || m.helpMode {
+	if m.hintMode || m.helpMode || m.diffMode {
 		return st.Render("\U000F12B7: cancel")
 	}
 	return st.Render("\U000F1050: action • \U000F12B7: close • ?: keys")
@@ -2152,6 +2231,31 @@ func (m model) viewString() string {
 		// updating behind the modal while help is open.
 		base := m.normalLines()
 		box := strings.Split(m.helpModal(), "\n")
+		boxH := len(box)
+		boxW := 0
+		if boxH > 0 {
+			boxW = lipgloss.Width(box[0])
+		}
+		left := (m.width - boxW) / 2
+		if left < 0 {
+			left = 0
+		}
+		top := 2 + (m.height-4-boxH)/2 // centered in the body region (below the 2 top rows)
+		if top < 2 {
+			top = 2
+		}
+		for i, bl := range box {
+			if r := top + i; r >= 0 && r < len(base) {
+				base[r] = spliceOver(base[r], bl, left)
+			}
+		}
+		sb.WriteString(strings.Join(base, "\n"))
+	} else if m.diffMode {
+		// The diff overlay composites the side-by-side diff box centered over the
+		// live document, exactly like the help modal — the playbook keeps rendering
+		// behind it. The box is built by diffModal and scrolled via diffYOff/diffXOff.
+		base := m.normalLines()
+		box := strings.Split(m.diffModal(), "\n")
 		boxH := len(box)
 		boxW := 0
 		if boxH > 0 {
