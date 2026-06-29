@@ -296,22 +296,6 @@ type model struct {
 	// "press quit again" intent stays immediate, not sticky across other interactions.
 	quitGuard bool
 
-	// adaptedFrom is the source slug of an adapt-on-run render (set from --adapted-from).
-	// When non-empty the pager shows the "adapted from <slug>" banner (via the subtitle
-	// slot) and enables the `d` keybind, which raises the original→adapted diff overlay.
-	// Empty for a normal (non-adapted) render — `d` is then inert.
-	adaptedFrom string
-	// origDoc is the ORIGINAL (pre-adaptation) playbook body, read from --orig-file. It
-	// is the left side of the `d` diff overlay (the adapted body, m.md, is the right
-	// side). Empty when not an adapt-on-run render.
-	origDoc string
-	// diffMode raises the original→adapted diff overlay (the `d` keybind). diffLines is
-	// the computed colored unified diff (built lazily on first toggle) and diffYOff its
-	// scroll offset. Mirrors helpMode/helpYOff.
-	diffMode  bool
-	diffLines []Line
-	diffYOff  int
-
 	// asker spawns the request-input float (the same floatinput.Asker the agent's
 	// `ask` tool uses) and returns the user's typed answer, OFF the bubbletea event
 	// loop. It backs the `f` keybind (spec §D): `f` → ask "What should I change?" →
@@ -901,32 +885,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.clampHelpScroll()
 			return m, nil
 		}
-		// Diff overlay: the `d` keybind raised the original→adapted diff; resolve its
-		// keys (scroll / close) before any normal nav, mirroring helpMode.
-		if m.diffMode {
-			switch msg.String() {
-			case "esc", "q", "d":
-				m.diffMode = false
-			case "down", "j":
-				m.diffYOff++
-			case "up", "k":
-				m.diffYOff--
-			case "ctrl+d":
-				m.diffYOff += m.body() / 2
-			case "ctrl+u":
-				m.diffYOff -= m.body() / 2
-			case "ctrl+f", "pgdown":
-				m.diffYOff += m.body()
-			case "ctrl+b", "pgup":
-				m.diffYOff -= m.body()
-			case "g", "home":
-				m.diffYOff = 0
-			case "G", "end":
-				m.diffYOff = len(m.diffLines)
-			}
-			m.clampDiffScroll()
-			return m, nil
-		}
 		// Hint mode: resolve the pending label before any normal nav.
 		if m.hintMode {
 			switch msg.String() {
@@ -1176,20 +1134,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.confirmFocus = 0
 				m.reflow()
 				// Re-showing the confirm repaints; re-assert the hide-cursor.
-				return m, reassertHideCursor()
-			}
-			return m, nil
-		case "d":
-			// `d` toggles the original→adapted diff overlay, but ONLY for an adapt-on-run
-			// render (adaptedFrom set). For a normal render `d` is inert (falls through to
-			// the default no-op). The diff is computed once on first open (orig=origDoc,
-			// adapted=the displayed body m.md) and cached in m.diffLines.
-			if m.adaptedFrom != "" {
-				if m.diffLines == nil {
-					m.diffLines = buildDiffLines(m.adaptedFrom, m.origDoc, m.md)
-				}
-				m.diffMode = true
-				m.diffYOff = 0
 				return m, reassertHideCursor()
 			}
 			return m, nil
@@ -1844,10 +1788,10 @@ func (m *model) clampHelpScroll() {
 // statusBar is the slim, mode-aware bottom hint.
 func (m model) statusBar() string {
 	st := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
-	if m.status != "" && !m.hintMode && !m.helpMode && !m.diffMode {
+	if m.status != "" && !m.hintMode && !m.helpMode {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render(m.status)
 	}
-	if m.hintMode || m.helpMode || m.diffMode {
+	if m.hintMode || m.helpMode {
 		return st.Render("\U000F12B7: cancel")
 	}
 	return st.Render("\U000F1050: action • \U000F12B7: close • ?: keys")
@@ -2192,10 +2136,6 @@ func (m model) viewString() string {
 		}
 		sb.WriteString("\n")
 		sb.WriteString("  " + m.statusBar())
-	} else if m.diffMode {
-		// The `d` overlay fully replaces the document with the scrollable
-		// original→adapted diff (it is a read-only review surface, not composited).
-		sb.WriteString(m.diffView())
 	} else if m.helpMode {
 		// The modal is an overlay: render the live document, then composite the
 		// keybinding box over it (centered), so the markdown keeps showing and
