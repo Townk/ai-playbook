@@ -178,6 +178,10 @@ apply, output capture, and needs-gating on that id. Use:
     `+"`git apply`"+`. Do NOT emit a bare fragment of changed lines, and do NOT put
     the target filename only in prose — the file headers ARE how the viewer and
     apply know the target.
+  - `+"`file=<path>`"+` blocks to CREATE a new file — the fenced block body is the new
+    file's FULL content, and the `+"`file=<path>`"+` annotation names the target (relative
+    to the project root). Use `+"`file=`"+` ONLY for files that do not exist yet — to
+    edit an existing file use a diff block instead.
 %sShell blocks run under `+"`set -e`"+`: a block FAILS at its FIRST failing command, so
 a later command cannot mask an earlier failure. If a non-zero exit is expected
 (a probe like `+"`command -v foo`"+` or `+"`grep …`"+`), guard it with `+"`|| true`"+`.

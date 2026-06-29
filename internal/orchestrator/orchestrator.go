@@ -796,6 +796,13 @@ func (o *Orchestrator) createFile(payload string) driver.Result {
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return driver.Result{Exit: -1, Err: err.Error()}
 	}
+	// Ensure a trailing newline: the UI trims the render-trimmed payload, so a
+	// body without one would produce a non-POSIX file (e.g. a .go file that fails
+	// gofmt). Empty bodies are left empty; already-newline-terminated bodies are
+	// unchanged.
+	if body != "" && !strings.HasSuffix(body, "\n") {
+		body += "\n"
+	}
 	if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
 		return driver.Result{Exit: -1, Err: err.Error()}
 	}
@@ -826,17 +833,21 @@ func (o *Orchestrator) undoCreate(payload string) driver.Result {
 	if !found {
 		return driver.Result{Exit: 0} // no backup for this path — nothing to undo
 	}
-	delete(o.createBackups, abs)
 	if backup != nil {
 		// File existed before; restore it.
 		if err := os.WriteFile(abs, *backup, 0o644); err != nil {
+			// Leave the backup entry intact so undo is retryable.
 			return driver.Result{Exit: -1, Err: err.Error()}
 		}
 	} else {
 		// File was new; delete it.
 		if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
+			// Leave the backup entry intact so undo is retryable.
 			return driver.Result{Exit: -1, Err: err.Error()}
 		}
 	}
+	// Only remove the backup entry after a successful restore/delete, so a
+	// failed undo can be retried (the entry is still present on an error path).
+	delete(o.createBackups, abs)
 	return driver.Result{Exit: 0}
 }

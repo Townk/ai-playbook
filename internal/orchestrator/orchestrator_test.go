@@ -449,6 +449,28 @@ func TestCreateFile_OverwriteUndoRestores(t *testing.T) {
 	}
 }
 
+// TestCreateFile_TrailingNewline locks the contract that createFile always ensures
+// a trailing newline on the written file, even when the payload body has none (as
+// the UI produces after render-trimming). Without this, a .go file created via a
+// file= block would fail gofmt and violate POSIX.
+func TestCreateFile_TrailingNewline(t *testing.T) {
+	dir := t.TempDir()
+	o := newTestOrchInDir(t, dir)
+
+	// Simulate the UI path: body is render-trimmed, no trailing newline.
+	payload := EncodeFileAction("x.go", "package main")
+	if res, _ := o.Do(Action{Kind: KindCreateFile, Payload: payload}); res.Exit != 0 {
+		t.Fatalf("create: %+v", res)
+	}
+	got, err := os.ReadFile(filepath.Join(dir, "x.go"))
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(got) != "package main\n" {
+		t.Fatalf("createFile must add a trailing newline to a trimmed body, got %q", string(got))
+	}
+}
+
 // TestCommitPlaybook_NoStoreDir_FallsBackToDataRoot asserts the back-compat
 // path: when StoreDir is empty, CommitPlaybook writes under dataRoot/playbooks.
 func TestCommitPlaybook_NoStoreDir_FallsBackToDataRoot(t *testing.T) {

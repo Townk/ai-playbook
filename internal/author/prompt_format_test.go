@@ -7,6 +7,19 @@ import (
 	"github.com/Townk/ai-playbook/internal/capture"
 )
 
+// TestSystemPrompt_FileChangeVocabulary asserts that SystemPrompt names both the
+// diff block (edit existing) and the file= block (create new) vocabularies, and
+// that it articulates the new-vs-edit distinction. Mirrors
+// TestStructuredToolInstruction_FileChangeVocabulary for the markdown prompt path.
+func TestSystemPrompt_FileChangeVocabulary(t *testing.T) {
+	sys := SystemPrompt(sampleFailure(), "", "zsh")
+	for _, want := range []string{"file=<path>", "file=", "new file", "diff block"} {
+		if !strings.Contains(sys, want) {
+			t.Errorf("SystemPrompt missing file-change vocabulary %q", want)
+		}
+	}
+}
+
 // Both authoring kinds must mandate the `# Playbook — <task>` H1 as the first
 // line (no conversational preamble) — the viewer's preamble-strip + title
 // extraction key off that H1, and its absence produced a malformed render.
