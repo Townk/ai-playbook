@@ -319,6 +319,9 @@ func (m *model) beginFinalPlaybookGenerate(base, change string) tea.Cmd {
 	if orch == nil || orch.Reengage == nil {
 		return nil
 	}
+	// Reset hadFollowup: the playbook is being re-authored, so the doc now reflects
+	// the resolution. A subsequent follow-up would set it again if needed.
+	m.hadFollowup = false
 	// Back up the resolved troubleshoot BEFORE the REPLACE clears it: if the generation
 	// turns out to be junk (a narration, not a real playbook) the stream-EOF guard
 	// restores this so the good troubleshoot is never wiped or persisted over.

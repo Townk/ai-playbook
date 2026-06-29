@@ -235,6 +235,10 @@ type model struct {
 	followups    int
 	maxFollowups int
 
+	// hadFollowup is true after a follow-up (auto or manual) launches — the run
+	// diverged from the proposed playbook. Reset when the playbook is re-authored.
+	hadFollowup bool
+
 	// wrappedUp gates the verify-SUCCESS auto wrap-up (issue #3) to fire ONCE per
 	// resolution. A verify RUN with exit 0 auto-triggers the wrap-up re-engagement
 	// (the agent asks the user, via the ask tool, whether the fix solved their
@@ -2458,6 +2462,10 @@ func (m model) canRegenerate() bool {
 
 func (m *model) beginFollowupStream(blockID, command string) tea.Cmd {
 	dbg("emit %s id=%s", "followup", blockID)
+	// Record the divergence: a follow-up launched, so the run diverged from the
+	// proposed playbook. Set this BEFORE early-return so the intent is recorded even
+	// if the in-proc actuator no-ops (no Reengage).
+	m.hadFollowup = true
 	// In-process: re-engage the agent via the orchestrator and re-arm the parser
 	// with the revised-fix stream (APPEND). The failed command's output is read
 	// from the block's run logfile (capped, like the shell's tail -c 4000).

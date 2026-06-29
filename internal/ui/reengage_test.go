@@ -56,6 +56,31 @@ func newReengageModel(t *testing.T, canned string) (model, *fakeAgent) {
 	return m, fa
 }
 
+// orchWithReengage creates a minimal orchestrator with Reengage wired (using a fake agent),
+// for testing re-engagement functions that need orch.Reengage to be non-nil.
+func orchWithReengage(t *testing.T) *orchestrator.Orchestrator {
+	t.Helper()
+	zdot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	d, err := driver.Open(driver.Options{Shell: "zsh", Env: append(os.Environ(), "ZDOTDIR="+zdot)})
+	if err != nil {
+		t.Fatalf("driver.Open: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+	return orchestrator.New(d, &cliMux{}).WithReengage(&orchestrator.Reengage{
+		Req: capture.Request{
+			Command:     "make build",
+			Exit:        "2",
+			UserRequest: "fix my build",
+			ProjectRoot: t.TempDir(),
+		},
+		Agent:    (&fakeAgent{canned: "# Revised fix\n"}).agent,
+		DataRoot: t.TempDir(),
+	})
+}
+
 // collectMsgs runs a tea.Cmd and flattens any tea.BatchMsg it yields into a slice
 // of concrete messages (re-running nested batch cmds).
 func collectMsgs(cmd tea.Cmd) []tea.Msg {
@@ -2556,5 +2581,13 @@ func TestRegenerateScrollsToTop(t *testing.T) {
 	}
 	if m.pinTop != -1 {
 		t.Errorf("regenerate must clear the follow-up pin: pinTop=%d, want -1", m.pinTop)
+	}
+}
+
+func TestHadFollowup_SetByFollowup(t *testing.T) {
+	m := &model{orch: orchWithReengage(t)} // an orch whose Reengage != nil so beginFollowupStream proceeds
+	_ = m.beginFollowupStream("verify", "false")
+	if !m.hadFollowup {
+		t.Fatal("a follow-up must set hadFollowup")
 	}
 }
