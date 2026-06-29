@@ -1684,3 +1684,18 @@ func TestList_OrderedHangingIndent(t *testing.T) {
 		t.Errorf("ordered continuation indent = %d, want 5 (after '1. ')", lead)
 	}
 }
+
+// TestList_HangingIndent_NoOverflow verifies that wrapped list items do NOT
+// overflow the render width. With emitHanging budgeting for hangIndent (the
+// continuation indent), all lines—including wrapped continuations—must fit
+// within the requested width.
+func TestList_HangingIndent_NoOverflow(t *testing.T) {
+	const width = 24
+	lines := renderMarkdownLines(t, "- "+strings.Repeat("word ", 12)+"\n", width)
+	for i, ln := range lines {
+		w := lipgloss.Width(ln.Text)
+		if w > width {
+			t.Errorf("line %d exceeds width %d (got %d): %q", i, width, w, strip(ln.Text))
+		}
+	}
+}

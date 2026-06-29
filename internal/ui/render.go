@@ -405,7 +405,7 @@ func (r *renderer) emitProse(s string, indent int) {
 // emitHanging wraps s so the FIRST line gets firstIndent leading spaces and
 // every wrapped continuation gets hangIndent (a hanging indent for list items).
 func (r *renderer) emitHanging(s string, firstIndent, hangIndent int) {
-	w := r.width - firstIndent
+	w := r.width - hangIndent
 	if w < 1 {
 		w = 1
 	}
