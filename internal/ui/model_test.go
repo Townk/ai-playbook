@@ -429,3 +429,13 @@ func TestModelThinkingRendersWidget(t *testing.T) {
 		t.Fatalf("thinking block must render the ProgressWidget activity, got %q", out)
 	}
 }
+
+func TestHelpModal_BlueBorder(t *testing.T) {
+	m := newModel("T", "hi")
+	m.width, m.height = 80, 24
+	v := m.helpModal()
+	// colBlue = #89b4fa = R137 G180 B250; lipgloss emits it as \x1b[38;2;137;180;250m
+	if !strings.Contains(v, "#89b4fa") && !strings.Contains(v, "137;180;250") {
+		t.Fatalf("help modal border not blue:\n%q", v)
+	}
+}

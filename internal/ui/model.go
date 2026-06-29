@@ -2053,7 +2053,7 @@ func (m model) helpModal() string {
 
 	return lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color(colSurface1)).
+		BorderForeground(lipgloss.Color(colBlue)).
 		BorderBackground(lipgloss.Color(colMantle)).
 		Background(lipgloss.Color(colMantle)).
 		Padding(0, 0).

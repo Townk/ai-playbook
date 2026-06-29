@@ -64,6 +64,14 @@ func TestRenderFrameNonEmptyTitleHasBoth(t *testing.T) {
 	}
 }
 
+func TestRenderFrame_HasMantleBackground(t *testing.T) {
+	out := renderFrame(defaultTheme(), "default", "Title", []string{"body"}, "hint", 40, 1, 1)
+	// mantle bg SGR: #181825 = R24 G24 B37 → \x1b[48;2;24;24;37m
+	if !strings.Contains(out, "\x1b[48;2;24;24;37m") {
+		t.Fatalf("renderFrame missing mantle background:\n%q", out)
+	}
+}
+
 func TestRenderFramePaddingRows(t *testing.T) {
 	// padding=2 adds two blank rows just inside the top and bottom borders.
 	// Each blank padding row must still be enclosed by the continuous border:
