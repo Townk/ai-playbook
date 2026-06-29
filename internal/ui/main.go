@@ -120,6 +120,17 @@ var pendingShell string
 // Consumed (and cleared) by Main. Mirrors SetDriver/SetAskBridge.
 func SetShell(s string) { pendingShell = s }
 
+// pendingProjectRoot is the heuristic project root consumed by the next Main() run
+// driver, set by SetProjectRoot. A project_bound playbook run sets it so the driver
+// exports PROJECT_ROOT=<root> and the playbook's portable $PROJECT_ROOT references
+// resolve. Consumed (and cleared) by Main. "" → no PROJECT_ROOT injected.
+var pendingProjectRoot string
+
+// SetProjectRoot stashes PROJECT_ROOT for the next ui.Main() run driver (a
+// project_bound playbook run). Consumed (and cleared) by Main; injected into the
+// driver's environment so the playbook's $PROJECT_ROOT resolves. Mirrors SetShell.
+func SetProjectRoot(root string) { pendingProjectRoot = root }
+
 // pendingFinalDraft, when true, starts the next Main()'s model with finalDraft=true
 // (committed=false, persistOnFinish=false). The create flow sets it so the viewer
 // treats the already-rendered structured playbook as a FINAL DRAFT: `w` PERSISTS it
@@ -381,8 +392,17 @@ func Main() int {
 				if runCwd == "" {
 					runCwd, _ = os.Getwd()
 				}
+				// PROJECT_ROOT (consume-once): a project_bound playbook run stashes the
+				// heuristic project root here so the driver exports it and the body's
+				// portable $PROJECT_ROOT references resolve. "" → not injected.
+				projectRoot := pendingProjectRoot
+				pendingProjectRoot = ""
+				env := os.Environ()
+				if projectRoot != "" {
+					env = append(env, "PROJECT_ROOT="+projectRoot)
+				}
 				var derr error
-				d, derr = driver.Open(driver.Options{Cwd: runCwd, Shell: pendingShell})
+				d, derr = driver.Open(driver.Options{Cwd: runCwd, Shell: pendingShell, Env: env})
 				if derr != nil {
 					fmt.Fprintf(os.Stderr, "ai-playbook run: driver.Open failed (%v); falling back to render-only\n", derr)
 					d = nil
@@ -409,6 +429,7 @@ func Main() int {
 	pendingAnswerRegen = nil  // ditto: the cached-answer regenerate stash is consume-once
 	pendingAskBridge = nil    // ditto: the no-mux ask-bridge stash is consume-once
 	pendingShell = ""         // ditto: the configured-shell stash is consume-once
+	pendingProjectRoot = ""   // ditto: defensive clear for paths that skip the driver open
 	pendingFinalDraft = false // ditto: the create final-draft flag is consume-once
 
 	// Force TrueColor: zellij's alt-screen pane underreports the color profile

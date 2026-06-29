@@ -509,7 +509,6 @@ func (re *Reengage) buildFrontMatter(body string) frontmatter.FrontMatter {
 		Env:          env,
 		Created:      time.Now().Format("2006-01-02"),
 		ProjectRoot:  frontmatter.NormalizeHome(re.Req.ProjectRoot, home),
-		Workdir:      frontmatter.NormalizeHome(re.Req.ProjectRoot, home),
 		ProjectBound: meta.ProjectBound,
 		Request:      re.Req.UserRequest,
 	}

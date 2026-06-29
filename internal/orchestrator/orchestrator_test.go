@@ -281,9 +281,9 @@ func TestViewDiff(t *testing.T) {
 	}
 }
 
-// TestBuildFrontMatter_WorkdirPopulated verifies buildFrontMatter sets Workdir
-// to the home-normalized project root from re.Req.ProjectRoot.
-func TestBuildFrontMatter_WorkdirPopulated(t *testing.T) {
+// TestBuildFrontMatter_NoWorkdir verifies buildFrontMatter no longer writes the
+// workdir field (Phase B2a: portability is via PROJECT_ROOT, not a stored workdir).
+func TestBuildFrontMatter_NoWorkdir(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	projRoot := filepath.Join(home, "Projects", "myapp")
 	re := &Reengage{
@@ -296,14 +296,13 @@ func TestBuildFrontMatter_WorkdirPopulated(t *testing.T) {
 	}
 	body := "# Playbook — Fix Build\n\nDo the thing.\n"
 	fm := re.buildFrontMatter(body)
-	want := frontmatter.NormalizeHome(projRoot, home)
-	if fm.Workdir != want {
-		t.Errorf("Workdir = %q, want %q", fm.Workdir, want)
+	if fm.Workdir != "" {
+		t.Errorf("Workdir = %q, want \"\" (workdir is no longer written)", fm.Workdir)
 	}
-	// also verify the assembled FM carries the workdir: key
+	// the assembled FM must NOT carry a workdir: key (omitempty drops it)
 	assembled := frontmatter.Assemble(fm)
-	if !strings.Contains(assembled, "workdir:") {
-		t.Errorf("assembled FM has no workdir: key:\n%s", assembled)
+	if strings.Contains(assembled, "workdir:") {
+		t.Errorf("assembled FM must not carry a workdir: key:\n%s", assembled)
 	}
 }
 

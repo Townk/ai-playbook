@@ -57,168 +57,59 @@ func withStoreLoadFn(t *testing.T, fn func(string) (store.Meta, string, error)) 
 	t.Cleanup(func() { storeLoadFn = old })
 }
 
-func withAdaptModelFn(t *testing.T, fn func(sys, user string) (string, error)) {
-	t.Helper()
-	old := adaptModelFn
-	adaptModelFn = fn
-	t.Cleanup(func() { adaptModelFn = old })
-}
+// ---- runPlaybook: the project_bound run gate ----
 
-func withProjectRootFn(t *testing.T, fn func() string) {
-	t.Helper()
-	old := projectRootFn
-	projectRootFn = fn
-	t.Cleanup(func() { projectRootFn = old })
-}
-
-const validAdapted = "# Build the app\n\n```bash {id=verify}\nmake build\n```\n"
-const originalBody = "# Build\n\n```bash {id=verify}\nmake\n```\n"
-
-// ---- adaptOnRun: junk-guard + valid path ----
-
-// TestAdaptOnRun_JunkFallsBackToOriginal verifies a junk adaptation (not a valid
-// playbook) falls back to the original body with no banner.
-func TestAdaptOnRun_JunkFallsBackToOriginal(t *testing.T) {
-	meta := store.Meta{Slug: "build-app"}
-	junk := "I adapted it for you, it's all set." // no H1, no runnable block
-	renderFile, origFile, bannerSlug, err := adaptOnRun(meta, originalBody, "/tmp/x", func(sys, user string) (string, error) {
-		return junk, nil
-	})
-	if err != nil {
-		t.Fatalf("adaptOnRun: unexpected error: %v", err)
+// TestRunPlaybook_ProjectBoundSetsProjectRoot verifies a project_bound playbook
+// resolves the heuristic project root, sets it on the run driver via the
+// setProjectRootFn seam, and renders the stored body as-is (no model adapt).
+func TestRunPlaybook_ProjectBoundSetsProjectRoot(t *testing.T) {
+	origLoad, origPR, origUI, origSPR := storeLoadFn, projectRootFn, uiMainFn, setProjectRootFn
+	t.Cleanup(func() { storeLoadFn, projectRootFn, uiMainFn, setProjectRootFn = origLoad, origPR, origUI, origSPR })
+	storeLoadFn = func(string) (store.Meta, string, error) {
+		return store.Meta{Slug: "pb", ProjectBound: true}, "# Playbook — T\n\n```bash {id=fix}\ncd $PROJECT_ROOT\n```\n", nil
 	}
-	t.Cleanup(func() { os.Remove(renderFile); os.Remove(origFile) })
-	if bannerSlug != "" {
-		t.Errorf("junk adaptation: bannerSlug = %q, want \"\"", bannerSlug)
+	projectRootFn = func() string { return "/new/proj" }
+	var gotPR string
+	setProjectRootFn = func(p string) { gotPR = p }
+	uiMainFn = func() int { return 0 } // no real viewer
+	if code := runPlaybook("pb"); code != 0 {
+		t.Fatalf("runPlaybook = %d", code)
 	}
-	got, _ := os.ReadFile(renderFile)
-	if string(got) != originalBody {
-		t.Errorf("junk adaptation: renderFile = %q, want the ORIGINAL body %q", got, originalBody)
+	if gotPR != "/new/proj" {
+		t.Fatalf("project_bound run must set PROJECT_ROOT to the heuristic root, got %q", gotPR)
 	}
 }
 
-// TestAdaptOnRun_ValidUsesAdapted verifies a valid adaptation is rendered with the
-// banner slug set and the original preserved for the diff.
-func TestAdaptOnRun_ValidUsesAdapted(t *testing.T) {
-	meta := store.Meta{Slug: "build-app"}
-	renderFile, origFile, bannerSlug, err := adaptOnRun(meta, originalBody, "/tmp/x", func(sys, user string) (string, error) {
-		return validAdapted, nil
-	})
-	if err != nil {
-		t.Fatalf("adaptOnRun: unexpected error: %v", err)
-	}
-	t.Cleanup(func() { os.Remove(renderFile); os.Remove(origFile) })
-	if bannerSlug != "build-app" {
-		t.Errorf("valid adaptation: bannerSlug = %q, want \"build-app\"", bannerSlug)
-	}
-	got, _ := os.ReadFile(renderFile)
-	if string(got) != validAdapted {
-		t.Errorf("valid adaptation: renderFile = %q, want the ADAPTED body %q", got, validAdapted)
-	}
-	orig, _ := os.ReadFile(origFile)
-	if string(orig) != originalBody {
-		t.Errorf("valid adaptation: origFile = %q, want the ORIGINAL body %q", orig, originalBody)
-	}
-}
+// ---- runPlaybook: non-project_bound renders as-is, no PROJECT_ROOT ----
 
-// TestAdaptOnRun_PromptNamesTarget verifies the adaptFn is handed a system prompt
-// naming the target dir (the AdaptPrompt wiring) and the original body as the user
-// message.
-func TestAdaptOnRun_PromptNamesTarget(t *testing.T) {
-	meta := store.Meta{Slug: "build-app", Name: "Build"}
-	var gotSys, gotUser string
-	rf, of, _, err := adaptOnRun(meta, originalBody, "/Users/me/proj", func(sys, user string) (string, error) {
-		gotSys, gotUser = sys, user
-		return validAdapted, nil
-	})
-	if err != nil {
-		t.Fatalf("adaptOnRun: %v", err)
+const storedBody = "# Build\n\n```bash {id=verify}\nmake\n```\n"
+
+// TestRunPlaybook_NonProjectBoundRendersAsIs verifies a non-project_bound playbook
+// is rendered verbatim via `run --file <tmp>` with NO --cwd and NO PROJECT_ROOT set
+// (no model adapt, no banner flags).
+func TestRunPlaybook_NonProjectBoundRendersAsIs(t *testing.T) {
+	origLoad, origUI, origSPR := storeLoadFn, uiMainFn, setProjectRootFn
+	t.Cleanup(func() { storeLoadFn, uiMainFn, setProjectRootFn = origLoad, origUI, origSPR })
+	withArgs(t, []string{"ai-playbook", "run", "build"})
+	storeLoadFn = func(slug string) (store.Meta, string, error) {
+		return store.Meta{Slug: "build", ProjectBound: false}, storedBody, nil
 	}
-	t.Cleanup(func() { os.Remove(rf); os.Remove(of) })
-	if !strings.Contains(gotSys, "/Users/me/proj") {
-		t.Errorf("adaptFn system prompt must name the target dir; got:\n%s", gotSys)
-	}
-	if gotUser != originalBody {
-		t.Errorf("adaptFn user message = %q, want the original body", gotUser)
-	}
-}
-
-// ---- resolveTargetDir ----
-
-// TestResolveTargetDir_ExistingWorkdir verifies an existing workdir is used as-is.
-func TestResolveTargetDir_ExistingWorkdir(t *testing.T) {
-	dir := t.TempDir()
-	got := resolveTargetDir(store.Meta{Workdir: dir})
-	if got != dir {
-		t.Errorf("resolveTargetDir = %q, want the existing workdir %q", got, dir)
-	}
-}
-
-// TestResolveTargetDir_EmptyWorkdir_OffMuxFallsBackToProjectRoot verifies that with
-// no workdir and no mux (the off-mux edge — tests have no zellij), resolveTargetDir
-// falls back to capture.ProjectRoot rather than blocking on a float.
-func TestResolveTargetDir_EmptyWorkdir_OffMuxFallsBackToProjectRoot(t *testing.T) {
-	withProjectRootFn(t, func() string { return "/the/project/root" })
-	got := resolveTargetDir(store.Meta{Workdir: ""})
-	if got != "/the/project/root" {
-		t.Errorf("off-mux empty workdir: resolveTargetDir = %q, want the project-root fallback", got)
-	}
-}
-
-// ---- RunMain: the playbook branch routes through adapt ----
-
-// TestRunMain_Playbook_RoutesThroughAdapt verifies a bare slug is store.Load'd,
-// adapted (via the injected adaptModelFn), and rendered as
-// `run --file <renderFile> --cwd <target> --adapted-from <slug> --orig-file <orig>`.
-func TestRunMain_Playbook_RoutesThroughAdapt(t *testing.T) {
-	dir := t.TempDir()
-	withArgs(t, []string{"ai-playbook", "run", "build-app"})
-	withStoreLoadFn(t, func(slug string) (store.Meta, string, error) {
-		if slug != "build-app" {
-			t.Fatalf("store.Load got slug %q", slug)
-		}
-		return store.Meta{Slug: "build-app", Workdir: dir}, originalBody, nil
-	})
-	adaptCalled := false
-	withAdaptModelFn(t, func(sys, user string) (string, error) {
-		adaptCalled = true
-		return validAdapted, nil
-	})
-
+	setProjectRootFn = func(string) { t.Fatal("non-project_bound run must NOT set PROJECT_ROOT") }
 	var captured []string
-	withUIMainFn(t, func() int {
-		captured = append([]string{}, os.Args...)
-		return 0
-	})
+	uiMainFn = func() int { captured = append([]string{}, os.Args...); return 0 }
 
-	if code := RunMain(); code != 0 {
-		t.Fatalf("RunMain playbook: want exit 0, got %d", code)
+	if code := runPlaybook("build"); code != 0 {
+		t.Fatalf("runPlaybook = %d", code)
 	}
-	if !adaptCalled {
-		t.Fatal("RunMain playbook: the adapt model call must run")
-	}
-	// {bin, run, --file, <rf>, --cwd, <dir>, --adapted-from, build-app, --orig-file, <of>}
-	if len(captured) != 10 {
-		t.Fatalf("RunMain playbook: reshaped args = %v (len %d), want 10", captured, len(captured))
-	}
-	if captured[1] != "run" || captured[2] != "--file" {
-		t.Errorf("RunMain playbook: args[1:3] = %v, want [run --file]", captured[1:3])
-	}
-	if captured[4] != "--cwd" || captured[5] != dir {
-		t.Errorf("RunMain playbook: --cwd not %q; args = %v", dir, captured)
-	}
-	if captured[6] != "--adapted-from" || captured[7] != "build-app" {
-		t.Errorf("RunMain playbook: --adapted-from build-app missing; args = %v", captured)
-	}
-	if captured[8] != "--orig-file" {
-		t.Errorf("RunMain playbook: --orig-file missing; args = %v", captured)
+	// {bin, run, --file, <tmp>} — no --cwd, no banner flags.
+	if len(captured) != 4 || captured[1] != "run" || captured[2] != "--file" {
+		t.Fatalf("non-project_bound run: args = %v, want [bin run --file <tmp>]", captured)
 	}
 	got, _ := os.ReadFile(captured[3])
-	if string(got) != validAdapted {
-		t.Errorf("RunMain playbook: render file = %q, want adapted body", got)
+	if string(got) != storedBody {
+		t.Errorf("non-project_bound run: render file = %q, want the stored body verbatim", got)
 	}
 	os.Remove(captured[3])
-	os.Remove(captured[9])
 }
 
 // TestRunMain_UnknownSlug_Exit1 verifies an unknown slug (store.Load error) is a
@@ -253,21 +144,20 @@ func TestRunMain_NoArgs_Exit2(t *testing.T) {
 	}
 }
 
-// ---- RunMain: the --file branch (raw as-is vs has-front-matter→adapt) ----
+// ---- runFile: raw as-is vs has-front-matter gate ----
 
 // TestRunMain_FileRaw_RendersAsIs verifies a raw file (NO front matter) renders
-// as-is via `run --file <path>` with no adapt (no --adapted-from).
+// as-is via `run --file <path>` with no adapt and no PROJECT_ROOT.
 func TestRunMain_FileRaw_RendersAsIs(t *testing.T) {
+	origSPR := setProjectRootFn
+	t.Cleanup(func() { setProjectRootFn = origSPR })
 	dir := t.TempDir()
 	raw := filepath.Join(dir, "raw.md")
 	if err := os.WriteFile(raw, []byte("# Just a doc\n\nno front matter here\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	withArgs(t, []string{"ai-playbook", "run", "--file", raw})
-	withAdaptModelFn(t, func(string, string) (string, error) {
-		t.Fatal("raw file must NOT call the adapt model")
-		return "", nil
-	})
+	setProjectRootFn = func(string) { t.Fatal("raw file must NOT set PROJECT_ROOT") }
 	var captured []string
 	withUIMainFn(t, func() int {
 		captured = append([]string{}, os.Args...)
@@ -282,22 +172,23 @@ func TestRunMain_FileRaw_RendersAsIs(t *testing.T) {
 	}
 }
 
-// TestRunMain_FileWithFrontMatter_Adapts verifies a file WITH front matter adapts
-// (the adapt model runs, the render carries the --adapted-from banner).
-func TestRunMain_FileWithFrontMatter_Adapts(t *testing.T) {
+// TestRunMain_FileProjectBound_SetsProjectRoot verifies a --file WITH a
+// project_bound front matter resolves the heuristic project root, sets it via the
+// setProjectRootFn seam, renders the stripped body as-is, and opens at --cwd <root>.
+func TestRunMain_FileProjectBound_SetsProjectRoot(t *testing.T) {
+	origPR, origSPR := projectRootFn, setProjectRootFn
+	t.Cleanup(func() { projectRootFn, setProjectRootFn = origPR, origSPR })
 	dir := t.TempDir()
-	wd := t.TempDir()
 	fmFile := filepath.Join(dir, "build.md")
-	content := "---\nname: Build\nworkdir: " + wd + "\n---\n" + originalBody
+	body := "# Build\n\n```bash {id=verify}\ncd $PROJECT_ROOT && make\n```\n"
+	content := "---\nname: Build\nproject_bound: true\n---\n" + body
 	if err := os.WriteFile(fmFile, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	withArgs(t, []string{"ai-playbook", "run", "--file", fmFile})
-	adaptCalled := false
-	withAdaptModelFn(t, func(string, string) (string, error) {
-		adaptCalled = true
-		return validAdapted, nil
-	})
+	projectRootFn = func() string { return "/the/proj" }
+	var gotPR string
+	setProjectRootFn = func(p string) { gotPR = p }
 	var captured []string
 	withUIMainFn(t, func() int {
 		captured = append([]string{}, os.Args...)
@@ -307,19 +198,20 @@ func TestRunMain_FileWithFrontMatter_Adapts(t *testing.T) {
 	if code := RunMain(); code != 0 {
 		t.Fatalf("RunMain fm file: want exit 0, got %d", code)
 	}
-	if !adaptCalled {
-		t.Fatal("RunMain fm file: a front-matter file must adapt")
+	if gotPR != "/the/proj" {
+		t.Fatalf("project_bound --file must set PROJECT_ROOT; got %q", gotPR)
 	}
 	joined := strings.Join(captured, " ")
-	if !strings.Contains(joined, "--adapted-from build") {
-		t.Errorf("RunMain fm file: expected --adapted-from banner; args = %v", captured)
+	if !strings.Contains(joined, "--cwd /the/proj") {
+		t.Errorf("project_bound --file: expected --cwd /the/proj; args = %v", captured)
 	}
-	if !strings.Contains(joined, "--cwd "+wd) {
-		t.Errorf("RunMain fm file: expected --cwd %s; args = %v", wd, captured)
+	got, _ := os.ReadFile(captured[3])
+	if string(got) != body {
+		t.Errorf("project_bound --file: render file = %q, want the stored body verbatim", got)
 	}
-	// cleanup temp render/orig files
+	// cleanup temp render file
 	for i, a := range captured {
-		if a == "--file" || a == "--orig-file" {
+		if a == "--file" {
 			os.Remove(captured[i+1])
 		}
 	}
