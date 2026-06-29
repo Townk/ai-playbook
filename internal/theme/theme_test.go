@@ -6,7 +6,7 @@ func TestPaletteValues(t *testing.T) {
 	cases := map[string]string{
 		Blue: "#89b4fa", Green: "#a6e3a1", Mauve: "#cba6f7", Peach: "#fab387",
 		Red: "#f38ba8", Overlay0: "#6c7086", Mantle: "#181825", Surface1: "#45475a",
-		Base: "#1e1e2e", Text: "#cdd6f4",
+		Base: "#1e1e2e", Text: "#cdd6f4", Surface0: "#313244", CodeBg: "#282C41",
 	}
 	for got, want := range cases {
 		if got != want {

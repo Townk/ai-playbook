@@ -1007,10 +1007,10 @@ func (r *renderer) quote(n ast.Node, indent int) {
 	bg := bgANSI(calloutBgTone)
 
 	// Step 4: build per-cell styles.
-	// Accent cells (TL corner, CL left bar, BL corner) — accent fg on document bg.
-	accentSty := lipgloss.NewStyle().Foreground(lipgloss.Color(color)).Background(lipgloss.Color(colBase))
-	// Tone cells (TB top border, BB bottom border) — callout-bg-tone fg on document bg.
-	toneSty := lipgloss.NewStyle().Foreground(lipgloss.Color(calloutBgTone)).Background(lipgloss.Color(colBase))
+	// Accent cells (TL corner, CL left bar, BL corner) — accent fg, inherit document bg.
+	accentSty := lipgloss.NewStyle().Foreground(lipgloss.Color(color))
+	// Tone cells (TB top border, BB bottom border) — callout-bg-tone fg, inherit document bg.
+	toneSty := lipgloss.NewStyle().Foreground(lipgloss.Color(calloutBgTone))
 	bodyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colText)).Italic(true)
 
 	// Width available for content: total width minus the left-bar cell (1 col).

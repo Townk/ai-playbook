@@ -253,6 +253,10 @@ func TestQuote_BorderedFrame(t *testing.T) {
 	if !strings.Contains(joined, "▐ ") {
 		t.Errorf("content not 1 space off the left bar:\n%s", joined)
 	}
+	// callout must have no right border glyph
+	if strings.ContainsAny(joined, "▌▕") {
+		t.Errorf("callout must have no right border: %q", joined)
+	}
 }
 
 func TestQuote_BareBlockquoteFallback(t *testing.T) {
