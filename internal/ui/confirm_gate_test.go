@@ -34,6 +34,14 @@ func TestGroupSizes(t *testing.T) {
 	}
 }
 
+func TestLoadPlaybookDocument_ReturnsEnv(t *testing.T) {
+	doc := "---\nname: T\nenv:\n  FOO:\n    why: bar\n---\n# T\n\n```bash {id=fix}\ntrue\n```\n"
+	_, _, _, env := loadPlaybookDocument(doc)
+	if env == nil || env["FOO"].Why != "bar" {
+		t.Fatalf("loadPlaybookDocument env = %v, want FOO.why=bar", env)
+	}
+}
+
 func TestBuildConfirmVars(t *testing.T) {
 	env := map[string]frontmatter.EnvValue{
 		"PROJECT_ROOT":     {Why: "the project directory"},

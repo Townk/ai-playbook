@@ -314,6 +314,11 @@ type model struct {
 	// bodyProvider, when non-nil, returns the captured rendered playbook at stream EOF
 	// in structured mode. Set by RunStream from StreamOptions.Body.
 	bodyProvider func() string
+
+	// B2b pre-run variable confirmation
+	confirmEnv    map[string]frontmatter.EnvValue // declared env (front matter); nil/empty → no gate
+	projectRoot   string                          // heuristic root (the PROJECT_ROOT value)
+	gateSatisfied bool                            // the gate ran (or wasn't needed) this session
 }
 
 // AskFunc opens the request-input float with the given prompt (the floatinput Type
@@ -1468,19 +1473,20 @@ var h1Heading = regexp.MustCompile(`(?m)^#[ \t]+(.+?)[ \t]*$`)
 // A document WITHOUT front matter degrades to the prior behavior: subtitle is
 // empty and the title comes from the H1 (a transcript with no H1 keeps an empty
 // title and an unchanged body).
-func loadPlaybookDocument(content string) (title, subtitle, body string) {
+func loadPlaybookDocument(content string) (title, subtitle, body string, env map[string]frontmatter.EnvValue) {
 	fm, rest, ok := frontmatter.Parse(content)
 	h1, stripped := playbookHeading(rest)
 	body = stripped
 	if ok {
 		subtitle = fm.Description
+		env = fm.Env
 		if fm.Name != "" {
 			title = fm.Name
-			return title, subtitle, body
+			return title, subtitle, body, env
 		}
 	}
 	title = h1
-	return title, subtitle, body
+	return title, subtitle, body, env
 }
 
 // isValidPlaybook reports whether md is a REAL final playbook rather than a narration:

@@ -18,7 +18,7 @@ func TestLoadPlaybookSource_SetsTitleAndStrips(t *testing.T) {
 	if err := os.WriteFile(pb, []byte("intro preamble\n\n# Playbook — Y\n\nstep\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r, title, subtitle, err := loadPlaybookSource(pb)
+	r, title, subtitle, _, err := loadPlaybookSource(pb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestLoadPlaybookSource_SetsTitleAndStrips(t *testing.T) {
 	if err := os.WriteFile(noH1, []byte("just a transcript\nno h1\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r2, title2, subtitle2, err := loadPlaybookSource(noH1)
+	r2, title2, subtitle2, _, err := loadPlaybookSource(noH1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +275,7 @@ const fmPlaybook = "---\n" +
 // front matter, takes the title from fm.Name, the subtitle from fm.Description,
 // and returns an FM-free body that still carries the H1.
 func TestLoadPlaybookDocument_FrontMatter(t *testing.T) {
-	title, subtitle, body := loadPlaybookDocument(fmPlaybook)
+	title, subtitle, body, _ := loadPlaybookDocument(fmPlaybook)
 	if title != "Playbook — Compiling an Android Application" {
 		t.Errorf("title = %q", title)
 	}
@@ -294,7 +294,7 @@ func TestLoadPlaybookDocument_FrontMatter(t *testing.T) {
 // degrades to H1-derived title and an empty subtitle (no regression).
 func TestLoadPlaybookDocument_NoFrontMatter(t *testing.T) {
 	doc := "preamble\n\n# Playbook — X\n\nstep\n"
-	title, subtitle, body := loadPlaybookDocument(doc)
+	title, subtitle, body, _ := loadPlaybookDocument(doc)
 	if title != "Playbook — X" {
 		t.Errorf("title = %q, want H1-derived", title)
 	}
@@ -314,7 +314,7 @@ func TestLoadPlaybookSource_FrontMatter(t *testing.T) {
 	if err := os.WriteFile(pb, []byte(fmPlaybook), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	r, title, subtitle, err := loadPlaybookSource(pb)
+	r, title, subtitle, _, err := loadPlaybookSource(pb)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -334,7 +334,7 @@ func TestLoadPlaybookSource_FrontMatter(t *testing.T) {
 // playbook (title + subtitle set, body = FM-stripped) renders neither the raw
 // YAML nor (via renderBody) the H1, and the header region shows the subtitle.
 func TestModelFromFMPlaybook_HidesYAMLAndH1(t *testing.T) {
-	title, subtitle, body := loadPlaybookDocument(fmPlaybook)
+	title, subtitle, body, _ := loadPlaybookDocument(fmPlaybook)
 	m := newModel("agent", body)
 	m.title = title
 	m.subtitle = subtitle

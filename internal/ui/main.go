@@ -16,6 +16,7 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/askbridge"
 	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
@@ -174,17 +175,18 @@ func BuildOrch(d *driver.Driver, re *orchestrator.Reengage) *orchestrator.Orches
 // loadPlaybookSource reads a finalized-playbook file (run-from-file / cached-serve),
 // strips any leading YAML front matter AND any preamble above the first H1 title,
 // and returns a reader over the stripped body, the playbook title (front-matter
-// `name` when present, else the H1), and the front-matter `description` as a
-// subtitle (empty when the file carries no front-matter description). A file with
-// no front matter and no H1 is returned unchanged with empty title/subtitle (it's
-// a transcript, not a playbook).
-func loadPlaybookSource(file string) (r io.Reader, title, subtitle string, err error) {
+// `name` when present, else the H1), the front-matter `description` as a subtitle
+// (empty when the file carries no front-matter description), and the declared env
+// map (nil when no front matter or no env block). A file with no front matter and
+// no H1 is returned unchanged with empty title/subtitle (it's a transcript, not a
+// playbook).
+func loadPlaybookSource(file string) (r io.Reader, title, subtitle string, env map[string]frontmatter.EnvValue, err error) {
 	raw, err := os.ReadFile(file)
 	if err != nil {
-		return nil, "", "", err
+		return nil, "", "", nil, err
 	}
-	title, subtitle, body := loadPlaybookDocument(string(raw))
-	return strings.NewReader(body), title, subtitle, nil
+	title, subtitle, body, env := loadPlaybookDocument(string(raw))
+	return strings.NewReader(body), title, subtitle, env, nil
 }
 
 // effectiveTitle resolves the pager header title: an explicit --title flag wins
@@ -262,6 +264,10 @@ func Main() int {
 	// finalized/served playbook that carries front matter. Empty for stdin streams
 	// and for files without a front-matter description.
 	playbookSubtitle := ""
+	// playbookEnv is the front-matter env map for the run-from-file path; nil for
+	// stdin streams and files without a front-matter env block. Threaded into the
+	// model as confirmEnv so the B2b confirmation gate can inspect declared vars.
+	var playbookEnv map[string]frontmatter.EnvValue
 	if file != "" {
 		// `ai-playbook run <file.md>` — render a finalized playbook artifact from a
 		// file (also the cached-serve path). Read it fully, strip any preamble above
@@ -269,13 +275,14 @@ func Main() int {
 		// body is the document stream (saved playbooks are plain markdown, no control
 		// records). Stripping here also cleans EXISTING saved files that still carry
 		// preamble. A file with no H1 is left unchanged (title stays empty).
-		r, title, subtitle, err := loadPlaybookSource(file)
+		r, title, subtitle, env, err := loadPlaybookSource(file)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", err)
 			return 1
 		}
 		playbookTitle = title
 		playbookSubtitle = subtitle
+		playbookEnv = env
 		src = r
 	}
 
@@ -335,6 +342,11 @@ func Main() int {
 	readyCh := pendingReady
 	pendingReady = nil // consume once
 	driverPending := false
+	// projectRoot is hoisted so it's available to stash on the model after build.
+	// On the sync new-driver path it is set (and pendingProjectRoot cleared) inside
+	// the if-d==nil block; on all other paths it stays "" (async, reused-driver,
+	// answer-regen). The defensive pendingProjectRoot="" below covers skipped paths.
+	projectRoot := ""
 	// Skip the shell driver entirely for a cached ANSWER (pendingAnswerRegen set): an
 	// answer has no run blocks and its reload is a cheap-model call (ClassifyRequest),
 	// not a shell command. Opening a driver here spawns a shell that sources the user's
@@ -365,7 +377,7 @@ func Main() int {
 				// PROJECT_ROOT (consume-once): a project_bound playbook run stashes the
 				// heuristic project root here so the driver exports it and the body's
 				// portable $PROJECT_ROOT references resolve. "" → not injected.
-				projectRoot := pendingProjectRoot
+				projectRoot = pendingProjectRoot
 				pendingProjectRoot = ""
 				env := os.Environ()
 				if projectRoot != "" {
@@ -406,6 +418,8 @@ func Main() int {
 	m := newModel(harness, "")
 	m.title = effectiveTitle(titleFlag, playbookTitle)
 	m.subtitle = playbookSubtitle
+	m.confirmEnv = playbookEnv  // front-matter env for the B2b confirmation gate
+	m.projectRoot = projectRoot // heuristic project root (also in driver.Options.Env)
 	m.orch = orch
 	m.driverPending = driverPending
 	m.readyCh = readyCh
