@@ -6,20 +6,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func TestReviewingStateShownThenClearedByResult(t *testing.T) {
-	m := newModel("T", "```diff {id=d}\n--- a\n+++ b\n```\n")
-	m.width, m.height = 80, 24
-	m = m.markReviewing("d")
-	m.reflow()
-	if !linesContain(m.lines, "Reviewing") {
-		t.Fatal("reviewing state must show Reviewing…")
-	}
-	m2, _ := m.Update(resultMsg{ID: "d", Exit: 0, Logpath: ""})
-	if m2.(model).blockStates["d"].Status == "reviewing" {
-		t.Fatal("resultMsg must clear reviewing")
-	}
-}
-
 func TestUpdateResultMsgSetsBlockState(t *testing.T) {
 	m := newModel("T", "")
 	m.width, m.height = 80, 24

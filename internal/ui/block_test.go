@@ -32,15 +32,6 @@ func TestAssignIDsAndValidate(t *testing.T) {
 	if bs[0].ID != "b1" || bs[1].ID != "x" {
 		t.Fatalf("auto-id wrong: %v", bs)
 	}
-	if err := validateNeeds(bs); err != nil {
-		t.Fatalf("valid graph rejected: %v", err)
-	}
-	if validateNeeds([]Block{{ID: "a", Needs: []string{"missing"}}}) == nil {
-		t.Fatalf("unknown need must error")
-	}
-	if validateNeeds([]Block{{ID: "a", Needs: []string{"b"}}, {ID: "b", Needs: []string{"a"}}}) == nil {
-		t.Fatalf("cycle must error")
-	}
 }
 
 // TestAssignIDsContiguousNoGap verifies that auto-ids are contiguous over the

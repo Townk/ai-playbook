@@ -2271,16 +2271,6 @@ func (m model) normalLines() []string {
 	return out
 }
 
-// markReviewing sets the given block's status to "reviewing". Called by the
-// review-diff action trigger so the block body shows a "Reviewing…" indicator
-// immediately, without waiting for a resultMsg.
-func (m model) markReviewing(id string) model {
-	st := m.blockStates[id]
-	st.Status = "reviewing"
-	m.blockStates[id] = st
-	return m
-}
-
 // markRunning sets the given block's status to "running" and resets its
 // SpinFrame to 0. Called by the action-trigger paths before emitAction so the
 // spinner appears immediately, without waiting for a resultMsg.
