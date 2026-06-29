@@ -13,31 +13,47 @@ export the final values into the run driver so the blocks resolve them. This clo
 loop on B2a portability: B2a makes a relocated playbook *reference* `$PROJECT_ROOT`/env
 vars; B2b lets the user *verify and override* those values for the current run.
 
-## Trigger
+## Trigger — a reusable gate before the first execution
 
-When a stored playbook is run (`run --file` / `run <slug>`) and its front-matter `env`
-is **non-empty**, the viewer runs the confirmation before unlocking blocks. The variable
-set is exactly the front-matter `env`:
+The confirmation is a **gate that runs once before the first block executes**, NOT a step
+tied to the `run` command. Today's trigger is the user's **first block-run action** in
+the viewer (the first `enter`/`space`/`run ▶` on a runnable block): the gate fires once,
+then every later block runs without re-asking. This keeps the viewer **read-first** — the
+playbook renders in full, the user reviews and scrolls freely, and nothing is confirmed
+or executed until they choose to run a block. (The current manual pager already lets the
+user review freely; the gate simply sits in front of the first execution.)
+
+The gate is built to be **reusable**. The assisted-run feature (Phase 2 run modes, per
+`docs/ROADMAP.md` — scroll-to-next-step + confirm-each + log; not yet built) will trigger
+the SAME gate at its "start assisted run" action. B2b builds the gate and wires only
+today's trigger (the first block-run); assisted-run reuses it unchanged.
+
+The variable set is exactly the front-matter `env`:
 - a `project_bound` playbook → `PROJECT_ROOT` + any declared `meta.env` vars;
 - a general playbook that declared `meta.env` vars → just those;
-- a playbook with no declared vars → `env` empty → **no confirmation**, the viewer is
-  immediately interactive (`N == 0` guard; that path is already fully resolved today).
+- a playbook with no declared vars → `env` empty → **no gate** (`N == 0`); the block runs
+  directly (the path already fully resolved today).
 
 Fires for ANY declared-var playbook, not only `project_bound`.
 
 ## UX flow
 
 1. **Start the viewer** (the existing `run --file` path).
-2. **Render the playbook** — the document is drawn and visible.
-3. **Detect env vars** — read the parsed front-matter `env`.
-4. **Raise the confirm dialogs OVER the rendered playbook** — the user sees what they
-   are about to run behind the dialog. Blocks are gated (run-keys inert) until the
-   confirmation completes.
-5. On completion, **export the final values** into the run driver, then **unlock** the
-   playbook (interactive).
+2. **Render the playbook** — drawn in full; the user reviews and scrolls **freely**.
+   Nothing executes.
+3. The user triggers the **first block run** (`enter`/`space`/`run ▶` on a runnable
+   block) — the explicit kick-off.
+4. If the front-matter `env` is non-empty and the gate has not yet run this session,
+   **raise the confirm dialogs OVER the rendered playbook** (the user sees what they are
+   about to run behind the dialog). Otherwise the block runs immediately.
+5. On confirmation completion, **export the final values** into the run driver, **mark
+   the gate satisfied**, then run the requested block. Every later block runs without
+   re-confirming.
 
-**ESC at any confirmation dialog aborts the whole run** (closes the viewer; re-run to
-retry). Consistent three-way: Confirm = proceed · Customize = edit · ESC = back out.
+**ESC at any confirmation dialog cancels the gate and returns to reading** — the viewer
+stays open, the requested block does NOT run, no values are exported; the user can review
+more, retry a run, or quit normally (`q`). Consistent three-way: Confirm = proceed ·
+Customize = edit · ESC = cancel back to reading. (`Ctrl+C` aborts the app as usual.)
 
 ## Surface — in-viewer overlays (both mux and no-mux)
 
@@ -76,7 +92,9 @@ lines:
 - **Customize** → a pre-filled **line** input for each variable in the group (prompt
   `NAME — why`, value pre-filled with the shown value); the edited values replace the
   shown ones; then advance to the next group. No re-confirm loop after editing.
-- **ESC** → abort the entire confirmation + close the viewer (run cancelled).
+- **ESC** → cancel the gate and return to reading (viewer stays open; the requested
+  block does NOT run; nothing is exported; the gate stays unsatisfied so a later run
+  re-prompts).
 
 The confirm widget already supports custom button labels at the field level
 (`newConfirmField(affirmative, negative, …)`); B2b surfaces "Confirm"/"Customize" by
@@ -96,10 +114,18 @@ driver authoritative regardless of inherited-env edge cases. Values are shell-qu
 - **Grouping helper** — pure function, balanced ≤ 5 (+ `N == 0` guard). Unit-testable.
 - **Variable-list builder** — front-matter `env` + `pendingProjectRoot` + `os.Getenv`
   → `[]{name, value, why}`. Unit-testable.
-- **Viewer confirmation phase** — a small state machine over the groups, raising each
-  dialog through the existing ask dispatch, collecting answers, gating run-keys until
-  done, then triggering the export + unlock. The bulk of the work.
-- **Driver export** — shell-quoted `export …` of the final values before blocks.
+- **Reusable confirmation gate** — a viewer-level capability invoked before the first
+  block executes: builds the var list, groups it, runs the dialog sequence through the
+  existing ask dispatch, and on completion exports the values + marks the gate satisfied
+  + proceeds with the requested block; on ESC returns to reading (unsatisfied). It tracks
+  a once-per-session "satisfied" flag so subsequent block runs skip it. The trigger
+  (first block-run today; the assisted-run start later) is the caller's concern, kept
+  separate from the gate so Phase-2 assisted-run can invoke the same gate. The bulk of
+  the work.
+- **First-block-run trigger** — intercept the first block-run action; if the gate is
+  unsatisfied and `env` is non-empty, invoke the gate (deferring the actual block run
+  until it completes); else run the block directly.
+- **Driver export** — shell-quoted `export …` of the final values before the block runs.
 - **`NewAsk` confirm-label pass-through** — surface "Confirm"/"Customize" labels.
 
 ## Testing
@@ -108,11 +134,15 @@ driver authoritative regardless of inherited-env edge cases. Values are shell-qu
   guard.
 - **Variable-list builder:** `PROJECT_ROOT` → the injected root; other vars → live shell
   value (set + unset cases); `why` carried through.
-- **Confirmation flow (viewer):** Confirm leaves values unchanged; Customize applies the
-  edited values; multi-group sequencing advances correctly; ESC aborts (viewer closes,
-  no export); run-keys are inert until confirmation completes.
+- **Confirmation gate (viewer):** the first block-run on an `env`-bearing playbook raises
+  the dialogs (the block does not run yet); Confirm leaves values unchanged; Customize
+  applies the edited values; multi-group sequencing advances correctly; on completion the
+  requested block runs and the gate is marked satisfied; a **second** block-run does NOT
+  re-prompt; **ESC** returns to reading with no export, the viewer still open, the block
+  not run, and the gate still unsatisfied (a later run re-prompts); an `env`-empty
+  playbook never prompts.
 - **Export:** the driver receives the final (confirmed + customized) values, shell-quoted,
-  before the first block runs.
+  before the gated block runs.
 
 ## Out of scope
 
