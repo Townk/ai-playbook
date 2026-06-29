@@ -2430,6 +2430,7 @@ func (m model) wFinalize() (model, tea.Cmd) {
 		return m, m.ask.Init()
 	}
 	m.wrappedUp = true
+	m.status = "finalizing…" // the commit path's transient indicator (re-author overwrites it)
 	cmd := m.saveDecision()
 	return m, cmd
 }
