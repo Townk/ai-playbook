@@ -281,8 +281,9 @@ func TestViewDiff(t *testing.T) {
 	}
 }
 
-// TestBuildFrontMatter_NoWorkdir verifies buildFrontMatter no longer writes the
-// workdir field (Phase B2a: portability is via PROJECT_ROOT, not a stored workdir).
+// TestBuildFrontMatter_NoWorkdir verifies buildFrontMatter does not write a
+// workdir field (the field was removed in the dead-code sweep; portability is
+// via PROJECT_ROOT instead).
 func TestBuildFrontMatter_NoWorkdir(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	projRoot := filepath.Join(home, "Projects", "myapp")
@@ -296,10 +297,7 @@ func TestBuildFrontMatter_NoWorkdir(t *testing.T) {
 	}
 	body := "# Playbook — Fix Build\n\nDo the thing.\n"
 	fm := re.buildFrontMatter(body)
-	if fm.Workdir != "" {
-		t.Errorf("Workdir = %q, want \"\" (workdir is no longer written)", fm.Workdir)
-	}
-	// the assembled FM must NOT carry a workdir: key (omitempty drops it)
+	// the assembled FM must NOT carry a workdir: key
 	assembled := frontmatter.Assemble(fm)
 	if strings.Contains(assembled, "workdir:") {
 		t.Errorf("assembled FM must not carry a workdir: key:\n%s", assembled)

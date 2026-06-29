@@ -58,7 +58,6 @@ type Meta struct {
 	Category     string
 	Tags         []string
 	Env          []EnvVar
-	Workdir      string
 	ProjectBound bool
 	Path         string
 	// Project is true when the playbook lives in the project-local store; its
@@ -132,7 +131,6 @@ func metaFromFM(fm frontmatter.FrontMatter, path string, project bool) Meta {
 		Category:     fm.Category,
 		Tags:         fm.Tags,
 		Env:          envFromFM(fm.Env),
-		Workdir:      fm.Workdir,
 		ProjectBound: fm.ProjectBound,
 		Path:         path,
 		Project:      project,

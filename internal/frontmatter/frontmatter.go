@@ -218,7 +218,6 @@ type FrontMatter struct {
 	Env          map[string]EnvValue `yaml:"env,omitempty"`
 	Created      string              `yaml:"created,omitempty"`
 	ProjectRoot  string              `yaml:"project_root,omitempty"`
-	Workdir      string              `yaml:"workdir,omitempty"`
 	ProjectBound bool                `yaml:"project_bound,omitempty"`
 	Request      string              `yaml:"request,omitempty"`
 }

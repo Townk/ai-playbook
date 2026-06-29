@@ -77,14 +77,13 @@ func TestIndexNewestFirstAndProjPrefix(t *testing.T) {
 	}
 }
 
-func TestEnvAndWorkdirMapped(t *testing.T) {
+func TestEnvMapped(t *testing.T) {
 	globalDir := t.TempDir()
 	projDir := t.TempDir()
 	seamTo(t, globalDir, projDir)
 
 	writePB(t, globalDir, "withenv", frontmatter.FrontMatter{
-		Name:    "WithEnv",
-		Workdir: "~/work",
+		Name: "WithEnv",
 		Env: map[string]frontmatter.EnvValue{
 			"FOO": {Value: "bar", Why: "needed"},
 		},
@@ -99,9 +98,6 @@ func TestEnvAndWorkdirMapped(t *testing.T) {
 		t.Fatalf("want 1, got %d", len(metas))
 	}
 	m := metas[0]
-	if m.Workdir != "~/work" {
-		t.Errorf("Workdir = %q, want ~/work", m.Workdir)
-	}
 	if len(m.Env) != 1 || m.Env[0].Name != "FOO" || m.Env[0].Value != "bar" || m.Env[0].Why != "needed" {
 		t.Errorf("Env mapped wrong: %+v", m.Env)
 	}
