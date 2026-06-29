@@ -89,13 +89,14 @@ func (m model) orchDriver() *driver.Driver {
 }
 
 // runOrGate runs block b directly, or — on the first run of an env-bearing playbook —
-// opens the confirmation gate (which runs b after the user confirms). The caller marks
-// the block running + reflows + batches the ticks as before; runOrGate returns the
-// action cmd (direct run, or the gate's dialog/defer).
+// opens the confirmation gate (which runs b after the user confirms). When the block
+// runs immediately (gate satisfied / no env), it marks the block running before
+// returning; the gated path defers that mark to runGateBlock (after the user confirms).
 func (m model) runOrGate(b Button) (model, tea.Cmd) {
 	if !m.gateSatisfied && len(m.confirmEnv) > 0 {
 		return m.beginGate(b)
 	}
+	m = m.markRunning(b.BlockID)
 	return m, m.emitAction(b)
 }
 
@@ -209,16 +210,20 @@ func (m model) afterGroup() (model, tea.Cmd) {
 	return m.runGateBlock(block, values)
 }
 
-// runGateBlock marks the gate satisfied and returns a sequential cmd that exports the
-// confirmed values into the shell's MAIN context (so they persist) and THEN runs the
-// deferred block. tea.Sequence guarantees the synchronous export completes before the
-// block — which reads the exported vars — runs. The export func is always non-nil, so
-// the returned cmd is non-nil even when there are no vars / no orchestrator (tests).
+// runGateBlock marks the gate satisfied, marks the block running, (re-)starts the
+// spinner tick, and returns a sequential cmd that exports the confirmed values into the
+// shell's MAIN context (so they persist) and THEN runs the deferred block.
+// tea.Sequence guarantees the synchronous export completes before the block — which
+// reads the exported vars — runs. The returned cmd is non-nil even when there are no
+// vars / no orchestrator (tests). The block is marked running HERE (not at the
+// call-site) so an ESC-cancelled gate never leaves a block stuck in the running state.
 func (m model) runGateBlock(block Button, values map[string]string) (model, tea.Cmd) {
 	m.gateSatisfied = true
+	m = m.markRunning(block.BlockID)
 	exportCmd := buildExportCmd(values)
 	drv := m.orchDriver()
-	return m, tea.Sequence(
+	tickCmd := m.startTick() // (re-)arm the spinner; may be nil if loop is already live
+	return m, tea.Batch(tickCmd, tea.Sequence(
 		func() tea.Msg {
 			if drv != nil && exportCmd != "" {
 				drv.RunMain(exportCmd, gateExportTimeout)
@@ -226,7 +231,7 @@ func (m model) runGateBlock(block Button, values map[string]string) (model, tea.
 			return nil
 		},
 		m.emitAction(block),
-	)
+	))
 }
 
 // buildExportCmd shell-quotes the final values into a single export command, sorted by

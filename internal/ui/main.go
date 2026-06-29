@@ -420,6 +420,10 @@ func Main() int {
 	m.subtitle = playbookSubtitle
 	m.confirmEnv = playbookEnv  // front-matter env for the B2b confirmation gate
 	m.projectRoot = projectRoot // heuristic project root (also in driver.Options.Env)
+	// NOTE (Phase-2 / in-session assisted-run): the async-startup and reused-driver
+	// paths leave m.projectRoot empty (projectRoot is only set on the sync new-driver
+	// path). When the gate is reused for an in-session assisted run, projectRoot must
+	// also be threaded on those paths — otherwise PROJECT_ROOT exports empty string.
 	m.orch = orch
 	m.driverPending = driverPending
 	m.readyCh = readyCh

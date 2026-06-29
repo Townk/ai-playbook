@@ -72,6 +72,7 @@ func gateModel(t *testing.T) model {
 	return model{
 		confirmEnv:  map[string]frontmatter.EnvValue{"PROJECT_ROOT": {Why: "root"}, "FOO": {Why: "foo"}},
 		projectRoot: "/proj",
+		blockStates: map[string]blockRunState{},
 	}
 }
 
@@ -111,6 +112,10 @@ func TestGate_CustomizeEditsValue(t *testing.T) {
 	}
 	// edit FOO (first sorted var) then PROJECT_ROOT
 	m, _ = m.advanceGate("/edited/foo", true)
+	// Assert the edit was actually stored before proceeding to the next var.
+	if m.gate.values["FOO"] != "/edited/foo" {
+		t.Fatalf("FOO edit not stored: got %q, want %q", m.gate.values["FOO"], "/edited/foo")
+	}
 	m, _ = m.advanceGate("/edited/root", true)
 	if m.gate != nil || !m.gateSatisfied {
 		t.Fatalf("after editing all vars the gate should finish")
@@ -142,5 +147,71 @@ func TestTrigger_SatisfiedRunsDirectly(t *testing.T) {
 	direct, _ := m.runOrGate(Button{Kind: "run", BlockID: "fix", Payload: "x"})
 	if direct.gate != nil {
 		t.Fatal("once satisfied, runs must not re-open the gate")
+	}
+	// Verify the direct-run path was actually taken: the block must be marked running.
+	// (emitAction returns nil without an orch, so cmd==nil here is by design; block state
+	// is the reliable proof that the run path — not a silent no-op — was followed.)
+	if st := direct.blockStates["fix"]; st.Status != "running" {
+		t.Fatalf("satisfied run must mark block running; got Status=%q", st.Status)
+	}
+}
+
+// TestGate_ESCDoesNotMarkRunning is the regression test for the ESC-spinner bug:
+// opening the gate must NOT mark the block running; ESC must leave it idle.
+func TestGate_ESCDoesNotMarkRunning(t *testing.T) {
+	m := gateModel(t)
+	const blkID = "fix"
+	m, _ = m.beginGate(Button{Kind: "run", BlockID: blkID, Payload: "x"})
+	if !m.askMode || m.gate == nil {
+		t.Fatal("beginGate must raise a dialog")
+	}
+	// Block must NOT be running just because the gate opened.
+	if st := m.blockStates[blkID]; st.Status == "running" {
+		t.Fatalf("opening the gate must not mark block running; got Status=%q", st.Status)
+	}
+	// ESC: gate cancelled.
+	m, _ = m.advanceGate("", false)
+	if m.gate != nil || m.askMode || m.gateSatisfied {
+		t.Fatal("ESC must clear the gate, exit ask-mode, and leave gate unsatisfied")
+	}
+	// After ESC the block must still NOT be running.
+	if st := m.blockStates[blkID]; st.Status == "running" {
+		t.Fatalf("ESC must not leave block %q in running state; got Status=%q", blkID, st.Status)
+	}
+}
+
+// TestShellQuote verifies that shellQuote produces correct POSIX single-quoting,
+// including injection-safe escaping of embedded single quotes and shell metacharacters.
+func TestShellQuote(t *testing.T) {
+	cases := []struct {
+		input string
+		want  string
+	}{
+		{"", "''"},
+		{"plain", "'plain'"},
+		{"/path/to/dir", "'/path/to/dir'"},
+		// Embedded single quote — the critical injection safety case.
+		{"a'b", `'a'\''b'`},
+		// Single quote + shell metachars: must be fully contained, no injection escape.
+		{"a'b; rm -rf /", `'a'\''b; rm -rf /'`},
+	}
+	for _, c := range cases {
+		if got := shellQuote(c.input); got != c.want {
+			t.Errorf("shellQuote(%q) = %q, want %q", c.input, got, c.want)
+		}
+	}
+}
+
+// TestBuildExportCmd_Quoting verifies that buildExportCmd shell-quotes values safely.
+func TestBuildExportCmd_Quoting(t *testing.T) {
+	values := map[string]string{
+		"FOO": "a'b; rm -rf /",
+		"BAR": "plain",
+	}
+	got := buildExportCmd(values)
+	// Sorted by name: BAR first, then FOO.
+	want := `export BAR='plain'; export FOO='a'\''b; rm -rf /'; `
+	if got != want {
+		t.Errorf("buildExportCmd = %q, want %q", got, want)
 	}
 }

@@ -128,18 +128,23 @@ func (d *Driver) Run(cmd string, timeout time.Duration) Result {
 
 // RunMain runs cmd in the driver's MAIN shell context (not the errexit subshell that
 // Run uses), so side effects like `export` persist for subsequent Run calls. It is the
-// exported counterpart to the internal runMain used at Open.
+// exported counterpart to the internal runMain used at Open. Unlike the Open-internal
+// runMain call (which runs before any concurrent caller exists), RunMain may be called
+// concurrently with Run/RunID, so it acquires runMu to serialize shell access.
 func (d *Driver) RunMain(cmd string, timeout time.Duration) {
+	d.runMu.Lock()
+	defer d.runMu.Unlock()
 	d.runMain(cmd, timeout)
 }
 
 // runMain executes cmd in the shell's MAIN context — NOT inside the errexit
 // subshell that runID wraps the user command in — and waits for completion. This
-// is for one-time session setup whose effect must persist on the main shell
-// (currently historyOff: disabling history/atuin recording). cmd and a
+// is for session setup / env injection whose effect must persist on the main shell
+// (historyOff at Open; export at gate-confirm via RunMain). cmd and a
 // main-context sentinel echo are sent as one raw line; the result is discarded
-// (best-effort). Called once from Open before any user command, so it needs no
-// runMu lock.
+// (best-effort). Callers that may run concurrently (RunMain) must hold runMu
+// themselves; the Open-time call happens before any concurrent caller exists and
+// therefore skips the lock.
 func (d *Driver) runMain(cmd string, timeout time.Duration) {
 	if cmd == "" {
 		return

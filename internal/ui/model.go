@@ -767,7 +767,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.flashCmd()
 				}
 				if b.Kind == "run" {
-					m = m.markRunning(b.BlockID)
 					var ac tea.Cmd
 					m, ac = m.runOrGate(b)
 					m.reflow()
@@ -922,7 +921,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, m.flashCmd()
 					}
 					if b.Kind == "run" {
-						m = m.markRunning(b.BlockID)
 						var ac tea.Cmd
 						m, ac = m.runOrGate(b)
 						m.reflow()
@@ -2288,9 +2286,12 @@ func (m model) normalLines() []string {
 }
 
 // markRunning sets the given block's status to "running" and resets its
-// SpinFrame to 0. Called by the action-trigger paths before emitAction so the
-// spinner appears immediately, without waiting for a resultMsg.
+// SpinFrame to 0. Called by runOrGate (direct path) and runGateBlock (gated path)
+// so the spinner appears immediately, without waiting for a resultMsg.
 func (m model) markRunning(id string) model {
+	if m.blockStates == nil {
+		m.blockStates = make(map[string]blockRunState)
+	}
 	st := m.blockStates[id]
 	st.Status = "running"
 	st.SpinFrame = 0
