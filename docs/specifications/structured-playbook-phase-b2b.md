@@ -55,20 +55,29 @@ stays open, the requested block does NOT run, no values are exported; the user c
 more, retry a run, or quit normally (`q`). Consistent three-way: Confirm = proceed ·
 Customize = edit · ESC = cancel back to reading. (`Ctrl+C` aborts the app as usual.)
 
-## Surface — in-viewer overlays (both mux and no-mux)
+## Surface — the in-viewer overlay (both mux and no-mux)
 
-The confirmation renders inside the viewer, reusing the **dual-surface ask dispatch**
-from B1: the no-mux **overlay** (composited over the live document) and the mux
-**floatinput float**. No-mux has no pre-viewer choice widget (`input.RunInline` is
-text-only), so in-viewer is the only place a choose/confirm renders without the viewer;
-unifying mux on the same in-viewer path keeps one code path and reuses the mechanism the
-viewer already uses for `r`/refine and agent `ask`.
+The confirmation renders through the viewer's **ask overlay** (`input.NewAsk`,
+composited over the rendered playbook) for **both** mux and no-mux. The viewer's mux ask
+path is a **text-only float** (the `AskFunc` used by `r`/refine) — it cannot render a
+confirm/choose dialog — so B2b does NOT use the float; it drives the overlay directly via
+the model's ask machinery (`m.ask`/`askMode`/`askCompletion`). The overlay composites
+over the viewer's own content, so it works identically whether the viewer is fullscreen
+(no-mux) or in a mux pane. One surface, both modes. (Consequence: only the overlay's
+`NewAsk` needs the Confirm/Customize labels — no `floatinput` change.)
 
-## Data flow (minimal new seams)
+## Data flow
 
-The viewer already parses the file's front matter (so it has the `env` names + each
-var's `why`), and B2a's `pendingProjectRoot` (`ui.SetProjectRoot`) is already passed in.
-The viewer builds the variable list itself — no new launcher→viewer plumbing:
+The variable list is built in the viewer from the parsed front-matter `env` (names +
+`why`) + the project root + the live shell, but two of those are currently **discarded
+before reaching the model** and must be threaded in:
+- the `run --file` path parses the front matter in `loadPlaybookDocument` but keeps only
+  the title/subtitle — `fm.Env` is dropped;
+- B2a's `pendingProjectRoot` is consumed into `driver.Options.Env` at driver-open and
+  then cleared — the model never retains it.
+
+So B2b adds a small seam: capture `fm.Env` and the project root into the `model` at load
+time. With those in hand the viewer builds the list itself:
 - **name** + **why** ← front-matter `env`.
 - **value**: for `PROJECT_ROOT`, the heuristic root (`pendingProjectRoot`); for every
   other var, its **live shell value** (`os.Getenv(name)`, empty string if unset). The
