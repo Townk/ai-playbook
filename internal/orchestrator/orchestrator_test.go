@@ -403,6 +403,52 @@ func TestBuildFrontMatter_DeclaresProjectRoot(t *testing.T) {
 	}
 }
 
+// newTestOrchInDir builds an Orchestrator whose driver cwd is dir, mirroring
+// the pattern used by the apply/undo tests.
+func newTestOrchInDir(t *testing.T, dir string) *Orchestrator {
+	t.Helper()
+	return &Orchestrator{Drv: newTestDriverIn(t, dir)}
+}
+
+// TestCreateFile_WritesAndUndoDeletes: create writes a new file; undo deletes it.
+func TestCreateFile_WritesAndUndoDeletes(t *testing.T) {
+	dir := t.TempDir()
+	o := newTestOrchInDir(t, dir)
+	payload := EncodeFileAction("sub/new.txt", "hello\n")
+	if res, _ := o.Do(Action{Kind: KindCreateFile, Payload: payload}); res.Exit != 0 {
+		t.Fatalf("create: %+v", res)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "sub/new.txt")); string(got) != "hello\n" {
+		t.Fatalf("file not written: %q", got)
+	}
+	if res, _ := o.Do(Action{Kind: KindUndoCreate, Payload: payload}); res.Exit != 0 {
+		t.Fatalf("undo: %+v", res)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "sub/new.txt")); !os.IsNotExist(err) {
+		t.Fatal("undo of a new file must delete it")
+	}
+}
+
+// TestCreateFile_OverwriteUndoRestores: create overwrites an existing file;
+// undo restores the original content.
+func TestCreateFile_OverwriteUndoRestores(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.txt"), []byte("ORIG\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o := newTestOrchInDir(t, dir)
+	payload := EncodeFileAction("x.txt", "NEW\n")
+	if _, err := o.Do(Action{Kind: KindCreateFile, Payload: payload}); err != nil {
+		t.Fatalf("create err: %v", err)
+	}
+	if _, err := o.Do(Action{Kind: KindUndoCreate, Payload: payload}); err != nil {
+		t.Fatalf("undo err: %v", err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "x.txt")); string(got) != "ORIG\n" {
+		t.Fatalf("undo of an overwrite must restore the backup, got %q", got)
+	}
+}
+
 // TestCommitPlaybook_NoStoreDir_FallsBackToDataRoot asserts the back-compat
 // path: when StoreDir is empty, CommitPlaybook writes under dataRoot/playbooks.
 func TestCommitPlaybook_NoStoreDir_FallsBackToDataRoot(t *testing.T) {

@@ -10,6 +10,7 @@
 package orchestrator
 
 import (
+	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -61,6 +62,8 @@ const (
 	KindViewDiff
 	KindApplyDiff
 	KindUndoDiff
+	KindCreateFile
+	KindUndoCreate
 	KindRegenerate
 	KindFollowup
 )
@@ -82,6 +85,10 @@ func (k Kind) String() string {
 		return "apply-diff"
 	case KindUndoDiff:
 		return "undo-diff"
+	case KindCreateFile:
+		return "create"
+	case KindUndoCreate:
+		return "undo-create"
 	case KindRegenerate:
 		return "regenerate"
 	case KindFollowup:
@@ -108,6 +115,11 @@ type Orchestrator struct {
 	Drv   *driver.Driver
 	Mux   Mux
 	Float mux.Mux
+
+	// createBackups records the prior content of files touched by createFile so
+	// undoCreate can restore them symmetrically. A nil *[]byte means the file was
+	// new (undo deletes it); a non-nil *[]byte holds the overwritten content.
+	createBackups map[string]*[]byte
 
 	// Reengage carries everything the regenerate / followup / wrapup kinds need to
 	// re-invoke the author in-process: the original request, the injected capable
@@ -286,6 +298,13 @@ func (o *Orchestrator) Do(a Action) (driver.Result, error) {
 	case KindUndoDiff:
 		// git-apply --reverse the patch (apply⇄undo toggle); Exit 0 → reverted.
 		return o.applyDiff(a.Payload, true), nil
+
+	case KindCreateFile:
+		// Write a new (or overwrite an existing) file; backs up prior content.
+		return o.createFile(a.Payload), nil
+	case KindUndoCreate:
+		// Restore the backed-up content (or delete the file if it was new).
+		return o.undoCreate(a.Payload), nil
 
 	// ---- re-engagement kinds (stage 4c-ii) ----
 	// These re-invoke the author and yield a NEW stream that must SWAP the ui's
@@ -720,4 +739,104 @@ func writePatch(diff string) (string, error) {
 // runs cmd through zsh). Matches driver.shquote semantics.
 func shquote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// fileAction is the JSON payload shared by KindCreateFile / KindUndoCreate.
+type fileAction struct {
+	Path string `json:"path"`
+	Body string `json:"body"`
+}
+
+// EncodeFileAction serialises a path + body into the JSON payload expected by
+// createFile / undoCreate. Called by the UI button (Task 3) when building the
+// Action.Payload for these kinds.
+func EncodeFileAction(path, body string) string {
+	b, _ := json.Marshal(fileAction{Path: path, Body: body})
+	return string(b)
+}
+
+// decodeFileAction deserialises a KindCreateFile / KindUndoCreate payload.
+func decodeFileAction(payload string) (string, string, error) {
+	var fa fileAction
+	if err := json.Unmarshal([]byte(payload), &fa); err != nil {
+		return "", "", err
+	}
+	return fa.Path, fa.Body, nil
+}
+
+// createFile writes body to the path described by payload, anchoring relative
+// paths against the driver's session cwd (projectRoot). If the file already
+// exists its content is saved in createBackups so undoCreate can restore it;
+// a nil entry records that the file was new (undo must delete it).
+func (o *Orchestrator) createFile(payload string) driver.Result {
+	relPath, body, err := decodeFileAction(payload)
+	if err != nil {
+		return driver.Result{Exit: -1, Err: err.Error()}
+	}
+	abs := relPath
+	if !filepath.IsAbs(abs) {
+		root := o.projectRoot()
+		if root == "" {
+			return driver.Result{Exit: -1, Err: "createFile: cannot resolve relative path — driver cwd unknown"}
+		}
+		abs = filepath.Join(root, relPath)
+	}
+	// Lazily initialise the backup map.
+	if o.createBackups == nil {
+		o.createBackups = make(map[string]*[]byte)
+	}
+	// Capture prior content if the file exists.
+	if existing, rerr := os.ReadFile(abs); rerr == nil {
+		cp := make([]byte, len(existing))
+		copy(cp, existing)
+		o.createBackups[abs] = &cp
+	} else {
+		o.createBackups[abs] = nil // file was new
+	}
+	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
+		return driver.Result{Exit: -1, Err: err.Error()}
+	}
+	if err := os.WriteFile(abs, []byte(body), 0o644); err != nil {
+		return driver.Result{Exit: -1, Err: err.Error()}
+	}
+	return driver.Result{Exit: 0}
+}
+
+// undoCreate reverses a previous createFile: if the file was overwritten its
+// prior content is restored; if the file was new it is deleted. The backup
+// entry is removed after use so a second undo is a no-op (no backup → nothing
+// to undo).
+func (o *Orchestrator) undoCreate(payload string) driver.Result {
+	relPath, _, err := decodeFileAction(payload)
+	if err != nil {
+		return driver.Result{Exit: -1, Err: err.Error()}
+	}
+	abs := relPath
+	if !filepath.IsAbs(abs) {
+		root := o.projectRoot()
+		if root == "" {
+			return driver.Result{Exit: -1, Err: "undoCreate: cannot resolve relative path — driver cwd unknown"}
+		}
+		abs = filepath.Join(root, relPath)
+	}
+	if o.createBackups == nil {
+		return driver.Result{Exit: 0} // no backup recorded — nothing to undo
+	}
+	backup, found := o.createBackups[abs]
+	if !found {
+		return driver.Result{Exit: 0} // no backup for this path — nothing to undo
+	}
+	delete(o.createBackups, abs)
+	if backup != nil {
+		// File existed before; restore it.
+		if err := os.WriteFile(abs, *backup, 0o644); err != nil {
+			return driver.Result{Exit: -1, Err: err.Error()}
+		}
+	} else {
+		// File was new; delete it.
+		if err := os.Remove(abs); err != nil && !os.IsNotExist(err) {
+			return driver.Result{Exit: -1, Err: err.Error()}
+		}
+	}
+	return driver.Result{Exit: 0}
 }
