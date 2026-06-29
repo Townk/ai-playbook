@@ -46,17 +46,6 @@ var pendingDriver *driver.Driver
 // Main; the driver is not closed by Main.
 func SetDriver(d *driver.Driver) { pendingDriver = d }
 
-// pendingActivity is the agent's live activity feed consumed by the next Main()
-// call, set by SetActivity. The cached-replay path stashes it here (same seam as
-// the driver/reengage) so a re-engagement (regenerate / verify follow-up) during
-// a cached replay can surface the agent's tool calls next to the spinner. nil →
-// no activity line.
-var pendingActivity <-chan string
-
-// SetActivity stashes the agent activity feed for the next ui.Main() invocation
-// (the troubleshoot cached-replay path). Consumed (and cleared) by Main.
-func SetActivity(ch <-chan string) { pendingActivity = ch }
-
 // pendingServedBase is the served playbook body consumed by the next Main() call,
 // set by SetServedBase. On a cache HIT serveCachedPlaybook serves an existing
 // playbook; it stashes that body here (same os.Args-reshaped seam as the
@@ -396,7 +385,6 @@ func Main() int {
 			}
 		}
 	}
-	activity := pendingActivity
 	servedBase := pendingServedBase
 	askerFn := pendingAsker
 	answerRegen := pendingAnswerRegen
@@ -404,7 +392,6 @@ func Main() int {
 	finalDraft := pendingFinalDraft
 	pendingReengage = nil     // consume once, regardless of whether an orch was built
 	pendingDriver = nil       // ditto: the session owns the driver's lifecycle
-	pendingActivity = nil     // ditto: the session owns the activity channel's lifecycle
 	pendingServedBase = ""    // ditto: served-base amend stash is consume-once
 	pendingAsker = nil        // ditto: the `f` asker stash is consume-once
 	pendingAnswerRegen = nil  // ditto: the cached-answer regenerate stash is consume-once
@@ -430,7 +417,6 @@ func Main() int {
 	m.streaming = true
 	m.reader = bufio.NewReader(src)
 	m.parser = parser
-	m.activity = activity
 	m.servedBase = servedBase
 	m.asker = askerFn
 	m.answerRegen = answerRegen
