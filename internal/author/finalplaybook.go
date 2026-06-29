@@ -5,7 +5,6 @@ import (
 	"io"
 	"strings"
 
-	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/capture"
 )
 
@@ -105,27 +104,6 @@ func FinalPlaybookPrompt(req capture.Request, base, context string) string {
 	b.WriteString("that points at an existing playbook instead of reproducing it is a failure.\n\n")
 	b.WriteString("Be concise: spend your words on the steps, keep the prose tight.\n")
 	return b.String()
-}
-
-// FinalPlaybook runs the FINAL-PLAYBOOK generation through the OWNED harness
-// invocation (the same streaming path as AuthorEvents/Followup): it builds the
-// system prompt via FinalPlaybookPrompt(req, base, context) and delegates to
-// RunHarnessEvents, returning a channel of normalized agentstream.Events, a
-// close/wait func that reaps the process, and a start error. When opts has an
-// MCPConfigPath the tools backend is wired in, exactly like the standard path.
-//
-// User message: the standard BuildUserMessage(req). The load-bearing inputs (the
-// base playbook + the change/context) live in the system prompt; BuildUserMessage
-// supplies the same project/request framing the rest of the author path uses, so
-// the harness sees a consistent request shape across fresh authoring, follow-up,
-// and final-playbook generation.
-//
-// The returned func() error waits for the process to exit (reaping it); call it
-// after draining the channel.
-func FinalPlaybook(req capture.Request, base, context string, opts AuthorOptions) (<-chan agentstream.Event, func() error, error) {
-	sys := FinalPlaybookPrompt(req, base, context)
-	user := BuildUserMessage(req)
-	return RunHarnessEvents(sys, user, opts)
 }
 
 // FinalPlaybookText is the text-path (io.ReadCloser) fallback for FinalPlaybook,

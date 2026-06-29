@@ -1,13 +1,10 @@
 package author
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 
-	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/capture"
-	"github.com/Townk/ai-playbook/internal/config"
 )
 
 // FRESH mode: base == "" → distill the resolved session into a new reusable
@@ -82,60 +79,6 @@ func TestFinalPlaybookPrompt_EmptyRequest(t *testing.T) {
 	}
 	if !strings.Contains(sys, "(none provided)") {
 		t.Errorf("empty context should fall back to a placeholder:\n%s", sys)
-	}
-}
-
-// FinalPlaybook with a fake harness: it streams the canned playbook events and was
-// invoked with FinalPlaybookPrompt(req, base, context) as the system prompt. The
-// system prompt is the trailing-but-one positional in the owned argv
-// (--append-system-prompt <sys> <user>); the Command seam captures the argv.
-func TestFinalPlaybook_FakeHarnessAndSystemPrompt(t *testing.T) {
-	bin := writeFakeHarness(t)
-
-	cfg := config.Default()
-	cfg.Agent.Harness = "claude"
-	req := sampleFailure()
-	const base = "# Playbook — x\n\n```bash {id=verify}\ntrue\n```\n"
-	const ctx = "the resolved fix to fold in"
-
-	var gotArgs []string
-	events, wait, err := FinalPlaybook(req, base, ctx, AuthorOptions{
-		Cfg: cfg,
-		Command: func(b string, args []string) *exec.Cmd {
-			gotArgs = args
-			return exec.Command(bin, args...)
-		},
-	})
-	if err != nil {
-		t.Fatalf("FinalPlaybook: %v", err)
-	}
-
-	var got []agentstream.Event
-	for e := range events {
-		got = append(got, e)
-	}
-	if err := wait(); err != nil {
-		t.Fatalf("process wait (reap) failed: %v", err)
-	}
-
-	// The canned stream surfaced as normalized events (final playbook included).
-	if len(got) == 0 {
-		t.Fatal("expected normalized events from the fake harness, got none")
-	}
-	var sawFinal bool
-	for _, e := range got {
-		if e.Kind == agentstream.Final {
-			sawFinal = true
-		}
-	}
-	if !sawFinal {
-		t.Errorf("expected a Final event in the stream, got: %+v", got)
-	}
-
-	// The owned argv carried FinalPlaybookPrompt(req, base, ctx) as the system prompt.
-	wantSys := FinalPlaybookPrompt(req, base, ctx)
-	if sysArg := appendSystemPromptArg(gotArgs); sysArg != wantSys {
-		t.Errorf("FinalPlaybook system prompt != FinalPlaybookPrompt(req, base, ctx)\n--- got ---\n%s", sysArg)
 	}
 }
 
