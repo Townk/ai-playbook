@@ -76,7 +76,8 @@ Build **one in-process, pure-Go diff renderer** and present it **mux-aware**.
   moderate effort.
 - We lose word-level intra-line highlighting vs delta until/unless added (deferred).
 - **Behavior change:** `AI_PLAYBOOK_HUNK_BIN` and the external-viewer fallback are
-  removed → recorded in the CHANGELOG.
+  removed → recorded in the amendment below (this repo has no CHANGELOG; see
+  § Amendment 2026-06-29).
 
 ## Pros and Cons of the Options
 
@@ -95,3 +96,35 @@ Build **one in-process, pure-Go diff renderer** and present it **mux-aware**.
 - **Good:** smallest change.
 - **Bad:** loses the review-before-apply surface (the inline colored block body is not
   a substitute for a side-by-side view). Rejected.
+
+## Amendment 2026-06-29
+
+### B2a dead-code sweep: adapt-on-run overlay removed
+
+The original decision named two shared surfaces for the in-process renderer:
+
+1. The playbook diff-block "view diff" float (the mux path).
+2. The adapt-on-run `d` overlay (`unifiedDiffLines`/`buildDiffLines`/`diffView` in
+   `internal/ui/adapt.go`).
+
+Surface 2 was **deleted** in the B2a dead-code sweep before the in-process renderer was
+wired to it. The renderer now serves **only** the diff-block "view diff" (surface 1). If
+the adapt-on-run overlay is revived in a future phase it will re-use the same renderer,
+but it is not present in the current codebase.
+
+### External chain removed; `AI_PLAYBOOK_HUNK_BIN` env var dropped
+
+The external viewer chain (`hunk` → `delta` → `less`) and its supporting helpers
+(`diffViewerCmd`, `hunkBin`, `lookViewer`) have been **deleted** from
+`internal/orchestrator/orchestrator.go`. `viewDiff` now spawns `ai-playbook diff
+<patchfile>` (via `os.Executable()`) in the Zellij float — the in-process renderer
+decided in this ADR.
+
+**User-facing removals** (this repo has no CHANGELOG; recorded here):
+
+- The `AI_PLAYBOOK_HUNK_BIN` environment variable is **removed**. It previously let
+  users override the `hunk` binary path. It has no effect and will be silently ignored
+  if set.
+- The external-viewer fallback (`hunk` → `delta` → `less`) is **removed**. The diff
+  float always uses the in-process renderer (`ai-playbook diff`). Users no longer need
+  `hunk` or `delta` installed.

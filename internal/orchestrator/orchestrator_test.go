@@ -178,6 +178,30 @@ func (f *recFloat) SpawnPane(mux.SpawnOptions) error       { return nil }
 func (f *recFloat) SpawnDocked(mux.SpawnOptions) error     { return nil }
 func (f *recFloat) TypeInto(string, string) error          { return nil }
 
+// fakeFloat is a lightweight float fake with a pluggable SpawnFloat callback,
+// used to assert the exact Cmd passed by viewDiff.
+type fakeFloat struct {
+	spawn func(mux.SpawnOptions) error
+}
+
+func (f *fakeFloat) DumpScreen(string) (string, error)      { return "", nil }
+func (f *fakeFloat) SpawnFloat(o mux.SpawnOptions) error    { return f.spawn(o) }
+func (f *fakeFloat) SpawnInputFloat(mux.SpawnOptions) error { return nil }
+func (f *fakeFloat) SpawnPane(mux.SpawnOptions) error       { return nil }
+func (f *fakeFloat) SpawnDocked(mux.SpawnOptions) error     { return nil }
+func (f *fakeFloat) TypeInto(string, string) error          { return nil }
+
+// TestViewDiff_SpawnsSelfDiffSubcommand asserts that viewDiff spawns
+// `<self> diff <patch>` rather than the old external chain (hunk/delta/less).
+func TestViewDiff_SpawnsSelfDiffSubcommand(t *testing.T) {
+	var got mux.SpawnOptions
+	o := &Orchestrator{Float: &fakeFloat{spawn: func(opts mux.SpawnOptions) error { got = opts; return nil }}}
+	_ = o.viewDiff("fix", "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n")
+	if len(got.Cmd) < 2 || got.Cmd[1] != "diff" {
+		t.Fatalf("viewDiff must spawn `<self> diff <patch>`, got %v", got.Cmd)
+	}
+}
+
 // apply-diff changes the file (Exit 0), undo-diff reverts it; the driver runs git
 // apply inside the temp repo (Cwd).
 func TestApplyUndoDiff(t *testing.T) {

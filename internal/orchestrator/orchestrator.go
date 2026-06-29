@@ -4,15 +4,15 @@
 // fifos, no text framing. Stage 2 wired the run/stop path to the driver (with
 // value-passing across blocks) plus copy/play via the Mux. Stage 4c-i wires the
 // diff kinds in-process: apply-diff / undo-diff git-apply the patch via the
-// driver, and view-diff opens a floating diff viewer via the Float mux. The
-// regenerate / followup / wrapup kinds remain modeled but deferred.
+// driver, and view-diff spawns the in-process diff renderer (`ai-playbook diff`)
+// in a Float mux pane. The regenerate / followup / wrapup kinds remain modeled
+// but deferred.
 package orchestrator
 
 import (
 	"errors"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -663,10 +663,11 @@ func (o *Orchestrator) viewDiff(id, diff string) error {
 	if err != nil {
 		return err
 	}
+	selfExe, _ := os.Executable()
 	name := "diff:" + id
 	cwd := o.projectRoot()
 	return o.Float.SpawnFloat(mux.SpawnOptions{
-		Cmd:      diffViewerCmd(patch),
+		Cmd:      []string{selfExe, "diff", patch},
 		Cwd:      cwd,
 		Name:     name,
 		Floating: true,
@@ -710,45 +711,6 @@ func writePatch(diff string) (string, error) {
 		return "", err
 	}
 	return name, nil
-}
-
-// diffViewerCmd resolves the diff viewer command for patch, porting the broker's
-// preference: hunk (split mode) → delta (side-by-side) → less. hunk is overridable
-// via $AI_PLAYBOOK_HUNK_BIN (for tests, as in the broker).
-func diffViewerCmd(patch string) []string {
-	if h := hunkBin(); h != "" {
-		return []string{h, "patch", "--mode", "split", patch}
-	}
-	if d := lookViewer("delta"); d != "" {
-		return []string{d, "--side-by-side", "--paging=always", patch}
-	}
-	return []string{"less", patch}
-}
-
-// hunkBin resolves the hunk binary: $AI_PLAYBOOK_HUNK_BIN, else hunk on PATH, else
-// well-known install dirs, else "" (not installed).
-func hunkBin() string {
-	if v := os.Getenv("AI_PLAYBOOK_HUNK_BIN"); v != "" {
-		return v
-	}
-	return lookViewer("hunk")
-}
-
-// lookViewer resolves name on PATH, else a couple of well-known install dirs,
-// returning "" when not found.
-func lookViewer(name string) string {
-	if p, err := exec.LookPath(name); err == nil {
-		return p
-	}
-	for _, cand := range []string{
-		filepath.Join("/opt/homebrew/bin", name),
-		filepath.Join("/usr/local/bin", name),
-	} {
-		if fi, err := os.Stat(cand); err == nil && !fi.IsDir() && fi.Mode()&0o111 != 0 {
-			return cand
-		}
-	}
-	return ""
 }
 
 // shquote single-quotes s for safe inclusion in a shell command line (the driver
