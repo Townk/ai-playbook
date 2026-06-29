@@ -1703,3 +1703,34 @@ func TestList_HangingIndent_NoOverflow(t *testing.T) {
 		}
 	}
 }
+
+func TestCreateBlock_TabAndButton(t *testing.T) {
+	_, buttons, _ := Render("```go {id=new file=cmd/x/main.go}\npackage main\n```\n", 100, nil, "")
+	var has bool
+	for _, b := range buttons {
+		if b.BlockID == "new" && b.Kind == "create" {
+			has = true
+		}
+	}
+	if !has {
+		t.Fatal("create block has no create button")
+	}
+	// applied → undo button
+	_, buttons2, _ := Render("```go {id=new file=cmd/x/main.go}\npackage main\n```\n", 100,
+		map[string]blockRunState{"new": {Status: "ok"}}, "")
+	var undo bool
+	for _, b := range buttons2 {
+		if b.BlockID == "new" && b.Kind == "undo-create" {
+			undo = true
+		}
+	}
+	if !undo {
+		t.Fatal("applied create block must show undo-create")
+	}
+	// tab must show the file path
+	lines, _, _ := Render("```go {id=new file=cmd/x/main.go}\npackage main\n```\n", 100, nil, "")
+	text := joinText(lines)
+	if !strings.Contains(text, "cmd/x/main.go") {
+		t.Fatalf("create tab must contain file path, got:\n%s", text)
+	}
+}

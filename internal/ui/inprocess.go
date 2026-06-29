@@ -112,6 +112,10 @@ func kindOf(s string) (orchestrator.Kind, bool) {
 		return orchestrator.KindApplyDiff, true
 	case "undo-diff":
 		return orchestrator.KindUndoDiff, true
+	case "create":
+		return orchestrator.KindCreateFile, true
+	case "undo-create":
+		return orchestrator.KindUndoCreate, true
 	case "regenerate":
 		return orchestrator.KindRegenerate, true
 	case "followup":
@@ -146,7 +150,7 @@ func (m model) orchCmd(b Button) tea.Cmd {
 			return statusMsg{text: b.Kind + ": " + err.Error()}
 		}
 		switch k {
-		case orchestrator.KindRun, orchestrator.KindApplyDiff, orchestrator.KindUndoDiff:
+		case orchestrator.KindRun, orchestrator.KindApplyDiff, orchestrator.KindUndoDiff, orchestrator.KindCreateFile, orchestrator.KindUndoCreate:
 			// These return a real driver.Result. Bridge it to the model's resultMsg
 			// via a temp logfile holding the {id, exit, logpath} shape (stdout then
 			// stderr). The model's resultMsg handler then flips the apply⇄undo toggle

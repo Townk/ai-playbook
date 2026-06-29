@@ -17,6 +17,8 @@ import (
 	"github.com/yuin/goldmark/extension"
 	extast "github.com/yuin/goldmark/extension/ast"
 	"github.com/yuin/goldmark/text"
+
+	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
 
 // admon describes one admonition type: display title, nerd-font icon glyph, and
@@ -495,6 +497,7 @@ const (
 	glyphApply    = "\U0000EC0B" // U+EC0B — apply diff via git apply
 	glyphUndo     = "\U000F054D" // nf-md undo-variant — undo an applied patch (git apply --reverse)
 	glyphRetry    = "\U000F0450" // nf-md refresh/retry — re-engage the agent for a different fix
+	glyphCreate   = "\U000F0224" // nf-md file-plus — create a new file
 )
 
 // Callout (admonition) bordered-frame glyphs — Symbols for Legacy Computing block.
@@ -562,9 +565,23 @@ func (r *renderer) code(n ast.Node) {
 	// (no icon cell, no trailing space after the icon). Known langs get the icon
 	// cell + trailing space + label. Empty lang (no fence info) shows no lang
 	// part at all — just separator+buttons.
+	// For create blocks the label is the file path (blk.File) rather than the
+	// lang name so the tab reads "󰈙 cmd/x/main.go ❘ create" instead of "go".
 	var langPart string
 	var langW int
-	if lang != "" {
+	if blk.Type == "create" {
+		glyph, color := langIconOrDefault(lang)
+		if glyph != "" {
+			langPart = bg.Foreground(lipgloss.Color(color)).Render(glyph+" ") +
+				bg.Foreground(lipgloss.Color(color)).Render(blk.File)
+			// glyph(1) + space(1) + file path
+			langW = lipgloss.Width(glyph) + 1 + lipgloss.Width(blk.File)
+		} else {
+			langPart = bg.Foreground(lipgloss.Color(color)).Render(blk.File)
+			// file path only — no icon column
+			langW = lipgloss.Width(blk.File)
+		}
+	} else if lang != "" {
 		glyph, color := langIconOrDefault(lang)
 		if glyph != "" {
 			langPart = bg.Foreground(lipgloss.Color(color)).Render(glyph+" ") +
@@ -595,6 +612,9 @@ func (r *renderer) code(n ast.Node) {
 		if r.states[blk.ID].Status == "ok" || len(unmet) == 0 {
 			regionW += 2 // undo-diff(2) or apply-diff(2)
 		}
+	}
+	if blk.Type == "create" {
+		regionW += 2 // create(2) or undo-create(2) — always shown (no needs gate)
 	}
 	fillCols := width - regionW
 	if fillCols < 0 {
@@ -668,6 +688,24 @@ func (r *renderer) code(n ast.Node) {
 			sb.WriteString(bg.Render(" "))
 			col++
 			r.buttons = append(r.buttons, Button{Line: lineIdx, Col: applyDiffCol, Width: 2, Kind: "apply-diff", Payload: src, BlockID: blk.ID})
+		}
+	}
+	if blk.Type == "create" {
+		// create: always shown, not needs-gated. Flips to undo-create once applied.
+		createCol := col
+		filePayload := orchestrator.EncodeFileAction(blk.File, blk.Payload)
+		if r.states[blk.ID].Status == "ok" {
+			sb.WriteString(r.buttonGlyph(blk.ID, "undo-create", glyphUndo, colPeach, bg))
+			col++
+			sb.WriteString(bg.Render(" "))
+			col++
+			r.buttons = append(r.buttons, Button{Line: lineIdx, Col: createCol, Width: 2, Kind: "undo-create", Payload: filePayload, BlockID: blk.ID})
+		} else {
+			sb.WriteString(r.buttonGlyph(blk.ID, "create", glyphCreate, colGreen, bg))
+			col++
+			sb.WriteString(bg.Render(" "))
+			col++
+			r.buttons = append(r.buttons, Button{Line: lineIdx, Col: createCol, Width: 2, Kind: "create", Payload: filePayload, BlockID: blk.ID})
 		}
 	}
 	copyCol := col

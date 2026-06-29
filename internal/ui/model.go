@@ -376,7 +376,7 @@ func (m model) shellActionsReady() bool { return !m.driverPending }
 // kinds (toggle / confirm / followup) are NOT gated.
 func isShellActionKind(kind string) bool {
 	switch kind {
-	case "run", "play", "stop", "diff", "view-diff", "apply-diff", "undo-diff", "regenerate":
+	case "run", "play", "stop", "diff", "view-diff", "apply-diff", "undo-diff", "create", "undo-create", "regenerate":
 		return true
 	}
 	return false
@@ -819,6 +819,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reflow()
 					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 				}
+				if b.Kind == "create" {
+					st := m.blockStates[b.BlockID]
+					st.Status = "running"
+					st.Action = "create"
+					st.SpinFrame = 0
+					m.blockStates[b.BlockID] = st
+					ac := m.emitAction(b)
+					m.reflow()
+					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
+				}
+				if b.Kind == "undo-create" {
+					st := m.blockStates[b.BlockID]
+					st.Status = "running"
+					st.Action = "undo"
+					st.SpinFrame = 0
+					m.blockStates[b.BlockID] = st
+					ac := m.emitAction(b)
+					m.reflow()
+					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
+				}
 				if b.Kind == "diff" || b.Kind == "view-diff" {
 					return m.activateDiffButton(b)
 				}
@@ -1005,6 +1025,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 					}
 					if b.Kind == "undo-diff" {
+						st := m.blockStates[b.BlockID]
+						st.Status = "running"
+						st.Action = "undo"
+						st.SpinFrame = 0
+						m.blockStates[b.BlockID] = st
+						ac := m.emitAction(b)
+						m.reflow()
+						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
+					}
+					if b.Kind == "create" {
+						st := m.blockStates[b.BlockID]
+						st.Status = "running"
+						st.Action = "create"
+						st.SpinFrame = 0
+						m.blockStates[b.BlockID] = st
+						ac := m.emitAction(b)
+						m.reflow()
+						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
+					}
+					if b.Kind == "undo-create" {
 						st := m.blockStates[b.BlockID]
 						st.Status = "running"
 						st.Action = "undo"
