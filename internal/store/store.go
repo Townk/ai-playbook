@@ -52,14 +52,15 @@ type EnvVar struct {
 // Meta is the indexed metadata for one playbook plus the resolved path and the
 // store it lives in.
 type Meta struct {
-	Slug        string
-	Name        string
-	Description string
-	Category    string
-	Tags        []string
-	Env         []EnvVar
-	Workdir     string
-	Path        string
+	Slug         string
+	Name         string
+	Description  string
+	Category     string
+	Tags         []string
+	Env          []EnvVar
+	Workdir      string
+	ProjectBound bool
+	Path         string
 	// Project is true when the playbook lives in the project-local store; its
 	// Slug is then "proj:"-prefixed.
 	Project bool
@@ -125,16 +126,17 @@ func metaFromFM(fm frontmatter.FrontMatter, path string, project bool) Meta {
 	}
 
 	m := Meta{
-		Slug:        slug,
-		Name:        fm.Name,
-		Description: fm.Description,
-		Category:    fm.Category,
-		Tags:        fm.Tags,
-		Env:         envFromFM(fm.Env),
-		Workdir:     fm.Workdir,
-		Path:        path,
-		Project:     project,
-		Created:     createdFor(fm.Created, path),
+		Slug:         slug,
+		Name:         fm.Name,
+		Description:  fm.Description,
+		Category:     fm.Category,
+		Tags:         fm.Tags,
+		Env:          envFromFM(fm.Env),
+		Workdir:      fm.Workdir,
+		ProjectBound: fm.ProjectBound,
+		Path:         path,
+		Project:      project,
+		Created:      createdFor(fm.Created, path),
 	}
 	return m
 }

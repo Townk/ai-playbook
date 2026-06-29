@@ -255,3 +255,16 @@ func TestCreatedFallsBackToModTime(t *testing.T) {
 		t.Errorf("Created is zero, want ModTime fallback")
 	}
 }
+
+func TestLoad_ReadsProjectBound(t *testing.T) {
+	globalDir := t.TempDir()
+	seamTo(t, globalDir, t.TempDir())
+	writePB(t, globalDir, "pb", frontmatter.FrontMatter{Name: "PB", ProjectBound: true})
+	m, _, err := Load("pb")
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !m.ProjectBound {
+		t.Fatal("Meta.ProjectBound must be read from front matter")
+	}
+}
