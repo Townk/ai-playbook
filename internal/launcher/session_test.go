@@ -16,6 +16,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/floatinput"
 	"github.com/Townk/ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/internal/orchestrator"
 	"github.com/Townk/ai-playbook/internal/playbook"
 	"github.com/Townk/ai-playbook/internal/tools"
 	"github.com/Townk/ai-playbook/internal/triage"
@@ -532,5 +533,20 @@ func TestEscalate_AuthorsStructured(t *testing.T) {
 	body := structuredBody(sess, "", "", nil)
 	if !strings.Contains(body, "# Fix the build") || !strings.Contains(body, "```bash {id=fix}") {
 		t.Fatalf("escalate body must be the rendered captured playbook: %s", body)
+	}
+}
+
+// TestReengageStructuredByKind asserts the AuthorOptions per kind: FinalPlaybook
+// and Regenerate author structured playbbooks (submit_playbook); Followup stays
+// markdown (continues the troubleshoot with run/ask).
+func TestReengageStructuredByKind(t *testing.T) {
+	if !reengageStructured(orchestrator.KindReengageFinalPlaybook) {
+		t.Error("finalplaybook must be structured")
+	}
+	if !reengageStructured(orchestrator.KindReengageRegenerate) {
+		t.Error("regenerate must be structured")
+	}
+	if reengageStructured(orchestrator.KindReengageFollowup) {
+		t.Error("followup must stay markdown")
 	}
 }

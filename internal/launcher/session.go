@@ -479,6 +479,14 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 // which still streams reasoning. Returns nil so the orchestrator falls back to the
 // text Agent only if config can't be loaded — otherwise the EventsFunc is always
 // returned and the orchestrator prefers it.
+
+// reengageStructured reports whether a re-engagement kind authors a playbook
+// (submit_playbook) vs continuing the troubleshoot in markdown. Followup is
+// markdown continuation; FinalPlaybook + Regenerate produce a playbook.
+func reengageStructured(kind orchestrator.ReengageKind) bool {
+	return kind != orchestrator.KindReengageFollowup
+}
+
 func buildReengageEvents(req capture.Request, sess *session) orchestrator.EventsFunc {
 	return func(kind orchestrator.ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error) {
 		// Per-invocation mcp-config so the re-engaged agent reaches the live backend.
@@ -505,6 +513,7 @@ func buildReengageEvents(req capture.Request, sess *session) orchestrator.Events
 		events, wait, err := author.RunHarnessEvents(sys, user, author.AuthorOptions{
 			Cfg:           cfg,
 			MCPConfigPath: mcpPath,
+			Structured:    reengageStructured(kind),
 		})
 		if err != nil {
 			removeMCP()
