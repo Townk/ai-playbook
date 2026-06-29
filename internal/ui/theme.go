@@ -1,52 +1,29 @@
 package ui
 
 import (
-	"fmt"
-	"strconv"
-
 	"github.com/alecthomas/chroma/v2"
+
+	"github.com/Townk/ai-playbook/internal/theme"
 )
 
-// parseHex returns the r,g,b components of a "#RRGGBB" hex string.
-func parseHex(hex string) (int, int, int) {
-	h := hex
-	if len(h) > 0 && h[0] == '#' {
-		h = h[1:]
-	}
-	rv, _ := strconv.ParseInt(h[0:2], 16, 32)
-	gv, _ := strconv.ParseInt(h[2:4], 16, 32)
-	bv, _ := strconv.ParseInt(h[4:6], 16, 32)
-	return int(rv), int(gv), int(bv)
-}
-
-// darken scales a #RRGGBB color toward black by factor f (0..1); returns "#RRGGBB".
-// Use f≈0.20 for a "very dark" tint.
-func darken(hex string, f float64) string {
-	rv, gv, bv := parseHex(hex)
-	return fmt.Sprintf("#%02X%02X%02X", int(float64(rv)*f), int(float64(gv)*f), int(float64(bv)*f))
-}
-
-// bgANSI returns the truecolor background SGR sequence for a #RRGGBB hex color.
-func bgANSI(hex string) string {
-	rv, gv, bv := parseHex(hex)
-	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", rv, gv, bv)
-}
-
-// Catppuccin Mocha.
+// Shared Catppuccin Mocha palette — aliased from internal/theme so every
+// existing colXxx call site stays unchanged.
 const (
-	colMauve    = "#cba6f7"
-	colText     = "#cdd6f4"
-	colBase     = "#1e1e2e"
-	colCodeBg   = "#282C41" // code block background
-	colOverlay0 = "#6c7086"
+	colBlue     = theme.Blue
+	colGreen    = theme.Green
+	colMauve    = theme.Mauve
+	colPeach    = theme.Peach
+	colRed      = theme.Red
+	colOverlay0 = theme.Overlay0
+	colMantle   = theme.Mantle
+	colSurface1 = theme.Surface1
+	colSurface0 = theme.Surface0
+	colBase     = theme.Base
+	colText     = theme.Text
+	colCodeBg   = theme.CodeBg
+
+	// ui-only Catppuccin Mocha colors.
 	colOverlay1 = "#7f849c"
-	colSurface0 = "#313244"
-	colSurface1 = "#45475a" // dark grey — modal border
-	colMantle   = "#181825" // darker panel — modal background
-	colBlue     = "#89b4fa"
-	colGreen    = "#a6e3a1"
-	colPeach    = "#fab387"
-	colRed      = "#f38ba8"
 	colYellow   = "#f9e2af"
 	colWhite    = "#ffffff" // bright white — key bindings
 	colLavender = "#b4befe"
@@ -66,6 +43,14 @@ const (
 	// on the glyph cell makes some terminals render the nerd-font (PUA) glyph
 	// shifted down a row, so we pulse the foreground only.
 	colFlashOn = "#ffffff" // bright white — bold flash pulse on the normal cell bg
+)
+
+// Helpers aliased from internal/theme so every existing call site stays
+// unchanged (var keeps the function signature identical to the original func).
+var (
+	parseHex = theme.ParseHex
+	darken   = theme.Darken
+	bgANSI   = theme.BgANSI
 )
 
 // codeBgANSI is the code block background (#282C41 = R40 G44 B65) applied

@@ -1,6 +1,10 @@
 package input
 
-import "flag"
+import (
+	"flag"
+
+	"github.com/Townk/ai-playbook/internal/theme"
+)
 
 // Theme is the resolved color palette. Defaults are Catppuccin Mocha (today's
 // exact values); each field is overridable via a --theme-* flag.
@@ -24,14 +28,14 @@ type Theme struct {
 
 func defaultTheme() Theme {
 	return Theme{
-		Accent:      "#cba6f7",
-		Border:      "#89b4fa",
+		Accent:      theme.Mauve,
+		Border:      theme.Blue,
 		Danger:      "#ff5555",
 		Warning:     "#e5bf7b",
-		Base:        "#1e1e2e",
-		Text:        "#cdd6f4",
-		Muted:       "#6c7086",
-		Rule:        "#313244",
+		Base:        theme.Base,
+		Text:        theme.Text,
+		Muted:       theme.Overlay0,
+		Rule:        theme.Surface0,
 		Key:         "#ffffff",
 		FieldBorder: "#585b70",
 		ButtonBg:    "#282c41",
