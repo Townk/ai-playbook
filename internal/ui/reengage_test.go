@@ -1177,6 +1177,8 @@ func TestWGenerateAmendsServedPlaybook(t *testing.T) {
 	m.committed = false
 	m.hadFollowup = true // diverged run → re-author (amend) path
 	m.reflow()
+	// Mark the verify block as passed so `w` saves directly (no unverified-confirm overlay).
+	m.blockStates["verify"] = blockRunState{Status: "ok"}
 
 	nm, cmd := m.Update(key("w"))
 	m = nm.(model)
@@ -1283,6 +1285,8 @@ func TestManualWGeneratesFinalPlaybookDraft(t *testing.T) {
 	m.md = "# Troubleshoot content\n"
 	m.hadFollowup = true // diverged run → re-author path
 	m.reflow()
+	// Mark the verify block as passed so `w` saves directly (no unverified-confirm overlay).
+	m.blockStates["verify"] = blockRunState{Status: "ok"}
 
 	nm, cmd := m.Update(key("w"))
 	m = nm.(model)
@@ -1389,6 +1393,8 @@ func TestWGeneratesOnTranscript(t *testing.T) {
 	m.committed = false
 	m.hadFollowup = true // diverged run → re-author path
 	m.reflow()
+	// Mark the verify block as passed so `w` saves directly (no unverified-confirm overlay).
+	m.blockStates["verify"] = blockRunState{Status: "ok"}
 
 	nm, cmd := m.Update(key("w"))
 	m = nm.(model)
@@ -2606,5 +2612,59 @@ func TestSaveDecision_FollowupReauthors(t *testing.T) {
 	// beginFinalPlaybookGenerate sets streaming=true to signal a generation is underway
 	if !m.streaming {
 		t.Fatal("re-author path must set streaming=true")
+	}
+}
+
+// Task 6: `w` on a troubleshoot transcript without a verified run raises the
+// "save unverified" confirm overlay instead of saving immediately.
+func TestW_NotVerifiedRaisesConfirm(t *testing.T) {
+	m := model{md: "# P\n\n```bash {id=verify}\ntrue\n```\n", orch: orchWithReengage(t)}
+	m.width, m.height = 80, 24
+	m.reflow()
+	// blockStates is empty → not verified
+	nm, _ := m.Update(key("w"))
+	m = nm.(model)
+	if !m.askMode {
+		t.Fatal("w on an unverified run must raise the confirm overlay")
+	}
+}
+
+// Task 6: `w` on a verified troubleshoot transcript saves directly (no overlay).
+func TestW_VerifiedSavesDirectly(t *testing.T) {
+	m := model{md: "# P\n\n```bash {id=verify}\ntrue\n```\n", orch: orchWithReengage(t)}
+	m.width, m.height = 80, 24
+	m.blockStates = map[string]blockRunState{"verify": {Status: "ok"}}
+	m.reflow()
+	nm, _ := m.Update(key("w"))
+	m = nm.(model)
+	if m.askMode {
+		t.Fatal("w on a verified run must NOT raise the confirm overlay")
+	}
+}
+
+// Task 6: saveConfirmMsg{ok:true} drives saveDecision (a non-nil cmd is returned).
+func TestW_SaveConfirmMsgOk(t *testing.T) {
+	m := model{md: "# P\n", orch: orchWithReengage(t)}
+	m.width, m.height = 80, 24
+	m.blockStates = map[string]blockRunState{}
+	// hadFollowup=false → saveDecision takes the commit path (commitPlaybookCmd).
+	_, cmd := m.Update(saveConfirmMsg{ok: true})
+	if cmd == nil {
+		t.Fatal("saveConfirmMsg{ok:true} must invoke saveDecision and return a non-nil cmd")
+	}
+}
+
+// Task 6: saveConfirmMsg{ok:false} is a no-op (the user cancelled the confirm).
+func TestW_SaveConfirmMsgCancel(t *testing.T) {
+	m := model{md: "# P\n", orch: orchWithReengage(t)}
+	m.width, m.height = 80, 24
+	m.blockStates = map[string]blockRunState{}
+	nm, cmd := m.Update(saveConfirmMsg{ok: false})
+	m = nm.(model)
+	if cmd != nil {
+		t.Fatalf("saveConfirmMsg{ok:false} must be a no-op, got %T", cmd)
+	}
+	if m.streaming {
+		t.Error("cancelled save confirm must not start a stream")
 	}
 }

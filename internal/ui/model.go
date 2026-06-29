@@ -112,6 +112,11 @@ func (m model) flashCmd() tea.Cmd {
 // flashTickMsg clears the active flash highlight after ~140ms.
 type flashTickMsg struct{}
 
+// saveConfirmMsg is the resolution of the "save unverified run?" confirm overlay
+// raised by the `w` handler when the verify block has not passed. ok=true means
+// the user chose to save anyway; ok=false means they cancelled.
+type saveConfirmMsg struct{ ok bool }
+
 type model struct {
 	harness string
 	// title is the finalized-playbook title shown in the pager header (▓▓▓ <title>)
@@ -1061,6 +1066,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				dbg("w: manual finalize → save decision (persist clean run / re-author diverged)")
 				m.wrappedUp = true
 				m.confirmResolved = false
+				verified := m.blockStates[m.verifyBlockID()].Status == "ok"
+				if !verified {
+					// The verify block hasn't passed — warn before saving.
+					m.askMode = true
+					m.ask = input.NewAsk("ai-playbook",
+						"This playbook wasn't fully run, so we couldn't verify it works. Save this state as a new playbook anyway?",
+						"", "confirm", nil, "Save", "Cancel")
+					m.askCompletion = func(value string, submitted bool) tea.Msg {
+						return saveConfirmMsg{ok: submitted && value == "yes"}
+					}
+					return m, m.ask.Init()
+				}
 				if cmd := m.saveDecision(); cmd != nil {
 					return m, cmd
 				}
@@ -1326,6 +1343,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// status bar until the next key/click clears it. Never crashes the UI.
 		dbg("status: %s", msg.text)
 		m.status = msg.text
+		return m, nil
+	case saveConfirmMsg:
+		// Resolution of the "save unverified run?" confirm overlay (raised when the user
+		// presses `w` before the verify block has passed). ok=true → proceed with the
+		// save decision (persist or re-author); ok=false → the user cancelled, no-op.
+		if msg.ok {
+			return m, m.saveDecision()
+		}
 		return m, nil
 	case playbookCommittedMsg:
 		// The auto-finish baseline (spec §D) or a `w` re-persist completed. On success
