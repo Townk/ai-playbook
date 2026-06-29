@@ -252,8 +252,9 @@ func buildExportCmd(values map[string]string) string {
 	return b.String()
 }
 
-// shellQuote single-quotes s for POSIX shells, escaping embedded single quotes
-// ('→'\”).
+// shellQuote wraps s in single quotes for POSIX shells, replacing each embedded
+// single quote with the close-quote / escaped-quote / reopen-quote sequence, so the
+// exported value is injection-safe.
 func shellQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
