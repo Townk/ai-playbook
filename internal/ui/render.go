@@ -309,7 +309,7 @@ func (r *renderer) list(l *ast.List, indent int) {
 		if fc := item.FirstChild(); fc != nil {
 			itemText = r.inline(fc)
 		}
-		r.emitProse(marker+itemText, indent+2)
+		r.emitHanging(marker+itemText, indent+2, indent+2+lipgloss.Width(marker))
 		// Nested lists inside this item.
 		for sub := item.FirstChild(); sub != nil; sub = sub.NextSibling() {
 			if nl, ok := sub.(*ast.List); ok {
@@ -399,6 +399,23 @@ func (r *renderer) emitProse(s string, indent int) {
 	pad := strings.Repeat(" ", indent)
 	for _, ln := range strings.Split(wrapped, "\n") {
 		r.lines = append(r.lines, Line{Text: pad + ln, Wide: false})
+	}
+}
+
+// emitHanging wraps s so the FIRST line gets firstIndent leading spaces and
+// every wrapped continuation gets hangIndent (a hanging indent for list items).
+func (r *renderer) emitHanging(s string, firstIndent, hangIndent int) {
+	w := r.width - firstIndent
+	if w < 1 {
+		w = 1
+	}
+	wrapped := lipgloss.NewStyle().Width(w).Render(s)
+	for i, ln := range strings.Split(wrapped, "\n") {
+		pad := firstIndent
+		if i > 0 {
+			pad = hangIndent
+		}
+		r.lines = append(r.lines, Line{Text: strings.Repeat(" ", pad) + ln, Wide: false})
 	}
 }
 

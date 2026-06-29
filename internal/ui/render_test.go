@@ -1633,3 +1633,54 @@ func TestNormalizeFences_Repairs(t *testing.T) {
 		}
 	}
 }
+
+// renderMarkdownLines renders md at the given width and returns the lines.
+func renderMarkdownLines(t *testing.T, md string, width int) []Line {
+	t.Helper()
+	lines, _, _ := Render(md, width, nil, "")
+	return lines
+}
+
+// lineTexts strips ANSI from each line and returns a slice of plain strings.
+func lineTexts(lines []Line) []string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = strip(l.Text)
+	}
+	return out
+}
+
+// TestList_HangingIndent verifies that wrapped unordered-list items indent
+// continuation lines to align after the "• " marker, not under it.
+// Top-level list: base indent = 2 (list() uses indent+2, indent=0).
+// "• " is 2 cols wide → hangIndent = 2+2 = 4.
+func TestList_HangingIndent(t *testing.T) {
+	// a long unordered item that must wrap at width 24
+	lines := renderMarkdownLines(t, "- "+strings.Repeat("word ", 12)+"\n", 24)
+	txts := lineTexts(lines)
+	if len(txts) < 2 {
+		t.Fatalf("item did not wrap: %v", txts)
+	}
+	// continuation aligns after "• " → leading spaces == base indent (2) + width("• ")=2 → 4
+	cont := txts[1]
+	lead := len(cont) - len(strings.TrimLeft(cont, " "))
+	if lead != 4 {
+		t.Errorf("unordered continuation indent = %d, want 4 (after '• ')", lead)
+	}
+}
+
+// TestList_OrderedHangingIndent verifies that wrapped ordered-list items indent
+// continuation lines to align after the "N. " marker.
+// Top-level list: base indent = 2; "1. " is 3 cols wide → hangIndent = 2+3 = 5.
+func TestList_OrderedHangingIndent(t *testing.T) {
+	lines := renderMarkdownLines(t, "1. "+strings.Repeat("word ", 12)+"\n", 24)
+	txts := lineTexts(lines)
+	if len(txts) < 2 {
+		t.Fatalf("ordered item did not wrap: %v", txts)
+	}
+	cont := txts[1]
+	lead := len(cont) - len(strings.TrimLeft(cont, " "))
+	if lead != 5 { // indent 2 + width("1. ")=3
+		t.Errorf("ordered continuation indent = %d, want 5 (after '1. ')", lead)
+	}
+}
