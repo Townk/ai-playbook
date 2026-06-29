@@ -127,3 +127,20 @@ func TestGate_NoEnvRunsDirectly(t *testing.T) {
 		t.Fatal("no env → satisfied + run the block directly")
 	}
 }
+
+func TestTrigger_FirstRunGated(t *testing.T) {
+	m := gateModel(t) // confirmEnv non-empty, gateSatisfied=false
+	gated, _ := m.runOrGate(Button{Kind: "run", BlockID: "fix", Payload: "x"})
+	if gated.gate == nil || !gated.askMode {
+		t.Fatal("first run with env vars must open the gate, not run directly")
+	}
+}
+
+func TestTrigger_SatisfiedRunsDirectly(t *testing.T) {
+	m := gateModel(t)
+	m.gateSatisfied = true
+	direct, _ := m.runOrGate(Button{Kind: "run", BlockID: "fix", Payload: "x"})
+	if direct.gate != nil {
+		t.Fatal("once satisfied, runs must not re-open the gate")
+	}
+}

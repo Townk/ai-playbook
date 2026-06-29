@@ -88,6 +88,17 @@ func (m model) orchDriver() *driver.Driver {
 	return nil
 }
 
+// runOrGate runs block b directly, or — on the first run of an env-bearing playbook —
+// opens the confirmation gate (which runs b after the user confirms). The caller marks
+// the block running + reflows + batches the ticks as before; runOrGate returns the
+// action cmd (direct run, or the gate's dialog/defer).
+func (m model) runOrGate(b Button) (model, tea.Cmd) {
+	if !m.gateSatisfied && len(m.confirmEnv) > 0 {
+		return m.beginGate(b)
+	}
+	return m, m.emitAction(b)
+}
+
 // beginGate is the reusable entry point: if the playbook declares env vars and the
 // gate is unsatisfied, it raises the first confirm dialog and defers the block;
 // otherwise it marks satisfied and runs the block directly. Callable from the

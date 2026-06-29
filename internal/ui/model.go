@@ -768,7 +768,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if b.Kind == "run" {
 					m = m.markRunning(b.BlockID)
-					ac := m.emitAction(b)
+					var ac tea.Cmd
+					m, ac = m.runOrGate(b)
 					m.reflow()
 					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 				}
@@ -922,7 +923,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					if b.Kind == "run" {
 						m = m.markRunning(b.BlockID)
-						ac := m.emitAction(b)
+						var ac tea.Cmd
+						m, ac = m.runOrGate(b)
 						m.reflow()
 						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 					}
