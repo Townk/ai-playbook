@@ -401,3 +401,30 @@ func TestCreate_StructuredRenderAndSeam(t *testing.T) {
 		t.Fatalf("seam meta tags = %v, want [gradle]", meta.Tags)
 	}
 }
+
+// TestReengageBody_RendersCapturedPlaybook asserts that Reengage.Body is set by
+// newCreateReengage and, after a submit_playbook tool call, returns a rendered body
+// containing the submitted code. Mirrors the session-construction pattern of
+// TestCreate_StructuredRenderAndSeam; adapted to the real newCreateReengage signature.
+func TestReengageBody_RendersCapturedPlaybook(t *testing.T) {
+	minimalZDOTDIR(t)
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	if sess == nil {
+		t.Fatal("openSession returned nil (driver/tools setup failed)")
+	}
+	defer sess.close()
+	pb := playbook.Playbook{Title: "T", Sections: []playbook.Section{{Heading: "S",
+		Content: []playbook.ContentItem{{Kind: "code", Lang: "bash", ID: "fix", Code: "echo hi"}}}}}
+	raw, _ := json.Marshal(pb)
+	res, err := tools.Dial(sess.socket, tools.Call{Tool: "submit_playbook", Playbook: raw})
+	if err != nil || !res.OK {
+		t.Fatalf("submit_playbook: %+v err=%v", res, err)
+	}
+	re := newCreateReengage(capture.Request{}, triage.Decision{Disabled: true}, nil, true, sess, config.Default())
+	if re.Body == nil {
+		t.Fatal("Reengage.Body must be set")
+	}
+	if got := re.Body(); !strings.Contains(got, "echo hi") {
+		t.Fatalf("Reengage.Body did not render the captured playbook: %q", got)
+	}
+}

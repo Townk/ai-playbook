@@ -405,6 +405,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		Events:      buildReengageEvents(req, sess),
 		Cache:       c,
 		RequestJSON: requestJSON(req),
+		Body:        reengageBody(sess, req),
 		// Structured authoring folds classification into the single submit_playbook
 		// call, so the captured pb's Meta drives the saved front matter + project_bound
 		// (capturedMetaSeam, mirroring create's newCreateReengage) — NO metadata model
@@ -762,6 +763,7 @@ func reengageReady(d triage.Decision, req capture.Request, sess *session, cwd st
 		CtxHash:     d.CtxHash,
 		ReqHash:     d.ReqHash,
 		RequestJSON: requestJSON(req),
+		Body:        reengageBody(sess, req),
 		Metadata:    buildMetadataSeam(sess),
 		EnvLookup:   buildEnvLookup(sess.drv),
 		StoreDir:    storeDir,

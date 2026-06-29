@@ -294,6 +294,7 @@ func newCreateReengage(req capture.Request, d triage.Decision, c *cache.Cache, n
 		Events:      buildReengageEvents(req, sess),
 		Cache:       c,
 		RequestJSON: requestJSON(req),
+		Body:        reengageBody(sess, req),
 		Metadata:    capturedMetaSeam(sess),
 		EnvLookup:   buildEnvLookup(sharedDrv),
 		StoreDir:    cfg.GlobalStoreDir(),
@@ -303,6 +304,15 @@ func newCreateReengage(req capture.Request, d triage.Decision, c *cache.Cache, n
 		re.ReqHash = d.ReqHash
 	}
 	return re
+}
+
+// reengageBody returns a live closure that renders the currently-captured structured
+// playbook (sess.lastPB) via structuredBody, Portabilizing when project_bound. Used
+// to set Reengage.Body at all three reengage-build sites so in-viewer re-engagement
+// can show the captured playbook instead of the streamed text.
+func reengageBody(sess *session, req capture.Request) func() string {
+	home, _ := os.UserHomeDir()
+	return func() string { return structuredBody(sess, req.ProjectRoot, home, nil) }
 }
 
 // capturedMetaSeam returns the structured playbook's meta as the front-matter

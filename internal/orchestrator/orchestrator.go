@@ -170,6 +170,11 @@ type Reengage struct {
 	RequestJSON string
 	DataRoot    string
 
+	// Body, when set, renders the currently-captured structured playbook (live).
+	// Re-engagement uses it so the in-viewer stream EOF can show the re-authored
+	// playbook from the session's submit_playbook capture, not the streamed text.
+	Body func() string
+
 	// Metadata is the injected model-classification seam used by CommitPlaybook to
 	// fill the front-matter description/category/tags + per-var env rationales (spec
 	// §B). main.go wires it from author.PlaybookMetadata; tests inject a fake. It is
