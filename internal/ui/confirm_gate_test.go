@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/Townk/ai-playbook/internal/frontmatter"
 )
 
@@ -62,5 +64,66 @@ func TestBuildConfirmVars(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("buildConfirmVars = %v, want %v", got, want)
+	}
+}
+
+func gateModel(t *testing.T) model {
+	t.Helper()
+	return model{
+		confirmEnv:  map[string]frontmatter.EnvValue{"PROJECT_ROOT": {Why: "root"}, "FOO": {Why: "foo"}},
+		projectRoot: "/proj",
+	}
+}
+
+func TestGate_ConfirmRunsBlockOnce(t *testing.T) {
+	m := gateModel(t)
+	blk := Button{Kind: "run", BlockID: "fix", Payload: "echo hi"}
+	m, _ = m.beginGate(blk)
+	if !m.askMode || m.gate == nil {
+		t.Fatal("beginGate should raise a dialog and set gate")
+	}
+	// Confirm the single group (2 vars ≤5 → 1 group): answer "yes".
+	var cmd tea.Cmd
+	m, cmd = m.advanceGate("yes", true)
+	if m.gate != nil || !m.gateSatisfied {
+		t.Fatalf("after confirm the gate should clear + be satisfied (gate=%v satisfied=%v)", m.gate, m.gateSatisfied)
+	}
+	if cmd == nil {
+		t.Fatal("confirm should return a cmd (export + deferred block)")
+	}
+}
+
+func TestGate_EscReturnsToReading(t *testing.T) {
+	m := gateModel(t)
+	m, _ = m.beginGate(Button{Kind: "run", BlockID: "fix", Payload: "x"})
+	m, _ = m.advanceGate("", false) // ESC
+	if m.gate != nil || m.askMode || m.gateSatisfied {
+		t.Fatalf("ESC must clear the gate, leave it unsatisfied, exit ask mode")
+	}
+}
+
+func TestGate_CustomizeEditsValue(t *testing.T) {
+	m := gateModel(t)
+	m, _ = m.beginGate(Button{Kind: "run", BlockID: "fix", Payload: "x"})
+	m, _ = m.advanceGate("no", true) // Customize → first var line edit
+	if !m.gate.customizing {
+		t.Fatal("Customize should enter the per-var edit phase")
+	}
+	// edit FOO (first sorted var) then PROJECT_ROOT
+	m, _ = m.advanceGate("/edited/foo", true)
+	m, _ = m.advanceGate("/edited/root", true)
+	if m.gate != nil || !m.gateSatisfied {
+		t.Fatalf("after editing all vars the gate should finish")
+	}
+}
+
+func TestGate_NoEnvRunsDirectly(t *testing.T) {
+	m := model{} // empty confirmEnv
+	m, cmd := m.beginGate(Button{Kind: "run", BlockID: "fix", Payload: "x"})
+	if m.gate != nil || m.askMode {
+		t.Fatal("no env → no gate")
+	}
+	if !m.gateSatisfied || cmd == nil {
+		t.Fatal("no env → satisfied + run the block directly")
 	}
 }

@@ -1,9 +1,17 @@
 package ui
 
 import (
+	"fmt"
+	"os"
 	"sort"
+	"strings"
+	"time"
 
+	tea "charm.land/bubbletea/v2"
+
+	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/internal/input"
 )
 
 // groupSizes returns the per-dialog variable counts for n variables: ceil(n/5)
@@ -49,4 +57,187 @@ func buildConfirmVars(env map[string]frontmatter.EnvValue, projectRoot string, g
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Name < out[j].Name })
 	return out
+}
+
+// gateExportTimeout bounds the synchronous shell export of the confirmed values.
+const gateExportTimeout = 10 * time.Second
+
+// confirmGate holds the state of an in-progress pre-run variable confirmation.
+type confirmGate struct {
+	groups      [][]confirmVar    // balanced ≤5 groups
+	values      map[string]string // name → final value (seeded from current, edited by Customize)
+	gi          int               // current group index (confirm phase)
+	ci          int               // current var index within the group (customize phase)
+	customizing bool              // editing the current group's vars
+	block       Button            // the deferred block to run after the gate
+}
+
+// gateAnswerMsg is produced by the gate's askCompletion (via handleAskKey) when one
+// confirm/customize overlay resolves; the Update arm feeds it to advanceGate.
+type gateAnswerMsg struct {
+	value     string
+	submitted bool
+}
+
+// orchDriver returns the live run driver, or nil when none is attached (tests /
+// render-only / async-startup before the orchestrator lands).
+func (m model) orchDriver() *driver.Driver {
+	if m.orch != nil {
+		return m.orch.Drv
+	}
+	return nil
+}
+
+// beginGate is the reusable entry point: if the playbook declares env vars and the
+// gate is unsatisfied, it raises the first confirm dialog and defers the block;
+// otherwise it marks satisfied and runs the block directly. Callable from the
+// first-block trigger (Task 7) and, later, the assisted-run start. The variable list
+// is built from the model's confirmEnv/projectRoot and the live shell env.
+func (m model) beginGate(block Button) (model, tea.Cmd) {
+	vars := buildConfirmVars(m.confirmEnv, m.projectRoot, os.Getenv)
+	if len(vars) == 0 || m.gateSatisfied {
+		m.gateSatisfied = true
+		// No gate needed: run the block directly (still threaded through the
+		// export-then-run sequence so the returned cmd is non-nil and the path is
+		// symmetric with the confirmed-finish path; with no vars the export is a no-op).
+		return m.runGateBlock(block, nil)
+	}
+	g := &confirmGate{values: map[string]string{}, block: block}
+	for _, v := range vars {
+		g.values[v.Name] = v.Value
+	}
+	// Partition the vars into balanced ≤5 groups, one confirm dialog each.
+	i := 0
+	for _, sz := range groupSizes(len(vars)) {
+		g.groups = append(g.groups, vars[i:i+sz])
+		i += sz
+	}
+	m.gate = g
+	return m.raiseGroupConfirm()
+}
+
+// raiseGroupConfirm opens the confirm dialog for the current group (Confirm /
+// Customize), routing its result back through askCompletion as a gateAnswerMsg.
+func (m model) raiseGroupConfirm() (model, tea.Cmd) {
+	g := m.gate
+	var b strings.Builder
+	b.WriteString("Confirm these variables for this run:\n\n")
+	for _, v := range g.groups[g.gi] {
+		fmt.Fprintf(&b, "  %s = %s\n", v.Name, g.values[v.Name])
+	}
+	m.ask = input.NewAsk("Variables", b.String(), "", "confirm", nil, "Confirm", "Customize")
+	m.askMode = true
+	m.askCompletion = func(value string, submitted bool) tea.Msg {
+		return gateAnswerMsg{value: value, submitted: submitted}
+	}
+	return m, m.ask.Init()
+}
+
+// raiseVarEdit opens a prefilled single-line dialog for the current customize var.
+func (m model) raiseVarEdit() (model, tea.Cmd) {
+	g := m.gate
+	v := g.groups[g.gi][g.ci]
+	prompt := v.Name
+	if v.Why != "" {
+		prompt += " — " + v.Why
+	}
+	m.ask = input.NewAsk("Customize", prompt, g.values[v.Name], "line", nil, "", "")
+	m.askMode = true
+	m.askCompletion = func(value string, submitted bool) tea.Msg {
+		return gateAnswerMsg{value: value, submitted: submitted}
+	}
+	return m, m.ask.Init()
+}
+
+// advanceGate consumes one dialog answer and drives the state machine: ESC cancels
+// (gate stays unsatisfied, back to reading); Customize enters the per-var edit phase;
+// Confirm (or finishing a group's edits) advances to the next group or finishes.
+func (m model) advanceGate(value string, submitted bool) (model, tea.Cmd) {
+	g := m.gate
+	if g == nil {
+		return m, nil
+	}
+	m.askMode = false
+	m.ask = nil
+	m.askCompletion = nil
+	if !submitted { // ESC → cancel, return to reading, gate stays unsatisfied
+		m.gate = nil
+		return m, nil
+	}
+	if g.customizing {
+		g.values[g.groups[g.gi][g.ci].Name] = value
+		g.ci++
+		if g.ci < len(g.groups[g.gi]) {
+			return m.raiseVarEdit()
+		}
+		g.customizing = false
+		g.ci = 0
+		g.gi++
+		return m.afterGroup()
+	}
+	// confirm phase
+	if value == "no" { // Customize → edit this group's vars
+		g.customizing = true
+		g.ci = 0
+		return m.raiseVarEdit()
+	}
+	g.gi++ // Confirm → next group
+	return m.afterGroup()
+}
+
+// afterGroup advances to the next group's confirm, or finishes the gate (export the
+// final values, mark satisfied, run the deferred block).
+func (m model) afterGroup() (model, tea.Cmd) {
+	g := m.gate
+	if g.gi < len(g.groups) {
+		return m.raiseGroupConfirm()
+	}
+	block := g.block
+	values := g.values
+	m.gate = nil
+	return m.runGateBlock(block, values)
+}
+
+// runGateBlock marks the gate satisfied and returns a sequential cmd that exports the
+// confirmed values into the shell's MAIN context (so they persist) and THEN runs the
+// deferred block. tea.Sequence guarantees the synchronous export completes before the
+// block — which reads the exported vars — runs. The export func is always non-nil, so
+// the returned cmd is non-nil even when there are no vars / no orchestrator (tests).
+func (m model) runGateBlock(block Button, values map[string]string) (model, tea.Cmd) {
+	m.gateSatisfied = true
+	exportCmd := buildExportCmd(values)
+	drv := m.orchDriver()
+	return m, tea.Sequence(
+		func() tea.Msg {
+			if drv != nil && exportCmd != "" {
+				drv.RunMain(exportCmd, gateExportTimeout)
+			}
+			return nil
+		},
+		m.emitAction(block),
+	)
+}
+
+// buildExportCmd shell-quotes the final values into a single export command, sorted by
+// name for a stable, testable string. Empty values → "".
+func buildExportCmd(values map[string]string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	names := make([]string, 0, len(values))
+	for n := range values {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	var b strings.Builder
+	for _, n := range names {
+		fmt.Fprintf(&b, "export %s=%s; ", n, shellQuote(values[n]))
+	}
+	return b.String()
+}
+
+// shellQuote single-quotes s for POSIX shells, escaping embedded single quotes
+// ('→'\”).
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }

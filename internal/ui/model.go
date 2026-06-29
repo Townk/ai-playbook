@@ -319,6 +319,9 @@ type model struct {
 	confirmEnv    map[string]frontmatter.EnvValue // declared env (front matter); nil/empty → no gate
 	projectRoot   string                          // heuristic root (the PROJECT_ROOT value)
 	gateSatisfied bool                            // the gate ran (or wasn't needed) this session
+	// gate holds the in-progress pre-run confirmation state machine while the user
+	// steps through the confirm/customize overlays; nil when no gate is active.
+	gate *confirmGate
 }
 
 // AskFunc opens the request-input float with the given prompt (the floatinput Type
@@ -684,6 +687,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.renderScheduled = false
 		m.flushRender()
 		return m, nil
+	case gateAnswerMsg:
+		// One pre-run confirmation overlay resolved (delivered by handleAskKey via the
+		// gate's askCompletion). Drive the state machine: raise the next dialog, or
+		// finish (export the values + run the deferred block).
+		return m.advanceGate(msg.value, msg.submitted)
 	case orchReadyMsg:
 		// Async-startup: the background-opened orchestrator landed. Install it (and the
 		// asker, when supplied), clear the pending state, and reflow so the now-enabled
