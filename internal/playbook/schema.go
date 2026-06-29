@@ -34,6 +34,7 @@ type ContentItem struct {
 	Needs      []string `json:"needs,omitempty" jsonschema:"for kind=code: ids of earlier blocks this one depends on"`
 	Rollback   string   `json:"rollback,omitempty" jsonschema:"for kind=code: the id of the block this one rolls back"`
 	Static     bool     `json:"static,omitempty" jsonschema:"for kind=code: true if the block is non-runnable (console output / illustrative)"`
+	File       string   `json:"file,omitempty" jsonschema:"for a NEW file: the relative path; the block body is the file's full content (use a diff block to EDIT an existing file)"`
 }
 
 // Step is a single command used for the top-level verify.

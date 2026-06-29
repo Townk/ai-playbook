@@ -70,6 +70,15 @@ func TestRender_CalloutAdmonition(t *testing.T) {
 	}
 }
 
+func TestRender_FileBlock(t *testing.T) {
+	pb := Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+		{Kind: "code", Lang: "go", File: "cmd/x/main.go", ID: "new", Code: "package main\n"}}}}}
+	out := Render(pb)
+	if !strings.Contains(out, "file=cmd/x/main.go") {
+		t.Fatalf("fence missing file= tag:\n%s", out)
+	}
+}
+
 // Code items with no id get a deterministic auto id; static items get no id.
 func TestRender_AutoIDsAndStatic(t *testing.T) {
 	pb := Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{

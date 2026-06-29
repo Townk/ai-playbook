@@ -533,6 +533,10 @@ func (r *renderer) code(n ast.Node) {
 		Payload: src,
 	}
 	blk.Type = classifyType(lang, blk.Static)
+	if f := attrs["file"]; f != "" {
+		blk.File = f
+		blk.Type = "create"
+	}
 	// Synthesize a stable, position-based id for blocks that have no explicit
 	// {id=…} attribute.  We use the block's 1-based ordinal among all code
 	// blocks seen so far in this render pass so the same document always yields

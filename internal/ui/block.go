@@ -7,10 +7,11 @@ import (
 
 type Block struct {
 	ID      string
-	Type    string // "shell" | "run" | "diff" | "static"
+	Type    string // "shell" | "run" | "diff" | "static" | "create"
 	Lang    string
 	Needs   []string
 	Static  bool
+	File    string
 	Payload string
 }
 
