@@ -69,26 +69,24 @@ func TestRegenerateButtonAbsentWhenNoPathWired(t *testing.T) {
 	}
 }
 
-// Stage 2 (spec §E): the `w` key now MANUALLY FINALIZES by generating the final
-// playbook draft — an IN-PROCESS-only action (it needs Reengage). With no
 // A create-style viewer marks its already-rendered playbook a final draft
 // (finalDraft=true, not yet committed). Pressing `w` must PERSIST it via
 // CommitPlaybook — NOT re-run the final-playbook generation pass (which would reset
 // m.md and stream a second playbook in, producing a duplicate H1 + the spurious
 // "ai-playbook — agent" header the create flow regressed on).
+// reauthored=true simulates a draft that was produced by beginFinalPlaybookGenerate:
+// the confirm gate is skipped, and wFinalize delegates directly to commitPlaybookCmd.
 func TestWrapUpPersistsFinalDraftNotGenerate(t *testing.T) {
 	m, _ := newReengageModel(t, "SHOULD-NOT-BE-GENERATED")
 	m.width = 100
 	m.md = "# Restore the wrapper\n\n```bash {id=fix}\necho hi\n```\n"
 	m.finalDraft = true
 	m.committed = false
+	m.reauthored = true // the draft was generated (not an unrun proposal)
 	m.reflow()
 	before := m.md
 	nm, cmd := m.Update(tea.KeyPressMsg{Code: 'w', Text: "w"})
 	got := nm.(model)
-	if got.status != "finalizing…" {
-		t.Fatalf("w on a finalDraft should persist (status finalizing…), got %q", got.status)
-	}
 	if got.md != before {
 		t.Fatalf("persist must not reset md (generation would); md = %q", got.md)
 	}
@@ -100,15 +98,16 @@ func TestWrapUpPersistsFinalDraftNotGenerate(t *testing.T) {
 	}
 }
 
-// orchestrator wired (standalone mode), `w` is a no-op: the old wrapup emission is
-// retired (the native confirm + FinalPlaybook replaces the agent-ask wrap-up). It
-// must NOT start a thinking session and must return a nil cmd.
-func TestWrapUpKeyNoOrchIsNoOp(t *testing.T) {
+// With no orchestrator wired, `w` + hadFollowup=true reaches saveDecision → the
+// re-author path, which returns nil (beginFinalPlaybookGenerate early-return). The
+// verify block is marked ok so wFinalize skips the confirm gate and reaches saveDecision.
+func TestWReauthorNoOrchIsNoOp(t *testing.T) {
 	m := newModel("T", "# Playbook\n")
 	m.width, m.height = 80, 24
 	m.streaming = false
-	// hadFollowup=true → saveDecision takes the re-author path, which returns nil
-	// when no orch is wired (beginFinalPlaybookGenerate early-return).
+	// verify=ok so wFinalize passes the gate; hadFollowup=true → saveDecision takes
+	// the re-author path, which returns nil when no orch is wired.
+	m.blockStates = map[string]blockRunState{"verify": {Status: "ok"}}
 	m.hadFollowup = true
 	m.reflow()
 

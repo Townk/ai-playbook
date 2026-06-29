@@ -1306,15 +1306,17 @@ func TestManualWGeneratesFinalPlaybookDraft(t *testing.T) {
 }
 
 // Stage 4b (spec §D): `w` on a DIRTY final-playbook DRAFT (finalDraft && !committed)
-// re-persists it — it calls orchestrator.CommitPlaybook (save + cache-replace), shows
-// "finalizing…" while the metadata round-trip runs, and on success the
-// playbookCommittedMsg result flips committed=true and shows "✓ saved playbook → <path>".
-// It does NOT re-generate (the producer is not called and the draft is preserved).
+// re-persists it — it calls orchestrator.CommitPlaybook (save + cache-replace) and on
+// success the playbookCommittedMsg result flips committed=true and shows "✓ saved playbook
+// → <path>". It does NOT re-generate (the producer is not called and the draft is preserved).
+// reauthored=true simulates a draft produced by beginFinalPlaybookGenerate so wFinalize
+// skips the confirm gate and proceeds directly to saveDecision.
 func TestWCommitsExistingDraft(t *testing.T) {
 	m, fe := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	m.md = "# Playbook — My Setup\n\n```bash {id=verify}\nclean playbook\n```\n"
 	m.finalDraft = true
 	m.committed = false
+	m.reauthored = true // produced by beginFinalPlaybookGenerate; skips the confirm gate
 	m.reflow()
 
 	nm, cmd := m.Update(key("w"))
@@ -1322,13 +1324,9 @@ func TestWCommitsExistingDraft(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("w on a dirty draft must return the commit cmd")
 	}
-	// committed flips on the RESULT now (not optimistically at the trigger); meanwhile
-	// the transient "finalizing…" status covers the metadata round-trip.
+	// committed flips on the RESULT (not optimistically at the trigger).
 	if m.committed {
 		t.Error("w must not flip committed at the trigger — it flips on the persist result")
-	}
-	if m.status != "finalizing…" {
-		t.Errorf("w-commit must show the finalizing status, got %q", m.status)
 	}
 	// The draft must be PRESERVED (not REPLACE-reset like a generation) and not regenerated.
 	if !strings.Contains(m.md, "My Setup") {
@@ -1555,11 +1553,14 @@ func TestQuitGuardWithUncommittedDraft(t *testing.T) {
 
 // Stage 3 (spec §E): a `w` commit between the two quit presses clears the guard, so
 // a subsequent quit exits immediately (the draft is now persisted).
+// reauthored=true simulates a draft produced by beginFinalPlaybookGenerate so wFinalize
+// skips the confirm gate and proceeds directly to saveDecision.
 func TestQuitGuardClearedByCommit(t *testing.T) {
 	m, _ := newReengageEventsModel(t, "# Playbook\n", "# Playbook\nclean\n")
 	m.md = "# Playbook — draft\n\n```bash {id=verify}\nbody\n```\n"
 	m.finalDraft = true
 	m.committed = false
+	m.reauthored = true // produced by beginFinalPlaybookGenerate; skips the confirm gate
 	m.reflow()
 
 	// First quit arms the guard.
@@ -2666,5 +2667,101 @@ func TestW_SaveConfirmMsgCancel(t *testing.T) {
 	}
 	if m.streaming {
 		t.Error("cancelled save confirm must not start a stream")
+	}
+}
+
+// B3: finalDraft with hadFollowup=true (diverged run) + verify ok → `w` → wFinalize
+// passes the gate → saveDecision → beginFinalPlaybookInProc → re-authors (streaming
+// path), NOT a plain commit. hadFollowup is reset by beginFinalPlaybookGenerate.
+func TestW_DivergedReauthors(t *testing.T) {
+	m, _ := newReengageModel(t, "# Re-authored\n\n```bash {id=fix}\ntrue\n```\n")
+	m.width, m.height = 80, 24
+	m.finalDraft = true
+	m.committed = false
+	m.hadFollowup = true
+	m.blockStates = map[string]blockRunState{"verify": {Status: "ok"}}
+	m.reflow()
+
+	nm, cmd := m.Update(key("w"))
+	got := nm.(model)
+
+	// wFinalize passes the gate (verify=ok) → saveDecision → re-author path.
+	if got.hadFollowup {
+		t.Error("beginFinalPlaybookGenerate must reset hadFollowup")
+	}
+	if !got.streaming {
+		t.Error("re-author path must set streaming=true")
+	}
+	if cmd == nil {
+		t.Fatal("re-author path must return a non-nil cmd")
+	}
+}
+
+// B3: finalDraft with reauthored=false + verify NOT ok → `w` → wFinalize raises the
+// "save unverified" confirm gate (askMode=true). The user must acknowledge before saving.
+func TestW_UnrunProposalWarns(t *testing.T) {
+	m, _ := newReengageModel(t, "")
+	m.width, m.height = 80, 24
+	m.finalDraft = true
+	m.committed = false
+	m.reauthored = false // an unrun proposal
+	// blockStates empty → verify not ok
+	m.blockStates = map[string]blockRunState{}
+	m.reflow()
+
+	nm, _ := m.Update(key("w"))
+	got := nm.(model)
+
+	if !got.askMode {
+		t.Fatal("w on an unrun finalDraft proposal must raise the confirm overlay")
+	}
+}
+
+// B3: finalDraft with reauthored=true + verify NOT ok → `w` → wFinalize skips the
+// gate (reauthored=true) and goes straight to saveDecision without showing the confirm.
+func TestW_ReauthoredNoWarn(t *testing.T) {
+	m, _ := newReengageModel(t, "# Revised\n\n```bash {id=fix}\ntrue\n```\n")
+	m.width, m.height = 80, 24
+	m.finalDraft = true
+	m.committed = false
+	m.reauthored = true // produced by beginFinalPlaybookGenerate
+	// blockStates empty → verify not ok; reauthored bypasses the gate
+	m.blockStates = map[string]blockRunState{}
+	m.reflow()
+
+	nm, cmd := m.Update(key("w"))
+	got := nm.(model)
+
+	if got.askMode {
+		t.Fatal("w on a reauthored finalDraft must NOT raise the confirm overlay")
+	}
+	if cmd == nil {
+		t.Fatal("reauthored path must return a non-nil saveDecision cmd")
+	}
+}
+
+// B3: finalDraft with hadFollowup=false + verify ok → `w` → wFinalize passes the gate
+// → saveDecision → commit path (no re-author, no confirm), streaming stays false.
+func TestW_CleanProposalVerifiedPersists(t *testing.T) {
+	m, _ := newReengageModel(t, "")
+	m.width, m.height = 80, 24
+	m.finalDraft = true
+	m.committed = false
+	m.hadFollowup = false
+	m.blockStates = map[string]blockRunState{"verify": {Status: "ok"}}
+	m.md = "# P\n\n```bash {id=fix}\ntrue\n```\n"
+	m.reflow()
+
+	nm, cmd := m.Update(key("w"))
+	got := nm.(model)
+
+	if got.askMode {
+		t.Fatal("verified finalDraft must NOT raise the confirm overlay")
+	}
+	if got.streaming {
+		t.Fatal("no-followup commit path must NOT start streaming")
+	}
+	if cmd == nil {
+		t.Fatal("commit path must return a non-nil cmd")
 	}
 }

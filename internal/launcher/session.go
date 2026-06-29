@@ -463,6 +463,13 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 	return code
 }
 
+// reengageStructured reports whether a re-engagement kind authors a playbook
+// (submit_playbook) vs continuing the troubleshoot in markdown. Followup is
+// markdown continuation; FinalPlaybook + Regenerate produce a playbook.
+func reengageStructured(kind orchestrator.ReengageKind) bool {
+	return kind != orchestrator.KindReengageFollowup
+}
+
 // buildReengageEvents builds the orchestrator.EventsFunc that re-engagement
 // (regenerate/followup/finalplaybook) uses to stream the model's live reasoning +
 // tool activity, exactly like the initial authoring. It lives in main (which imports
@@ -479,14 +486,6 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 // which still streams reasoning. Returns nil so the orchestrator falls back to the
 // text Agent only if config can't be loaded — otherwise the EventsFunc is always
 // returned and the orchestrator prefers it.
-
-// reengageStructured reports whether a re-engagement kind authors a playbook
-// (submit_playbook) vs continuing the troubleshoot in markdown. Followup is
-// markdown continuation; FinalPlaybook + Regenerate produce a playbook.
-func reengageStructured(kind orchestrator.ReengageKind) bool {
-	return kind != orchestrator.KindReengageFollowup
-}
-
 func buildReengageEvents(req capture.Request, sess *session) orchestrator.EventsFunc {
 	return func(kind orchestrator.ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error) {
 		// Per-invocation mcp-config so the re-engaged agent reaches the live backend.

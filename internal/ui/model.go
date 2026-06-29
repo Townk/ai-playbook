@@ -283,6 +283,11 @@ type model struct {
 	// either by the auto-finish baseline (spec §D) or a `w` re-persist.
 	finalDraft bool
 	committed  bool
+	// reauthored is true when the finalDraft was produced by a deliberate re-author
+	// (beginFinalPlaybookGenerate) rather than arriving as an unrun proposal. Used by
+	// wFinalize to skip the "save unverified" confirm gate: a re-authored draft already
+	// incorporates the run's outcome; an unrun proposal (reauthored=false) needs the gate.
+	reauthored bool
 
 	// preFinalMd backs up the resolved troubleshoot displayed at the moment a FINAL
 	// playbook generation REPLACES it (beginFinalPlaybookGenerate sets m.md = ""). If
@@ -1041,16 +1046,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "w":
 			// `w` is the single finalize/commit action (spec §D/§E). Only when settled
 			// (not streaming). Three branches:
-			//   - a DIRTY draft (finalDraft && !committed): `w` re-persists the current
-			//     doc (orchestrator.CommitPlaybook → save + cache-replace), and the result
-			//     handler flips committed + clears the quit guard + shows the saved path.
-			//     "finalizing…" covers the (slow) metadata round-trip. This fires after an
-			//     `f` tweak; the auto-finish baseline already persisted the first cut.
 			//   - an ALREADY-SAVED draft (finalDraft && committed): no-op — the doc is
 			//     unchanged since the baseline/last `w`, so re-running the metadata call
 			//     would be wasted work (spec §D efficiency). Just confirm "✓ already saved".
-			//   - no draft (the pager holds a raw troubleshoot TRANSCRIPT): `w` generates
-			//     the final-playbook draft (which then auto-persists a baseline at EOF).
+			//   - a DIRTY draft (finalDraft && !committed): wFinalize handles the gate —
+			//     skips the confirm for re-authored drafts, warns for unrun proposals.
+			//   - no draft (the pager holds a raw troubleshoot TRANSCRIPT): wFinalize
+			//     applies the same gate, then delegates to saveDecision (persist or re-author).
 			if !m.streaming {
 				if m.finalDraft && m.committed {
 					dbg("w: draft already saved (unchanged) — no-op")
@@ -1059,28 +1061,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if m.finalDraft && !m.committed {
 					dbg("w: re-persist dirty final-playbook draft")
-					m.confirmResolved = false
-					m.status = "finalizing…"
-					return m, m.commitPlaybookCmd(m.md)
-				}
-				dbg("w: manual finalize → save decision (persist clean run / re-author diverged)")
-				m.wrappedUp = true
-				m.confirmResolved = false
-				verified := m.blockStates[m.verifyBlockID()].Status == "ok"
-				if !verified {
-					// The verify block hasn't passed — warn before saving.
-					m.askMode = true
-					m.ask = input.NewAsk("ai-playbook",
-						"This playbook wasn't fully run, so we couldn't verify it works. Save this state as a new playbook anyway?",
-						"", "confirm", nil, "Save", "Cancel")
-					m.askCompletion = func(value string, submitted bool) tea.Msg {
-						return saveConfirmMsg{ok: submitted && value == "yes"}
-					}
-					return m, m.ask.Init()
-				}
-				if cmd := m.saveDecision(); cmd != nil {
+					var cmd tea.Cmd
+					m, cmd = m.wFinalize()
 					return m, cmd
 				}
+				dbg("w: manual finalize → save decision (persist clean run / re-author diverged)")
+				var cmd tea.Cmd
+				m, cmd = m.wFinalize()
+				return m, cmd
 			}
 			return m, nil
 		case "r":
@@ -1349,6 +1337,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// presses `w` before the verify block has passed). ok=true → proceed with the
 		// save decision (persist or re-author); ok=false → the user cancelled, no-op.
 		if msg.ok {
+			m.wrappedUp = true
 			return m, m.saveDecision()
 		}
 		return m, nil
@@ -2414,6 +2403,35 @@ func (m *model) announceFollowup(attempt int) {
 	m.yOff = pin
 	m.follow = false // subsequent streamed content must NOT scroll
 	m.clampScroll()
+}
+
+// wFinalize is the shared finalisation step invoked by the `w` handler on both a
+// dirty finalDraft branch and the raw-transcript branch. It decides whether to show
+// the "save unverified" confirm gate or proceed directly to saveDecision:
+//   - Not verified AND not reauthored → the user is saving an unrun proposal; show
+//     the confirm overlay (askMode) so they acknowledge the playbook is untested.
+//   - Verified OR reauthored → the gate is satisfied; set wrappedUp and delegate to
+//     saveDecision (re-author if diverged, persist otherwise).
+//
+// wrappedUp is only set here (after the gate) and in the saveConfirmMsg{ok:true} arm,
+// never before the gate in the `w` handler itself.
+func (m model) wFinalize() (model, tea.Cmd) {
+	m.confirmResolved = false
+	verified := m.blockStates[m.verifyBlockID()].Status == "ok"
+	if !verified && !m.reauthored {
+		// First save of an unrun proposal — warn before committing.
+		m.askMode = true
+		m.ask = input.NewAsk("ai-playbook",
+			"This playbook wasn't fully run, so we couldn't verify it works. Save this state as a new playbook anyway?",
+			"", "confirm", nil, "Save", "Cancel")
+		m.askCompletion = func(value string, submitted bool) tea.Msg {
+			return saveConfirmMsg{ok: submitted && value == "yes"}
+		}
+		return m, m.ask.Init()
+	}
+	m.wrappedUp = true
+	cmd := m.saveDecision()
+	return m, cmd
 }
 
 // saveDecision finalizes the troubleshoot result: if the run diverged from the

@@ -268,6 +268,7 @@ func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
 	// Per-stream structured render: followup is a markdown APPEND — clear structured
 	// so the EOF render does NOT clobber the appended markdown with a stale bodyProvider.
 	m.structured = false
+	m.bodyProvider = nil
 	return tea.Batch(m.restartTick(), func() tea.Msg {
 		stream, activity, _, err := orch.Followup(failedOutput)
 		return reArmStreamMsg{reader: stream, activity: activity, err: err}
@@ -316,6 +317,9 @@ func (m *model) beginFinalPlaybookGenerate(base, change string) tea.Cmd {
 	// Reset hadFollowup: the playbook is being re-authored, so the doc now reflects
 	// the resolution. A subsequent follow-up would set it again if needed.
 	m.hadFollowup = false
+	// Mark this finalDraft as deliberately re-authored so wFinalize skips the
+	// "save unverified" confirm gate — the re-authoring already incorporates the run.
+	m.reauthored = true
 	// Back up the resolved troubleshoot BEFORE the REPLACE clears it: if the generation
 	// turns out to be junk (a narration, not a real playbook) the stream-EOF guard
 	// restores this so the good troubleshoot is never wiped or persisted over.

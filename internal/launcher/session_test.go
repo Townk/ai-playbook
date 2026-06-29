@@ -537,7 +537,7 @@ func TestEscalate_AuthorsStructured(t *testing.T) {
 }
 
 // TestReengageStructuredByKind asserts the AuthorOptions per kind: FinalPlaybook
-// and Regenerate author structured playbbooks (submit_playbook); Followup stays
+// and Regenerate author structured playbooks (submit_playbook); Followup stays
 // markdown (continues the troubleshoot with run/ask).
 func TestReengageStructuredByKind(t *testing.T) {
 	if !reengageStructured(orchestrator.KindReengageFinalPlaybook) {
