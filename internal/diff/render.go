@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
 )
 
 const minSideBySide = 80
@@ -90,8 +91,12 @@ func renderSideBySide(files []FileDiff, width int, highlightFn func(string, stri
 			flushRun()
 
 			for _, r := range rows {
-				leftHL := highlightFn(r.left, lang)
-				rightHL := highlightFn(r.right, lang)
+				// Truncate plain text to colWidth before highlighting so that
+				// lipgloss .Width(colWidth) only pads (never wraps) the cell.
+				leftTrunc := runewidth.Truncate(r.left, colWidth, "")
+				rightTrunc := runewidth.Truncate(r.right, colWidth, "")
+				leftHL := highlightFn(leftTrunc, lang)
+				rightHL := highlightFn(rightTrunc, lang)
 
 				var leftSty, rightSty lipgloss.Style
 				if r.leftOp == OpDel {

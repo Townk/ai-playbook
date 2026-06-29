@@ -663,7 +663,10 @@ func (o *Orchestrator) viewDiff(id, diff string) error {
 	if err != nil {
 		return err
 	}
-	selfExe, _ := os.Executable()
+	selfExe, err := os.Executable()
+	if err != nil {
+		return err
+	}
 	name := "diff:" + id
 	cwd := o.projectRoot()
 	return o.Float.SpawnFloat(mux.SpawnOptions{

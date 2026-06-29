@@ -32,3 +32,18 @@ func TestParse_MultiFileMultiHunk(t *testing.T) {
 		t.Fatalf("multi-file parse wrong: %#v", got)
 	}
 }
+
+func TestParse_BareBlankContextLine(t *testing.T) {
+	// A blank context line emitted WITHOUT a leading space (bare \n) must be
+	// preserved as Line{OpContext, ""} rather than dropped.
+	patch := "--- a/x\n+++ b/x\n@@ -1,3 +1,3 @@\n ctx\n\n more\n"
+	got := Parse(patch)
+	if len(got) == 0 || len(got[0].Hunks) == 0 {
+		t.Fatal("parse returned no hunks")
+	}
+	lines := got[0].Hunks[0].Lines
+	want := []Line{{OpContext, "ctx"}, {OpContext, ""}, {OpContext, "more"}}
+	if !reflect.DeepEqual(lines, want) {
+		t.Fatalf("bare blank context line not preserved:\ngot  %#v\nwant %#v", lines, want)
+	}
+}

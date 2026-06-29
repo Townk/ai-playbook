@@ -104,4 +104,3 @@ All ai-playbook env vars are prefixed `AI_PLAYBOOK_`.
 | `AI_PLAYBOOK_DEBUG_LOG`             | unset (off)        | Path to a debug log file; when set, diagnostics are written there. |
 | `AI_PLAYBOOK_USER_REQUEST`          | —                  | Internal: passes the request text between in-process stages. |
 | `AI_PLAYBOOK_CLAUDE_PERMISSION_MODE`| `bypassPermissions`| The headless permission posture for the Claude invocation, so the agent never blocks on an interactive prompt. |
-| `AI_PLAYBOOK_HUNK_BIN`              | `hunk` on `PATH`   | Override for the `hunk` diff viewer (falls back hunk → delta → less); used in tests. |

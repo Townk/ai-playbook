@@ -9,7 +9,9 @@ import (
 
 func TestDiffMain_RendersPatchFile(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "p.patch")
-	os.WriteFile(f, []byte("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n"), 0o644)
+	if err := os.WriteFile(f, []byte("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	// renderFile is the headless core Main wraps (Main runs the TUI; test the core).
 	out := renderFile(f, 100)
 	if !strings.Contains(out, "old") || !strings.Contains(out, "new") {

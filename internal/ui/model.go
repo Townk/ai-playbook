@@ -382,6 +382,23 @@ func isShellActionKind(kind string) bool {
 	return false
 }
 
+// activateDiffButton handles a "diff" / "view-diff" button press from either
+// dispatch site (mouse-click and keyboard-hint). No-mux: renders the in-viewer
+// overlay; mux: emits to the orchestrator for the float viewer.
+func (m model) activateDiffButton(b Button) (model, tea.Cmd) {
+	if m.asker == nil {
+		rendered := idiff.Render(idiff.Parse(b.Payload), m.width-4, highlight)
+		m.diffLines = strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+		m.diffMode = true
+		m.diffYOff = 0
+		m.diffXOff = 0
+		return m, nil
+	}
+	ac := m.emitAction(b)
+	m.reflow()
+	return m, tea.Batch(m.flashCmd(), ac)
+}
+
 func newModel(harness, md string) model {
 	return model{
 		harness:      harness,
@@ -803,19 +820,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 				}
 				if b.Kind == "diff" || b.Kind == "view-diff" {
-					// NO-MUX: open the in-viewer side-by-side diff overlay.
-					// MUX: emit to the orchestrator (float viewer, Task 4).
-					if m.asker == nil {
-						rendered := idiff.Render(idiff.Parse(b.Payload), m.width-4, highlight)
-						m.diffLines = strings.Split(rendered, "\n")
-						m.diffMode = true
-						m.diffYOff = 0
-						m.diffXOff = 0
-						return m, nil
-					}
-					ac := m.emitAction(b)
-					m.reflow()
-					return m, tea.Batch(m.flashCmd(), ac)
+					return m.activateDiffButton(b)
 				}
 				if b.Kind == "regenerate" {
 					m.flashKey = "cached:regenerate"
@@ -1010,19 +1015,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 					}
 					if b.Kind == "diff" || b.Kind == "view-diff" {
-						// NO-MUX: open the in-viewer side-by-side diff overlay.
-						// MUX: emit to the orchestrator (float viewer, Task 4).
-						if m.asker == nil {
-							rendered := idiff.Render(idiff.Parse(b.Payload), m.width-4, highlight)
-							m.diffLines = strings.Split(rendered, "\n")
-							m.diffMode = true
-							m.diffYOff = 0
-							m.diffXOff = 0
-							return m, nil
-						}
-						ac := m.emitAction(b)
-						m.reflow()
-						return m, tea.Batch(m.flashCmd(), ac)
+						return m.activateDiffButton(b)
 					}
 					if b.Kind == "regenerate" {
 						m.flashKey = "cached:regenerate"

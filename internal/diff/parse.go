@@ -28,7 +28,7 @@ func Parse(patch string) []FileDiff {
 	var files []FileDiff
 	var cur *FileDiff
 	var hunk *Hunk
-	for _, ln := range strings.Split(patch, "\n") {
+	for _, ln := range strings.Split(strings.TrimSuffix(patch, "\n"), "\n") {
 		switch {
 		case strings.HasPrefix(ln, "--- "):
 			files = append(files, FileDiff{OldPath: strings.TrimSpace(ln[4:])})
@@ -50,6 +50,9 @@ func Parse(patch string) []FileDiff {
 			hunk.Lines = append(hunk.Lines, Line{OpAdd, ln[1:]})
 		case hunk != nil && strings.HasPrefix(ln, " "):
 			hunk.Lines = append(hunk.Lines, Line{OpContext, ln[1:]})
+		case hunk != nil && ln == "":
+			// bare blank context line (no leading space) — common in agents' patches.
+			hunk.Lines = append(hunk.Lines, Line{OpContext, ""})
 		default:
 			// `\ No newline at end of file`, index lines, etc. — ignore.
 		}
