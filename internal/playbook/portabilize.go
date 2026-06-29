@@ -35,6 +35,11 @@ func Portabilize(pb *Playbook, projectRoot, home string) {
 // replacePathPrefix replaces prefix with repl wherever prefix appears as a whole path
 // component — preceded by a start/separator boundary and followed by a path boundary
 // — preserving the surrounding boundary characters. Empty prefix → no change.
+// KNOWN LIMITATION: because the leading boundary character is consumed into the match,
+// two full-prefix tokens separated by a single space with no trailing path component
+// (e.g. "echo /Users/me/Proj /Users/me/Proj") leave the second occurrence un-rewritten;
+// Go's RE2 has no lookahead, so this is an accepted trade-off (real playbook paths
+// almost always have a trailing component).
 func replacePathPrefix(s, prefix, repl string) string {
 	if prefix == "" {
 		return s

@@ -28,3 +28,13 @@ func TestPortabilize_BoundaryAndNoMangle(t *testing.T) {
 		t.Fatalf("substring must not be mangled to PROJECT_ROOT; home prefix applies: %q", got)
 	}
 }
+
+func TestPortabilize_LeavesProseUntouched(t *testing.T) {
+	pb := Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+		{Kind: "text", Text: "/Users/me/Proj/readme.md is the doc"},
+	}}}}
+	Portabilize(&pb, "/Users/me/Proj", "/Users/me")
+	if got := pb.Sections[0].Content[0].Text; got != "/Users/me/Proj/readme.md is the doc" {
+		t.Errorf("prose text must be untouched, got %q", got)
+	}
+}

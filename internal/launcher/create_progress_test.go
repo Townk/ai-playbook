@@ -342,6 +342,8 @@ func TestStructuredBody_PortabilizesProjectBound(t *testing.T) {
 	}
 	raw, _ := json.Marshal(pb)
 	_, _ = tools.Dial(sess.socket, tools.Call{Tool: "submit_playbook", Playbook: raw})
+	// The hardcoded "/proj" is intentionally the path used in the submitted playbook's code block (distinct from sess.ProjectRoot),
+	// so the portabilization is observable.
 	body := structuredBody(sess, "/proj", "/home", nil)
 	if !strings.Contains(body, "cd $PROJECT_ROOT/app") {
 		t.Fatalf("project_bound body must be portabilized: %s", body)
