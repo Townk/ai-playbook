@@ -67,7 +67,7 @@ type AskFunc func(req floatinput.Request) (floatinput.Result, error)
 
 // Deps carry what the backend needs to service tool calls: the session's live
 // shell driver (RunID for `run`), the project root (the KB key + the default
-// `remember` target), the KB data-dir root (kb.Append target; empty →
+// `remember` target), the KB data-dir root (kb.AppendTo target; empty →
 // kb.DefaultRoot, the real data dir), the cwd ask-floats open in, and the Ask
 // seam (nil → ask is unavailable).
 type Deps struct {

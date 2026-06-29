@@ -1454,7 +1454,7 @@ func TestLerpHexColorTNegative(t *testing.T) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// field_choose.go: value()/filled()/optionLineCount/renderOptionRow edge cases
+// field_choose.go: value()/filled()/renderOptionRow edge cases
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestChooseValueNoSelection(t *testing.T) {

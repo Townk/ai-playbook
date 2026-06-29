@@ -128,7 +128,7 @@ const (
 	// KindReengageFollowup builds the "your fix didn't work" prompt from the
 	// failed block's captured output.
 	KindReengageFollowup
-	// KindReengageFinalPlaybook builds the FINAL-PLAYBOOK prompt (author.FinalPlaybook):
+	// KindReengageFinalPlaybook builds the FINAL-PLAYBOOK prompt (author.FinalPlaybookPrompt):
 	// fresh when base=="" (distill the resolved troubleshoot into a clean reusable
 	// playbook), amend when base!="" (fold the change into the served base playbook).
 	KindReengageFinalPlaybook
