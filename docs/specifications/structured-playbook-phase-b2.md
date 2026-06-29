@@ -76,6 +76,22 @@ In the run path (`runcmd.go`):
   `AdaptPrompt`. **Delete** `resolveTargetDir`'s stored-`workdir` branch + the
   target-dir float/ask. Stop writing `workdir` to the front matter (`project_bound`
   replaces it); old playbooks with a `workdir` field still parse (field ignored).
+- **Pre-run variable confirmation.** Before any block runs, confirm the playbook's
+  variables with the user — `PROJECT_ROOT` (value = the computed heuristic project
+  root) plus each `meta.env` var (value = the user's live shell value, possibly
+  empty):
+  - Show a **confirm dialog** per group listing each variable's name + current value,
+    with options **confirm** / **customize**. **confirm** → proceed with those values;
+    **customize** → an input dialog per variable in the group, pre-filled with its
+    current value, for the user to edit. The (possibly edited) values are exported in
+    the driver before any block runs.
+  - **Grouping** — balanced dialogs of at most 5. Number of dialogs =
+    `ceil(TOTAL_VARS / 5)`; per-dialog size = `ceil(TOTAL_VARS / ceil(TOTAL_VARS / 5))`
+    (balanced + always ≤5 — e.g. 6 → [3,3], 12 → [4,4,4], 13 → [5,5,3]; never a lonely
+    last group). **Guard `TOTAL_VARS == 0`** (no variables → no confirmation, run
+    directly).
+  - Reuse the existing ask/input dialog surfaces (mux float / no-mux in-viewer
+    overlay).
 
 ## Removed / unchanged
 
