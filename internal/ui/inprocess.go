@@ -226,6 +226,13 @@ func (m *model) beginRegenerate() tea.Cmd {
 	m.yOff = 0
 	m.pinTop = -1
 	m.reflow()
+	// Per-stream structured render: only enter structured mode when the Body closure
+	// is set (the event path with Task-1's live capture). The text-fallback path
+	// (Body==nil) streams the playbook directly into m.md and must NOT drain the stream.
+	if m.orch != nil && m.orch.Reengage != nil && m.orch.Reengage.Body != nil {
+		m.structured = true
+		m.bodyProvider = m.orch.Reengage.Body
+	}
 	return tea.Batch(m.restartTick(), func() tea.Msg {
 		stream, activity, _, err := orch.Regenerate()
 		return reArmStreamMsg{reader: stream, activity: activity, err: err}
@@ -258,6 +265,9 @@ func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
 	// still clamp into the visible body, so the "thinking" feedback stays on screen).
 	m.follow = false
 	m.reflow()
+	// Per-stream structured render: followup is a markdown APPEND — clear structured
+	// so the EOF render does NOT clobber the appended markdown with a stale bodyProvider.
+	m.structured = false
 	return tea.Batch(m.restartTick(), func() tea.Msg {
 		stream, activity, _, err := orch.Followup(failedOutput)
 		return reArmStreamMsg{reader: stream, activity: activity, err: err}
@@ -333,6 +343,13 @@ func (m *model) beginFinalPlaybookGenerate(base, change string) tea.Cmd {
 	m.committed = false
 	m.persistOnFinish = false
 	m.reflow()
+	// Per-stream structured render: only enter structured mode when the Body closure
+	// is set (the event path with Task-1's live capture). The text-fallback path
+	// (Body==nil) streams the playbook directly into m.md and must NOT drain the stream.
+	if m.orch != nil && m.orch.Reengage != nil && m.orch.Reengage.Body != nil {
+		m.structured = true
+		m.bodyProvider = m.orch.Reengage.Body
+	}
 	return tea.Batch(m.restartTick(), func() tea.Msg {
 		stream, activity, _, err := orch.FinalPlaybook(base, change)
 		return reArmStreamMsg{reader: stream, activity: activity, err: err}

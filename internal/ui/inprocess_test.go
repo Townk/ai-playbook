@@ -181,6 +181,75 @@ func TestEmitActionNoOrchNoFifoReturnsNil(t *testing.T) {
 	}
 }
 
+// orchWithReengageBody builds a minimal *orchestrator.Orchestrator (no live driver
+// needed) with a Reengage whose Body closure returns the given function. Used by the
+// per-stream structured-render tests below; the Cmd returned by begin* is never
+// called, so the nil Drv/Mux are harmless.
+func orchWithReengageBody(body func() string) *orchestrator.Orchestrator {
+	return &orchestrator.Orchestrator{
+		Reengage: &orchestrator.Reengage{Body: body},
+	}
+}
+
+// TestRearm_StructuredFinalPlaybook: beginFinalPlaybookGenerate must set
+// m.structured=true and wire m.bodyProvider to Reengage.Body so the stream EOF
+// renders the fresh captured playbook rather than clobbering with a stale one.
+func TestRearm_StructuredFinalPlaybook(t *testing.T) {
+	want := "# Re-authored\n"
+	m := model{
+		orch:   orchWithReengageBody(func() string { return want }),
+		width:  80,
+		height: 24,
+	}
+	_ = m.beginFinalPlaybookGenerate("", "troubleshoot content")
+	if !m.structured {
+		t.Fatal("beginFinalPlaybookGenerate must set structured=true")
+	}
+	if m.bodyProvider == nil {
+		t.Fatal("beginFinalPlaybookGenerate must wire bodyProvider to Reengage.Body")
+	}
+	if got := m.bodyProvider(); got != want {
+		t.Fatalf("bodyProvider not wired to Reengage.Body: got %q want %q", got, want)
+	}
+}
+
+// TestRearm_StructuredRegenerate: beginRegenerate (orch path) must set
+// m.structured=true and wire m.bodyProvider to Reengage.Body.
+func TestRearm_StructuredRegenerate(t *testing.T) {
+	want := "# Regenerated\n"
+	m := model{
+		orch:   orchWithReengageBody(func() string { return want }),
+		width:  80,
+		height: 24,
+	}
+	_ = m.beginRegenerate()
+	if !m.structured {
+		t.Fatal("beginRegenerate must set structured=true")
+	}
+	if m.bodyProvider == nil {
+		t.Fatal("beginRegenerate must wire bodyProvider to Reengage.Body")
+	}
+	if got := m.bodyProvider(); got != want {
+		t.Fatalf("bodyProvider not wired to Reengage.Body: got %q want %q", got, want)
+	}
+}
+
+// TestRearm_FollowupNotStructured: beginFollowupInProc (the markdown APPEND path)
+// must clear m.structured so its streamed markdown is NOT clobbered at EOF by the
+// bodyProvider re-render.
+func TestRearm_FollowupNotStructured(t *testing.T) {
+	m := model{
+		structured: true,
+		orch:       orchWithReengageBody(func() string { return "x" }),
+		width:      80,
+		height:     24,
+	}
+	_ = m.beginFollowupInProc("failed output")
+	if m.structured {
+		t.Fatal("beginFollowupInProc must clear structured so its markdown is not clobbered at EOF")
+	}
+}
+
 // kindOf maps every UI kind to the orchestrator's Kind (and ErrNotImplemented for
 // deferred ones is the orchestrator's concern, exercised above).
 func TestKindOfMapping(t *testing.T) {
