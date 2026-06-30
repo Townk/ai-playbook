@@ -60,6 +60,64 @@ check comes from the patch itself (`git apply` reads it); no path threading need
 conflict markers) — "resolve manually" shows the diff and lets the user reconcile;
 a real 3-way is a possible later enhancement.
 
+**Decomposition of W1:** **W1a** (drift detection + grey-out + `[resolve manually]`) shipped
+first — it reuses existing seams and is low-risk. **W1b** (the `[regenerate]` per-block
+re-author) is the heavier chunk and follows, with the mechanism below.
+
+---
+
+## W1b — `[regenerate]` per-block re-author (mechanism, pinned 2026-06-29)
+
+Clicking `[regenerate]` on a drifted `diff` block sends the model the CURRENT target-file
+content + the stale patch, gets ONE fresh diff back, splices it into that block in place,
+and re-checks drift — WITHOUT the whole-playbook reset (`m.md` wipe + `clear(blockStates)`
++ full re-author) that the existing whole-playbook `Regenerate` does. Grounding resolved
+three forks into one coherent mechanism; the whole-playbook regenerate is unchanged.
+
+**Fork 1 — the fresh diff returns as TEXT (not structured capture).** The structured
+`submit_playbook` route is whole-playbook AND shares `sess.lastPB` with the commit-metadata
+seam — routing one diff through it would corrupt the committed playbook. Instead:
+- a new `KindReengageDriftRegen` with `reengageStructured()==false` → the model gets the
+  plain tool instruction (no `submit_playbook`) and returns the diff as TEXT;
+- a scoped `case` in `buildReengageEvents` builds the prompt from the existing
+  `(kind, base, change)` args — **`base` = current target-file content, `change` = stale
+  patch** — no `req` mutation; the prompt asks for a fresh unified diff achieving the same
+  intent against the current file;
+- a new `Orchestrator.DriftRegen(target, patch string) (string, error)` runs `re.Events` →
+  `agentstream.FanOut` → drains the reader (`fan.Body()`) → returns the one diff string.
+  No `lastPB`, no structured mode, no shared-pipeline touch.
+
+**Fork 2 — the `m.md` single-block splice by `{id=X}` tag.** A new helper finds the
+opening fence carrying `{id=X`, finds its closing ```` ``` ````, replaces the body lines
+between (keeping BOTH fence lines so tag attributes survive), leaves the rest of `m.md`
+intact, then `reflow()`. Low-risk: ids are unique per block, diff bodies contain no fences,
+and `normalizeFences` already canonicalizes. (~15-line string op; no existing helper.)
+
+**Fork 3 — per-block UX: an isolated async Cmd→msg, no pane reset.** A second drift
+tag-button `[regenerate]` (`Kind:"drift-regen"`, alongside `drift-resolve`); on click set a
+new `blockRunState.Status == "regenerating"` (spinner on JUST that block — new `case` in
+`runRegion` + the `spinTick` predicate), and fire a new async Cmd (mirroring W1a's
+`driftCheckCmds`) → `driftRegenMsg{ID, newPatch string, err error}`. The handler splices
+`m.md` (Fork 2), `reflow()`s, clears the regenerating status, and re-fires `CheckDrift` for
+that one block. It MUST NOT touch the shared streaming pipeline
+(`m.reader`/`structured`/`bodyProvider`/`streaming`/`thinking`) — it behaves like the drift
+check, NOT like `beginRegenerate`.
+
+**Behavioral decisions.**
+- **Success** (fresh diff applies clean): splice → re-check → drift clears → the normal
+  apply button returns; the user applies it as usual.
+- **Failure or still-drifted** (model errored, or the fresh diff also doesn't apply): the
+  block STAYS drifted, the drift region remains, with a brief *"regenerate didn't resolve
+  it — resolve manually"* note. No destructive fallback.
+- **Persistence:** the regenerated diff updates the viewer's in-memory `m.md` (session-local);
+  it persists to the stored playbook only if the user saves (the existing save flow / W2).
+  W1b does NOT change save behavior.
+
+**W1b risks:** the `m.md` splice string op (mitigated by unique ids + fence-free diff
+bodies + `normalizeFences`); strict isolation from the shared streaming pipeline (the new
+Cmd must drain its OWN private reader, never `m.reader`); the scoped prompt must reliably
+yield a unified diff (text path, `Structured:false`).
+
 ---
 
 ## W2 — Source edit + reload (second)
