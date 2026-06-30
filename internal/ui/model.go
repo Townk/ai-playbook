@@ -1588,12 +1588,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.progress.SetActivity("")
 			cmds = append(cmds, m.activityWaitCmd())
 		}
-		// Site 3: blockStates were cleared above; re-fire drift checks against the
-		// now-stale-but-visible diff blocks (same ids the fresh stream will reuse).
-		// When the fresh stream EOFs, site 2 fires again for the rebuilt blocks.
-		if dc := m.driftCheckCmds(); dc != nil {
-			cmds = append(cmds, dc)
-		}
+		// Drift is re-checked at stream-EOF (Site 2) once the regenerated blocks land.
 		return m, tea.Batch(cmds...)
 	}
 	return m, nil

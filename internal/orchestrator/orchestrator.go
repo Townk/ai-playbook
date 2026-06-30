@@ -766,6 +766,8 @@ func (o *Orchestrator) CheckDrift(diff string) (DriftVerdict, error) {
 	if o.Drv.Run(base+"--reverse -- "+shquote(patch), applyTimeout).Exit == 0 {
 		return DriftApplied, nil
 	}
+	// Intentional: environmental failures (git missing, not a repo, target absent)
+	// also fall through here; the viewer treats DriftDrifted as "needs attention".
 	return DriftDrifted, nil
 }
 
