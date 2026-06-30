@@ -23,6 +23,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/diff"
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/mux"
@@ -883,4 +884,36 @@ func (o *Orchestrator) undoCreate(payload string) driver.Result {
 	// failed undo can be retried (the entry is still present on an error path).
 	delete(o.createBackups, abs)
 	return driver.Result{Exit: 0}
+}
+
+// DriftRegen asks the model for a fresh unified diff for a drifted patch, against the
+// CURRENT target file, and returns it as text. It does NOT touch the structured/lastPB
+// capture path. The empty string with a nil error means the model produced nothing.
+func (o *Orchestrator) DriftRegen(patch string) (string, error) {
+	re := o.Reengage
+	if re == nil || re.Events == nil {
+		return "", errors.New("regenerate unavailable")
+	}
+	files := diff.Parse(patch)
+	if len(files) == 0 {
+		return "", errors.New("could not parse patch target")
+	}
+	rel := strings.TrimPrefix(strings.TrimPrefix(files[0].NewPath, "b/"), "a/")
+	abs := rel
+	if !filepath.IsAbs(abs) {
+		abs = filepath.Join(o.projectRoot(), rel)
+	}
+	content, err := os.ReadFile(abs)
+	if err != nil {
+		return "", err
+	}
+	events, closeFn, err := re.Events(KindReengageDriftRegen, string(content), patch)
+	if err != nil {
+		return "", err
+	}
+	reader, _, fan := agentstream.FanOut(events, closeFn, 0)
+	if _, err := io.ReadAll(reader); err != nil { // drain to EOF
+		return "", err
+	}
+	return fan.Body(), nil
 }

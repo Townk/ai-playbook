@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/frontmatter"
@@ -534,5 +535,39 @@ func TestCheckDrift_CleanAppliedDrifted(t *testing.T) {
 	}
 	if v, err := o.CheckDrift(patch); v != DriftDrifted {
 		t.Fatalf("changed target should be DriftDrifted, got %v (err=%v)", v, err)
+	}
+}
+
+// TestDriftRegen_DrainsFreshDiff verifies that DriftRegen reads the current file,
+// calls Events with KindReengageDriftRegen and the current content as base, and
+// returns the fresh diff text emitted by the stub.
+func TestDriftRegen_DrainsFreshDiff(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.txt"), []byte("current\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o := newTestOrchInDir(t, dir)
+	fresh := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-current\n+fixed\n"
+	o.Reengage = &Reengage{
+		Events: func(kind ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error) {
+			if kind != KindReengageDriftRegen {
+				t.Fatalf("wrong kind %v", kind)
+			}
+			if !strings.Contains(base, "current") {
+				t.Fatalf("base lacks current file content: %q", base)
+			}
+			ch := make(chan agentstream.Event, 1)
+			ch <- agentstream.Event{Kind: agentstream.Final, Text: fresh}
+			close(ch)
+			return ch, func() error { return nil }, nil
+		},
+	}
+	stalePatch := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-stale\n+fixed\n"
+	got, err := o.DriftRegen(stalePatch)
+	if err != nil {
+		t.Fatalf("DriftRegen returned error: %v", err)
+	}
+	if strings.TrimSpace(got) != strings.TrimSpace(fresh) {
+		t.Fatalf("DriftRegen = %q; want %q", got, fresh)
 	}
 }
