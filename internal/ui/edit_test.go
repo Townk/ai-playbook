@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // hasButton returns true if any button in btns has the given Kind.
@@ -84,6 +85,31 @@ func TestResolveEditor_Order(t *testing.T) {
 	t.Setenv("VISUAL", "code -w")
 	if got := resolveEditor(); got != "code -w" {
 		t.Fatalf("$VISUAL wins over $EDITOR, got %q", got)
+	}
+}
+
+// TestSourcePoll_ReloadsOnMtimeChange verifies that a sourcePollMsg fires a reload
+// when the source file's mtime has advanced past m.sourceMtime.
+func TestSourcePoll_ReloadsOnMtimeChange(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "p.md")
+	if err := os.WriteFile(src, []byte("# A\n\n```bash {id=one}\necho a\n```\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newTestModelFileBacked(t, src)
+	st, _ := os.Stat(src)
+	m.sourceMtime = st.ModTime()
+	// bump mtime and update content
+	future := time.Now().Add(time.Hour)
+	if err := os.Chtimes(src, future, future); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(src, []byte("# A\n\n```bash {id=one}\necho b\n```\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m2i, _ := m.Update(sourcePollMsg{})
+	if !strings.Contains(m2i.(model).md, "echo b") {
+		t.Fatal("a newer source mtime must reload")
 	}
 }
 

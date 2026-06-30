@@ -114,6 +114,18 @@ func (m model) flashCmd() tea.Cmd {
 // flashTickMsg clears the active flash highlight after ~140ms.
 type flashTickMsg struct{}
 
+// sourcePollMsg is issued by sourcePollCmd once per second while the mux editor
+// pane may be open. The handler stats sourcePath and reloads when the mtime has
+// advanced (the user saved in the editor).
+type sourcePollMsg struct{}
+
+// sourcePollCmd returns a 1-second tick that delivers a sourcePollMsg. It mirrors
+// renderTickCmd and flashCmd — a single fire, re-armed by the handler to keep
+// polling as long as the mux [edit] session is active.
+func (m model) sourcePollCmd() tea.Cmd {
+	return tea.Tick(time.Second, func(time.Time) tea.Msg { return sourcePollMsg{} })
+}
+
 // saveConfirmMsg is the resolution of the "save unverified run?" confirm overlay
 // raised by the `w` handler when the verify block has not passed. ok=true means
 // the user chose to save anyway; ok=false means they cancelled.
@@ -336,6 +348,7 @@ type model struct {
 	confirmEnv    map[string]frontmatter.EnvValue // declared env (front matter); nil/empty → no gate
 	projectRoot   string                          // heuristic root (the PROJECT_ROOT value)
 	sourcePath    string                          // on-disk .md path (non-empty → file-backed; enables [edit])
+	sourceMtime   time.Time                       // mtime of sourcePath at last read; used by the mux poll to detect saves
 	gateSatisfied bool                            // the gate ran (or wasn't needed) this session
 	// gate holds the in-progress pre-run confirmation state machine while the user
 	// steps through the confirm/customize overlays; nil when no gate is active.
@@ -930,8 +943,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						cmd := exec.Command(parts[0], args...)
 						return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return reloadMsg{Err: err} })
 					}
-					// MUX path: Task 4 will fill this in.
-					return m, nil
+					// MUX path: spawn the editor in a docked pane and start the mtime poll.
+					if m.orch != nil {
+						_ = m.orch.EditSource(resolveEditor(), m.sourcePath)
+					}
+					if st, err := os.Stat(m.sourcePath); err == nil {
+						m.sourceMtime = st.ModTime()
+					}
+					return m, m.sourcePollCmd()
 				}
 				ac := m.emitAction(b)
 				m.reflow()
@@ -1173,8 +1192,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							cmd := exec.Command(parts[0], args...)
 							return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return reloadMsg{Err: err} })
 						}
-						// MUX path: Task 4 will fill this in.
-						return m, nil
+						// MUX path: spawn the editor in a docked pane and start the mtime poll.
+						if m.orch != nil {
+							_ = m.orch.EditSource(resolveEditor(), m.sourcePath)
+						}
+						if st, err := os.Stat(m.sourcePath); err == nil {
+							m.sourceMtime = st.ModTime()
+						}
+						return m, m.sourcePollCmd()
 					}
 					ac := m.emitAction(b)
 					m.reflow()
@@ -1695,6 +1720,19 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// crashing; the user can re-open the editor if needed.
 		_ = m.reloadSource()
 		return m, nil
+	case sourcePollMsg:
+		// Mux editor poll: stat sourcePath and reload when mtime has advanced (the
+		// user saved in the docked editor pane). Re-arm unconditionally so saves at
+		// any point while the pane is open are picked up. Stop early when there's no
+		// source file (ephemeral playbook — shouldn't happen but guard anyway).
+		if m.sourcePath == "" {
+			return m, nil
+		}
+		if st, err := os.Stat(m.sourcePath); err == nil && st.ModTime().After(m.sourceMtime) {
+			m.sourceMtime = st.ModTime()
+			_ = m.reloadSource()
+		}
+		return m, m.sourcePollCmd()
 	}
 	return m, nil
 }

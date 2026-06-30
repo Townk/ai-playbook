@@ -192,6 +192,29 @@ func (f *fakeFloat) SpawnPane(mux.SpawnOptions) error       { return nil }
 func (f *fakeFloat) SpawnDocked(mux.SpawnOptions) error     { return nil }
 func (f *fakeFloat) TypeInto(string, string) error          { return nil }
 
+// fakeDockMux records SpawnDocked calls (the EditSource test double).
+type fakeDockMux struct {
+	dock func(mux.SpawnOptions) error
+}
+
+func (f *fakeDockMux) DumpScreen(string) (string, error)      { return "", nil }
+func (f *fakeDockMux) SpawnFloat(mux.SpawnOptions) error      { return nil }
+func (f *fakeDockMux) SpawnInputFloat(mux.SpawnOptions) error { return nil }
+func (f *fakeDockMux) SpawnPane(mux.SpawnOptions) error       { return nil }
+func (f *fakeDockMux) SpawnDocked(o mux.SpawnOptions) error   { return f.dock(o) }
+func (f *fakeDockMux) TypeInto(string, string) error          { return nil }
+
+// TestEditSource_SpawnsDocked asserts that EditSource spawns `editor … path`
+// via SpawnDocked (tiled, not floating).
+func TestEditSource_SpawnsDocked(t *testing.T) {
+	var got mux.SpawnOptions
+	o := &Orchestrator{Float: &fakeDockMux{dock: func(opts mux.SpawnOptions) error { got = opts; return nil }}}
+	_ = o.EditSource("nano", "/store/x.md")
+	if len(got.Cmd) < 2 || got.Cmd[0] != "nano" || got.Cmd[len(got.Cmd)-1] != "/store/x.md" {
+		t.Fatalf("EditSource must spawn `nano … /store/x.md` docked, got %v", got.Cmd)
+	}
+}
+
 // TestViewDiff_SpawnsSelfDiffSubcommand asserts that viewDiff spawns
 // `<self> diff <patch>` rather than the old external chain (hunk/delta/less).
 func TestViewDiff_SpawnsSelfDiffSubcommand(t *testing.T) {

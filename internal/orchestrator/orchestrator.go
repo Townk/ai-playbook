@@ -672,6 +672,17 @@ func (o *Orchestrator) applyDiff(diff string, reverse bool) driver.Result {
 	return o.Drv.Run(cmd, applyTimeout)
 }
 
+// EditSource opens the playbook source in a docked editor pane (mux only).
+// Guard: if Float is nil (no mux wired) this is a no-op — the no-mux path uses
+// tea.ExecProcess instead (model.go).
+func (o *Orchestrator) EditSource(editor, path string) error {
+	if o.Float == nil {
+		return nil
+	}
+	parts := append(strings.Fields(editor), path)
+	return o.Float.SpawnDocked(mux.SpawnOptions{Cmd: parts, Cwd: o.projectRoot(), Name: "edit", Floating: false})
+}
+
 // viewDiff writes the patch to a temp file and opens it in a floating viewer pane
 // (hunk → delta → less, like the broker's broker::open_diff). Fire-and-forget:
 // the float is best-effort, so a nil Float mux or a spawn error is non-fatal.
