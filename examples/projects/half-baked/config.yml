@@ -1,0 +1,12 @@
+app:
+  name: half-baked
+  version: "1.0"
+  description: A partially-complete project used for tutorial demos.
+
+server:
+  host: localhost
+  port: 8080
+
+logging:
+  level: info
+  format: json

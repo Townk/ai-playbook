@@ -1,0 +1,29 @@
+---
+name: tidy-checkup
+description: Run a quick health check on a project — build, test, and report status.
+category: maintenance
+tags:
+  - build
+  - test
+  - health
+created: 2026-06-30
+---
+
+# Tidy Checkup
+
+A quick playbook to verify that a project builds and its tests pass.
+
+## Build
+
+```bash {id=build}
+echo "Running build…"
+bash build.sh
+```
+
+## Test
+
+```bash {id=test needs=build}
+echo "Running tests…"
+bash test.sh
+echo "All checks passed."
+```
