@@ -689,7 +689,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = m.reengageStream.Close()
 				m.reengageStream = nil
 			}
-			return m, nil
+			// Site 2: diff blocks are now fully parsed (reflow ran above). Fire async
+			// drift checks so the badge appears without blocking the event loop.
+			return m, m.driftCheckCmds()
 		}
 		cmds := []tea.Cmd{readStream(m.reader, m.parser)}
 		if startedThinking {
@@ -717,13 +719,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// shell buttons re-render normally colored + live. A nil Orch (background open
 		// failed) leaves m.orch nil but still clears driverPending — the buttons stay
 		// disabled (degraded, no shell) rather than hanging.
+		// Site 1: fire async drift checks now that the orchestrator is available —
+		// the playbook may already be rendered (diff blocks present) but the orch
+		// arrived later via the async-startup path.
 		m.orch = msg.Orch
 		if msg.Asker != nil {
 			m.asker = msg.Asker
 		}
 		m.driverPending = false
 		m.reflow()
-		return m, nil
+		return m, m.driftCheckCmds()
 	case flashTickMsg:
 		m.flashKey = ""
 		m.reflow()
@@ -1438,6 +1443,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, reassertHideCursor()
 		}
 		return m, nil
+	case driftMsg:
+		// Async drift-check result: update Drifted on the block's state and reflow so
+		// the render picks up the badge (Tasks 3-4). Only DriftDrifted sets Drifted;
+		// DriftClean / DriftApplied (already-applied detection) clear it.
+		st := m.blockStates[msg.ID]
+		st.Drifted = msg.Verdict == orchestrator.DriftDrifted
+		m.blockStates[msg.ID] = st
+		m.reflow()
+		return m, nil
 	case statusMsg:
 		// Transient one-line note (e.g. a deferred in-process action). Shown in the
 		// status bar until the next key/click clears it. Never crashes the UI.
@@ -1559,6 +1573,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.activity = msg.activity
 			m.progress.SetActivity("")
 			cmds = append(cmds, m.activityWaitCmd())
+		}
+		// Site 3: blockStates were cleared above; re-fire drift checks against the
+		// now-stale-but-visible diff blocks (same ids the fresh stream will reuse).
+		// When the fresh stream EOFs, site 2 fires again for the rebuilt blocks.
+		if dc := m.driftCheckCmds(); dc != nil {
+			cmds = append(cmds, dc)
 		}
 		return m, tea.Batch(cmds...)
 	}

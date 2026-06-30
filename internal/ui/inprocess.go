@@ -93,6 +93,31 @@ func (m model) orchReadyWaitCmd() tea.Cmd {
 	}
 }
 
+// driftCheckCmds builds one async tea.Cmd per diff block in m.blocks, each
+// calling orch.CheckDrift off the event loop (never blocking render) and
+// returning a driftMsg. Returns nil when the orchestrator is not installed or
+// there are no diff blocks. Callers tea.Batch the result with existing cmds.
+func (m model) driftCheckCmds() tea.Cmd {
+	if m.orch == nil {
+		return nil
+	}
+	var cmds []tea.Cmd
+	for _, blk := range m.blocks {
+		if blk.Type != "diff" {
+			continue
+		}
+		id, patch, orch := blk.ID, blk.Payload, m.orch
+		cmds = append(cmds, func() tea.Msg {
+			v, _ := orch.CheckDrift(patch)
+			return driftMsg{ID: id, Verdict: v}
+		})
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	return tea.Batch(cmds...)
+}
+
 // kindOf maps a UI button kind string to the orchestrator's typed Kind. The
 // second result is false for kinds that have no orchestrator action (e.g.
 // "toggle", which is pager-local and never reaches emitAction in in-process use).
