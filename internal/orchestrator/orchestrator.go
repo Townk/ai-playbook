@@ -915,5 +915,25 @@ func (o *Orchestrator) DriftRegen(patch string) (string, error) {
 	if _, err := io.ReadAll(reader); err != nil { // drain to EOF
 		return "", err
 	}
-	return fan.Body(), nil
+	return stripCodeFence(fan.Body()), nil
+}
+
+// stripCodeFence removes a single wrapping ```... / ``` pair if the body is fenced
+// (the drift-regen prompt forbids fences, but models sometimes add them).
+func stripCodeFence(s string) string {
+	t := strings.TrimSpace(s)
+	if !strings.HasPrefix(t, "```") {
+		return s
+	}
+	lines := strings.Split(t, "\n")
+	if len(lines) < 2 {
+		return s
+	}
+	// drop the opening ```[lang] line
+	lines = lines[1:]
+	// drop a trailing ``` line if present
+	if strings.TrimSpace(lines[len(lines)-1]) == "```" {
+		lines = lines[:len(lines)-1]
+	}
+	return strings.Join(lines, "\n")
 }

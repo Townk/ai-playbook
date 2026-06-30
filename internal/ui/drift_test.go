@@ -105,12 +105,17 @@ func TestDriftCheckCmds_NilWhenNoDiffBlocks(t *testing.T) {
 
 // TestDriftRegenMsg_SuccessSplicesAndRechecks verifies that a successful
 // driftRegenMsg splices the fresh patch into m.md and clears the "regenerating"
-// status on the block state.
+// status on the block state, and that the re-check cmd is returned.
 func TestDriftRegenMsg_SuccessSplicesAndRechecks(t *testing.T) {
 	m := newTestModelWithDiffBlock(t, "fix") // m.md has ```diff {id=fix} ... ```
+	// Inject a non-nil orchestrator so driftCheckCmds() returns the re-check cmd.
+	m.orch = orchestrator.New(nil, &cliMux{})
 	m.blockStates["fix"] = blockRunState{Status: "regenerating", Drifted: true}
 	fresh := "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+FRESH\n"
-	m2i, _ := m.Update(driftRegenMsg{ID: "fix", NewPatch: fresh})
+	m2i, cmd := m.Update(driftRegenMsg{ID: "fix", NewPatch: fresh})
+	if cmd == nil {
+		t.Fatal("success must return the drift re-check cmd")
+	}
 	m2 := m2i.(model)
 	if m2.blockStates["fix"].Status == "regenerating" {
 		t.Fatal("regenerating status must clear")

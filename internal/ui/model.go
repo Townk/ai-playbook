@@ -855,6 +855,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m.activateDiffButton(b)
 				}
 				if b.Kind == "drift-regen" {
+					if m.orch == nil {
+						return m, nil
+					}
 					st := m.blockStates[b.BlockID]
 					st.Status = "regenerating"
 					st.RegenFailed = false
@@ -1086,6 +1089,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m.activateDiffButton(b)
 					}
 					if b.Kind == "drift-regen" {
+						if m.orch == nil {
+							return m, nil
+						}
 						st := m.blockStates[b.BlockID]
 						st.Status = "regenerating"
 						st.RegenFailed = false

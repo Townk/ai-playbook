@@ -571,3 +571,38 @@ func TestDriftRegen_DrainsFreshDiff(t *testing.T) {
 		t.Fatalf("DriftRegen = %q; want %q", got, fresh)
 	}
 }
+
+// TestDriftRegen_StripsFencedOutput verifies that DriftRegen strips a wrapping
+// ```diff ... ``` code fence from the model's output (the prompt forbids fences
+// but models sometimes add them), returning only the clean diff lines.
+func TestDriftRegen_StripsFencedOutput(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.txt"), []byte("current\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o := newTestOrchInDir(t, dir)
+	fresh := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-current\n+fixed\n"
+	fenced := "```diff\n" + fresh + "```"
+	o.Reengage = &Reengage{
+		Events: func(kind ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error) {
+			if kind != KindReengageDriftRegen {
+				t.Fatalf("wrong kind %v", kind)
+			}
+			ch := make(chan agentstream.Event, 1)
+			ch <- agentstream.Event{Kind: agentstream.Final, Text: fenced}
+			close(ch)
+			return ch, func() error { return nil }, nil
+		},
+	}
+	stalePatch := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-stale\n+fixed\n"
+	got, err := o.DriftRegen(stalePatch)
+	if err != nil {
+		t.Fatalf("DriftRegen returned error: %v", err)
+	}
+	if strings.HasPrefix(strings.TrimSpace(got), "```") || strings.HasSuffix(strings.TrimSpace(got), "```") {
+		t.Fatalf("DriftRegen must strip wrapping code fence, got %q; want %q", got, fresh)
+	}
+	if !strings.Contains(got, "--- a/x.txt") || !strings.Contains(got, "+++ b/x.txt") || !strings.Contains(got, "+fixed") {
+		t.Fatalf("DriftRegen stripped too much: got %q; want content like %q", got, fresh)
+	}
+}

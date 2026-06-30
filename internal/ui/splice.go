@@ -17,19 +17,19 @@ func replaceBlockBody(md, id, newBody string) (string, bool) {
 	if open == -1 {
 		return md, false
 	}
-	close := -1
+	closeIdx := -1
 	for i := open + 1; i < len(lines); i++ {
 		if strings.TrimSpace(lines[i]) == "```" {
-			close = i
+			closeIdx = i
 			break
 		}
 	}
-	if close == -1 {
+	if closeIdx == -1 {
 		return md, false
 	}
 	body := strings.Split(strings.TrimRight(newBody, "\n"), "\n")
 	out := append([]string{}, lines[:open+1]...)
 	out = append(out, body...)
-	out = append(out, lines[close:]...)
+	out = append(out, lines[closeIdx:]...)
 	return strings.Join(out, "\n"), true
 }
