@@ -509,6 +509,7 @@ func (m *model) body() int {
 func (m *model) reflow() {
 	m.lines, m.buttons, m.blocks = Render(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey, m.driverPending)
 	m.appendCachedButton()
+	m.appendEditButton()
 	m.appendConfirmButtons()
 	m.clampScroll()
 }
@@ -1877,14 +1878,75 @@ func (m model) regenLabel() string {
 	return ""
 }
 
+// editBadge returns the styled powerline pill string for the file-backed [edit]
+// affordance, followed by exactly 1 trailing space. The pill mirrors cachedBadge:
+// capL (U+E0B6) + body (bg=colGreen, fg=colBase: " edit ") + capR (U+E0B4) + " ".
+// Returns "" when sourcePath is empty (ephemeral playbook).
+func (m model) editBadge() string {
+	if m.sourcePath == "" {
+		return ""
+	}
+	capFg := colGreen
+	capStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(capFg))
+	bodyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(colBase)).
+		Background(lipgloss.Color(colGreen))
+	capL := capStyle.Render("\U0000E0B6")
+	body := bodyStyle.Render(" edit ")
+	capR := capStyle.Render("\U0000E0B4")
+	return capL + body + capR + " "
+}
+
+// appendEditButton adds the screen-fixed [edit] button to m.buttons when
+// sourcePath is non-empty (file-backed playbook). The badge is right-aligned on
+// the title row (screen row 1 — bodyTop()-2 in the non-cached, non-subtitle
+// layout; always 1 since the title is the second row after the leading blank).
+// Col is computed from the right edge so buttonAt (which strips the 2-col margin)
+// hits the badge area. Screen=true so buttonAt resolves it by absolute Y.
+func (m *model) appendEditButton() {
+	if m.sourcePath == "" {
+		return
+	}
+	badge := m.editBadge()
+	badgeW := lipgloss.Width(badge) - 1 // drop the trailing space for the hit target
+	if badgeW < 1 {
+		badgeW = 1
+	}
+	// Title is always screen row 1 (row 0 is the leading blank line).
+	titleRow := 1
+	// Badge starts at screen col (m.width - lipgloss.Width(badge)); subtract 2 for
+	// the left margin that buttonAt strips via col := x-2.
+	editCol := m.width - lipgloss.Width(badge) - 2
+	if editCol < 0 {
+		editCol = 0
+	}
+	m.buttons = append(m.buttons, Button{
+		Line:    titleRow,
+		Col:     editCol,
+		Width:   badgeW,
+		Kind:    "edit",
+		BlockID: "edit",
+		Screen:  true,
+	})
+}
+
 // titleLine builds the full header line string for the given available width.
-// When isCached, the powerline pill is right-aligned with exactly 1 trailing
-// space (last cell sits one column from the right edge). The pill is never
-// dropped — the title is truncated if necessary to make room. If the budget
-// for the title falls below 2 columns the pane is too narrow and the pill is
-// omitted rather than overflowing.
-func (m model) titleLine(_ int) string {
-	return "  " + m.header()
+// When the playbook is file-backed (sourcePath non-empty), the [edit] pill is
+// right-aligned on the title row with exactly 1 trailing space. The pill is
+// omitted when w < 1 (zero-width pane) rather than overflowing.
+func (m model) titleLine(w int) string {
+	title := "  " + m.header()
+	badge := m.editBadge()
+	if badge == "" || w < 1 {
+		return title
+	}
+	titleW := lipgloss.Width(title)
+	badgeW := lipgloss.Width(badge)
+	gap := w - titleW - badgeW
+	if gap < 0 {
+		gap = 0
+	}
+	return title + strings.Repeat(" ", gap) + badge
 }
 
 // cachedBadgeRow returns the header row shown directly BELOW the title (reusing
