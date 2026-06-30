@@ -213,6 +213,12 @@ func TestEditSource_SpawnsDocked(t *testing.T) {
 	if len(got.Cmd) < 2 || got.Cmd[0] != "nano" || got.Cmd[len(got.Cmd)-1] != "/store/x.md" {
 		t.Fatalf("EditSource must spawn `nano … /store/x.md` docked, got %v", got.Cmd)
 	}
+	if got.Floating {
+		t.Error("EditSource must spawn docked (Floating=false), got Floating=true")
+	}
+	if got.Name != "edit" {
+		t.Errorf("EditSource pane Name = %q, want \"edit\"", got.Name)
+	}
 }
 
 // TestViewDiff_SpawnsSelfDiffSubcommand asserts that viewDiff spawns

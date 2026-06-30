@@ -13,6 +13,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/mattn/go-runewidth"
 
 	"github.com/Townk/ai-playbook/internal/askbridge"
 	idiff "github.com/Townk/ai-playbook/internal/diff"
@@ -349,6 +350,7 @@ type model struct {
 	projectRoot   string                          // heuristic root (the PROJECT_ROOT value)
 	sourcePath    string                          // on-disk .md path (non-empty → file-backed; enables [edit])
 	sourceMtime   time.Time                       // mtime of sourcePath at last read; used by the mux poll to detect saves
+	polling       bool                            // a mtime-poll loop is already live; guards against N concurrent [edit] clicks
 	gateSatisfied bool                            // the gate ran (or wasn't needed) this session
 	// gate holds the in-progress pre-run confirmation state machine while the user
 	// steps through the confirm/customize overlays; nil when no gate is active.
@@ -395,6 +397,40 @@ func isShellActionKind(kind string) bool {
 		return true
 	}
 	return false
+}
+
+// editDispatch handles an [edit] button press from either dispatch site
+// (mouse-click and keyboard-hint). The two paths are identical, so both sites
+// call this helper to de-dup the logic.
+//
+// No-mux (m.asker == nil): suspend the TUI and open the editor inline via
+// tea.ExecProcess; reload on return.
+//
+// Mux path: spawn the editor in a docked pane via the orchestrator, capture the
+// current source mtime, and start the 1-second mtime-poll loop exactly once.
+// The poll guard (m.polling) prevents a second [edit] click from spawning a
+// second concurrent timer goroutine; the existing loop keeps running and picks
+// up any subsequent saves.
+func (m model) editDispatch() (model, tea.Cmd) {
+	// NO-MUX: suspend the TUI, open the editor, reload on return.
+	if m.asker == nil {
+		parts := strings.Fields(resolveEditor())
+		args := append(parts[1:], m.sourcePath)
+		cmd := exec.Command(parts[0], args...)
+		return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return reloadMsg{Err: err} })
+	}
+	// MUX path: spawn the editor in a docked pane and start the mtime poll.
+	if m.orch != nil {
+		_ = m.orch.EditSource(resolveEditor(), m.sourcePath)
+	}
+	if st, err := os.Stat(m.sourcePath); err == nil {
+		m.sourceMtime = st.ModTime()
+	}
+	if !m.polling {
+		m.polling = true
+		return m, m.sourcePollCmd()
+	}
+	return m, nil
 }
 
 // activateDiffButton handles a "diff" / "view-diff" button press from either
@@ -529,7 +565,7 @@ func (m *model) reflow() {
 }
 
 // reloadMsg is delivered by tea.ExecProcess after the editor exits (no-mux path)
-// or by the mux watcher poll (Task 4) to trigger a source reload.
+// to trigger a source reload.
 type reloadMsg struct{ Err error }
 
 // reloadSource re-reads sourcePath through loadPlaybookSource (identical front-matter
@@ -936,21 +972,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, m.flashCmd()
 				}
 				if b.Kind == "edit" {
-					// NO-MUX: suspend the TUI, open the editor, reload on return.
-					if m.asker == nil {
-						parts := strings.Fields(resolveEditor())
-						args := append(parts[1:], m.sourcePath)
-						cmd := exec.Command(parts[0], args...)
-						return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return reloadMsg{Err: err} })
-					}
-					// MUX path: spawn the editor in a docked pane and start the mtime poll.
-					if m.orch != nil {
-						_ = m.orch.EditSource(resolveEditor(), m.sourcePath)
-					}
-					if st, err := os.Stat(m.sourcePath); err == nil {
-						m.sourceMtime = st.ModTime()
-					}
-					return m, m.sourcePollCmd()
+					return m.editDispatch()
 				}
 				ac := m.emitAction(b)
 				m.reflow()
@@ -1185,21 +1207,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, m.flashCmd()
 					}
 					if b.Kind == "edit" {
-						// NO-MUX: suspend the TUI, open the editor, reload on return.
-						if m.asker == nil {
-							parts := strings.Fields(resolveEditor())
-							args := append(parts[1:], m.sourcePath)
-							cmd := exec.Command(parts[0], args...)
-							return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return reloadMsg{Err: err} })
-						}
-						// MUX path: spawn the editor in a docked pane and start the mtime poll.
-						if m.orch != nil {
-							_ = m.orch.EditSource(resolveEditor(), m.sourcePath)
-						}
-						if st, err := os.Stat(m.sourcePath); err == nil {
-							m.sourceMtime = st.ModTime()
-						}
-						return m, m.sourcePollCmd()
+						return m.editDispatch()
 					}
 					ac := m.emitAction(b)
 					m.reflow()
@@ -1714,10 +1722,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Drift is re-checked at stream-EOF (Site 2) once the regenerated blocks land.
 		return m, tea.Batch(cmds...)
 	case reloadMsg:
-		// Editor exited (no-mux ExecProcess callback) or mux poll fired (Task 4):
-		// re-read the source file and refresh the document. Errors are silently
-		// swallowed — the playbook keeps showing its prior content rather than
-		// crashing; the user can re-open the editor if needed.
+		// Editor exited (no-mux ExecProcess callback): re-read the source file and
+		// refresh the document. Errors are silently swallowed — the playbook keeps
+		// showing its prior content rather than crashing; the user can re-open the
+		// editor if needed.
 		_ = m.reloadSource()
 		return m, nil
 	case sourcePollMsg:
@@ -1975,6 +1983,13 @@ func (m model) regenLabel() string {
 	return ""
 }
 
+// editBadge powerline-pill styles: hoisted to package-level so they are allocated
+// once rather than on every render frame.
+var (
+	editBadgeCapStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen))
+	editBadgeBodyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colBase)).Background(lipgloss.Color(colGreen))
+)
+
 // editBadge returns the styled powerline pill string for the file-backed [edit]
 // affordance, followed by exactly 1 trailing space. The pill mirrors cachedBadge:
 // capL (U+E0B6) + body (bg=colGreen, fg=colBase: " edit ") + capR (U+E0B4) + " ".
@@ -1983,14 +1998,9 @@ func (m model) editBadge() string {
 	if m.sourcePath == "" {
 		return ""
 	}
-	capFg := colGreen
-	capStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(capFg))
-	bodyStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color(colBase)).
-		Background(lipgloss.Color(colGreen))
-	capL := capStyle.Render("\U0000E0B6")
-	body := bodyStyle.Render(" edit ")
-	capR := capStyle.Render("\U0000E0B4")
+	capL := editBadgeCapStyle.Render("\U0000E0B6")
+	body := editBadgeBodyStyle.Render(" edit ")
+	capR := editBadgeCapStyle.Render("\U0000E0B4")
 	return capL + body + capR + " "
 }
 
@@ -2010,6 +2020,8 @@ func (m *model) appendEditButton() {
 		badgeW = 1
 	}
 	// Title is always screen row 1 (row 0 is the leading blank line).
+	// NOTE: titleRow=1 assumes the non-cached ShowMain render path — the only
+	// path that sets sourcePath; cached/ephemeral playbooks never get this button.
 	titleRow := 1
 	// Badge starts at screen col (m.width - lipgloss.Width(badge)); subtract 2 for
 	// the left margin that buttonAt strips via col := x-2.
@@ -2031,6 +2043,9 @@ func (m *model) appendEditButton() {
 // When the playbook is file-backed (sourcePath non-empty), the [edit] pill is
 // right-aligned on the title row with exactly 1 trailing space. The pill is
 // omitted when w < 1 (zero-width pane) rather than overflowing.
+// When the title is too long to share the row with the badge, the title is
+// truncated (with an ellipsis) so title+badge always fits within w and the
+// badge stays at the right edge — keeping its hit-box aligned with editCol.
 func (m model) titleLine(w int) string {
 	title := "  " + m.header()
 	badge := m.editBadge()
@@ -2039,6 +2054,15 @@ func (m model) titleLine(w int) string {
 	}
 	titleW := lipgloss.Width(title)
 	badgeW := lipgloss.Width(badge)
+	if titleW+badgeW > w {
+		// Truncate title so title+badge fits within w; reserve room for the badge.
+		maxTitleW := w - badgeW
+		if maxTitleW < 1 {
+			maxTitleW = 1
+		}
+		title = runewidth.Truncate(title, maxTitleW, "…")
+		titleW = runewidth.StringWidth(title)
+	}
 	gap := w - titleW - badgeW
 	if gap < 0 {
 		gap = 0

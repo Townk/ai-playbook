@@ -88,6 +88,39 @@ func TestResolveEditor_Order(t *testing.T) {
 	}
 }
 
+// TestEditDispatch_PollGuard verifies that a second mux [edit] dispatch does NOT
+// start a second poll loop: the first call returns a non-nil sourcePollCmd and
+// sets polling=true; the second call returns nil (the running loop keeps arming).
+func TestEditDispatch_PollGuard(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "p.md")
+	if err := os.WriteFile(src, []byte("# A\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newTestModelFileBacked(t, src)
+	// Simulate mux path: set asker to a non-nil dummy so editDispatch takes the
+	// mux branch instead of the no-mux tea.ExecProcess branch.
+	m.asker = func(string) (string, bool) { return "", false }
+
+	// First dispatch: poll loop should start.
+	m2, cmd1 := m.editDispatch()
+	if !m2.polling {
+		t.Error("first editDispatch must set polling=true")
+	}
+	if cmd1 == nil {
+		t.Error("first editDispatch must return a non-nil sourcePollCmd")
+	}
+
+	// Second dispatch on the returned model: no second loop should start.
+	m3, cmd2 := m2.editDispatch()
+	if !m3.polling {
+		t.Error("polling must remain true after second editDispatch")
+	}
+	if cmd2 != nil {
+		t.Error("second editDispatch must return nil cmd (single poll loop guard)")
+	}
+}
+
 // TestSourcePoll_ReloadsOnMtimeChange verifies that a sourcePollMsg fires a reload
 // when the source file's mtime has advanced past m.sourceMtime.
 func TestSourcePoll_ReloadsOnMtimeChange(t *testing.T) {
