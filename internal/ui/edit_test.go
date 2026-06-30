@@ -1,6 +1,11 @@
 package ui
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
 
 // hasButton returns true if any button in btns has the given Kind.
 func hasButton(btns []Button, kind string) bool {
@@ -79,5 +84,31 @@ func TestResolveEditor_Order(t *testing.T) {
 	t.Setenv("VISUAL", "code -w")
 	if got := resolveEditor(); got != "code -w" {
 		t.Fatalf("$VISUAL wins over $EDITOR, got %q", got)
+	}
+}
+
+// TestReloadSource_UpdatesMdAndPreservesState verifies that reloadSource:
+//   - re-reads sourcePath and updates m.md to match the new content
+//   - does NOT clear blockStates, so transient per-block state survives the reload
+func TestReloadSource_UpdatesMdAndPreservesState(t *testing.T) {
+	dir := t.TempDir()
+	src := filepath.Join(dir, "p.md")
+	if err := os.WriteFile(src, []byte("# T\n\n```bash {id=one}\necho hi\n```\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newTestModelFileBacked(t, src)
+	m.blockStates["one"] = blockRunState{Status: "ok"} // transient state to preserve
+	// edit the source on disk
+	if err := os.WriteFile(src, []byte("# T2\n\n```bash {id=one}\necho bye\n```\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.reloadSource(); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(m.md, "echo bye") {
+		t.Fatal("m.md must reflect the edited source")
+	}
+	if m.blockStates["one"].Status != "ok" {
+		t.Fatal("transient block state must survive reload")
 	}
 }

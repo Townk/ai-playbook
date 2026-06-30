@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"regexp"
 	"strconv"
 	"strings"
@@ -514,6 +515,35 @@ func (m *model) reflow() {
 	m.clampScroll()
 }
 
+// reloadMsg is delivered by tea.ExecProcess after the editor exits (no-mux path)
+// or by the mux watcher poll (Task 4) to trigger a source reload.
+type reloadMsg struct{ Err error }
+
+// reloadSource re-reads sourcePath through loadPlaybookSource (identical front-matter
+// stripping as the initial load), refreshes m.md / m.title / m.subtitle / m.confirmEnv,
+// and calls reflow(). blockStates is NOT cleared, so per-block transient state
+// (run status, drift flags) survives when block ids are stable across the edit.
+// Returns nil immediately when sourcePath is empty (ephemeral playbook).
+func (m *model) reloadSource() error {
+	if m.sourcePath == "" {
+		return nil
+	}
+	r, title, subtitle, env, err := loadPlaybookSource(m.sourcePath)
+	if err != nil {
+		return err
+	}
+	body, err := io.ReadAll(r)
+	if err != nil {
+		return err
+	}
+	m.md = string(body)
+	m.title = title
+	m.subtitle = subtitle
+	m.confirmEnv = env
+	m.reflow()
+	return nil
+}
+
 // flushRender re-renders the accumulated stream buffer if any text is pending,
 // pinning the view to the bottom while following. No-op when nothing is dirty,
 // so it's cheap to call from the render tick and on EOF.
@@ -892,6 +922,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reflow()
 					return m, m.flashCmd()
 				}
+				if b.Kind == "edit" {
+					// NO-MUX: suspend the TUI, open the editor, reload on return.
+					if m.asker == nil {
+						parts := strings.Fields(resolveEditor())
+						args := append(parts[1:], m.sourcePath)
+						cmd := exec.Command(parts[0], args...)
+						return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return reloadMsg{Err: err} })
+					}
+					// MUX path: Task 4 will fill this in.
+					return m, nil
+				}
 				ac := m.emitAction(b)
 				m.reflow()
 				return m, tea.Batch(m.flashCmd(), ac)
@@ -1123,6 +1164,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						m.reflow()
 						return m, m.flashCmd()
+					}
+					if b.Kind == "edit" {
+						// NO-MUX: suspend the TUI, open the editor, reload on return.
+						if m.asker == nil {
+							parts := strings.Fields(resolveEditor())
+							args := append(parts[1:], m.sourcePath)
+							cmd := exec.Command(parts[0], args...)
+							return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return reloadMsg{Err: err} })
+						}
+						// MUX path: Task 4 will fill this in.
+						return m, nil
 					}
 					ac := m.emitAction(b)
 					m.reflow()
@@ -1636,6 +1688,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Drift is re-checked at stream-EOF (Site 2) once the regenerated blocks land.
 		return m, tea.Batch(cmds...)
+	case reloadMsg:
+		// Editor exited (no-mux ExecProcess callback) or mux poll fired (Task 4):
+		// re-read the source file and refresh the document. Errors are silently
+		// swallowed — the playbook keeps showing its prior content rather than
+		// crashing; the user can re-open the editor if needed.
+		_ = m.reloadSource()
+		return m, nil
 	}
 	return m, nil
 }
