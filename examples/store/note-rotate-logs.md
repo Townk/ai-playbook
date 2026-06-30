@@ -16,7 +16,7 @@ Compresses yesterday's log file and removes any logs older than 7 days.
 ## Compress yesterday's log
 
 ```bash {id=compress}
-log_file="app-$(date -v-1d +%Y-%m-%d).log"
+log_file="app-$(date -d yesterday +%F 2>/dev/null || date -v-1d +%F).log"
 if [[ -f "$log_file" ]]; then
   gzip "$log_file"
   echo "Compressed: ${log_file}.gz"

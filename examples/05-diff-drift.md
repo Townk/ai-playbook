@@ -47,4 +47,4 @@ Neither option is automatically the right one. If you know *why* the file drifte
 
 ---
 
-Chapter 06 will cover multi-step sequences that combine `file=` blocks, `diff` blocks, and `bash` commands into a single coordinated workflow.
+Chapter 06 introduces **portability** and the **env confirmation gate** — how `project_bound` anchors a playbook to a specific project root, and how the `env:` map lets you (and collaborators) confirm or override environment variables before any block runs.

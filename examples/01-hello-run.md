@@ -10,7 +10,7 @@ created: 2026-06-30
 
 Welcome to ai-playbook. This chapter covers the core affordances you will reach for constantly: running a shell block, streaming output with play, stopping a long-running command, reading static reference blocks, and spotting callout hints.
 
-Open this file with `ai-playbook view examples/01-hello-run.md` and work through each section in order. All commands run relative to `examples/` — nothing touches anything outside that directory.
+Open this file with `ai-playbook run --file examples/01-hello-run.md` and work through each section in order. All commands run relative to `examples/` — nothing touches anything outside that directory.
 
 ## Run a shell block
 

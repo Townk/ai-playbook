@@ -58,7 +58,7 @@ This means you can share a playbook with a colleague who has the project checked
 The block below seeds a small file inside the project's `data/` directory. Notice it references `$DATA_DIR` — which the confirmation gate resolved for you — rather than any absolute path.
 
 ```bash {id=seed}
-mkdir -p "$DATA_DIR" && echo seeded > "$DATA_DIR/seed.txt" && echo "wrote $DATA_DIR/seed.txt"
+echo "Project root: $PROJECT_ROOT" && mkdir -p "$DATA_DIR" && echo seeded > "$DATA_DIR/seed.txt" && echo "wrote $DATA_DIR/seed.txt"
 ```
 
 The block is idempotent: running it a second time overwrites `seed.txt` with the same content and prints the same message.

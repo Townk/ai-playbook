@@ -9,7 +9,7 @@ created: 2026-06-30
 # Fix it — authoring a playbook
 
 > [!IMPORTANT]
-> **This chapter requires a configured model backend.** Chapters 01–08 are fully offline — no model needed. Chapter 09 calls a language model to author, triage, and regenerate. Run `ai-playbook config show` and confirm a model is configured before continuing.
+> **This chapter requires a configured model backend.** Chapters 01–08 are fully offline — no model needed. Chapter 09 calls a language model to author, triage, and regenerate. Ensure `$AI_PLAYBOOK_MODEL` is set before continuing (`echo "$AI_PLAYBOOK_MODEL"` to verify).
 
 Chapters 01–08 worked with pre-authored playbooks. This chapter flips the authoring seat to you — but you do not write the playbook by hand. Instead, you point ai-playbook at a broken project, let it read the failure, and watch it draft the fix.
 
@@ -107,13 +107,13 @@ Regenerate discards the current draft entirely, feeds the model the same origina
 
 ## The cached badge
 
-Once the fix is confirmed (the verify step exits 0, or the build runs cleanly), re-running `ai-playbook create "fix the build"` from the same directory will show a **cached** badge in the viewer header:
+Once the fix is confirmed (the verify step exits 0, or the build runs cleanly), re-running `ai-playbook assist` from the same directory will show a **cached** badge in the viewer header:
 
 ```text {static}
 Fix it — authoring a playbook   [cached]
 ```
 
-The badge means ai-playbook found a previously-authored playbook for the same request in the same project and is showing you that result instead of calling the model again. Repeated invocations are fast and free. To force a fresh draft, pass `--no-cache` to the create command.
+The badge means ai-playbook found a previously-authored playbook for the same context in the same project and is showing you that result instead of calling the model again. Repeated invocations are fast and free. To force a fresh draft, set `AI_PLAYBOOK_NO_CACHE=1` before running `ai-playbook assist`.
 
 ---
 

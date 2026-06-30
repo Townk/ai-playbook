@@ -10,7 +10,7 @@ playbook from a broken project.
 ## Prerequisites
 
 - `ai-playbook` installed and on your `$PATH`
-- (ch.09 only) a configured model backend — `ai-playbook config show` to verify
+- (ch.09 only) a configured model backend — ensure `$AI_PLAYBOOK_MODEL` is set (`echo "$AI_PLAYBOOK_MODEL"` to verify)
 
 ## Safety note
 
@@ -19,10 +19,11 @@ button on a block. However:
 
 - **Shell blocks** run real commands in the project directory. The examples are idempotent and
   touch nothing outside `examples/`.
-- **Apply / create demos** (ch.03–05) modify tracked files inside `examples/projects/`. Undo
-  via the `undo` button on the block, or reset with:
+- **Apply / create / shell demos** (ch.02/03/06 create new files; ch.04/05 modify tracked files)
+  write to `examples/projects/`. Undo via the **Undo** button on the block, or reset both
+  tracked edits and created files with:
   ```
-  git restore examples/
+  git restore examples/ && git clean -fd examples/
   ```
 - The store chapter (ch.08) reads from `examples/store/` — point `$AI_PLAYBOOK_DATA_DIR`
   there to try it live.
@@ -39,7 +40,7 @@ button on a block. However:
 | 06 | [06-portable-and-env.md](06-portable-and-env.md) | project_bound · $PROJECT_ROOT · env confirm gate |
 | 07 | [07-run-modes.md](07-run-modes.md) | --assisted (confirm-each-step) · --auto · stop |
 | 08 | [08-the-store.md](08-the-store.md) | list / search / show · [edit]+reload · validate |
-| 09 | [09-fix-it.md](09-fix-it.md) | authoring: create · assist · escalate |
+| 09 | [09-fix-it.md](09-fix-it.md) | authoring: create · assist · escalate · followup · regenerate · cached |
 
 Full walkthrough: [docs/guides/tutorial.md](../docs/guides/tutorial.md)
 

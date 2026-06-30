@@ -11,6 +11,9 @@ created: 2026-06-30
 
 # Tidy Checkup
 
+> [!NOTE]
+> This fixture is intended for browsing via the store (see chapter 08: `ai-playbook show tidy-checkup`). Its blocks assume a project cwd with `build.sh` and `test.sh` present.
+
 A quick playbook to verify that a project builds and its tests pass.
 
 ## Build

@@ -65,7 +65,7 @@ Expected output:
 ai-playbook show tidy-checkup
 ```
 
-This opens `tidy-checkup` in the viewer exactly as if you had run `ai-playbook view` on the file directly. The two runnable blocks — **Build** and **Test** — are available immediately; **Test** carries `needs=build` so it stays locked until **Build** succeeds.
+This opens `tidy-checkup` in the viewer exactly as if you had run `ai-playbook run --file` on the file directly. The two runnable blocks — **Build** and **Test** — are available immediately; **Test** carries `needs=build` so it stays locked until **Build** succeeds.
 
 ### The [edit] button
 

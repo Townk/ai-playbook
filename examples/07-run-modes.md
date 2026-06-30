@@ -32,7 +32,7 @@ bash projects/tidy-shop/test.sh
 echo "tidy-shop: all checks passed at $(date +%H:%M:%S)"
 ```
 
-The three blocks are **idempotent** — running them a second time produces the same output and exit code. The `needs=` chain enforces order: `test` will not start until `build` succeeds, and `status` will not start until `test` succeeds.
+The three blocks are **idempotent** — running them a second time produces the same exit code. The `needs=` chain enforces order: `test` will not start until `build` succeeds, and `status` will not start until `test` succeeds.
 
 ---
 

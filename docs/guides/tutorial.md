@@ -8,7 +8,7 @@ Work through the chapters in order. Each one builds on what came before. By the 
 
 - `ai-playbook` installed and on your `$PATH`
 - A local clone of this repository (all examples reference files inside `examples/`)
-- **(Chapter 09 only)** a configured model backend — run `ai-playbook config show` to verify
+- **(Chapter 09 only)** a configured model backend — ensure `$AI_PLAYBOOK_MODEL` is set (`echo "$AI_PLAYBOOK_MODEL"` to verify)
 
 No model backend is needed for chapters 01–08. They are fully offline: pre-authored playbooks that exercise the viewer and the CLI without calling any AI service.
 
@@ -23,7 +23,7 @@ ai-playbook is designed to work with or without a terminal multiplexer (tmux, Ze
 A few things to keep in mind as you work through the chapters:
 
 - **Shell blocks run real commands** in the project directory (usually `examples/`). The examples are idempotent and touch nothing outside `examples/`.
-- **Apply / create demos** (chapters 03–05) write to tracked files inside `examples/projects/`. Each block has an **Undo** button. If you want a clean slate you can also run `git restore examples/` from the repo root.
+- **Apply / create / shell demos** (chapters 02/03/06 create new files; chapters 04/05 modify tracked files) write to `examples/projects/`. Each block has an **Undo** button. For a clean slate, run `git restore examples/ && git clean -fd examples/` from the repo root.
 - **The store chapter** (chapter 08) reads from `examples/store/` — point `$AI_PLAYBOOK_DATA_DIR` there before running the commands in that chapter.
 - **Chapter 09** calls a live model and writes a generated playbook to a temporary file. The generated file is not committed to the repo.
 
@@ -35,7 +35,7 @@ File: [`examples/01-hello-run.md`](../../examples/01-hello-run.md)
 
 Features: run ▶ / play ▷ / stop ■ / copy ⧉ · static blocks · callouts
 
-**Run:** `ai-playbook view examples/01-hello-run.md`
+**Run:** `ai-playbook run --file examples/01-hello-run.md`
 
 **You'll see:** A playbook titled "Hello, run" with several fenced code blocks and callout boxes. Each `bash` block shows a **▶ Run** button and a **⧉ Copy** button. Blocks with an `id=` attribute also show a **▷ Play** button.
 
@@ -43,7 +43,7 @@ Features: run ▶ / play ▷ / stop ■ / copy ⧉ · static blocks · callouts
 
 **Click:** **▷ Play** on the same block. **Notice:** Output streams line-by-line (in a mux split pane, or inline below the block without a mux) rather than appearing all at once. Play is useful for long-running commands where you want to watch progress.
 
-**Click:** **▶ Run** on the `wait` block (the five-second sleep), then immediately click **■ Stop**. **Notice:** The block shows a cancelled status and no downstream blocks dependent on it will run.
+**Click:** **▶ Run** on the `wait` block (the five-second sleep), then immediately click **■ Stop**. **Notice:** The block shows a cancelled status.
 
 **Click:** **⧉ Copy** on any block. **Notice:** The raw command is on your clipboard — paste it into a terminal to run it with custom flags, unchanged.
 
@@ -59,7 +59,7 @@ File: [`examples/02-needs-verify-rollback.md`](../../examples/02-needs-verify-ro
 
 Features: needs= · blocked notice · verify block · rollback
 
-**Run:** `ai-playbook view examples/02-needs-verify-rollback.md`
+**Run:** `ai-playbook run --file examples/02-needs-verify-rollback.md`
 
 **You'll see:** A playbook with a `prep` block, a `use` block that carries `needs=prep`, a `stage` block paired with `rollback=undo-stage`, a deliberately-failing `boom` block, and a `## Verify` section.
 
@@ -79,7 +79,7 @@ File: [`examples/03-create-a-file.md`](../../examples/03-create-a-file.md)
 
 Features: file= create / undo
 
-**Run:** `ai-playbook view examples/03-create-a-file.md`
+**Run:** `ai-playbook run --file examples/03-create-a-file.md`
 
 **You'll see:** A playbook targeting `projects/half-baked`. The `local` block carries a `file=projects/half-baked/config.local.yml` attribute — its body is the full content of the file to be written.
 
@@ -99,7 +99,7 @@ File: [`examples/04-edit-with-diff.md`](../../examples/04-edit-with-diff.md)
 
 Features: diff · view-diff · apply / undo
 
-**Run:** `ai-playbook view examples/04-edit-with-diff.md`
+**Run:** `ai-playbook run --file examples/04-edit-with-diff.md`
 
 **You'll see:** A playbook with a `diff` block targeting `projects/half-baked/config.yml`. The patch bumps the version field from `"1.0"` to `"2.0"`.
 
@@ -121,7 +121,7 @@ File: [`examples/05-diff-drift.md`](../../examples/05-diff-drift.md)
 
 Features: drift region · resolve manually · regenerate
 
-**Run:** `ai-playbook view examples/05-diff-drift.md`
+**Run:** `ai-playbook run --file examples/05-diff-drift.md`
 
 **You'll see:** A playbook with a `diff` block targeting `projects/drifted/settings.conf`. The patch was authored against an older version of the file; the file on disk has since been edited, so the patch context no longer matches.
 
@@ -142,7 +142,7 @@ File: [`examples/06-portable-and-env.md`](../../examples/06-portable-and-env.md)
 
 Features: project_bound · $PROJECT_ROOT · env declaration · confirmation gate
 
-**Run:** `ai-playbook view examples/06-portable-and-env.md`
+**Run:** `ai-playbook run --file examples/06-portable-and-env.md`
 
 **You'll see:** A playbook with `project_bound: true` and a `project_root:` key in its front matter. The `env:` map declares `PROJECT_ROOT` and `DATA_DIR`, each with a `value` and a `why` explanation.
 
@@ -166,7 +166,7 @@ Features: --assisted (confirm-each-step) · --auto · stop ⏳
 > [!NOTE]
 > The `--assisted` and `--auto` flags are marked ⏳ — they are documented here as if shipped, and will be verified once the feature lands. The interactive viewer blocks in this chapter work today.
 
-**Run:** `ai-playbook view examples/07-run-modes.md`
+**Run:** `ai-playbook run --file examples/07-run-modes.md`
 
 **You'll see:** Three chained blocks (`build → test → status`) you can run interactively, followed by prose explaining three non-interactive invocation modes.
 
@@ -220,7 +220,7 @@ File: [`examples/09-fix-it.md`](../../examples/09-fix-it.md)
 Features: create · assist (triage: command / answer / escalate) · followup ("try another fix") · regenerate · cached badge
 
 > [!IMPORTANT]
-> This chapter requires a configured model backend. Run `ai-playbook config show` to verify before starting.
+> This chapter requires a configured model backend. Ensure `$AI_PLAYBOOK_MODEL` is set before starting (`echo "$AI_PLAYBOOK_MODEL"` to verify).
 
 **Setup:** Open a terminal in the repo root.
 
@@ -248,7 +248,7 @@ bash build.sh
 
 **If the whole draft is off:** Click **[Regenerate ↺]** in the viewer header. **Notice:** The current draft is discarded; the model produces a fresh playbook using the same original context plus any new scrollback from your attempts.
 
-**Re-run:** Once the fix is confirmed, exit the viewer and run `ai-playbook create "fix the build"` again from the same directory. **Notice:** The viewer header shows a **[cached]** badge — ai-playbook found the previously-authored playbook and returned it without calling the model. Pass `--no-cache` to force a fresh draft.
+**Re-run:** Once the fix is confirmed, exit the viewer and run `ai-playbook assist` again from the same directory. **Notice:** The viewer header shows a **[cached]** badge — ai-playbook found the previously-authored playbook and returned it without calling the model. Set `AI_PLAYBOOK_NO_CACHE=1` to force a fresh draft.
 
 ---
 

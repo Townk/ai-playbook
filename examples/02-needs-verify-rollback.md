@@ -59,6 +59,9 @@ You would not normally click `undo-stage` by hand — it runs automatically when
 exit 1
 ```
 
+> [!CAUTION]
+> The `boom` block is **designed to fail**. Running it will trigger the rollback chain and undo what `stage` put in place. Do not run `boom` in a real workflow where `stage` has made changes you want to keep.
+
 Run `stage` first (it creates the marker), then run `boom`. Because `boom` exits 1, ai-playbook fires the rollback chain in reverse: `undo-stage` runs and the stage marker disappears.
 
 > [!WARNING]
