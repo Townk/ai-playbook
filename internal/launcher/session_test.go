@@ -570,3 +570,11 @@ func TestReengageStructuredByKind(t *testing.T) {
 		t.Error("followup must stay markdown")
 	}
 }
+
+// TestReengageStructured_DriftRegenIsText asserts that the drift-regen kind is
+// non-structured: the model returns a raw unified diff (text), not submit_playbook.
+func TestReengageStructured_DriftRegenIsText(t *testing.T) {
+	if reengageStructured(orchestrator.KindReengageDriftRegen) {
+		t.Fatal("KindReengageDriftRegen must be NON-structured (text diff back)")
+	}
+}

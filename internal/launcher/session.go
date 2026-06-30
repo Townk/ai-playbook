@@ -489,8 +489,9 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 // reengageStructured reports whether a re-engagement kind authors a playbook
 // (submit_playbook) vs continuing the troubleshoot in markdown. Followup is
 // markdown continuation; FinalPlaybook + Regenerate produce a playbook.
+// DriftRegen returns a raw unified diff (text), not a structured playbook.
 func reengageStructured(kind orchestrator.ReengageKind) bool {
-	return kind != orchestrator.KindReengageFollowup
+	return kind != orchestrator.KindReengageFollowup && kind != orchestrator.KindReengageDriftRegen
 }
 
 // buildReengageEvents builds the orchestrator.EventsFunc that re-engagement
@@ -526,6 +527,8 @@ func buildReengageEvents(req capture.Request, sess *session) orchestrator.Events
 			// content to distill), amend when base!="" (fold change into the base).
 			sys = author.FinalPlaybookPrompt(req, base, change)
 			user = author.BuildUserMessage(req)
+		case orchestrator.KindReengageDriftRegen:
+			sys, user = author.DriftRegenPrompt(base, change) // base=current file, change=stale patch
 		default: // KindReengageRegenerate → the standard authoring prompt + folded KB
 			sys = author.SystemPrompt(req, author.KnowledgeBase(kb.Load(req.ProjectRoot)), driver.ResolveShellName(cfg.Driver.Shell))
 			user = author.BuildUserMessage(req)

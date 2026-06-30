@@ -144,6 +144,9 @@ const (
 	// fresh when base=="" (distill the resolved troubleshoot into a clean reusable
 	// playbook), amend when base!="" (fold the change into the served base playbook).
 	KindReengageFinalPlaybook
+	// KindReengageDriftRegen re-authors ONE drifted diff block against the current
+	// target file; non-structured, returns a unified diff as text (no submit_playbook).
+	KindReengageDriftRegen
 )
 
 // EventsFunc is the injected event producer for re-engagement: per kind it builds
