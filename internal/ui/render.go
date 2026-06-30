@@ -226,6 +226,11 @@ func (r *renderer) buttonGlyph(blockID, kind, glyph, fgColor string, bg lipgloss
 		// the flash pulse. Same glyph/cell, so the position never moves when it enables.
 		return bg.Foreground(lipgloss.Color(colOverlay0)).Render(glyph)
 	}
+	if r.states[blockID].Drifted && (kind == "apply-diff" || kind == "diff") {
+		// Drift: the patch no longer applies cleanly. Dim the action buttons to signal
+		// they are inert; the drift-region button (Task 4) is the live re-apply path.
+		return bg.Foreground(lipgloss.Color(colOverlay0)).Render(glyph)
+	}
 	key := blockID + ":" + kind
 	if r.flashKey != "" && r.flashKey == key {
 		// Flash feedback WITHOUT a background. A background applied to the glyph cell

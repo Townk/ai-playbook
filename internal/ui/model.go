@@ -804,6 +804,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reflow()
 					return m, tea.Batch(m.flashCmd(), ac)
 				}
+				// Drifted diff block: apply/view-diff buttons are inert; swallow the click.
+				if (b.Kind == "apply-diff" || b.Kind == "diff" || b.Kind == "view-diff") && m.blockStates[b.BlockID].Drifted {
+					return m, nil
+				}
 				if b.Kind == "apply-diff" {
 					st := m.blockStates[b.BlockID]
 					st.Status = "running"
@@ -1018,6 +1022,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						ac := m.emitAction(b)
 						m.reflow()
 						return m, tea.Batch(m.flashCmd(), ac)
+					}
+					// Drifted diff block: apply/view-diff buttons are inert; swallow the key.
+					if (b.Kind == "apply-diff" || b.Kind == "diff" || b.Kind == "view-diff") && m.blockStates[b.BlockID].Drifted {
+						return m, nil
 					}
 					if b.Kind == "apply-diff" {
 						st := m.blockStates[b.BlockID]

@@ -1734,3 +1734,29 @@ func TestCreateBlock_TabAndButton(t *testing.T) {
 		t.Fatalf("create tab must contain file path, got:\n%s", text)
 	}
 }
+
+// TestDriftedDiff_GreysApplyAndViewDiff verifies that buttonGlyph dims the
+// diff (view) and apply-diff glyphs to colOverlay0 when the block is Drifted,
+// and leaves non-drifted blocks with their normal colors.
+func TestDriftedDiff_GreysApplyAndViewDiff(t *testing.T) {
+	r := &renderer{states: map[string]blockRunState{"fix": {Drifted: true}}}
+	bg := lipgloss.NewStyle()
+	wantDim := bg.Foreground(lipgloss.Color(colOverlay0))
+
+	// diff (view) glyph: normal color is colBlue, drifted → colOverlay0
+	gotDiff := r.buttonGlyph("fix", "diff", glyphViewDiff, colBlue, bg)
+	if gotDiff != wantDim.Render(glyphViewDiff) {
+		t.Fatalf("drifted diff button should be dimmed:\n got  %q\n want %q", gotDiff, wantDim.Render(glyphViewDiff))
+	}
+	// apply-diff glyph: normal color is colGreen, drifted → colOverlay0
+	gotApply := r.buttonGlyph("fix", "apply-diff", glyphApply, colGreen, bg)
+	if gotApply != wantDim.Render(glyphApply) {
+		t.Fatalf("drifted apply-diff button should be dimmed:\n got  %q\n want %q", gotApply, wantDim.Render(glyphApply))
+	}
+	// non-drifted block: the diff glyph must NOT be dimmed
+	rNormal := &renderer{states: map[string]blockRunState{"fix": {Drifted: false}}}
+	gotNormal := rNormal.buttonGlyph("fix", "diff", glyphViewDiff, colBlue, bg)
+	if gotNormal == wantDim.Render(glyphViewDiff) {
+		t.Fatal("non-drifted diff button must NOT be dimmed")
+	}
+}
