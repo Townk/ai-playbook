@@ -495,3 +495,44 @@ func TestCommitPlaybook_NoStoreDir_FallsBackToDataRoot(t *testing.T) {
 		t.Errorf("CommitPlaybook path = %q, want prefix %q", path, wantPrefix)
 	}
 }
+
+// TestCheckDrift_CleanAppliedDrifted verifies the three DriftVerdict states:
+// DriftClean (patch not yet applied), DriftApplied (already applied), and
+// DriftDrifted (target changed incompatibly).
+func TestCheckDrift_CleanAppliedDrifted(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	o := newTestOrchInDir(t, dir)
+	sh(t, dir, "git init -q && git config user.email t@t && git config user.name t")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sh(t, dir, "git add f.txt && git commit -qm init")
+
+	patch := "--- a/f.txt\n+++ b/f.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
+
+	// Fresh repo: patch should apply forward → DriftClean.
+	if v, err := o.CheckDrift(patch); v != DriftClean {
+		t.Fatalf("fresh patch should be DriftClean, got %v (err=%v)", v, err)
+	}
+
+	// Apply the patch so the file is at the post-patch state.
+	if r, err := o.Do(Action{Kind: KindApplyDiff, Payload: patch}); err != nil || r.Exit != 0 {
+		t.Fatalf("o.Do(ApplyDiff) failed: exit=%d err=%v stderr=%q", r.Exit, err, r.Err)
+	}
+
+	// Patch already applied → reverse should succeed → DriftApplied.
+	if v, err := o.CheckDrift(patch); v != DriftApplied {
+		t.Fatalf("applied patch should be DriftApplied, got %v (err=%v)", v, err)
+	}
+
+	// Overwrite the file with incompatible content → neither direction applies → DriftDrifted.
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("totally\ndifferent\ncontent\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if v, err := o.CheckDrift(patch); v != DriftDrifted {
+		t.Fatalf("changed target should be DriftDrifted, got %v (err=%v)", v, err)
+	}
+}

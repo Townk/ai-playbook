@@ -741,6 +741,34 @@ func shquote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
+// DriftVerdict classifies the relationship between a unified diff and its target
+// as determined by git apply --check (forward then reverse).
+type DriftVerdict int
+
+const (
+	DriftClean   DriftVerdict = iota // patch applies forward — target is at pre-patch state
+	DriftApplied                     // patch reverse-applies — already applied to target
+	DriftDrifted                     // neither applies — target changed incompatibly
+)
+
+// CheckDrift classifies whether diff still applies to its target. It never mutates
+// the working tree (git apply --check).
+func (o *Orchestrator) CheckDrift(diff string) (DriftVerdict, error) {
+	patch, err := writePatch(diff)
+	if err != nil {
+		return DriftDrifted, err
+	}
+	defer os.Remove(patch)
+	base := "git apply --check --recount --ignore-whitespace "
+	if o.Drv.Run(base+"-- "+shquote(patch), applyTimeout).Exit == 0 {
+		return DriftClean, nil
+	}
+	if o.Drv.Run(base+"--reverse -- "+shquote(patch), applyTimeout).Exit == 0 {
+		return DriftApplied, nil
+	}
+	return DriftDrifted, nil
+}
+
 // fileAction is the JSON payload shared by KindCreateFile / KindUndoCreate.
 type fileAction struct {
 	Path string `json:"path"`
