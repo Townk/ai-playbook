@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	"github.com/Townk/ai-playbook/internal/orchestrator"
@@ -98,5 +100,35 @@ func TestDriftCheckCmds_NilWhenNoDiffBlocks(t *testing.T) {
 
 	if cmd := m.driftCheckCmds(); cmd != nil {
 		t.Fatal("driftCheckCmds must return nil when no diff blocks exist")
+	}
+}
+
+// TestDriftRegenMsg_SuccessSplicesAndRechecks verifies that a successful
+// driftRegenMsg splices the fresh patch into m.md and clears the "regenerating"
+// status on the block state.
+func TestDriftRegenMsg_SuccessSplicesAndRechecks(t *testing.T) {
+	m := newTestModelWithDiffBlock(t, "fix") // m.md has ```diff {id=fix} ... ```
+	m.blockStates["fix"] = blockRunState{Status: "regenerating", Drifted: true}
+	fresh := "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+FRESH\n"
+	m2i, _ := m.Update(driftRegenMsg{ID: "fix", NewPatch: fresh})
+	m2 := m2i.(model)
+	if m2.blockStates["fix"].Status == "regenerating" {
+		t.Fatal("regenerating status must clear")
+	}
+	if !strings.Contains(m2.md, "+FRESH") {
+		t.Fatal("m.md must carry the spliced patch")
+	}
+}
+
+// TestDriftRegenMsg_FailureStaysDrifted verifies that an errored driftRegenMsg
+// keeps Drifted=true, sets RegenFailed=true, and clears the "regenerating" status.
+func TestDriftRegenMsg_FailureStaysDrifted(t *testing.T) {
+	m := newTestModelWithDiffBlock(t, "fix")
+	m.blockStates["fix"] = blockRunState{Status: "regenerating", Drifted: true}
+	m2i, _ := m.Update(driftRegenMsg{ID: "fix", Err: errors.New("boom")})
+	m2 := m2i.(model)
+	st := m2.blockStates["fix"]
+	if !st.Drifted || !st.RegenFailed || st.Status == "regenerating" {
+		t.Fatalf("failure must stay drifted + set RegenFailed + clear status, got %+v", st)
 	}
 }

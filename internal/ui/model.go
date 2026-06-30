@@ -1484,6 +1484,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.blockStates[msg.ID] = st
 		m.reflow()
 		return m, nil
+	case driftRegenMsg:
+		// Async DriftRegen result: clear the "regenerating" spinner status, then either
+		// splice the fresh patch into m.md and re-check drift (success path), or keep the
+		// block Drifted and set RegenFailed so the drift region shows the alternate note
+		// (failure path). Never touches m.reader/structured/bodyProvider/streaming/thinking.
+		st := m.blockStates[msg.ID]
+		st.Status = ""
+		if msg.Err != nil || strings.TrimSpace(msg.NewPatch) == "" {
+			st.RegenFailed = true // block stays Drifted; render shows alternate message
+			m.blockStates[msg.ID] = st
+			m.reflow()
+			return m, nil
+		}
+		st.RegenFailed = false
+		m.blockStates[msg.ID] = st
+		if newMd, ok := replaceBlockBody(m.md, msg.ID, msg.NewPatch); ok {
+			m.md = newMd
+		}
+		m.reflow()
+		return m, m.driftCheckCmds() // re-check all diff blocks; clears Drifted if fresh patch applies
 	case statusMsg:
 		// Transient one-line note (e.g. a deferred in-process action). Shown in the
 		// status bar until the next key/click clears it. Never crashes the UI.

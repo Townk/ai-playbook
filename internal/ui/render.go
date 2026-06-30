@@ -772,10 +772,15 @@ func (r *renderer) code(n ast.Node) {
 	if blk.Type == "diff" && r.states != nil && r.states[blk.ID].Drifted {
 		const indentStr = "  "
 		const indentW = 2
-		// Message line: ⚠ (colPeach) + explanation (colSubtext).
+		// Message line: ⚠ (colPeach) + explanation (colSubtext). When RegenFailed is
+		// set the alternate message is shown instead of the plain drift message.
+		driftNote := "this diff no longer applies — the target file changed since it was written"
+		if r.states[blk.ID].RegenFailed {
+			driftNote = "regenerate didn't resolve it — resolve manually"
+		}
 		msgLine := indentStr +
 			lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render("⚠ ") +
-			lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Render("this diff no longer applies — the target file changed since it was written")
+			lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Render(driftNote)
 		r.lines = append(r.lines, Line{Text: msgLine, Wide: false, Code: true})
 		// Button line: glyph + space + label for each button, separated by glyphSep.
 		// Col is the position of each glyph within Line.Text, accumulated as
