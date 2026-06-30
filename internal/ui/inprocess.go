@@ -118,6 +118,23 @@ func (m model) driftCheckCmds() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// driftRegenCmd builds the async tea.Cmd that calls orch.DriftRegen for one
+// drifted diff block, OFF the event loop, and returns a driftRegenMsg. It is
+// SELF-CONTAINED: it captures orch and the patch at call time and never touches
+// m.reader/m.structured/m.bodyProvider/m.streaming/m.thinking or resets the
+// pane — that is beginRegenerate's role. Mirrors the shape of driftCheckCmds.
+// Returns nil when the orchestrator is not installed.
+func (m model) driftRegenCmd(id, patch string) tea.Cmd {
+	orch := m.orch
+	if orch == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		np, err := orch.DriftRegen(patch)
+		return driftRegenMsg{ID: id, NewPatch: np, Err: err}
+	}
+}
+
 // kindOf maps a UI button kind string to the orchestrator's typed Kind. The
 // second result is false for kinds that have no orchestrator action (e.g.
 // "toggle", which is pager-local and never reaches emitAction in in-process use).

@@ -1761,6 +1761,23 @@ func TestDriftedDiff_GreysApplyAndViewDiff(t *testing.T) {
 	}
 }
 
+func TestDriftedDiff_HasRegenerateButton(t *testing.T) {
+	states := map[string]blockRunState{"fix": {Drifted: true}}
+	_, buttons, _ := Render("```diff {id=fix}\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n```\n", 100, states, "")
+	var resolve, regen bool
+	for _, b := range buttons {
+		if b.BlockID == "fix" && b.Kind == "drift-resolve" {
+			resolve = true
+		}
+		if b.BlockID == "fix" && b.Kind == "drift-regen" {
+			regen = true
+		}
+	}
+	if !resolve || !regen {
+		t.Fatalf("drifted block needs both buttons: resolve=%v regen=%v", resolve, regen)
+	}
+}
+
 func TestDriftedDiff_RegionAndResolveButton(t *testing.T) {
 	states := map[string]blockRunState{"fix": {Drifted: true}}
 	src := "```diff {id=fix}\n--- a/cmd/x.go\n+++ b/cmd/x.go\n@@ -1 +1 @@\n-a\n+b\n```\n"

@@ -743,7 +743,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		running := false
 		for id, st := range m.blockStates {
-			if st.Status == "running" {
+			if st.Status == "running" || st.Status == "regenerating" {
 				st.SpinFrame++
 				m.blockStates[id] = st
 				running = true
@@ -853,6 +853,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if b.Kind == "drift-resolve" {
 					return m.activateDiffButton(b)
+				}
+				if b.Kind == "drift-regen" {
+					st := m.blockStates[b.BlockID]
+					st.Status = "regenerating"
+					st.RegenFailed = false
+					st.SpinFrame = 0
+					m.blockStates[b.BlockID] = st
+					m.reflow()
+					return m, tea.Batch(m.startTick(), m.flashCmd(), m.driftRegenCmd(b.BlockID, b.Payload))
 				}
 				if b.Kind == "regenerate" {
 					m.flashKey = "cached:regenerate"
@@ -1075,6 +1084,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					if b.Kind == "drift-resolve" {
 						return m.activateDiffButton(b)
+					}
+					if b.Kind == "drift-regen" {
+						st := m.blockStates[b.BlockID]
+						st.Status = "regenerating"
+						st.RegenFailed = false
+						st.SpinFrame = 0
+						m.blockStates[b.BlockID] = st
+						m.reflow()
+						return m, tea.Batch(m.startTick(), m.flashCmd(), m.driftRegenCmd(b.BlockID, b.Payload))
 					}
 					if b.Kind == "regenerate" {
 						m.flashKey = "cached:regenerate"

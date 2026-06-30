@@ -777,22 +777,37 @@ func (r *renderer) code(n ast.Node) {
 			lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render("⚠ ") +
 			lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Render("this diff no longer applies — the target file changed since it was written")
 		r.lines = append(r.lines, Line{Text: msgLine, Wide: false, Code: true})
-		// Button line: glyph + space + label. Col is the position of the glyph
-		// within Line.Text, accumulated as indentW + widths of preceding elements
-		// (none here, so Col = indentW). Mirrors the followup tag-button formula.
+		// Button line: glyph + space + label for each button, separated by glyphSep.
+		// Col is the position of each glyph within Line.Text, accumulated as
+		// indentW + widths of preceding visible elements. Mirrors the followup
+		// tag-button formula (see runRegion's followupCol computation).
 		resolveLineIdx := len(r.lines)
 		resolveGlyph := lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue)).Render(glyphViewDiff)
 		resolveLabel := lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Render("resolve manually")
+		sep := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).Render(glyphSep)
+		regenGlyph := lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue)).Render(glyphRetry)
+		regenLabel := lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Render("regenerate")
 		r.lines = append(r.lines, Line{
-			Text: indentStr + resolveGlyph + " " + resolveLabel,
+			Text: indentStr + resolveGlyph + " " + resolveLabel + " " + sep + " " + regenGlyph + " " + regenLabel,
 			Wide: false,
 			Code: true,
 		})
+		// drift-resolve: glyph starts right after the 2-space indent.
 		r.buttons = append(r.buttons, Button{
 			Line:    resolveLineIdx,
-			Col:     indentW, // glyph starts right after the 2-space indent
+			Col:     indentW,
 			Width:   2,
 			Kind:    "drift-resolve",
+			Payload: src,
+			BlockID: blk.ID,
+		})
+		// drift-regen: glyph starts after resolve glyph + space + label + space + sep + space.
+		regenCol := indentW + lipgloss.Width(glyphViewDiff) + 1 + lipgloss.Width("resolve manually") + 1 + lipgloss.Width(glyphSep) + 1
+		r.buttons = append(r.buttons, Button{
+			Line:    resolveLineIdx,
+			Col:     regenCol,
+			Width:   2,
+			Kind:    "drift-regen",
 			Payload: src,
 			BlockID: blk.ID,
 		})
@@ -818,6 +833,9 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 		r.lines = append(r.lines, Line{Text: indentStr + sty.Render("⟳ Reviewing… (annotate in the hunk window)"), Wide: false, Code: true})
 	case "running":
 		sl := spinnerLine(st.SpinFrame, "running…", st.SpinFrame/10)
+		r.lines = append(r.lines, Line{Text: indentStr + sl, Wide: false, Code: true})
+	case "regenerating":
+		sl := spinnerLine(st.SpinFrame, "regenerating…", st.SpinFrame/10)
 		r.lines = append(r.lines, Line{Text: indentStr + sl, Wide: false, Code: true})
 	case "ok", "failed", "stopped":
 		rawToggle := "▸"
