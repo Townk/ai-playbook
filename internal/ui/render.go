@@ -765,6 +765,39 @@ func (r *renderer) code(n ast.Node) {
 		r.emitBlocked(unmet)
 	}
 
+	// Drift region: when the diff block's patch no longer applies, emit a warning
+	// message line + a [resolve manually] tag-button that opens the FC1 diff view.
+	// Placed after the diff body (and any blocked notice) but before runRegion so it
+	// sits visually between the block content and the run-state summary.
+	if blk.Type == "diff" && r.states != nil && r.states[blk.ID].Drifted {
+		const indentStr = "  "
+		const indentW = 2
+		// Message line: ⚠ (colPeach) + explanation (colSubtext).
+		msgLine := indentStr +
+			lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render("⚠ ") +
+			lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Render("this diff no longer applies — the target file changed since it was written")
+		r.lines = append(r.lines, Line{Text: msgLine, Wide: false, Code: true})
+		// Button line: glyph + space + label. Col is the position of the glyph
+		// within Line.Text, accumulated as indentW + widths of preceding elements
+		// (none here, so Col = indentW). Mirrors the followup tag-button formula.
+		resolveLineIdx := len(r.lines)
+		resolveGlyph := lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue)).Render(glyphViewDiff)
+		resolveLabel := lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Render("resolve manually")
+		r.lines = append(r.lines, Line{
+			Text: indentStr + resolveGlyph + " " + resolveLabel,
+			Wide: false,
+			Code: true,
+		})
+		r.buttons = append(r.buttons, Button{
+			Line:    resolveLineIdx,
+			Col:     indentW, // glyph starts right after the 2-space indent
+			Width:   2,
+			Kind:    "drift-resolve",
+			Payload: src,
+			BlockID: blk.ID,
+		})
+	}
+
 	if r.states != nil {
 		if st, ok := r.states[blk.ID]; ok {
 			r.runRegion(blk, st)

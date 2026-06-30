@@ -851,6 +851,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if b.Kind == "diff" || b.Kind == "view-diff" {
 					return m.activateDiffButton(b)
 				}
+				if b.Kind == "drift-resolve" {
+					return m.activateDiffButton(b)
+				}
 				if b.Kind == "regenerate" {
 					m.flashKey = "cached:regenerate"
 					// In-process: re-author via the orchestrator and re-arm the parser
@@ -1068,6 +1071,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 					}
 					if b.Kind == "diff" || b.Kind == "view-diff" {
+						return m.activateDiffButton(b)
+					}
+					if b.Kind == "drift-resolve" {
 						return m.activateDiffButton(b)
 					}
 					if b.Kind == "regenerate" {

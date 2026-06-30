@@ -1760,3 +1760,21 @@ func TestDriftedDiff_GreysApplyAndViewDiff(t *testing.T) {
 		t.Fatal("non-drifted diff button must NOT be dimmed")
 	}
 }
+
+func TestDriftedDiff_RegionAndResolveButton(t *testing.T) {
+	states := map[string]blockRunState{"fix": {Drifted: true}}
+	src := "```diff {id=fix}\n--- a/cmd/x.go\n+++ b/cmd/x.go\n@@ -1 +1 @@\n-a\n+b\n```\n"
+	lines, buttons, _ := Render(src, 100, states, "")
+	if !strings.Contains(joinText(lines), "no longer applies") {
+		t.Fatalf("missing drift message:\n%s", joinText(lines))
+	}
+	var has bool
+	for _, b := range buttons {
+		if b.BlockID == "fix" && b.Kind == "drift-resolve" {
+			has = true
+		}
+	}
+	if !has {
+		t.Fatal("drifted block must have a drift-resolve button")
+	}
+}
