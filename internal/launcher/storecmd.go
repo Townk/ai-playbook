@@ -47,6 +47,11 @@ var pathForFn = func(slug string) (string, bool) { return store.PathFor(slug) }
 // so ShowMain tests never need a TTY.
 var uiMainFn = func() int { return ui.Main() }
 
+// setSourcePathFn is the ui.SetSourcePath seam: wires the on-disk store path
+// into the viewer model so it can offer an [edit] button. Tests inject a
+// recorder to assert ShowMain calls it with the correct store path.
+var setSourcePathFn = ui.SetSourcePath
+
 // editorSpawn is the seam for launching $EDITOR: production opens the editor
 // with inherited stdio; tests inject a recorder.
 var editorSpawn = func(editor, path string) error {
@@ -228,6 +233,10 @@ func ShowMain() int {
 		fmt.Fprintf(os.Stderr, "ai-playbook show: no playbook for slug %q\n", slug)
 		return 1
 	}
+	// Thread the real store path into the viewer model so it can offer an [edit]
+	// button for this file-backed playbook. Must be called before uiMainFn so
+	// ui.Main() consumes the stash on startup.
+	setSourcePathFn(path)
 	// Reshape os.Args so that uiMainFn (ui.Main) sees:
 	//   os.Args = {bin, "run", path}
 	// ui.Main reads its file via fs.Arg(0) — the bare positional after flags.

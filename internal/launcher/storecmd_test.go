@@ -411,6 +411,40 @@ func withUIMainFn(t *testing.T, fn func() int) {
 	t.Cleanup(func() { uiMainFn = old })
 }
 
+// withSetSourcePathFn replaces setSourcePathFn for the duration of t.
+func withSetSourcePathFn(t *testing.T, fn func(string)) {
+	t.Helper()
+	old := setSourcePathFn
+	setSourcePathFn = fn
+	t.Cleanup(func() { setSourcePathFn = old })
+}
+
+// TestShowMain_SetsSourcePath verifies that ShowMain calls setSourcePathFn with
+// the resolved store path (the real .md file) so the viewer model can offer an
+// [edit] button for file-backed playbooks.
+func TestShowMain_SetsSourcePath(t *testing.T) {
+	const wantPath = "/store/known.md"
+	withArgs(t, []string{"ai-playbook", "show", "known-slug"})
+	withPathForFn(t, func(slug string) (string, bool) {
+		if slug == "known-slug" {
+			return wantPath, true
+		}
+		return "", false
+	})
+	withUIMainFn(t, func() int { return 0 })
+
+	var got string
+	withSetSourcePathFn(t, func(p string) { got = p })
+
+	code := ShowMain()
+	if code != 0 {
+		t.Errorf("ShowMain: want exit 0, got %d", code)
+	}
+	if got != wantPath {
+		t.Fatalf("ShowMain must call setSourcePathFn with the store path; got %q, want %q", got, wantPath)
+	}
+}
+
 // ---- EditMain ----
 
 func TestEditMain_MissingArg_Exit2(t *testing.T) {

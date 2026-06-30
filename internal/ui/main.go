@@ -121,6 +121,21 @@ var pendingProjectRoot string
 // driver's environment so the playbook's $PROJECT_ROOT resolves. Mirrors SetShell.
 func SetProjectRoot(root string) { pendingProjectRoot = root }
 
+// pendingSourcePath is the on-disk .md path of a stored playbook consumed by the
+// next Main() run. Set by SetSourcePath (called from storecmd.ShowMain) so the
+// viewer model can offer an [edit] button for file-backed playbooks. Cleared by
+// takeSourcePath (consume-once). "" → temp-file / generated path, no [edit].
+var pendingSourcePath string
+
+// SetSourcePath stashes the on-disk source path for the next ui.Main() run.
+// Only stored/committed playbooks set this (ShowMain). Temp-file viewer launches
+// (cached-serve, create_progress, inline_input) do NOT call it. Mirrors SetProjectRoot.
+func SetSourcePath(p string) { pendingSourcePath = p }
+
+// takeSourcePath consumes pendingSourcePath (consume-once) and returns it,
+// leaving pendingSourcePath empty so subsequent calls return "".
+func takeSourcePath() string { p := pendingSourcePath; pendingSourcePath = ""; return p }
+
 // pendingFinalDraft, when true, starts the next Main()'s model with finalDraft=true
 // (committed=false). The create flow sets it so the viewer treats the already-rendered
 // structured playbook as a FINAL DRAFT: `w` PERSISTS it (CommitPlaybook via the
@@ -401,15 +416,16 @@ func Main() int {
 	answerRegen := pendingAnswerRegen
 	askBridge := pendingAskBridge
 	finalDraft := pendingFinalDraft
-	pendingReengage = nil     // consume once, regardless of whether an orch was built
-	pendingDriver = nil       // ditto: the session owns the driver's lifecycle
-	pendingServedBase = ""    // ditto: served-base amend stash is consume-once
-	pendingAsker = nil        // ditto: the `f` asker stash is consume-once
-	pendingAnswerRegen = nil  // ditto: the cached-answer regenerate stash is consume-once
-	pendingAskBridge = nil    // ditto: the no-mux ask-bridge stash is consume-once
-	pendingShell = ""         // ditto: the configured-shell stash is consume-once
-	pendingProjectRoot = ""   // ditto: defensive clear for paths that skip the driver open
-	pendingFinalDraft = false // ditto: the create final-draft flag is consume-once
+	sourcePath := takeSourcePath() // consume-once: store path for file-backed [edit]; "" for temp paths
+	pendingReengage = nil          // consume once, regardless of whether an orch was built
+	pendingDriver = nil            // ditto: the session owns the driver's lifecycle
+	pendingServedBase = ""         // ditto: served-base amend stash is consume-once
+	pendingAsker = nil             // ditto: the `f` asker stash is consume-once
+	pendingAnswerRegen = nil       // ditto: the cached-answer regenerate stash is consume-once
+	pendingAskBridge = nil         // ditto: the no-mux ask-bridge stash is consume-once
+	pendingShell = ""              // ditto: the configured-shell stash is consume-once
+	pendingProjectRoot = ""        // ditto: defensive clear for paths that skip the driver open
+	pendingFinalDraft = false      // ditto: the create final-draft flag is consume-once
 
 	// Force TrueColor: zellij's alt-screen pane underreports the color profile
 	// during bubbletea's auto-detection, causing colors to be downsampled.
@@ -419,6 +435,7 @@ func Main() int {
 	m.subtitle = playbookSubtitle
 	m.confirmEnv = playbookEnv  // front-matter env for the B2b confirmation gate
 	m.projectRoot = projectRoot // heuristic project root (also in driver.Options.Env)
+	m.sourcePath = sourcePath   // on-disk .md path; non-empty → file-backed, [edit] enabled
 	// NOTE (Phase-2 / in-session assisted-run): the async-startup and reused-driver
 	// paths leave m.projectRoot empty (projectRoot is only set on the sync new-driver
 	// path). When the gate is reused for an in-session assisted run, projectRoot must

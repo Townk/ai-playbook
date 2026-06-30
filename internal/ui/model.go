@@ -334,6 +334,7 @@ type model struct {
 	// B2b pre-run variable confirmation
 	confirmEnv    map[string]frontmatter.EnvValue // declared env (front matter); nil/empty → no gate
 	projectRoot   string                          // heuristic root (the PROJECT_ROOT value)
+	sourcePath    string                          // on-disk .md path (non-empty → file-backed; enables [edit])
 	gateSatisfied bool                            // the gate ran (or wasn't needed) this session
 	// gate holds the in-progress pre-run confirmation state machine while the user
 	// steps through the confirm/customize overlays; nil when no gate is active.
