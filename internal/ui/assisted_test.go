@@ -1,8 +1,10 @@
 package ui
 
 import (
-	"github.com/Townk/ai-playbook/internal/autorun"
+	"strings"
 	"testing"
+
+	"github.com/Townk/ai-playbook/internal/autorun"
 )
 
 func TestStartAssisted_SetsCursorToFirstRunnable(t *testing.T) {
@@ -59,5 +61,41 @@ func TestAssisted_SkipMarksSkippedAndAdvances(t *testing.T) {
 	}
 	if m2.readyID != "b" {
 		t.Errorf("cursor should advance to b; got %q", m2.readyID)
+	}
+}
+
+func TestAssistedFooter_StepButtons(t *testing.T) {
+	m := newModel("T", "```bash {id=a}\ntrue\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+	m = m.startAssisted()
+	out := strip(m.viewString())
+	for _, w := range []string{"Run", "Skip", "Quit"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("step footer missing %q:\n%s", w, out)
+		}
+	}
+	// Screen buttons registered for click.
+	if buttonForBlock(m.buttons, "assist", "assist-run") == nil {
+		t.Error("no assist-run Screen button")
+	}
+}
+
+func TestAssistedFooter_FailureButtons(t *testing.T) {
+	m := newModel("T", "```bash {id=a rollback=undo-a}\ntrue\n```\n\n```bash {id=undo-a}\ntrue\n```\n\n```bash {id=boom needs=a}\nfalse\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+	m = m.startAssisted()
+	m.blockStates["a"] = blockRunState{Status: "ok"}
+	m.assistedFooter = "failure"
+	m.assistedFailedID = "boom"
+	m.reflow()
+	out := strip(m.viewString())
+	for _, w := range []string{"Roll back", "Leave as-is", "Quit"} {
+		if !strings.Contains(out, w) {
+			t.Errorf("failure footer missing %q:\n%s", w, out)
+		}
 	}
 }

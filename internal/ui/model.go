@@ -819,6 +819,13 @@ func (m *model) body() int {
 		// without overlapping content.
 		h -= m.confirmQuestionLines() + 3
 	}
+	if m.assistedFooterActive() {
+		// Same replace-the-bottom-pad reasoning as the confirmResolved branch
+		// above, for the GUIDED footer's own blank+context+blank+buttons+blank
+		// block (assistedFooterLines is that block's net addition over the one
+		// already-reserved pad).
+		h -= m.assistedFooterLines()
+	}
 	if h < 1 {
 		h = 1
 	}
@@ -830,6 +837,7 @@ func (m *model) reflow() {
 	m.appendCachedButton()
 	m.appendEditButton()
 	m.appendConfirmButtons()
+	m.appendAssistedFooter()
 	m.clampScroll()
 }
 
@@ -3236,6 +3244,20 @@ func (m model) normalLines() []string {
 		out = append(out, pad(""))                               // blank   (m.height-4)
 		out = append(out, pad("  "+m.confirmButtonsRowString())) // buttons (m.height-3)
 		out = append(out, pad(""))                               // blank   (m.height-2)
+	} else if m.assistedFooterActive() {
+		// The GUIDED footer mirrors the confirm block's shape (blank, content,
+		// blank, buttons, blank) so the buttons row lands on the SAME pinned
+		// m.height-3 row appendAssistedFooter registers its Screen buttons on.
+		rows := m.assistedFooterRows()
+		var ctx, btns string
+		if len(rows) == 2 {
+			ctx, btns = rows[0], rows[1]
+		}
+		out = append(out, pad(""))        // blank above the context line
+		out = append(out, pad("  "+ctx))  // context line
+		out = append(out, pad(""))        // blank   (m.height-4)
+		out = append(out, pad("  "+btns)) // buttons (m.height-3)
+		out = append(out, pad(""))        // blank   (m.height-2)
 	} else {
 		out = append(out, pad("")) // bottom pad
 	}
