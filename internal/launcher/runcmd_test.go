@@ -86,6 +86,9 @@ func TestResolveRunArgs_Assisted(t *testing.T) {
 	if _, err := resolveRunArgs([]string{"--assisted", "--no-auto-rollback", "--file", "x.md"}); err == nil {
 		t.Error("--assisted with --no-auto-rollback must error (that flag is --auto only)")
 	}
+	if _, err := resolveRunArgs([]string{"--assisted", "--auto-rollback", "--file", "x.md"}); err == nil {
+		t.Error("--assisted with --auto-rollback must error (mutually exclusive: assisted owns post-failure flow via its own manual button)")
+	}
 }
 
 // ---- seam helpers ----

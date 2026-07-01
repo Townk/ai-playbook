@@ -354,7 +354,11 @@ type runArgs struct {
 // default-viewer opt-in) is mutually exclusive with --auto. --assisted switches
 // to the GUIDED-fullscreen run mode (Mode: modeAssisted); it is mutually
 // exclusive with --auto (headless and GUIDED-fullscreen are incompatible run
-// modes), and with --no-auto-rollback (that flag is --auto-only).
+// modes) and with --auto-rollback (assisted mode owns post-failure flow via
+// its own manual "Roll back" button; auto-rollback would fire out from under
+// it). --no-auto-rollback being --auto-only is covered by the noAutoRollback
+// && !autoMode check below, which assisted's --auto exclusion above already
+// makes reachable-consistent.
 func resolveRunArgs(args []string) (runArgs, error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
@@ -404,8 +408,8 @@ func resolveRunArgs(args []string) (runArgs, error) {
 	if assisted && autoMode {
 		return runArgs{}, fmt.Errorf("--assisted and --auto are mutually exclusive")
 	}
-	if assisted && noAutoRollback {
-		return runArgs{}, fmt.Errorf("--no-auto-rollback is only valid with --auto")
+	if assisted && auto {
+		return runArgs{}, fmt.Errorf("--assisted and --auto-rollback are mutually exclusive")
 	}
 
 	ra := runArgs{AutoRollback: auto, NoAutoRollback: noAutoRollback}

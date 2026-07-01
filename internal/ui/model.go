@@ -1845,7 +1845,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// of leaving the manual "Rollback playbook" button. Takes precedence over the
 		// verify auto-followup below (rollback, not re-engage, is the opted-in response).
 		// Guard against re-firing on a rollback TARGET's own result (prevAction rollback).
-		if prevAction != "rollback" && st.Status == "failed" && m.autoRollback && m.anyRollbackable() {
+		if prevAction != "rollback" && st.Status == "failed" && m.autoRollback && m.anyRollbackable() && !m.assisted {
 			return m.beginRollback(msg.ID)
 		}
 		// Auto-fire a follow-up when the VERIFY re-run fails: a non-zero exit on a
@@ -1867,7 +1867,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// runnable block as the verify so success/follow-up detection still works.
 		verifyID := m.verifyBlockID()
 		if msg.ID == verifyID && msg.Exit != 0 &&
-			prevAction != "apply" && prevAction != "undo" {
+			prevAction != "apply" && prevAction != "undo" && !m.assisted {
 			switch {
 			case m.followups >= m.maxFollowups:
 				// Cap reached: stop auto-firing. Mark the verify block so render.go shows
@@ -1917,7 +1917,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// live session path), so the confirm's Yes can actually generate.
 		if msg.ID == verifyID && msg.Exit == 0 && !m.wrappedUp &&
 			prevAction != "apply" && prevAction != "undo" &&
-			m.canReengageInProc() {
+			m.canReengageInProc() && !m.assisted {
 			m.wrappedUp = true
 			m.confirmResolved = true
 			m.confirmFocus = 0 // default keyboard focus = Yes

@@ -178,6 +178,33 @@ func TestAutoRollback_OffKeepsManualPath(t *testing.T) {
 	}
 }
 
+// TestAssistedMode_SuppressesAutoRollback verifies that during an assisted (GUIDED)
+// run, m.autoRollback being true (a legal --assisted --auto-rollback combo prior to
+// the CLI-level rejection) must NOT auto-fire the rollback chain: assisted mode owns
+// post-failure flow via its own failure footer and manual "Roll back" button only.
+func TestAssistedMode_SuppressesAutoRollback(t *testing.T) {
+	body := "```bash {id=a rollback=undo-a}\ntrue\n```\n\n" +
+		"```bash {id=undo-a}\ntrue\n```\n\n" +
+		"```bash {id=boom needs=a}\nfalse\n```\n"
+	m := newModel("T", body)
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.autoRollback = true
+	m.readyID = "boom"
+	m.reflow()
+	m.blockStates["a"] = blockRunState{Status: "ok"} // a applied → rollbackable
+	m.reflow()
+
+	m2 := mustModel(m.Update(resultMsg{ID: "boom", Exit: 1, Logpath: "/tmp/x.log"}))
+
+	if m2.blockStates["undo-a"].Status == "running" {
+		t.Error("assisted mode must not auto-fire rollback even with m.autoRollback set")
+	}
+	if m2.assistedFooter != "failure" {
+		t.Errorf("assisted mode must show the failure footer on step failure; got %q", m2.assistedFooter)
+	}
+}
+
 // TestRollbackButtonGating verifies the "Rollback playbook" button shows on a failed
 // step only when rollback is available and re-engagement is not; re-engagement (an
 // authoring session) takes precedence over rollback when both are possible.
