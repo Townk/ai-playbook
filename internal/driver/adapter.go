@@ -25,6 +25,15 @@ type shellAdapter interface {
 	// shell/atuin history — the driver spawns an interactive shell for fidelity,
 	// but its `source <job>` lines should never be recorded. Empty = nothing to do.
 	historyOff() string
+	// historyShimFiles returns the ZDOTDIR-shim startup files (relative filename →
+	// content) the driver writes into a temp dir and points the spawned shell at, so
+	// recording is hard-disabled at shell INIT time — before atuin's preexec/precmd
+	// hooks are ever armed and before any interactive command runs. The shim files
+	// each source the user's real counterpart at top level (preserving env, aliases,
+	// functions) and then disable history. Returns nil for shells that don't use a
+	// shim (bash/sh keep the runtime historyOff path). When non-nil, the driver
+	// skips the runtime historyOff call at Open.
+	historyShimFiles() map[string]string
 	// sentinelEcho prints the driver's sentinel (with exit 0) in the MAIN context,
 	// so runMain can sync on a raw command that is NOT wrapped in job()'s subshell.
 	sentinelEcho() string

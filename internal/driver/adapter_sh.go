@@ -40,6 +40,10 @@ func (shAdapter) historyOff() string {
 	return "HISTFILE=/dev/null; export HISTFILE"
 }
 
+// historyShimFiles returns nil: POSIX sh has no atuin integration and uses the
+// runtime historyOff path.
+func (shAdapter) historyShimFiles() map[string]string { return nil }
+
 func (shAdapter) sentinelEcho() string {
 	return "printf '%s\\n' " + shquote(sentinel+"0"+sentinel)
 }

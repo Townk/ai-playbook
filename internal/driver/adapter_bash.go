@@ -31,6 +31,10 @@ func (bashAdapter) historyOff() string {
 		"trap - DEBUG 2>/dev/null; PROMPT_COMMAND="
 }
 
+// historyShimFiles returns nil: bash uses the runtime historyOff path, not a
+// ZDOTDIR-style shim (there is no atuin instant-prompt race for bash here).
+func (bashAdapter) historyShimFiles() map[string]string { return nil }
+
 func (bashAdapter) sentinelEcho() string {
 	return "printf '%s\\n' " + shquote(sentinel+"0"+sentinel)
 }

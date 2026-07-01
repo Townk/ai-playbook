@@ -49,6 +49,8 @@ type Driver struct {
 
 	cwd string // the cwd entered at Open (Options.Cwd), for callers that need it
 
+	shimDir string // temp ZDOTDIR shim dir (zsh history-leak fix); "" if no shim
+
 	mu       sync.Mutex
 	buf      []byte
 	lastSeen time.Time
@@ -88,10 +90,44 @@ func Open(opts Options) (*Driver, error) {
 	if err != nil {
 		return nil, err
 	}
+	// ZDOTDIR shim (zsh): disable history recording at shell INIT — before atuin's
+	// preexec/precmd hooks are ever armed — by pointing zsh at a temp ZDOTDIR whose
+	// startup files source the user's real ones and then hard-disable recording.
+	// This closes the two leaks the runtime historyOff() could not: (1) historyOff
+	// itself being recorded by atuin's preexec before it can unhook, and (2) the
+	// instant-prompt race that let subsequent source-lines be recorded. Falls back
+	// gracefully to the runtime path if the shim can't be created; nil = no shim
+	// (bash/sh) → keep the runtime historyOff call below.
+	shimDir := ""
+	if files := a.historyShimFiles(); files != nil {
+		realZ := getenvFn("ZDOTDIR")
+		if realZ == "" {
+			realZ = getenvFn("HOME")
+		}
+		if dir, mkErr := os.MkdirTemp("", "apb-zdotdir-"); mkErr == nil {
+			ok := true
+			for name, content := range files {
+				if wErr := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); wErr != nil {
+					ok = false
+					break
+				}
+			}
+			if ok {
+				shimDir = dir
+				env = withEnv(env, "ZDOTDIR", dir)
+				env = append(env, "APB_REAL_ZDOTDIR="+realZ)
+			} else {
+				_ = os.RemoveAll(dir) // partial write → clean up, fall back to runtime path
+			}
+		}
+	}
 	c := exec.Command(bin, a.spawnArgs()...)
 	c.Env = env
 	ptmx, err := pty.Start(c)
 	if err != nil {
+		if shimDir != "" {
+			_ = os.RemoveAll(shimDir)
+		}
 		return nil, err
 	}
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 50, Cols: 200})
@@ -102,6 +138,7 @@ func Open(opts Options) (*Driver, error) {
 		shellPid: c.Process.Pid,
 		lastSeen: time.Now(),
 		a:        a,
+		shimDir:  shimDir,
 	}
 	go d.read()
 	if err := d.ready(); err != nil {
@@ -110,7 +147,12 @@ func Open(opts Options) (*Driver, error) {
 	}
 	// Stop the driver's own commands (`source <job>` lines) from polluting the
 	// user's shell/atuin history — run ONCE in the main context before anything else.
-	d.runMain(d.a.historyOff(), 5*time.Second)
+	// When a ZDOTDIR shim is active it already disabled recording at INIT, so skip
+	// the runtime path (which is now only the fallback for the non-shim shells or a
+	// failed shim setup).
+	if d.shimDir == "" {
+		d.runMain(d.a.historyOff(), 5*time.Second)
+	}
 	d.run("stty -echo 2>/dev/null", 5*time.Second) // cosmetic: trim echo noise
 	if opts.Cwd != "" {
 		d.cwd = opts.Cwd
@@ -233,7 +275,23 @@ func (d *Driver) Close() error {
 	if d.cmd != nil && d.cmd.Process != nil {
 		_ = d.cmd.Process.Kill()
 	}
+	if d.shimDir != "" {
+		_ = os.RemoveAll(d.shimDir)
+	}
 	return nil
+}
+
+// withEnv returns env with any existing `key=` entry removed and `key=val`
+// appended, so the spawned shell sees exactly one (overriding) value.
+func withEnv(env []string, key, val string) []string {
+	prefix := key + "="
+	out := env[:0:0] // fresh backing array; never mutate the caller's slice
+	for _, e := range env {
+		if !strings.HasPrefix(e, prefix) {
+			out = append(out, e)
+		}
+	}
+	return append(out, key+"="+val)
 }
 
 // ---- internals ----

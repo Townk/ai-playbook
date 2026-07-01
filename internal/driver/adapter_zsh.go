@@ -28,6 +28,57 @@ func (zshAdapter) historyOff() string {
 		"add-zsh-hook -d precmd _atuin_precmd 2>/dev/null"
 }
 
+// historyShimFiles returns the four zsh startup files for a temp ZDOTDIR shim.
+// Each file sources the user's real counterpart AT TOP LEVEL (never inside a
+// function — otherwise the user's `typeset`/non-exported vars would become
+// function-locals and be lost) using temp globals __apb_real/__apb_shim and
+// juggling $ZDOTDIR to the real dir while sourcing so the user's rc sees its own
+// dir. APB_REAL_ZDOTDIR is injected by the driver; falling back to $HOME matches
+// zsh's own default when ZDOTDIR is unset. Recording is hard-disabled at INIT —
+// invisible to atuin's preexec and after atuin is fully armed regardless of
+// powerlevel10k instant-prompt timing.
+func (zshAdapter) historyShimFiles() map[string]string {
+	return map[string]string{
+		".zshenv": "" +
+			"__apb_real=${APB_REAL_ZDOTDIR:-$HOME}; __apb_shim=$ZDOTDIR\n" +
+			"ZDOTDIR=$__apb_real\n" +
+			"[[ -r $__apb_real/.zshenv ]] && builtin source $__apb_real/.zshenv\n" +
+			"ZDOTDIR=$__apb_shim\n" +
+			"unset __apb_real __apb_shim\n",
+		".zprofile": "" +
+			"__apb_real=${APB_REAL_ZDOTDIR:-$HOME}; __apb_shim=$ZDOTDIR\n" +
+			"ZDOTDIR=$__apb_real\n" +
+			"[[ -r $__apb_real/.zprofile ]] && builtin source $__apb_real/.zprofile\n" +
+			"ZDOTDIR=$__apb_shim\n" +
+			"unset __apb_real __apb_shim\n",
+		".zshrc": "" +
+			"__apb_real=${APB_REAL_ZDOTDIR:-$HOME}\n" +
+			"ZDOTDIR=$__apb_real\n" +
+			"[[ -r $__apb_real/.zshrc ]] && builtin source $__apb_real/.zshrc\n" +
+			"unset __apb_real\n" +
+			"# The real rc (incl. atuin) is now loaded. Disable recording AT INIT — invisible to\n" +
+			"# atuin's preexec, and after atuin is fully armed regardless of instant-prompt timing.\n" +
+			"# ZDOTDIR is left = the real dir so a login shell's .zlogin is read from there.\n" +
+			"HISTFILE=/dev/null\n" +
+			"SAVEHIST=0\n" +
+			"autoload -Uz add-zsh-hook 2>/dev/null\n" +
+			"add-zsh-hook -d preexec _atuin_preexec 2>/dev/null\n" +
+			"add-zsh-hook -d precmd _atuin_precmd 2>/dev/null\n" +
+			"functions[_atuin_preexec]='' 2>/dev/null\n" +
+			"functions[_atuin_precmd]='' 2>/dev/null\n",
+		".zlogin": "" +
+			"__apb_real=${APB_REAL_ZDOTDIR:-$HOME}\n" +
+			"[[ -r $__apb_real/.zlogin ]] && ZDOTDIR=$__apb_real builtin source $__apb_real/.zlogin\n" +
+			"unset __apb_real\n" +
+			"HISTFILE=/dev/null\n" +
+			"SAVEHIST=0\n" +
+			"add-zsh-hook -d preexec _atuin_preexec 2>/dev/null\n" +
+			"add-zsh-hook -d precmd _atuin_precmd 2>/dev/null\n" +
+			"functions[_atuin_preexec]='' 2>/dev/null\n" +
+			"functions[_atuin_precmd]='' 2>/dev/null\n",
+	}
+}
+
 func (zshAdapter) sentinelEcho() string {
 	return "print -r -- " + sentinel + "0" + sentinel
 }
