@@ -1894,3 +1894,30 @@ func TestDriftedDiff_RegionAndResolveButton(t *testing.T) {
 		t.Fatal("drifted block must have a drift-resolve button")
 	}
 }
+
+// TestRender_ReadyCursorMarksNextStep verifies the assisted-mode ready-cursor
+// caret (▶) shows up next to the current step once GUIDED mode has started.
+func TestRender_ReadyCursorMarksNextStep(t *testing.T) {
+	m := newModel("T", "```bash {id=a}\ntrue\n```\n\n```bash {id=b needs=a}\ntrue\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+	m = m.startAssisted() // readyID=a
+	out := strip(m.viewString())
+	if !strings.Contains(out, "▶") {
+		t.Errorf("ready step should show a ▶ caret:\n%s", out)
+	}
+}
+
+// TestRender_SkippedStatus verifies a block whose run state is "skipped"
+// renders a "skipped" label instead of reading as merely un-run.
+func TestRender_SkippedStatus(t *testing.T) {
+	m := newModel("T", "```bash {id=a}\ntrue\n```\n")
+	m.width, m.height = 80, 24
+	m.blockStates["a"] = blockRunState{Status: "skipped"}
+	m.reflow()
+	out := strip(m.viewString())
+	if !strings.Contains(out, "skipped") {
+		t.Errorf("a skipped block should render 'skipped':\n%s", out)
+	}
+}

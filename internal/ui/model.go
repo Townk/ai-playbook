@@ -833,7 +833,14 @@ func (m *model) body() int {
 }
 
 func (m *model) reflow() {
-	m.lines, m.buttons, m.blocks = Render(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey, m.driverPending, m.canReengageInProc(), m.anyRollbackable(), m.asker != nil)
+	// readyID threads the assisted-mode (--assisted/GUIDED) ready-cursor into the
+	// renderer ONLY while a GUIDED run is active, so every non-assisted render is
+	// byte-for-byte unchanged (m.readyID is otherwise left as its own zero value).
+	readyID := ""
+	if m.assisted {
+		readyID = m.readyID
+	}
+	m.lines, m.buttons, m.blocks = renderCursor(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey, readyID, m.driverPending, m.canReengageInProc(), m.anyRollbackable(), m.asker != nil)
 	m.appendCachedButton()
 	m.appendEditButton()
 	m.appendConfirmButtons()
