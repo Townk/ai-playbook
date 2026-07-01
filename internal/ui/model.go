@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -347,12 +348,17 @@ type model struct {
 	bodyProvider func() string
 
 	// B2b pre-run variable confirmation
-	confirmEnv    map[string]frontmatter.EnvValue // declared env (front matter); nil/empty → no gate
-	projectRoot   string                          // heuristic root (the PROJECT_ROOT value)
-	sourcePath    string                          // on-disk .md path (non-empty → file-backed; enables [edit])
-	sourceMtime   time.Time                       // mtime of sourcePath at last read; used by the mux poll to detect saves
-	polling       bool                            // a mtime-poll loop is already live; guards against N concurrent [edit] clicks
-	gateSatisfied bool                            // the gate ran (or wasn't needed) this session
+	confirmEnv  map[string]frontmatter.EnvValue // declared env (front matter); nil/empty → no gate
+	projectRoot string                          // heuristic root (the PROJECT_ROOT value)
+	sourcePath  string                          // on-disk .md path (non-empty → file-backed; enables [edit])
+	sourceMtime time.Time                       // mtime of sourcePath at last read; used by the mux poll to detect saves
+	polling     bool                            // a mtime-poll loop is already live; guards against N concurrent [edit] clicks
+	// driftEditPath/driftEditMtime back the MUX "resolve manually" (F21) poll: while
+	// driftEditPath is set the shared source-poll loop ALSO watches that target file
+	// and re-checks drift when it is saved (mirrors sourcePath/sourceMtime for [edit]).
+	driftEditPath  string
+	driftEditMtime time.Time
+	gateSatisfied  bool // the gate ran (or wasn't needed) this session
 	// gate holds the in-progress pre-run confirmation state machine while the user
 	// steps through the confirm/customize overlays; nil when no gate is active.
 	gate *confirmGate
@@ -386,6 +392,22 @@ func (m model) emitAction(b Button) tea.Cmd {
 // this is true and the buttons render/behave exactly as before. The copy button
 // never consults this — it needs no shell.
 func (m model) shellActionsReady() bool { return !m.driverPending }
+
+// buttonInert reports whether a button's dispatch is currently a swallowed no-op, so
+// it must not receive a hint label (F19) — otherwise a hint letter would select a
+// button that does nothing. Two cases: a DRIFTED block's apply-diff (you can't apply a
+// patch that no longer matches — the drift region's resolve/regenerate buttons are the
+// live paths), and any shell-action button during the async-startup window (the
+// orchestrator isn't open yet). Mirrors exactly what the two dispatch sites swallow.
+func (m model) buttonInert(b Button) bool {
+	if b.Kind == "apply-diff" && m.blockStates[b.BlockID].Drifted {
+		return true
+	}
+	if isShellActionKind(b.Kind) && !m.shellActionsReady() {
+		return true
+	}
+	return false
+}
 
 // isShellActionKind reports whether a button kind needs the shell driver /
 // orchestrator to act: run (▶), play (run-in-assistant-shell), stop, (view-)diff,
@@ -452,6 +474,70 @@ func (m model) activateDiffButton(b Button) (model, tea.Cmd) {
 	ac := m.emitAction(b)
 	m.reflow()
 	return m, tea.Batch(m.flashCmd(), ac)
+}
+
+// driftResolveDispatch handles a "resolve manually" press on a DRIFTED diff block.
+// The patch no longer applies, so — unlike the read-only view-diff button (that path
+// is F30's job) — this OPENS THE PATCH'S TARGET FILE IN $EDITOR so the user can
+// reconcile it by hand, then re-checks drift on return so a successful edit clears
+// the Drifted flag (the fresh patch now applies). Mirrors editDispatch's two paths:
+// no-mux suspends the TUI and opens the editor inline; the mux path spawns a docked
+// editor pane and polls the target file's mtime to re-check drift on save.
+func (m model) driftResolveDispatch(b Button) (model, tea.Cmd) {
+	path := m.driftTargetPath(b.Payload)
+	if path == "" {
+		m.status = "resolve manually: couldn't determine the diff's target file"
+		return m, nil
+	}
+	// NO-MUX: suspend the TUI, open the editor on the target file, re-check drift on return.
+	if m.asker == nil {
+		parts := strings.Fields(resolveEditor())
+		args := append(parts[1:], path)
+		cmd := exec.Command(parts[0], args...)
+		return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return driftResolveReloadMsg{Err: err} })
+	}
+	// MUX path: spawn the editor in a docked pane and watch the TARGET file; a save
+	// re-checks drift. Reuses the shared 1-second mtime-poll loop (the [edit] path's),
+	// guarded by m.polling so a second click doesn't spawn a second timer goroutine.
+	if m.orch != nil {
+		_ = m.orch.EditSource(resolveEditor(), path)
+	}
+	if st, err := os.Stat(path); err == nil {
+		m.driftEditMtime = st.ModTime()
+	}
+	m.driftEditPath = path
+	if !m.polling {
+		m.polling = true
+		return m, m.sourcePollCmd()
+	}
+	return m, nil
+}
+
+// driftTargetPath resolves the on-disk path of a patch's target file: the parsed
+// new-file path (files[0].NewPath) with a leading a/ or b/ prefix stripped. When an
+// orchestrator is wired it delegates to orch.DriftTargetPath so the path resolves
+// against the SAME session root the drift check / regenerate use; otherwise (tests /
+// degraded) it resolves relative to the process cwd. Returns "" when the patch has no
+// parseable target.
+func (m model) driftTargetPath(patch string) string {
+	if m.orch != nil {
+		if p, err := m.orch.DriftTargetPath(patch); err == nil && p != "" {
+			return p
+		}
+	}
+	files := idiff.Parse(patch)
+	if len(files) == 0 {
+		return ""
+	}
+	rel := strings.TrimPrefix(strings.TrimPrefix(files[0].NewPath, "b/"), "a/")
+	if rel == "" || rel == "/dev/null" {
+		return ""
+	}
+	if filepath.IsAbs(rel) {
+		return rel
+	}
+	cwd, _ := os.Getwd()
+	return filepath.Join(cwd, rel)
 }
 
 func newModel(harness, md string) model {
@@ -572,6 +658,11 @@ func (m *model) reflow() {
 // to trigger a source reload.
 type reloadMsg struct{ Err error }
 
+// driftResolveReloadMsg is delivered by tea.ExecProcess after the $EDITOR opened on
+// a drifted patch's TARGET file (the "resolve manually" action, F21) exits. The
+// handler re-runs the drift check so a successful manual edit clears the Drifted flag.
+type driftResolveReloadMsg struct{ Err error }
+
 // reloadSource re-reads sourcePath through loadPlaybookSource (identical front-matter
 // stripping as the initial load), refreshes m.md / m.title / m.subtitle / m.confirmEnv,
 // and calls reflow(). blockStates is NOT cleared, so per-block transient state
@@ -658,6 +749,20 @@ func (m *model) cachedRows() int {
 // Cached layout:     leading blank(1) + header(1) + [subtitle?] + blank(1) + pill(1) + blank(1) = row 5 (+1 with a subtitle).
 func (m *model) bodyTop() int {
 	return 1 + headerRows + m.subtitleRows() + 1 + m.cachedRows()
+}
+
+// lineBlank reports whether body line lineIdx is empty or all-whitespace (ANSI
+// stripped). Used by the hint-overlay painter (F20): a label normally floats on the
+// line above its button, but if that line carries text (e.g. the drift warning banner
+// sits directly above the resolve/regenerate buttons) floating there would paint the
+// letter INTO that running text — even landing on an inter-word space still corrupts
+// it — so the label drops onto the button's own line instead. An out-of-range index
+// is treated as blank (nothing to overwrite).
+func (m *model) lineBlank(lineIdx int) bool {
+	if lineIdx < 0 || lineIdx >= len(m.lines) {
+		return true
+	}
+	return strings.TrimSpace(strip(m.lines[lineIdx].Text)) == ""
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -889,8 +994,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reflow()
 					return m, tea.Batch(m.flashCmd(), ac)
 				}
-				// Drifted diff block: apply/view-diff buttons are inert; swallow the click.
-				if (b.Kind == "apply-diff" || b.Kind == "diff" || b.Kind == "view-diff") && m.blockStates[b.BlockID].Drifted {
+				// Drifted diff block: only apply-diff is inert (you genuinely can't apply a
+				// patch that no longer matches). view-diff/diff still open the read-only
+				// side-by-side pager (activateDiffButton) so a drifted diff can be viewed.
+				if b.Kind == "apply-diff" && m.blockStates[b.BlockID].Drifted {
 					return m, nil
 				}
 				if b.Kind == "apply-diff" {
@@ -937,7 +1044,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m.activateDiffButton(b)
 				}
 				if b.Kind == "drift-resolve" {
-					return m.activateDiffButton(b)
+					return m.driftResolveDispatch(b)
 				}
 				if b.Kind == "drift-regen" {
 					if m.orch == nil {
@@ -946,6 +1053,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					st := m.blockStates[b.BlockID]
 					st.Status = "regenerating"
 					st.RegenFailed = false
+					st.RegenNote = ""
 					st.SpinFrame = 0
 					m.blockStates[b.BlockID] = st
 					m.reflow()
@@ -1130,8 +1238,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.reflow()
 						return m, tea.Batch(m.flashCmd(), ac)
 					}
-					// Drifted diff block: apply/view-diff buttons are inert; swallow the key.
-					if (b.Kind == "apply-diff" || b.Kind == "diff" || b.Kind == "view-diff") && m.blockStates[b.BlockID].Drifted {
+					// Drifted diff block: only apply-diff is inert (you genuinely can't apply a
+					// patch that no longer matches). view-diff/diff still open the read-only
+					// side-by-side pager (activateDiffButton) so a drifted diff can be viewed.
+					if b.Kind == "apply-diff" && m.blockStates[b.BlockID].Drifted {
 						return m, nil
 					}
 					if b.Kind == "apply-diff" {
@@ -1178,7 +1288,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						return m.activateDiffButton(b)
 					}
 					if b.Kind == "drift-resolve" {
-						return m.activateDiffButton(b)
+						return m.driftResolveDispatch(b)
 					}
 					if b.Kind == "drift-regen" {
 						if m.orch == nil {
@@ -1187,6 +1297,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						st := m.blockStates[b.BlockID]
 						st.Status = "regenerating"
 						st.RegenFailed = false
+						st.RegenNote = ""
 						st.SpinFrame = 0
 						m.blockStates[b.BlockID] = st
 						m.reflow()
@@ -1260,6 +1371,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if s := msg.String(); s == "space" || s == " " {
 			var visible []Button
 			for _, b := range m.buttons {
+				// F19: a currently-inert button (its dispatch is swallowed) gets no hint
+				// label — otherwise the user picks a letter that does nothing. Covers a
+				// drifted block's apply-diff and the async-startup shell buttons.
+				if m.buttonInert(b) {
+					continue
+				}
 				if b.Screen {
 					// Screen-fixed buttons are always "visible" (they're in the
 					// fixed header, not the scrollable body).
@@ -1601,11 +1718,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		st.Status = ""
 		if msg.Err != nil || strings.TrimSpace(msg.NewPatch) == "" {
 			st.RegenFailed = true // block stays Drifted; render shows alternate message
+			// F24: surface WHY it failed. A missing/unconfigured AI backend gets a
+			// specific, actionable note; any other failure (or an empty patch) keeps the
+			// generic "resolve manually" alternate — either way the drift region shows a
+			// visible message, never a silent no-op.
+			if looksLikeNoBackend(msg.Err) {
+				st.RegenNote = "no AI backend found — install and authenticate the Claude CLI (claude), or resolve manually"
+			} else {
+				st.RegenNote = ""
+			}
 			m.blockStates[msg.ID] = st
 			m.reflow()
 			return m, nil
 		}
 		st.RegenFailed = false
+		st.RegenNote = ""
 		m.blockStates[msg.ID] = st
 		if newMd, ok := replaceBlockBody(m.md, msg.ID, msg.NewPatch); ok {
 			m.md = newMd
@@ -1743,19 +1870,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// editor if needed.
 		_ = m.reloadSource()
 		return m, nil
+	case driftResolveReloadMsg:
+		// The $EDITOR opened on a drifted patch's target file (resolve manually, F21)
+		// exited. Re-check drift so a successful manual edit clears Drifted (the fresh
+		// patch now applies); a still-mismatched file keeps the drift region. Errors are
+		// ignored — the drift state simply stays as it was.
+		return m, m.driftCheckCmds()
 	case sourcePollMsg:
-		// Mux editor poll: stat sourcePath and reload when mtime has advanced (the
-		// user saved in the docked editor pane). Re-arm unconditionally so saves at
-		// any point while the pane is open are picked up. Stop early when there's no
-		// source file (ephemeral playbook — shouldn't happen but guard anyway).
-		if m.sourcePath == "" {
+		// Mux editor poll: stat the watched file(s) and act when the mtime has advanced
+		// (the user saved in the docked editor pane). Re-arm unconditionally so saves at
+		// any point while the pane is open are picked up. Watches sourcePath (the [edit]
+		// playbook reload) AND, when set, driftEditPath (the "resolve manually" target →
+		// re-check drift on save, F21). Stops the loop only when neither is watched.
+		var recheck tea.Cmd
+		if m.sourcePath != "" {
+			if st, err := os.Stat(m.sourcePath); err == nil && st.ModTime().After(m.sourceMtime) {
+				m.sourceMtime = st.ModTime()
+				_ = m.reloadSource()
+			}
+		}
+		if m.driftEditPath != "" {
+			if st, err := os.Stat(m.driftEditPath); err == nil && st.ModTime().After(m.driftEditMtime) {
+				m.driftEditMtime = st.ModTime()
+				recheck = m.driftCheckCmds()
+			}
+		}
+		if m.sourcePath == "" && m.driftEditPath == "" {
+			m.polling = false
 			return m, nil
 		}
-		if st, err := os.Stat(m.sourcePath); err == nil && st.ModTime().After(m.sourceMtime) {
-			m.sourceMtime = st.ModTime()
-			_ = m.reloadSource()
-		}
-		return m, m.sourcePollCmd()
+		return m, tea.Batch(m.sourcePollCmd(), recheck)
 	}
 	return m, nil
 }
@@ -2541,9 +2685,17 @@ func (m model) viewString() string {
 			if b.Screen {
 				continue // handled separately in the header region
 			}
+			// Labels normally float on the line ABOVE the button. But when that line
+			// already holds text at the button's column (F20: the drift warning banner
+			// sits directly above the resolve/regenerate buttons), floating there would
+			// paint the letter over that text — so drop the label onto the button's OWN
+			// line instead. When the line above is scrolled off the top, float below.
 			row := b.Line - 1
-			if row < m.yOff {
+			switch {
+			case row < m.yOff:
 				row = b.Line + 1
+			case !m.lineBlank(row):
+				row = b.Line
 			}
 			if labelsByRow[row] == nil {
 				labelsByRow[row] = map[int]string{}
@@ -2946,12 +3098,13 @@ func (m *model) resolveConfirm(yes bool) tea.Cmd {
 	return nil
 }
 
-// canReengageInProc reports whether in-process re-engagement is wired (an
-// orchestrator with a Reengage context). When true, beginFollowupStream re-arms
-// the parser with the agent's revised-fix stream directly. This is the live
-// session path (file/stdin input, Reengage set).
+// canReengageInProc reports whether FOLLOWUP-grade in-process re-engagement is wired
+// (an orchestrator with a full authoring/troubleshoot Reengage context). When true,
+// beginFollowupStream re-arms the parser with the agent's revised-fix stream directly.
+// A DriftRegenOnly context (a `run --file` viewer wired to the harness for drift
+// regenerate alone) does NOT count — the followup affordances stay off there.
 func (m *model) canReengageInProc() bool {
-	return m.orch != nil && m.orch.Reengage != nil
+	return m.orch != nil && m.orch.Reengage != nil && !m.orch.Reengage.DriftRegenOnly
 }
 
 // canRegenerate reports whether the cached pill's reload can actually do something —

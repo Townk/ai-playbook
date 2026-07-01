@@ -1735,29 +1735,54 @@ func TestCreateBlock_TabAndButton(t *testing.T) {
 	}
 }
 
-// TestDriftedDiff_GreysApplyAndViewDiff verifies that buttonGlyph dims the
-// diff (view) and apply-diff glyphs to colOverlay0 when the block is Drifted,
-// and leaves non-drifted blocks with their normal colors.
-func TestDriftedDiff_GreysApplyAndViewDiff(t *testing.T) {
+// TestDriftedDiff_GreysApplyOnly verifies that buttonGlyph dims ONLY the apply-diff
+// glyph when the block is Drifted (you can't apply a stale patch), and leaves the
+// view-diff (diff) glyph live-colored so a drifted diff can still be viewed (F30).
+func TestDriftedDiff_GreysApplyOnly(t *testing.T) {
 	r := &renderer{states: map[string]blockRunState{"fix": {Drifted: true}}}
 	bg := lipgloss.NewStyle()
 	wantDim := bg.Foreground(lipgloss.Color(colOverlay0))
 
-	// diff (view) glyph: normal color is colBlue, drifted → colOverlay0
-	gotDiff := r.buttonGlyph("fix", "diff", glyphViewDiff, colBlue, bg)
-	if gotDiff != wantDim.Render(glyphViewDiff) {
-		t.Fatalf("drifted diff button should be dimmed:\n got  %q\n want %q", gotDiff, wantDim.Render(glyphViewDiff))
-	}
-	// apply-diff glyph: normal color is colGreen, drifted → colOverlay0
+	// apply-diff glyph: normal color is colGreen, drifted → dimmed to colOverlay0
 	gotApply := r.buttonGlyph("fix", "apply-diff", glyphApply, colGreen, bg)
 	if gotApply != wantDim.Render(glyphApply) {
 		t.Fatalf("drifted apply-diff button should be dimmed:\n got  %q\n want %q", gotApply, wantDim.Render(glyphApply))
+	}
+	// diff (view) glyph: must NOT be dimmed even when drifted — it stays live-colored (F30).
+	gotDiff := r.buttonGlyph("fix", "diff", glyphViewDiff, colBlue, bg)
+	if gotDiff == wantDim.Render(glyphViewDiff) {
+		t.Fatal("drifted view-diff button must NOT be dimmed (F30: a drifted diff can still be viewed)")
+	}
+	if want := bg.Foreground(lipgloss.Color(colBlue)).Render(glyphViewDiff); gotDiff != want {
+		t.Fatalf("drifted view-diff glyph should keep its live color:\n got  %q\n want %q", gotDiff, want)
 	}
 	// non-drifted block: the diff glyph must NOT be dimmed
 	rNormal := &renderer{states: map[string]blockRunState{"fix": {Drifted: false}}}
 	gotNormal := rNormal.buttonGlyph("fix", "diff", glyphViewDiff, colBlue, bg)
 	if gotNormal == wantDim.Render(glyphViewDiff) {
 		t.Fatal("non-drifted diff button must NOT be dimmed")
+	}
+}
+
+// TestDriftedDiff_RegenFailedNote verifies the drift region's message swaps to the
+// generic "resolve manually" alternate when RegenFailed is set, and to the specific
+// RegenNote (F24 — e.g. the no-backend notice) when one is present.
+func TestDriftedDiff_RegenFailedNote(t *testing.T) {
+	src := "```diff {id=fix}\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n```\n"
+
+	// Generic failure → the "resolve manually" alternate.
+	states := map[string]blockRunState{"fix": {Drifted: true, RegenFailed: true}}
+	lines, _, _ := Render(src, 100, states, "")
+	if !strings.Contains(joinText(lines), "regenerate didn't resolve it") {
+		t.Fatalf("RegenFailed must show the generic alternate note:\n%s", joinText(lines))
+	}
+
+	// Specific note (no backend) → surfaced verbatim, overriding the generic line.
+	note := "no AI backend available — set AI_PLAYBOOK_MODEL or install the harness, or resolve manually"
+	states2 := map[string]blockRunState{"fix": {Drifted: true, RegenFailed: true, RegenNote: note}}
+	lines2, _, _ := Render(src, 100, states2, "")
+	if !strings.Contains(joinText(lines2), "no AI backend available") {
+		t.Fatalf("RegenNote must override the generic alternate note:\n%s", joinText(lines2))
 	}
 }
 

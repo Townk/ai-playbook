@@ -47,6 +47,10 @@ var projectRootFn = capture.ProjectRoot
 // root) for a project_bound playbook. Seam so tests observe it without a viewer.
 var setProjectRootFn = ui.SetProjectRoot
 
+// setReengageFn stashes the run-viewer's drift-regen re-engagement context (the harness
+// wiring for regenerating a drifted diff). Seam so tests observe the wiring without a viewer.
+var setReengageFn = ui.SetReengage
+
 // RunMain is the `ai-playbook run` subcommand: it owns config loading + the
 // configured-shell hand-off (ui stays config-agnostic), resolves the run
 // argument, and renders the resolved playbook through ui.Main (via uiMainFn). A
@@ -142,8 +146,11 @@ func resolveProjectRoot(declared string) string {
 }
 
 // runViewer renders file through the `run --file` viewer (ui.Main via uiMainFn),
-// passing --cwd when non-empty so the run driver opens there.
+// passing --cwd when non-empty so the run driver opens there. It wires the harness for
+// drift-regenerate (drift-only re-engagement) so a standalone playbook can regenerate a
+// drifted diff block; the viewer keeps its authoring affordances off (DriftRegenOnly).
 func runViewer(file, cwd string) int {
+	setReengageFn(driftRegenReengage())
 	saved := os.Args
 	args := []string{os.Args[0], "run", "--file", file}
 	if cwd != "" {

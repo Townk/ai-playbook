@@ -266,9 +266,11 @@ func (r *renderer) buttonGlyph(blockID, kind, glyph, fgColor string, bg lipgloss
 		// the flash pulse. Same glyph/cell, so the position never moves when it enables.
 		return bg.Foreground(lipgloss.Color(colOverlay0)).Render(glyph)
 	}
-	if r.states[blockID].Drifted && (kind == "apply-diff" || kind == "diff") {
-		// Drift: the patch no longer applies cleanly. Dim the action buttons to signal
-		// they are inert; the drift-region button (Task 4) is the live re-apply path.
+	if r.states[blockID].Drifted && kind == "apply-diff" {
+		// Drift: the patch no longer applies cleanly. Dim ONLY apply-diff to signal it
+		// is inert; the drift region's resolve/regenerate buttons are the live paths. The
+		// view-diff (diff) button stays live-colored — a drifted diff can still be VIEWED
+		// read-only (F30).
 		return bg.Foreground(lipgloss.Color(colOverlay0)).Render(glyph)
 	}
 	key := blockID + ":" + kind
@@ -895,7 +897,13 @@ func (r *renderer) code(n ast.Node) {
 		// set the alternate message is shown instead of the plain drift message.
 		driftNote := "this diff no longer applies — the target file changed since it was written"
 		if r.states[blk.ID].RegenFailed {
-			driftNote = "regenerate didn't resolve it — resolve manually"
+			// A failed regenerate: show the specific cause when we have one (F24 — e.g.
+			// "no AI backend available…"), else the generic "resolve manually" alternate.
+			if note := r.states[blk.ID].RegenNote; note != "" {
+				driftNote = note
+			} else {
+				driftNote = "regenerate didn't resolve it — resolve manually"
+			}
 		}
 		msgLine := indentStr +
 			lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render("⚠ ") +

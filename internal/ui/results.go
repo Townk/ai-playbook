@@ -1,6 +1,35 @@
 package ui
 
-import "github.com/Townk/ai-playbook/internal/orchestrator"
+import (
+	"strings"
+
+	"github.com/Townk/ai-playbook/internal/orchestrator"
+)
+
+// looksLikeNoBackend reports whether err indicates the AI harness/backend is missing
+// or unusable (F24) — the binary isn't on PATH, the harness isn't supported/built, or
+// the model couldn't be resolved. Used to pick the specific "no AI backend available"
+// drift note over the generic regenerate-failed message. Best-effort substring match:
+// a false negative merely shows the generic (still non-silent) note.
+func looksLikeNoBackend(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := strings.ToLower(err.Error())
+	for _, needle := range []string{
+		"executable file not found",
+		"no such file or directory",
+		"not yet supported",
+		"command not found",
+		"regenerate unavailable",
+		"no backend",
+	} {
+		if strings.Contains(s, needle) {
+			return true
+		}
+	}
+	return false
+}
 
 // driftMsg carries the result of an async drift check for a diff block. The
 // handler sets blockRunState.Drifted when the verdict is DriftDrifted (the
@@ -50,4 +79,10 @@ type blockRunState struct {
 	// error. Task 5's render note uses it to show a "regen failed" badge beside the
 	// [regenerate] button so the user knows the attempt did not produce a fresh patch.
 	RegenFailed bool
+
+	// RegenNote, when non-empty, is the exact drift-region message shown after a FAILED
+	// regenerate (F24) — it overrides the default "regenerate didn't resolve it" line so
+	// a specific cause (e.g. "no AI backend available…") is surfaced instead of a silent
+	// no-op. Set together with RegenFailed; cleared on a fresh regenerate attempt.
+	RegenNote string
 }

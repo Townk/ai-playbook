@@ -177,14 +177,21 @@ type EventsFunc func(kind ReengageKind, base, change string) (<-chan agentstream
 // NOT re-store the main playbook). DataRoot is the data dir for the wrap-up
 // solution artifact and the KB append (defaults to cache.DefaultRoot when empty).
 type Reengage struct {
-	Req         capture.Request
-	Agent       author.Agent
-	Events      EventsFunc
-	Cache       *cache.Cache
-	CtxHash     string
-	ReqHash     string
-	RequestJSON string
-	DataRoot    string
+	Req    capture.Request
+	Agent  author.Agent
+	Events EventsFunc
+	// DriftRegenOnly marks a re-engagement context that supports ONLY the
+	// drift-regenerate action (a `run --file` viewer wired to the harness for that one
+	// thing), not a full authoring/troubleshoot session. The viewer keeps its followup
+	// and whole-playbook-regenerate affordances OFF for such a context (see
+	// canReengageInProc), so a standalone playbook can regenerate a drifted diff without
+	// sprouting an authoring-only "try another fix" button.
+	DriftRegenOnly bool
+	Cache          *cache.Cache
+	CtxHash        string
+	ReqHash        string
+	RequestJSON    string
+	DataRoot       string
 
 	// Body, when set, renders the currently-captured structured playbook (live).
 	// Re-engagement uses it so the in-viewer stream EOF can show the re-authored
@@ -897,6 +904,27 @@ func (o *Orchestrator) undoCreate(payload string) driver.Result {
 	return driver.Result{Exit: 0}
 }
 
+// DriftTargetPath resolves the on-disk absolute path of a patch's target file: the
+// parsed new-file path (files[0].NewPath) with a leading a/ or b/ prefix stripped,
+// joined against the session root (projectRoot — the driver's cwd) when relative. It
+// is the single source of truth for "which file does this patch target", shared by
+// DriftRegen and the UI's "resolve manually" editor (F21) so both act on the exact
+// file the drift check evaluated. Returns an error when the patch has no target.
+func (o *Orchestrator) DriftTargetPath(patch string) (string, error) {
+	files := diff.Parse(patch)
+	if len(files) == 0 {
+		return "", errors.New("could not parse patch target")
+	}
+	rel := strings.TrimPrefix(strings.TrimPrefix(files[0].NewPath, "b/"), "a/")
+	if rel == "" {
+		return "", errors.New("could not parse patch target")
+	}
+	if filepath.IsAbs(rel) {
+		return rel, nil
+	}
+	return filepath.Join(o.projectRoot(), rel), nil
+}
+
 // DriftRegen asks the model for a fresh unified diff for a drifted patch, against the
 // CURRENT target file, and returns it as text. It does NOT touch the structured/lastPB
 // capture path. The empty string with a nil error means the model produced nothing.
@@ -905,14 +933,9 @@ func (o *Orchestrator) DriftRegen(patch string) (string, error) {
 	if re == nil || re.Events == nil {
 		return "", errors.New("regenerate unavailable")
 	}
-	files := diff.Parse(patch)
-	if len(files) == 0 {
-		return "", errors.New("could not parse patch target")
-	}
-	rel := strings.TrimPrefix(strings.TrimPrefix(files[0].NewPath, "b/"), "a/")
-	abs := rel
-	if !filepath.IsAbs(abs) {
-		abs = filepath.Join(o.projectRoot(), rel)
+	abs, err := o.DriftTargetPath(patch)
+	if err != nil {
+		return "", err
 	}
 	content, err := os.ReadFile(abs)
 	if err != nil {

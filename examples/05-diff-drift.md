@@ -29,12 +29,14 @@ The `settimeout` block targets `settings.conf`. Click **Apply** and watch what h
  [logging]
 ```
 
-Instead of applying cleanly, ai-playbook highlights a **drift region** — the lines where the patch's expected context (`timeout = 30`) does not match what the file actually contains (`timeout = 99`). The **Apply** button is replaced by two options:
+Instead of applying cleanly, ai-playbook highlights a **drift region** — the lines where the patch's expected context (`timeout = 30`) does not match what the file actually contains (`timeout = 99`). The **Apply** button is dimmed (you can't apply a patch that no longer matches), and two options appear:
 
-- **Resolve manually** — opens the file in your editor with conflict markers, letting you merge the change by hand. Use this when the correct new value depends on business logic you need to reason about — in this case, deciding whether `60` or some other value is right given that someone deliberately set it to `99`.
-- **Regenerate** — sends the current file content back to the AI that authored the patch and asks it to rewrite the diff against the real file. Use this when the patch intent is clear but the context simply needs refreshing.
+- **Resolve manually** — opens the patch's **target file** (`settings.conf`) in your editor (`$VISUAL`/`$EDITOR`) so you can reconcile the change by hand. Use this when the correct new value depends on business logic you need to reason about — in this case, deciding whether `60` or some other value is right given that someone deliberately set it to `99`. When you save and close the editor, ai-playbook re-checks the patch: if your edit makes it apply again, the drift region clears.
+- **Regenerate** — sends the current file content back to the AI that authored the patch and asks it to rewrite the diff against the real file. Use this when the patch intent is clear but the context simply needs refreshing. A spinner shows while it works; if it can't produce a fresh patch (for example, no AI backend is configured) the drift region says so and points you back to resolving manually.
 
 Neither option is automatically the right one. If you know *why* the file drifted you should resolve manually; if the change is mechanical and the AI context is still accurate, regenerate is faster.
+
+The **View diff** button stays live even when a diff has drifted — you can always open the read-only side-by-side view to see exactly what the patch expected versus what the file now contains before deciding how to resolve it.
 
 > [!NOTE]
 > **Viewing the diff when drift occurs:**
