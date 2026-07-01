@@ -998,7 +998,7 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 	case "regenerating":
 		sl := spinnerLine(st.SpinFrame, "regenerating…", st.SpinFrame/10)
 		r.lines = append(r.lines, Line{Text: indentStr + sl, Wide: false, Code: true})
-	case "ok", "failed", "stopped":
+	case "ok", "failed", "stopped", "rolledback":
 		rawToggle := "▸"
 		if st.Expanded {
 			rawToggle = "▾"
@@ -1016,10 +1016,22 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 			sty := lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext))
 			label = "■ stopped (exit " + itoa(st.Exit) + ")"
 			statusPart = sty.Render(label)
+		case "rolledback":
+			// A rollback-chain target that finished — undone, in the rollback (peach) hue.
+			sty := lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach))
+			label = "↺ step rolled back"
+			statusPart = sty.Render(label)
 		default: // "failed"
 			sty := lipgloss.NewStyle().Foreground(lipgloss.Color(colRed))
 			label = "✗ failed (exit " + itoa(st.Exit) + ")"
 			statusPart = sty.Render(label)
+			// When a rollback chain triggered by this failure has finished, append a
+			// peach suffix so the failure line reads "✗ failed (exit N) — all steps rolled back".
+			if st.RolledBack {
+				suffix := " — all steps rolled back"
+				statusPart += lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render(suffix)
+				label += suffix // keep label width in sync for toggleCol
+			}
 		}
 		// toggle column: indent(2) + visible width of label + space(1).
 		// This mirrors how tab button columns are computed (tracking col after each
@@ -1074,6 +1086,12 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 		r.buttons = append(r.buttons, Button{Line: summaryLineIdx, Col: toggleCol, Width: 2, Kind: "toggle", BlockID: id})
 		if extraCol >= 0 {
 			r.buttons = append(r.buttons, Button{Line: summaryLineIdx, Col: extraCol, Width: 2, Kind: extraKind, Payload: blk.Payload, BlockID: id})
+		}
+		// While a rollback chain triggered by this failure is running, show a spinner
+		// under the failure so the automatic undo has a stated cause.
+		if st.RollingBack {
+			sl := spinnerLine(st.SpinFrame, "rolling back applied steps…", st.SpinFrame/10)
+			r.lines = append(r.lines, Line{Text: indentStr + sl, Wide: false, Code: true})
 		}
 		if st.Expanded {
 			tail := tailFile(st.Logpath, 50)

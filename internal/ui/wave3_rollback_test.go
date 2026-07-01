@@ -76,9 +76,59 @@ func TestRollbackTargetNotIndependentlyRunnable(t *testing.T) {
 	}
 }
 
+// TestRollbackChain_SpinnerRolledbackAndSuffix verifies the rollback-chain UX: the
+// failed block gets a RollingBack spinner while the undo runs; the rolled-back FORWARD
+// step (the origin) shows the "rolledback" status; the rollback TARGET (the undo command)
+// lands as a normal success ("ok"); and when the chain completes the failed block flips
+// to RolledBack (the "— all steps rolled back" suffix). The failed block's ✗ state must
+// survive the dependent-reset (it needs= the rolled-back step).
+func TestRollbackChain_SpinnerRolledbackAndSuffix(t *testing.T) {
+	body := "```bash {id=a rollback=undo-a}\ntrue\n```\n\n" +
+		"```bash {id=undo-a}\ntrue\n```\n\n" +
+		"```bash {id=boom needs=a}\nfalse\n```\n"
+	m := newModel("T", body)
+	m.width, m.height = 80, 24
+	m.reflow()
+	m.blockStates["a"] = blockRunState{Status: "ok"}
+	m.blockStates["boom"] = blockRunState{Status: "failed", Exit: 1}
+	m.reflow()
+
+	m2, _ := m.beginRollback("boom")
+	fb := m2.blockStates["boom"]
+	if fb.Status != "failed" || !fb.RollingBack || fb.RolledBack {
+		t.Fatalf("failed block must stay failed + RollingBack during the chain; got %+v", fb)
+	}
+	// The forward step that is being undone shows "rolledback" (↺ step rolled back).
+	if got := m2.blockStates["a"].Status; got != "rolledback" {
+		t.Fatalf("rolled-back forward step a must be 'rolledback'; got %q", got)
+	}
+	if m2.blockStates["undo-a"].Status != "running" || m2.blockStates["undo-a"].Action != "rollback" {
+		t.Fatalf("target undo-a must be running with Action=rollback; got %+v", m2.blockStates["undo-a"])
+	}
+	if m2.rollbackPending != 1 {
+		t.Fatalf("rollbackPending should be 1; got %d", m2.rollbackPending)
+	}
+
+	// The undo command finishes → success ("ok"); chain done → failed block gets the suffix.
+	m3 := mustModel(m2.Update(resultMsg{ID: "undo-a", Exit: 0}))
+	if got := m3.blockStates["undo-a"].Status; got != "ok" {
+		t.Errorf("finished rollback target (undo command) must be 'ok'; got %q", got)
+	}
+	if got := m3.blockStates["a"].Status; got != "rolledback" {
+		t.Errorf("rolled-back forward step a must stay 'rolledback'; got %q", got)
+	}
+	fb = m3.blockStates["boom"]
+	if fb.RollingBack || !fb.RolledBack {
+		t.Errorf("after the chain, failed block must be RolledBack (spinner off); got %+v", fb)
+	}
+	if m3.rollbackPending != 0 {
+		t.Errorf("rollbackPending should be 0 after completion; got %d", m3.rollbackPending)
+	}
+}
+
 // TestAutoRollback_FiresOnFailure verifies that with --auto-rollback (m.autoRollback),
-// a step failure auto-fires the rollback chain: the rolled-back origin is reset and its
-// rollback target is marked running.
+// a step failure auto-fires the rollback chain: the rolled-back forward step shows
+// "rolledback" and its rollback target is marked running.
 func TestAutoRollback_FiresOnFailure(t *testing.T) {
 	body := "```bash {id=a rollback=undo-a}\ntrue\n```\n\n" +
 		"```bash {id=undo-a}\ntrue\n```\n\n" +
@@ -92,8 +142,8 @@ func TestAutoRollback_FiresOnFailure(t *testing.T) {
 
 	m2 := mustModel(m.Update(resultMsg{ID: "boom", Exit: 1, Logpath: "/tmp/x.log"}))
 
-	if _, ok := m2.blockStates["a"]; ok {
-		t.Error("auto-rollback must reset the rolled-back origin a")
+	if got := m2.blockStates["a"].Status; got != "rolledback" {
+		t.Errorf("auto-rollback must mark the rolled-back forward step a 'rolledback'; got %q", got)
 	}
 	if m2.blockStates["undo-a"].Status != "running" {
 		t.Errorf("auto-rollback must mark undo-a running; got %q", m2.blockStates["undo-a"].Status)
@@ -160,9 +210,10 @@ func TestRollbackButtonGating(t *testing.T) {
 	}
 }
 
-// TestBeginRollbackResetsAndRuns verifies beginRollback resets the run steps that had a
-// rollback= target and marks each target running (the actual undo runs via the returned
-// cmd). No orchestrator is wired, so emitAction is a no-op — we assert the state model.
+// TestBeginRollbackResetsAndRuns verifies beginRollback marks the run steps that had a
+// rollback= target as "rolledback" and marks each target running (the actual undo runs
+// via the returned cmd). No orchestrator is wired, so emitAction is a no-op — we assert
+// the state model.
 func TestBeginRollbackResetsAndRuns(t *testing.T) {
 	body := "```bash {id=a rollback=undo-a}\ntrue\n```\n\n" +
 		"```bash {id=undo-a}\ntrue\n```\n\n" +
@@ -175,13 +226,13 @@ func TestBeginRollbackResetsAndRuns(t *testing.T) {
 	m.blockStates["b"] = blockRunState{Status: "ok"}
 	m.reflow()
 
-	m2, _ := m.beginRollback()
+	m2, _ := m.beginRollback("")
 
-	if _, ok := m2.blockStates["a"]; ok {
-		t.Error("origin a must be reset (its forward effect is being undone)")
+	if got := m2.blockStates["a"].Status; got != "rolledback" {
+		t.Errorf("forward step a must be 'rolledback' (its effect is being undone); got %q", got)
 	}
-	if _, ok := m2.blockStates["b"]; ok {
-		t.Error("origin b must be reset")
+	if got := m2.blockStates["b"].Status; got != "rolledback" {
+		t.Errorf("forward step b must be 'rolledback'; got %q", got)
 	}
 	if m2.blockStates["undo-a"].Status != "running" {
 		t.Errorf("undo-a must be marked running; got %q", m2.blockStates["undo-a"].Status)
