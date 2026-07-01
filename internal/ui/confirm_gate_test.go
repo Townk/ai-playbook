@@ -67,6 +67,32 @@ func TestBuildConfirmVars(t *testing.T) {
 	}
 }
 
+// TestBuildConfirmVars_DeclaredDefaults verifies the declared front-matter `value:` is
+// used as each var's default (shown literally, shell expands later), a live shell value
+// overrides it, and PROJECT_ROOT always takes the heuristic root.
+func TestBuildConfirmVars_DeclaredDefaults(t *testing.T) {
+	env := map[string]frontmatter.EnvValue{
+		"PROJECT_ROOT": {Value: "declared/ignored", Why: "root"},
+		"DATA_DIR":     {Value: "$PROJECT_ROOT/data", Why: "data"},
+		"OVERRIDE_ME":  {Value: "declared-default", Why: "x"},
+	}
+	getenv := func(k string) string {
+		if k == "OVERRIDE_ME" {
+			return "shell-override"
+		}
+		return ""
+	}
+	got := buildConfirmVars(env, "/abs/root", getenv)
+	want := []confirmVar{
+		{"DATA_DIR", "$PROJECT_ROOT/data", "data"}, // declared default, shown literally
+		{"OVERRIDE_ME", "shell-override", "x"},     // live shell env overrides the default
+		{"PROJECT_ROOT", "/abs/root", "root"},      // heuristic root wins over declared
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("buildConfirmVars = %v, want %v", got, want)
+	}
+}
+
 func gateModel(t *testing.T) model {
 	t.Helper()
 	return model{
@@ -211,6 +237,25 @@ func TestBuildExportCmd_Quoting(t *testing.T) {
 	got := buildExportCmd(values)
 	// Sorted by name: BAR first, then FOO.
 	want := `export BAR='plain'; export FOO='a'\''b; rm -rf /'; `
+	if got != want {
+		t.Errorf("buildExportCmd = %q, want %q", got, want)
+	}
+}
+
+// TestBuildExportCmd_ExpandsConfirmedRefs verifies a derived value referencing another
+// confirmed var (DATA_DIR=$PROJECT_ROOT/data, NESTED=${DATA_DIR}/logs) is expanded to
+// the resolved path at export time — so the shell never creates a literal "$PROJECT_ROOT"
+// directory — while a literal $ that is not a confirmed var name (p$ssw0rd) is untouched.
+func TestBuildExportCmd_ExpandsConfirmedRefs(t *testing.T) {
+	values := map[string]string{
+		"PROJECT_ROOT": "/abs/portable",
+		"DATA_DIR":     "$PROJECT_ROOT/data",
+		"NESTED":       "${DATA_DIR}/logs",
+		"LITERAL":      "p$ssw0rd",
+	}
+	got := buildExportCmd(values)
+	// Sorted by name: DATA_DIR, LITERAL, NESTED, PROJECT_ROOT.
+	want := `export DATA_DIR='/abs/portable/data'; export LITERAL='p$ssw0rd'; export NESTED='/abs/portable/data/logs'; export PROJECT_ROOT='/abs/portable'; `
 	if got != want {
 		t.Errorf("buildExportCmd = %q, want %q", got, want)
 	}

@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
@@ -90,32 +91,68 @@ func runPlaybook(slug string) int {
 	return renderStored(body, cwd)
 }
 
-// runFile renders a markdown file. A file WITH front matter is treated as a stored
-// playbook: a project_bound one gets its PROJECT_ROOT set + opens at the project
-// root, else it renders as-is. A raw file WITHOUT front matter renders as-is (the
-// internal-caller temp-file shape, though those callers bypass RunMain).
+// runFile renders a markdown file through the `run --file` viewer. The ORIGINAL file
+// is always what ui.Main renders — ui.Main strips any front matter for display AND
+// extracts the declared env map for the confirmation gate, so we must NOT pre-strip it
+// (an earlier temp-file round-trip did, which silently discarded both the run cwd and
+// the env map). A project_bound file resolves its project root (declared project_root
+// relative to the heuristic repo root, else the repo root itself), exports it as
+// PROJECT_ROOT, and opens there; a plain front-matter file opens in the file's own
+// directory; a raw file with no front matter renders as-is in the invocation cwd.
 func runFile(file string) int {
 	data, rerr := os.ReadFile(file)
 	if rerr != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", rerr)
 		return 1
 	}
-	fm, fmBody, ok := frontmatter.Parse(string(data))
+	fm, _, ok := frontmatter.Parse(string(data))
 	if !ok {
-		// No front matter → render as-is via the `run --file` path.
-		saved := os.Args
-		os.Args = []string{os.Args[0], "run", "--file", file}
-		code := uiMainFn()
-		os.Args = saved
-		return code
+		// No front matter → render as-is (cwd derived from the file by ui.Main).
+		return runViewer(file, "")
 	}
 	cwd := ""
 	if fm.ProjectBound {
-		root := projectRootFn()
+		root := resolveProjectRoot(fm.ProjectRoot)
 		setProjectRootFn(root) // the run driver exports PROJECT_ROOT=<root>
 		cwd = root
+	} else if dir := filepath.Dir(file); dir != "" {
+		// The `run --file` cwd rule: blocks run in the playbook file's own directory
+		// so the body's relative paths resolve against it.
+		if abs, aerr := filepath.Abs(dir); aerr == nil {
+			cwd = abs
+		} else {
+			cwd = dir
+		}
 	}
-	return renderStored(fmBody, cwd)
+	return runViewer(file, cwd)
+}
+
+// resolveProjectRoot resolves a project_bound playbook's root. An explicit
+// front-matter project_root is resolved relative to the heuristic repo root
+// (absolute values are used verbatim); an empty project_root falls back to the
+// heuristic root itself.
+func resolveProjectRoot(declared string) string {
+	if declared == "" {
+		return projectRootFn()
+	}
+	if filepath.IsAbs(declared) {
+		return declared
+	}
+	return filepath.Join(projectRootFn(), declared)
+}
+
+// runViewer renders file through the `run --file` viewer (ui.Main via uiMainFn),
+// passing --cwd when non-empty so the run driver opens there.
+func runViewer(file, cwd string) int {
+	saved := os.Args
+	args := []string{os.Args[0], "run", "--file", file}
+	if cwd != "" {
+		args = append(args, "--cwd", cwd)
+	}
+	os.Args = args
+	code := uiMainFn()
+	os.Args = saved
+	return code
 }
 
 // renderStored writes body to a temp file and runs it via the `run --file` viewer

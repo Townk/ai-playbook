@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -43,13 +44,18 @@ type confirmVar struct {
 }
 
 // buildConfirmVars builds the gate's variable list from the declared front-matter env,
-// the heuristic project root, and a getenv func (injected for tests). PROJECT_ROOT takes
-// the project root; every other var takes its live shell value (empty if unset). Sorted
-// by name for stable dialog ordering.
+// the heuristic project root, and a getenv func (injected for tests). Each var defaults
+// to its declared front-matter `value:` (shown literally — e.g. "$PROJECT_ROOT/data" —
+// so it tracks any PROJECT_ROOT override when the shell expands it at export time); a
+// non-empty live shell value overrides that default; PROJECT_ROOT always takes the
+// heuristic project root. Sorted by name for stable dialog ordering.
 func buildConfirmVars(env map[string]frontmatter.EnvValue, projectRoot string, getenv func(string) string) []confirmVar {
 	out := make([]confirmVar, 0, len(env))
 	for name, ev := range env {
-		val := getenv(name)
+		val := ev.Value // declared front-matter default
+		if shell := getenv(name); shell != "" {
+			val = shell // an explicit live shell value overrides the default
+		}
 		if name == "PROJECT_ROOT" {
 			val = projectRoot
 		}
@@ -234,12 +240,53 @@ func (m model) runGateBlock(block Button, values map[string]string) (model, tea.
 	))
 }
 
+// expandConfirmedVars resolves references to other confirmed vars inside each value
+// (e.g. DATA_DIR="$PROJECT_ROOT/data" → the resolved PROJECT_ROOT path). Only exact
+// confirmed-var names are expanded ($NAME / ${NAME}); a literal $ before anything else
+// (e.g. "p$ssw0rd") is left untouched so the subsequent single-quote keeps it verbatim.
+// Bounded fixed-point iteration resolves transitive references; a cyclic reference is
+// left partially expanded rather than looping forever.
+func expandConfirmedVars(values map[string]string) map[string]string {
+	res := make(map[string]string, len(values))
+	pats := make(map[string]*regexp.Regexp, len(values))
+	names := make([]string, 0, len(values))
+	for n, v := range values {
+		res[n] = v
+		names = append(names, n)
+		pats[n] = regexp.MustCompile(`\$` + regexp.QuoteMeta(n) + `\b`)
+	}
+	for pass := 0; pass <= len(values); pass++ {
+		changed := false
+		for _, target := range names {
+			s := res[target]
+			for _, ref := range names {
+				val := res[ref]
+				s = strings.ReplaceAll(s, "${"+ref+"}", val)
+				// ReplaceAllStringFunc (not ReplaceAllString) so a $ in val is never
+				// misread as a $1 group reference.
+				s = pats[ref].ReplaceAllStringFunc(s, func(string) string { return val })
+			}
+			if s != res[target] {
+				res[target] = s
+				changed = true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	return res
+}
+
 // buildExportCmd shell-quotes the final values into a single export command, sorted by
-// name for a stable, testable string. Empty values → "".
+// name for a stable, testable string. Confirmed-var references in derived values are
+// expanded first (so "$PROJECT_ROOT/data" exports the resolved path, not a literal). Empty
+// values → "".
 func buildExportCmd(values map[string]string) string {
 	if len(values) == 0 {
 		return ""
 	}
+	values = expandConfirmedVars(values)
 	names := make([]string, 0, len(values))
 	for n := range values {
 		names = append(names, n)
