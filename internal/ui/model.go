@@ -17,6 +17,7 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/Townk/ai-playbook/internal/askbridge"
+	"github.com/Townk/ai-playbook/internal/autorun"
 	idiff "github.com/Townk/ai-playbook/internal/diff"
 	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/input"
@@ -2251,6 +2252,26 @@ func (m model) anyRollbackable() bool {
 	return false
 }
 
+// toAutorunBlocks maps the pager's blocks and their live run states into the
+// autorun package's Block/status shape, so beginRollback can share the same
+// autorun.RollbackPairs collection logic used by the headless --auto rollback.
+func (m model) toAutorunBlocks() ([]autorun.Block, map[string]string) {
+	ab := make([]autorun.Block, 0, len(m.blocks))
+	status := make(map[string]string, len(m.blocks))
+	for _, b := range m.blocks {
+		ab = append(ab, autorun.Block{
+			ID:       b.ID,
+			Command:  b.Payload,
+			Needs:    b.Needs,
+			Rollback: b.Rollback,
+			Static:   b.Static,
+			Kind:     autorun.KindRun,
+		})
+		status[b.ID] = m.blockStates[b.ID].Status
+	}
+	return ab, status
+}
+
 // beginRollback runs the manual rollback chain (a "Rollback playbook" click): every
 // already-run block (Status=="ok") that declares a rollback= target has that target
 // executed, in REVERSE registration order, each as a normal run so its result shows
@@ -2258,13 +2279,12 @@ func (m model) anyRollbackable() bool {
 // effect and re-locking any dependents. tea.Sequence runs the targets one at a time so a
 // later undo never races an earlier one.
 func (m model) beginRollback(failedID string) (model, tea.Cmd) {
+	ab, status := m.toAutorunBlocks()
+	pairs := autorun.RollbackPairs(ab, status)
 	var origins, targets []string
-	for i := len(m.blocks) - 1; i >= 0; i-- {
-		b := m.blocks[i]
-		if b.Rollback != "" && m.blockStates[b.ID].Status == "ok" {
-			origins = append(origins, b.ID)
-			targets = append(targets, b.Rollback)
-		}
+	for i := 0; i < len(pairs); i++ {
+		origins = append(origins, pairs[i][0])
+		targets = append(targets, pairs[i][1])
 	}
 	if len(targets) == 0 {
 		return m, nil

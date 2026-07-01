@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 	"testing"
+
+	"github.com/Townk/ai-playbook/internal/autorun"
 )
 
 // TestBlockVisualNumbers verifies actionable blocks get sequential circled numbers while
@@ -226,6 +228,11 @@ func TestBeginRollbackResetsAndRuns(t *testing.T) {
 	m.blockStates["b"] = blockRunState{Status: "ok"}
 	m.reflow()
 
+	// Snapshot the pre-rollback autorun view BEFORE calling beginRollback: blockStates is a
+	// map, so beginRollback mutates it in place (shared with m) and the "ok" statuses would
+	// be gone by the time we could otherwise inspect them below.
+	ab, status := m.toAutorunBlocks()
+
 	m2, _ := m.beginRollback("")
 
 	if got := m2.blockStates["a"].Status; got != "rolledback" {
@@ -242,5 +249,19 @@ func TestBeginRollbackResetsAndRuns(t *testing.T) {
 	}
 	if m2.blockStates["undo-a"].Action != "rollback" || m2.blockStates["undo-b"].Action != "rollback" {
 		t.Error("rollback targets must carry Action=rollback")
+	}
+
+	// beginRollback now derives its origins/targets from the shared autorun.RollbackPairs
+	// helper (also used by the headless --auto rollback) — confirm the two agree on the
+	// same reverse-order pairing (b before a) for this scenario.
+	pairs := autorun.RollbackPairs(ab, status)
+	want := [][2]string{{"b", "undo-b"}, {"a", "undo-a"}}
+	if len(pairs) != len(want) {
+		t.Fatalf("RollbackPairs returned %d pairs, want %d: %v", len(pairs), len(want), pairs)
+	}
+	for i, p := range want {
+		if pairs[i] != p {
+			t.Errorf("pairs[%d] = %v, want %v", i, pairs[i], p)
+		}
 	}
 }
