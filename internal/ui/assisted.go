@@ -29,10 +29,25 @@ func (m model) assistedNextID() string {
 	return ""
 }
 
+// maybeStartAssisted enters the guided walk once the playbook's blocks are
+// available (stream EOF). Guarded so it fires exactly once.
+func (m model) maybeStartAssisted() model {
+	if m.assisted && !m.assistedStarted {
+		m.assistedStarted = true
+		return m.startAssisted()
+	}
+	return m
+}
+
 // startAssisted sets the initial readyID cursor (the first runnable block) and
 // raises the "step" footer, scrolling that block ~⅓ down the viewport. An empty
 // playbook (no runnable blocks) goes straight to the "done" footer.
 func (m model) startAssisted() model {
+	// Recompute m.blocks from the current m.md regardless of caller state — the
+	// caller (maybeStartAssisted at stream EOF, or a test constructing a model
+	// directly) may not have reflowed yet, and assistedNextID below depends on
+	// m.blocks being current.
+	m.reflow()
 	m.readyID = m.assistedNextID()
 	if m.readyID != "" {
 		m.assistedFooter = "step"
@@ -104,22 +119,30 @@ func (m model) lineForBlock(id string) int {
 
 // footerBtn is one button in the assisted (GUIDED) footer's button row: the
 // label shown, the Kind that identifies it to the click hit-test/flash (e.g.
-// "assist-run") and confirmButtonLabel's flash lookup, and the accent color
-// used when NOT focused-and-highlighted (confirmButtonLabel always highlights
-// the focused button green regardless of accent, matching the confirm row).
+// "assist-run") and assistedFooterButtonLabel's flash lookup, and the Accent —
+// the FOCUSED-highlight color for this footer mode (all buttons in a mode
+// share one accent: the neutral dialog blue for "step", the warn peach for
+// "failure", green only for the terminal "done" success state).
 type footerBtn struct{ Label, Kind, Accent string }
 
 // assistedFooterButtons returns the button set for the current assistedFooter
 // mode: "step" → Run/Skip/Quit; "failure" → Roll back (only when at least one
 // already-run block declares a rollback target) / Leave as-is / Quit; "done" →
 // a single Quit; "" (footer not shown) → nil.
+//
+// Accent is mode-wide, not per-button: "step" hasn't succeeded at anything yet,
+// so it uses the standard dialog accent (colBlue — the same blue as the
+// confirm-dialog/help-modal border) rather than success-green. "failure" uses
+// the warn tone (colPeach) already used elsewhere for rollback/danger actions.
+// "done" is the one case a completed run legitimately reads as success
+// (colGreen).
 func (m model) assistedFooterButtons() []footerBtn {
 	switch m.assistedFooter {
 	case "step":
 		return []footerBtn{
-			{"Run", "assist-run", colGreen},
-			{"Skip", "assist-skip", colSubtext},
-			{"Quit", "assist-quit", colPeach},
+			{"Run", "assist-run", colBlue},
+			{"Skip", "assist-skip", colBlue},
+			{"Quit", "assist-quit", colBlue},
 		}
 	case "failure":
 		var btns []footerBtn
@@ -127,7 +150,7 @@ func (m model) assistedFooterButtons() []footerBtn {
 			btns = append(btns, footerBtn{"Roll back", "assist-rollback", colPeach})
 		}
 		btns = append(btns,
-			footerBtn{"Leave as-is", "assist-leave", colSubtext},
+			footerBtn{"Leave as-is", "assist-leave", colPeach},
 			footerBtn{"Quit", "assist-quit", colPeach},
 		)
 		return btns
@@ -213,17 +236,42 @@ func (m model) assistedFooterContextRowString() string {
 	}
 }
 
-// assistedFooterButtonsRowString builds the styled BUTTONS row, reusing the
-// SAME filled-control primitive the confirm row draws with (confirmButtonLabel)
-// so both read as buttons with the focused one highlighted green — only the
-// footer's OWN focus index (footerFocus) drives the highlight, independent of
-// confirmFocus. Left-aligned at the content edge, same indent/gap constants as
-// the confirm buttons row so the layout reads consistently.
+// assistedFooterButtonLabel renders one footer button, mirroring
+// confirmButtonLabel's filled-control structure (same padding, same flash
+// treatment, same dim "unfocused" look) but WITHOUT confirmButtonLabel's
+// always-green focused highlight: the focused color comes from the button's
+// own Accent (mode-wide — see assistedFooterButtons), so the "step" footer
+// doesn't read as "success" before anything has run. confirmButtonLabel itself
+// is left untouched — the verify-success confirm row still shares it.
+func (m model) assistedFooterButtonLabel(label, kind, accent string, focused bool) string {
+	st := lipgloss.NewStyle().Padding(0, confirmButtonPad)
+	if m.flashKey == "assist:"+kind {
+		return st.Foreground(lipgloss.Color(colFlashOn)).Bold(true).Render(label)
+	}
+	if focused {
+		return st.
+			Foreground(lipgloss.Color(colBase)).
+			Background(lipgloss.Color(accent)).
+			Bold(true).Render(label)
+	}
+	return st.
+		Foreground(lipgloss.Color(colSubtext)).
+		Background(lipgloss.Color(colSurface1)).
+		Render(label)
+}
+
+// assistedFooterButtonsRowString builds the styled BUTTONS row via
+// assistedFooterButtonLabel (NOT confirmButtonLabel — that primitive always
+// highlights the focused button green, which would read as "success" on the
+// normal "step" footer) — only the footer's OWN focus index (footerFocus)
+// drives the highlight, independent of confirmFocus. Left-aligned at the
+// content edge, same indent/gap constants as the confirm buttons row so the
+// layout reads consistently.
 func (m model) assistedFooterButtonsRowString() string {
 	btns := m.assistedFooterButtons()
 	labels := make([]string, len(btns))
 	for i, b := range btns {
-		labels[i] = m.confirmButtonLabel(b.Label, b.Kind, b.Accent, i == m.footerFocus)
+		labels[i] = m.assistedFooterButtonLabel(b.Label, b.Kind, b.Accent, i == m.footerFocus)
 	}
 	return strings.Repeat(" ", confirmButtonIndent) + strings.Join(labels, strings.Repeat(" ", confirmButtonGap))
 }

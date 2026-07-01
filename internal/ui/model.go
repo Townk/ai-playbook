@@ -387,6 +387,10 @@ type model struct {
 	// user to act on next ("" when no step is ready — either not started, or the
 	// playbook is done). Advanced by startAssisted/assistedAdvance/assistedSkip.
 	readyID string
+	// assistedStarted guards maybeStartAssisted so the guided walk is entered
+	// exactly once, at the stream-EOF where m.md/m.blocks first become final —
+	// not at model-build time (Main()), when the playbook hasn't streamed in yet.
+	assistedStarted bool
 	// assistedFooter selects which GUIDED bottom bar (wired in a later Plan 2
 	// task) to render: "" (hidden — not in assisted mode, or not yet started),
 	// "step" (readyID has a next action), "failure" (readyID's run just failed),
@@ -1075,6 +1079,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Site 2: diff blocks are now fully parsed (reflow ran above). Fire async
 			// drift checks so the badge appears without blocking the event loop.
+			// Assisted (GUIDED) entry: m.md/m.blocks are now final for this EOF (the
+			// structured/finalDraft branches above have already rewritten m.md and
+			// reflowed if applicable) — safe to compute the first ready block now.
+			m = m.maybeStartAssisted()
 			return m, m.driftCheckCmds()
 		}
 		cmds := []tea.Cmd{readStream(m.reader, m.parser)}

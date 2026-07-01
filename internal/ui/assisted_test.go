@@ -211,3 +211,100 @@ func TestAssisted_ScrollKeyFallsThroughWhileFooter(t *testing.T) {
 		t.Errorf("j must not be treated as a footer-nav key; footerFocus changed %d -> %d", focusBefore, m2.footerFocus)
 	}
 }
+
+// Regression (blocker): startAssisted was called at model-build time (Main()),
+// before the playbook's markdown had streamed in — m.blocks was still empty,
+// so the guided walk immediately reported "0 ran, 0 skipped" and quit. Entry
+// must instead be deferred to the stream-EOF handler, once m.md/m.blocks are
+// final, via maybeStartAssisted — guarded so it only fires once.
+func TestMaybeStartAssisted_FiresOnceWhenBlocksReady(t *testing.T) {
+	m := newModel("T", "```bash {id=a}\ntrue\n```\n\n```bash {id=b needs=a}\ntrue\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+
+	m2 := m.maybeStartAssisted()
+	if m2.readyID == "" {
+		t.Fatal("maybeStartAssisted: readyID must be set once blocks are ready")
+	}
+	if m2.assistedFooter != "step" {
+		t.Errorf("maybeStartAssisted: footer=%q, want step", m2.assistedFooter)
+	}
+	if !m2.assistedStarted {
+		t.Error("maybeStartAssisted: assistedStarted must be set true")
+	}
+
+	// Re-entry: calling it again must be a no-op (guarded by assistedStarted),
+	// even though the underlying playbook still has runnable blocks.
+	m3 := m2.maybeStartAssisted()
+	if m3.readyID != m2.readyID {
+		t.Errorf("maybeStartAssisted re-entry: readyID changed %q -> %q", m2.readyID, m3.readyID)
+	}
+	if m3.assistedFooter != m2.assistedFooter {
+		t.Errorf("maybeStartAssisted re-entry: footer changed %q -> %q", m2.assistedFooter, m3.assistedFooter)
+	}
+
+	// Non-assisted model: always a no-op.
+	m4 := newModel("T", "```bash {id=a}\ntrue\n```\n")
+	m4.width, m4.height = 80, 24
+	m4.reflow()
+	m5 := m4.maybeStartAssisted()
+	if m5.readyID != "" || m5.assistedFooter != "" || m5.assistedStarted {
+		t.Errorf("maybeStartAssisted on a non-assisted model must be a no-op; got readyID=%q footer=%q started=%v",
+			m5.readyID, m5.assistedFooter, m5.assistedStarted)
+	}
+}
+
+// Regression: startAssisted must recompute m.blocks from the current m.md
+// itself (via an internal reflow), rather than trusting the caller to have
+// reflowed first — the stream-EOF call site may hand it a model whose m.md
+// was just rewritten (structured/finalDraft branches) without an intervening
+// reflow of its own.
+func TestStartAssisted_ReflowsFromMd(t *testing.T) {
+	m := newModel("T", "```bash {id=a}\ntrue\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	// Deliberately NOT calling m.reflow() here — m.blocks stays empty/stale,
+	// proving startAssisted's own top-of-function reflow is what finds "a".
+	m = m.startAssisted()
+	if m.readyID != "a" {
+		t.Fatalf("startAssisted without a prior reflow: readyID=%q, want a", m.readyID)
+	}
+	if m.assistedFooter != "step" {
+		t.Errorf("startAssisted without a prior reflow: footer=%q, want step", m.assistedFooter)
+	}
+}
+
+// The "step" footer must NOT reuse the always-green focused highlight the
+// verify-success confirm row uses (that reads as "success" before anything
+// has run) — it should use the neutral dialog-blue accent. "failure" uses the
+// warn/peach tone; "done" (a completed run) is the one legitimate green case.
+func TestAssistedFooterButtons_ModeAccents(t *testing.T) {
+	m := newModel("T", "```bash {id=a rollback=undo-a}\ntrue\n```\n\n```bash {id=undo-a}\ntrue\n```\n\n```bash {id=boom needs=a}\nfalse\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+
+	m.assistedFooter = "step"
+	for _, b := range m.assistedFooterButtons() {
+		if b.Accent != colBlue {
+			t.Errorf("step button %q: Accent=%q, want colBlue (%q)", b.Label, b.Accent, colBlue)
+		}
+	}
+
+	m.blockStates["a"] = blockRunState{Status: "ok"}
+	m.assistedFooter = "failure"
+	m.assistedFailedID = "boom"
+	for _, b := range m.assistedFooterButtons() {
+		if b.Accent != colPeach {
+			t.Errorf("failure button %q: Accent=%q, want colPeach (%q)", b.Label, b.Accent, colPeach)
+		}
+	}
+
+	m.assistedFooter = "done"
+	for _, b := range m.assistedFooterButtons() {
+		if b.Accent != colGreen {
+			t.Errorf("done button %q: Accent=%q, want colGreen (%q)", b.Label, b.Accent, colGreen)
+		}
+	}
+}

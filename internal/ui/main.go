@@ -479,16 +479,13 @@ func Main() int {
 	m.answerRegen = answerRegen
 	m.askBridge = askBridge
 	m.finalDraft = finalDraft
-	if m.assisted {
-		// The real terminal size only arrives via the first tea.WindowSizeMsg
-		// (handled in Update, after prog.Run() starts) — reflow() hasn't run yet
-		// at this point, so m.buttons/m.lines are still nil. Reflow now (against
-		// newModel's 80x24 default) so startAssisted's lineForBlock/scrollToFraction
-		// have real data; the WindowSizeMsg handler reflows again once the actual
-		// size is known, so this is just priming, not a final layout.
-		m.reflow()
-		m = m.startAssisted()
-	}
+	// NOTE: assisted-mode entry (startAssisted) is deliberately NOT called here.
+	// The model is built with EMPTY markdown (newModel(harness, "") above) — the
+	// playbook content only streams into m.md via the parser after prog.Run()
+	// starts, so m.blocks is still empty at this point (assistedNextID would see
+	// zero runnable blocks and jump straight to the "done" footer). Instead,
+	// maybeStartAssisted() is called from the stream-EOF handler in Update once
+	// m.md/m.blocks are final for the run.
 	prog := tea.NewProgram(
 		m,
 		tea.WithInput(tty),
