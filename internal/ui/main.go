@@ -42,6 +42,16 @@ var pendingAutoRollback bool
 // Consumed (and cleared) by Main.
 func SetAutoRollback(v bool) { pendingAutoRollback = v }
 
+// pendingAssisted is the --assisted opt-in consumed by the next Main() call, set
+// by SetAssisted. GUIDED-fullscreen mode rides the same viewer path as the
+// default (interactive) run; the assisted behavior itself is wired by later
+// Plan 2 tasks — this plumbing task only stashes the opt-in onto the model.
+var pendingAssisted bool
+
+// SetAssisted stashes the --assisted opt-in for the next ui.Main() invocation.
+// Consumed (and cleared) by Main.
+func SetAssisted(v bool) { pendingAssisted = v }
+
 // pendingDriver is the session's shared shell driver consumed by the next Main()
 // call, set by SetDriver. The cached-replay path (troubleshoot →
 // serveCachedPlaybook → ui.Main via os.Args reshaping) can't pass a struct
@@ -447,6 +457,8 @@ func Main() int {
 	m.sourcePath = sourcePath   // on-disk .md path; non-empty → file-backed, [edit] enabled
 	m.autoRollback = pendingAutoRollback
 	pendingAutoRollback = false // consume once
+	m.assisted = pendingAssisted
+	pendingAssisted = false // consume once
 	// NOTE (Phase-2 / in-session assisted-run): the async-startup and reused-driver
 	// paths leave m.projectRoot empty (projectRoot is only set on the sync new-driver
 	// path). When the gate is reused for an in-session assisted run, projectRoot must
@@ -473,7 +485,8 @@ func Main() int {
 		tea.WithOutput(tty),
 		tea.WithColorProfile(colorprofile.TrueColor),
 	)
-	if _, err := prog.Run(); err != nil {
+	fm, err := prog.Run()
+	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", err)
 		return 1
 	}
@@ -482,6 +495,12 @@ func Main() int {
 	// channel keeps the goroutine running until process exit (bounded).
 	if askBridge != nil {
 		go drainAskCancel(askBridge, nil)
+	}
+	// The final model may carry a non-zero exitCode (e.g. a GUIDED/assisted run
+	// that ends on a failed/aborted step) — surface it as the process exit code
+	// instead of always returning 0.
+	if mm, ok := fm.(model); ok && mm.exitCode != 0 {
+		return mm.exitCode
 	}
 	return 0
 }

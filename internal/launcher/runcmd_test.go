@@ -72,6 +72,22 @@ func TestResolveRunArgs_AutoFlags(t *testing.T) {
 	}
 }
 
+// TestResolveRunArgs_Assisted covers the --assisted flag: it sets
+// Mode: modeAssisted, and is mutually exclusive with --auto (assisted rides
+// the interactive viewer; auto is headless — the two are incompatible).
+func TestResolveRunArgs_Assisted(t *testing.T) {
+	ra, err := resolveRunArgs([]string{"--assisted", "--file", "x.md"})
+	if err != nil || ra.Mode != modeAssisted || ra.Kind != "file" || ra.Value != "x.md" {
+		t.Fatalf("--assisted: %+v err=%v", ra, err)
+	}
+	if _, err := resolveRunArgs([]string{"--assisted", "--auto", "--file", "x.md"}); err == nil {
+		t.Error("--assisted with --auto must error (mutually exclusive)")
+	}
+	if _, err := resolveRunArgs([]string{"--assisted", "--no-auto-rollback", "--file", "x.md"}); err == nil {
+		t.Error("--assisted with --no-auto-rollback must error (that flag is --auto only)")
+	}
+}
+
 // ---- seam helpers ----
 
 func withStoreLoadFn(t *testing.T, fn func(string) (store.Meta, string, error)) {

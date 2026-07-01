@@ -57,6 +57,10 @@ var setReengageFn = ui.SetReengage
 // observe it without a viewer.
 var setAutoRollbackFn = ui.SetAutoRollback
 
+// setAssistedFn stashes the --assisted opt-in for the next viewer. Seam so tests
+// observe it without a viewer.
+var setAssistedFn = ui.SetAssisted
+
 // autorunRunFn is the autorun.Run seam: the headless (`--auto`) run executes the
 // converted block sequence without a driver/viewer. Tests inject a fake so the
 // auto branch is exercised without opening a real shell.
@@ -84,6 +88,9 @@ func RunMain() int {
 	}
 
 	setAutoRollbackFn(ra.AutoRollback) // opt-in: auto-fire rollback on a step failure
+	if ra.Mode == modeAssisted {
+		setAssistedFn(true) // opt-in: GUIDED fullscreen mode rides the same viewer path as default
+	}
 
 	switch ra.Kind {
 	case "file":
@@ -309,13 +316,17 @@ func writeTempMarkdown(tag, content string) (string, error) {
 	return name, nil
 }
 
-// runMode selects between the default (interactive viewer) and headless run
-// paths. modeAssisted (Plan 2) is not added by this task.
+// runMode selects between the default (interactive viewer), headless (--auto),
+// and GUIDED-fullscreen (--assisted) run paths. modeAssisted rides the SAME
+// viewer path as modeDefault (runFile/runPlaybook) — only the plumbing (the
+// setAssistedFn opt-in) differs; the assisted UI behavior itself is Plan 2's
+// later tasks.
 type runMode int
 
 const (
 	modeDefault runMode = iota
 	modeAuto
+	modeAssisted
 )
 
 // runArgs is the resolved `run` invocation: the single playbook source (Kind +
@@ -340,17 +351,21 @@ type runArgs struct {
 //
 // --auto switches to the headless run mode (Mode: modeAuto); --no-auto-rollback
 // is only meaningful there (an error otherwise), and --auto-rollback (the
-// default-viewer opt-in) is mutually exclusive with --auto.
+// default-viewer opt-in) is mutually exclusive with --auto. --assisted switches
+// to the GUIDED-fullscreen run mode (Mode: modeAssisted); it is mutually
+// exclusive with --auto (headless and GUIDED-fullscreen are incompatible run
+// modes), and with --no-auto-rollback (that flag is --auto-only).
 func resolveRunArgs(args []string) (runArgs, error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var playbook, file string
-	var auto, autoMode, noAutoRollback bool
+	var auto, autoMode, noAutoRollback, assisted bool
 	fs.StringVar(&playbook, "playbook", "", "slug of a saved playbook to run")
 	fs.StringVar(&file, "file", "", "path to a markdown file to run")
 	fs.BoolVar(&auto, "auto-rollback", false, "on a step failure, automatically roll back applied steps (else a manual button)")
 	fs.BoolVar(&autoMode, "auto", false, "run headless: execute every block in order with no viewer/driver pane")
 	fs.BoolVar(&noAutoRollback, "no-auto-rollback", false, "with --auto, do not roll back applied steps on a failure")
+	fs.BoolVar(&assisted, "assisted", false, "run GUIDED fullscreen: step-by-step confirmation in the same viewer/driver pane")
 	if perr := fs.Parse(args); perr != nil {
 		return runArgs{}, perr
 	}
@@ -386,10 +401,19 @@ func resolveRunArgs(args []string) (runArgs, error) {
 	if autoMode && auto {
 		return runArgs{}, fmt.Errorf("--auto and --auto-rollback are mutually exclusive (auto mode rolls back by default; use --no-auto-rollback to opt out)")
 	}
+	if assisted && autoMode {
+		return runArgs{}, fmt.Errorf("--assisted and --auto are mutually exclusive")
+	}
+	if assisted && noAutoRollback {
+		return runArgs{}, fmt.Errorf("--no-auto-rollback is only valid with --auto")
+	}
 
 	ra := runArgs{AutoRollback: auto, NoAutoRollback: noAutoRollback}
-	if autoMode {
+	switch {
+	case autoMode:
 		ra.Mode = modeAuto
+	case assisted:
+		ra.Mode = modeAssisted
 	}
 	switch {
 	case file != "":

@@ -374,6 +374,15 @@ type model struct {
 	// autoRollback (set from the --auto-rollback run flag) makes a step failure auto-fire
 	// the rollback chain instead of only showing the manual "Rollback playbook" button.
 	autoRollback bool
+	// assisted (set from the --assisted run flag / ui.SetAssisted) opts into the
+	// GUIDED-fullscreen run mode; it rides the same viewer path as the default
+	// run — the assisted behavior itself is wired by later Plan 2 tasks.
+	assisted bool
+	// exitCode is the process exit code Main() surfaces after prog.Run() returns
+	// the final model (in place of the default 0). Zero (the default) means "no
+	// override" — a GUIDED/assisted run that ends on a failed/aborted step can
+	// set this to signal failure to the caller.
+	exitCode int
 	// rollbackFailedID is the failed block currently driving a rollback chain (it shows
 	// the "rolling back…" spinner, then the "all steps rolled back" suffix); "" = none.
 	// rollbackPending counts the rollback targets still running, so we know when the chain
