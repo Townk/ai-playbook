@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -56,6 +57,47 @@ func TestResultHandlerApplyUndoInterpretation(t *testing.T) {
 			}
 			if st.Action != "" {
 				t.Errorf("action=%q exit=%d: Action must be cleared after result, got %q", tc.action, tc.exit, st.Action)
+			}
+		})
+	}
+}
+
+// TestExpandedEmptyLog_SuccessMessages verifies F17: a successful diff-apply /
+// file-create with an empty log shows an affirmative message rather than the
+// "(log unavailable)" fallback (which is kept for a genuinely empty run log).
+func TestExpandedEmptyLog_SuccessMessages(t *testing.T) {
+	cases := []struct {
+		name  string
+		md    string
+		want  string
+		avoid string
+	}{
+		{
+			name:  "diff-apply",
+			md:    "```diff {id=fix}\n--- a\n+++ b\n@@ -1 +1 @@\n-a\n+b\n```\n",
+			want:  "Diff applied successfully",
+			avoid: "(log unavailable)",
+		},
+		{
+			name:  "file-create",
+			md:    "```text {id=fix file=x.txt}\nhello\n```\n",
+			want:  "File created",
+			avoid: "(log unavailable)",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := newModel("T", tc.md)
+			m.width, m.height = 100, 30
+			// Expanded, successful, empty log (nonexistent path → tailFile returns nil).
+			m.blockStates = map[string]blockRunState{"fix": {Status: "ok", Expanded: true, Logpath: "/nonexistent/ai-playbook-log"}}
+			m.reflow()
+			out := strip(m.viewString())
+			if !strings.Contains(out, tc.want) {
+				t.Errorf("expected %q in output:\n%s", tc.want, out)
+			}
+			if strings.Contains(out, tc.avoid) {
+				t.Errorf("did not expect %q in output:\n%s", tc.avoid, out)
 			}
 		})
 	}

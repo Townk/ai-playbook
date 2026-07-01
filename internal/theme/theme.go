@@ -46,3 +46,9 @@ func BgANSI(hex string) string {
 	rv, gv, bv := ParseHex(hex)
 	return fmt.Sprintf("\x1b[48;2;%d;%d;%dm", rv, gv, bv)
 }
+
+// FgANSI returns the truecolor foreground SGR sequence for a #RRGGBB hex color.
+func FgANSI(hex string) string {
+	rv, gv, bv := ParseHex(hex)
+	return fmt.Sprintf("\x1b[38;2;%d;%d;%dm", rv, gv, bv)
+}

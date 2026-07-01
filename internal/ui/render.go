@@ -1041,7 +1041,20 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 		if st.Expanded {
 			tail := tailFile(st.Logpath, 50)
 			if len(tail) == 0 {
-				r.lines = append(r.lines, Line{Text: indentStr + "(log unavailable)", Wide: true, Bg: codeBgANSI, Code: true})
+				// An empty log on a SUCCESSFUL diff-apply / file-create isn't a missing
+				// log — it's the expected no-output success. Show an affirmative message
+				// instead of "(log unavailable)". (st.Action is cleared once the result
+				// lands, so we key off the block type + ok status, not st.Action.)
+				msg := "(log unavailable)"
+				if st.Status == "ok" {
+					switch blk.Type {
+					case "diff":
+						msg = "Diff applied successfully"
+					case "create":
+						msg = "File created"
+					}
+				}
+				r.lines = append(r.lines, Line{Text: indentStr + msg, Wide: true, Bg: codeBgANSI, Code: true})
 			} else {
 				sub := lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext))
 				for _, tl := range tail {

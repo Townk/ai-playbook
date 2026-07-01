@@ -1,7 +1,11 @@
 // Package diff parses already-authored unified patches and renders them.
 package diff
 
-import "strings"
+import (
+	"regexp"
+	"strconv"
+	"strings"
+)
 
 type Op int
 
@@ -15,7 +19,21 @@ type Line struct {
 	Op   Op
 	Text string
 }
-type Hunk struct{ Lines []Line }
+
+// Hunk carries the @@ START line numbers (OldStart/NewStart) so the side-by-side
+// renderer can number gutters; the @@ COUNTS are still ignored (agents miscount
+// them) and line CONTENT is always driven off the body, never the header.
+type Hunk struct {
+	OldStart, NewStart int
+	Lines              []Line
+}
+
+// hunkRe captures the two START numbers from `@@ -old[,count] +new[,count] @@`.
+// The counts are optional (unified diffs omit them for single-line ranges) and
+// deliberately uncaptured. A malformed header simply doesn't match, leaving the
+// starts at their zero value.
+var hunkRe = regexp.MustCompile(`^@@+ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
+
 type FileDiff struct {
 	OldPath, NewPath string
 	Hunks            []Hunk
@@ -44,6 +62,10 @@ func Parse(patch string) []FileDiff {
 			}
 			cur.Hunks = append(cur.Hunks, Hunk{})
 			hunk = &cur.Hunks[len(cur.Hunks)-1]
+			if mm := hunkRe.FindStringSubmatch(ln); mm != nil {
+				hunk.OldStart, _ = strconv.Atoi(mm[1])
+				hunk.NewStart, _ = strconv.Atoi(mm[2])
+			}
 		case hunk != nil && strings.HasPrefix(ln, "-"):
 			hunk.Lines = append(hunk.Lines, Line{OpDel, ln[1:]})
 		case hunk != nil && strings.HasPrefix(ln, "+"):

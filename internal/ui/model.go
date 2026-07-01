@@ -166,7 +166,8 @@ type model struct {
 	// live document. Only raised on the no-mux path (m.asker == nil); mux-on keeps
 	// the existing emitAction→float path. Closed by q/esc.
 	diffMode  bool
-	diffLines []string
+	diffFiles []idiff.FileDiff // parsed patch; kept so the narrow overlay can render unified
+	diffRows  []idiff.Row      // structured side-by-side rows, rendered (windowed) per frame
 	diffYOff  int
 	diffXOff  int
 
@@ -438,8 +439,11 @@ func (m model) editDispatch() (model, tea.Cmd) {
 // overlay; mux: emits to the orchestrator for the float viewer.
 func (m model) activateDiffButton(b Button) (model, tea.Cmd) {
 	if m.asker == nil {
-		rendered := idiff.Render(idiff.Parse(b.Payload), m.width-4, highlight)
-		m.diffLines = strings.Split(strings.TrimRight(rendered, "\n"), "\n")
+		// Store the structured rows (and the parsed files for the narrow fallback);
+		// widths/gutters are applied at render time so h/l re-window per frame.
+		files := idiff.Parse(b.Payload)
+		m.diffFiles = files
+		m.diffRows = idiff.Rows(files)
 		m.diffMode = true
 		m.diffYOff = 0
 		m.diffXOff = 0
@@ -1039,7 +1043,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "g", "home":
 				m.diffYOff = 0
 			case "G", "end":
-				m.diffYOff = len(m.diffLines)
+				m.diffYOff = m.diffRowCount()
 			case "right", "l":
 				m.diffXOff++
 			case "left", "h":
@@ -2638,9 +2642,12 @@ func (m model) viewString() string {
 		if left < 0 {
 			left = 0
 		}
-		top := 2 + (m.height-4-boxH)/2 // centered in the body region (below the 2 top rows)
-		if top < 2 {
-			top = 2
+		// The diff box is near-full-height (m.height-2), so center it over the
+		// whole viewport — 1 blank line above and below — rather than nudging it
+		// below the 2 top rows (which would push a full-height box off the bottom).
+		top := (m.height - boxH) / 2
+		if top < 0 {
+			top = 0
 		}
 		for i, bl := range box {
 			if r := top + i; r >= 0 && r < len(base) {

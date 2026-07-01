@@ -8,11 +8,41 @@ import (
 func TestParse_SingleHunk(t *testing.T) {
 	patch := "--- a/foo.go\n+++ b/foo.go\n@@ -1,3 +1,3 @@\n ctx\n-old line\n+new line\n more\n"
 	got := Parse(patch)
-	want := []FileDiff{{OldPath: "a/foo.go", NewPath: "b/foo.go", Hunks: []Hunk{{Lines: []Line{
+	want := []FileDiff{{OldPath: "a/foo.go", NewPath: "b/foo.go", Hunks: []Hunk{{OldStart: 1, NewStart: 1, Lines: []Line{
 		{OpContext, "ctx"}, {OpDel, "old line"}, {OpAdd, "new line"}, {OpContext, "more"},
 	}}}}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Parse =\n%#v\nwant\n%#v", got, want)
+	}
+}
+
+func TestParse_HunkStartNumbers(t *testing.T) {
+	// The @@ START numbers must be captured (COUNTS still ignored).
+	patch := "--- a/x\n+++ b/x\n@@ -10,3 +12,4 @@\n ctx\n-old\n+new\n"
+	h := Parse(patch)[0].Hunks[0]
+	if h.OldStart != 10 || h.NewStart != 12 {
+		t.Fatalf("hunk starts = %d/%d, want 10/12", h.OldStart, h.NewStart)
+	}
+}
+
+func TestParse_HunkStartNoCounts(t *testing.T) {
+	// Counts omitted (`@@ -1 +1 @@`) → starts still parse, defaulting to those.
+	patch := "--- a/x\n+++ b/x\n@@ -5 +7 @@\n-a\n+b\n"
+	h := Parse(patch)[0].Hunks[0]
+	if h.OldStart != 5 || h.NewStart != 7 {
+		t.Fatalf("hunk starts = %d/%d, want 5/7", h.OldStart, h.NewStart)
+	}
+}
+
+func TestParse_HunkStartMalformed(t *testing.T) {
+	// A malformed @@ header leaves the starts at zero (no panic, no truncation).
+	patch := "--- a/x\n+++ b/x\n@@ garbage @@\n-a\n+b\n"
+	h := Parse(patch)[0].Hunks[0]
+	if h.OldStart != 0 || h.NewStart != 0 {
+		t.Fatalf("malformed header starts = %d/%d, want 0/0", h.OldStart, h.NewStart)
+	}
+	if len(h.Lines) != 2 {
+		t.Fatalf("malformed header must not drop body: got %d lines", len(h.Lines))
 	}
 }
 
