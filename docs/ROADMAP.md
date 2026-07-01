@@ -62,7 +62,7 @@ validate [<slug> | --file <path>]      AI + structural review of a playbook
   `--playbook`, `--file`}.
 - Run modes (mutually exclusive): default = interactive pager (free-form),
   `--assisted` = guided confirm-each-step, `--auto` = unattended.
-  `--no-auto-rollback` is valid only with `--auto`.
+  `--no-auto-rollback` is valid only with `--auto` (auto-rollback is ON by default under `--auto`; use `--no-auto-rollback` to opt out and leave failed state in place).
 
 ## Schema (evolves across phases)
 

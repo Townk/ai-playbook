@@ -44,7 +44,7 @@ The simplest way to drive a playbook from the terminal is the `run` subcommand w
 ai-playbook run --file examples/07-run-modes.md
 ```
 
-ai-playbook renders each block header and command in your terminal, then waits for you to press **Enter** before executing it. You see the output stream in place, the block turns green on exit 0, and ai-playbook moves to the next block. Press **q** at any prompt to quit early.
+This opens an interactive fullscreen viewer (the pager) where you can click or press **Run** to execute each block. You see the output stream in place, the block turns green on exit 0, and ai-playbook displays the next block ready to run. Press **q** to quit and exit the viewer.
 
 This mode is ideal when you want to step through an unfamiliar playbook, read each command before it runs, and keep one hand on the keyboard.
 
@@ -70,8 +70,6 @@ Press `y` to run, `n` to skip, or `q` to quit immediately. Skipped blocks are re
 Assisted mode is useful when you are running a playbook written by someone else and want fine-grained control over which steps execute, without fully committing to running everything.
 
 ## Auto run
-
-<!-- ⏳ needs assisted/auto run modes (not yet built) -->
 
 The `--auto` flag removes all prompts and runs every block in dependency order without pausing:
 
