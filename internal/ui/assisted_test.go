@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/Townk/ai-playbook/internal/autorun"
 )
 
@@ -146,5 +148,66 @@ func TestAssisted_LeaveAsIsKeepsNonZeroExit(t *testing.T) {
 	m2, _ := m.assistedActivate("assist-leave")
 	if m2.exitCode != 1 {
 		t.Errorf("Leave as-is keeps exit 1; got %d", m2.exitCode)
+	}
+}
+
+// Regression (review finding): the assisted footer's keyboard gate must capture
+// ONLY its own nav keys (left/h, right/l, tab, enter/space) and let everything
+// else — most importantly ctrl+c — fall through to the global key handling.
+// Previously an unconditional `return m, nil` after the footer's switch swallowed
+// ctrl+c for as long as any footer (Run/Skip/Quit, Roll back/Leave/Quit) was on
+// screen, making it impossible to abort an assisted session.
+func TestAssisted_CtrlCWhileFooterAborts(t *testing.T) {
+	m := newModel("T", "```bash {id=a}\ntrue\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+	m = m.startAssisted()
+	if m.assistedFooter != "step" {
+		t.Fatalf("setup: expected a step footer, got %q", m.assistedFooter)
+	}
+	nm, cmd := m.Update(tea.KeyPressMsg{Code: 'c', Mod: tea.ModCtrl})
+	m2 := nm.(model)
+	if m2.exitCode != 1 {
+		t.Errorf("ctrl+c while the footer is active must set exitCode=1; got %d", m2.exitCode)
+	}
+	if cmd == nil {
+		t.Fatal("ctrl+c while the footer is active must return a quit cmd, got nil (key was swallowed)")
+	}
+	if _, ok := cmd().(tea.QuitMsg); !ok {
+		t.Errorf("ctrl+c while the footer is active must return tea.QuitMsg, got %T", cmd())
+	}
+}
+
+// Regression (review finding): the doc must stay scrollable while an assisted
+// footer is on screen ("the user can scroll freely to read the step before
+// running it") — a scroll key must NOT be captured by the footer's keyboard gate.
+func TestAssisted_ScrollKeyFallsThroughWhileFooter(t *testing.T) {
+	var body strings.Builder
+	body.WriteString("intro line\n\n")
+	for i := 0; i < 60; i++ {
+		body.WriteString("filler paragraph line to force scrolling\n\n")
+	}
+	body.WriteString("```bash {id=a}\ntrue\n```\n\n")
+	for i := 0; i < 60; i++ {
+		body.WriteString("more filler paragraph line after the block\n\n")
+	}
+	m := newModel("T", body.String())
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+	m = m.startAssisted()
+	if m.assistedFooter != "step" {
+		t.Fatalf("setup: expected a step footer, got %q", m.assistedFooter)
+	}
+	before := m.yOff
+	focusBefore := m.footerFocus
+	nm, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	m2 := nm.(model)
+	if m2.yOff == before {
+		t.Errorf("j while the footer is active must scroll (yOff unchanged at %d) — key was swallowed", before)
+	}
+	if m2.footerFocus != focusBefore {
+		t.Errorf("j must not be treated as a footer-nav key; footerFocus changed %d -> %d", focusBefore, m2.footerFocus)
 	}
 }

@@ -1545,6 +1545,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// activate the focused one. Captured BEFORE the confirm/leader/global switch
 		// so footer keys are never mistaken for normal nav while a footer is active;
 		// a mouse click still resolves regardless of focus (click-dispatch path).
+		//
+		// Only the nav/activate keys below are captured (each returns explicitly).
+		// Any OTHER key (ctrl+c, q, esc, scroll keys, ?, w, ...) falls through to
+		// the confirm/leader/global handling further down — in particular ctrl+c
+		// must always be able to quit, and the doc must stay scrollable while a
+		// footer is on screen.
 		if m.assistedFooterActive() {
 			btns := m.assistedFooterButtons()
 			// Clamp a stale focus (e.g. carried over from a footer with more buttons)
@@ -1560,20 +1566,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.footerFocus > 0 {
 					m.footerFocus--
 				}
+				return m, nil
 			case "right", "l":
 				if m.footerFocus < len(btns)-1 {
 					m.footerFocus++
 				}
+				return m, nil
 			case "tab":
 				if len(btns) > 0 {
 					m.footerFocus = (m.footerFocus + 1) % len(btns)
 				}
+				return m, nil
 			case "enter", "space", " ":
 				if m.footerFocus >= 0 && m.footerFocus < len(btns) {
 					return m.assistedActivate(btns[m.footerFocus].Kind)
 				}
+				return m, nil
 			}
-			return m, nil // footer captured the key
 		}
 		// Issue #4: while the verify-success confirm row is active it is keyboard-
 		// FOCUSABLE — ←/→ (also h/l, Tab) move focus between [ Yes ] and [ No ], and
