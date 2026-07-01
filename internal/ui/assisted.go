@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
 	"github.com/Townk/ai-playbook/internal/autorun"
@@ -269,6 +270,38 @@ func (m model) assistedFooterScreenRow() int {
 		return -1
 	}
 	return m.height - 3
+}
+
+// assistedActivate dispatches one footer button by its Kind (e.g. "assist-run")
+// to the underlying action — the keyboard Enter/Space handler and the mouse
+// click handler both funnel through here so the two input paths can never
+// drift apart.
+func (m model) assistedActivate(kind string) (model, tea.Cmd) {
+	switch kind {
+	case "assist-run":
+		b := Button{Kind: "run", Payload: m.blockCommand(m.readyID), BlockID: m.readyID}
+		m.assistedFooter = "" // hide the footer while the step runs — the block's own spinner takes over
+		return m.runOrGate(b)
+	case "assist-skip":
+		m = m.assistedSkip()
+		m.reflow()
+		return m, nil
+	case "assist-rollback":
+		m.assistedFooter = ""
+		m.exitCode = 0 // the failure is being resolved by rolling back
+		mm, cmd := m.beginRollback(m.assistedFailedID)
+		mm.assistedFooter = "done"
+		return mm, cmd
+	case "assist-leave":
+		// exitCode stays whatever it already is (1, from the failure) — leaving the
+		// failure as-is does not resolve it.
+		return m, tea.Quit
+	case "assist-quit":
+		// exit uses whatever m.exitCode already holds (0 unless an unresolved
+		// failure set it to 1).
+		return m, tea.Quit
+	}
+	return m, nil
 }
 
 // appendAssistedFooter registers one Screen-fixed Button per footer button on

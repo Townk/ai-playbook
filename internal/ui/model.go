@@ -1278,6 +1278,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reflow()
 					return m, m.flashCmd()
 				}
+				if strings.HasPrefix(b.Kind, "assist-") {
+					return m.assistedActivate(b.Kind)
+				}
 				if b.Kind == "edit" {
 					return m.editDispatch()
 				}
@@ -1536,6 +1539,42 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// Assisted (GUIDED) footer: while a footer row is up (Run/Skip/Quit,
+		// Roll-back/Leave-as-is/Quit, or the done Quit) it is keyboard-FOCUSABLE —
+		// ←/→ (also h/l, Tab) move focus between its buttons, Enter/Space/space
+		// activate the focused one. Captured BEFORE the confirm/leader/global switch
+		// so footer keys are never mistaken for normal nav while a footer is active;
+		// a mouse click still resolves regardless of focus (click-dispatch path).
+		if m.assistedFooterActive() {
+			btns := m.assistedFooterButtons()
+			// Clamp a stale focus (e.g. carried over from a footer with more buttons)
+			// before using it as an index below.
+			if m.footerFocus > len(btns)-1 {
+				m.footerFocus = len(btns) - 1
+			}
+			if m.footerFocus < 0 {
+				m.footerFocus = 0
+			}
+			switch msg.String() {
+			case "left", "h":
+				if m.footerFocus > 0 {
+					m.footerFocus--
+				}
+			case "right", "l":
+				if m.footerFocus < len(btns)-1 {
+					m.footerFocus++
+				}
+			case "tab":
+				if len(btns) > 0 {
+					m.footerFocus = (m.footerFocus + 1) % len(btns)
+				}
+			case "enter", "space", " ":
+				if m.footerFocus >= 0 && m.footerFocus < len(btns) {
+					return m.assistedActivate(btns[m.footerFocus].Kind)
+				}
+			}
+			return m, nil // footer captured the key
+		}
 		// Issue #4: while the verify-success confirm row is active it is keyboard-
 		// FOCUSABLE — ←/→ (also h/l, Tab) move focus between [ Yes ] and [ No ], and
 		// Enter/Space SELECT the focused button. These keys are captured ONLY while the
@@ -1607,6 +1646,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.quitGuard = true
 				m.status = "uncommitted playbook — w to save, quit again to discard"
 				return m, nil
+			}
+			if m.assisted && msg.String() == "ctrl+c" {
+				// Abort is non-zero; q/esc stay a clean exit (0 unless an unresolved
+				// failure already set it).
+				m.exitCode = 1
 			}
 			return m, tea.Quit
 		case "w":

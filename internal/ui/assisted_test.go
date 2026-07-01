@@ -99,3 +99,52 @@ func TestAssistedFooter_FailureButtons(t *testing.T) {
 		}
 	}
 }
+
+func TestAssisted_RunActivatesReadyBlock(t *testing.T) {
+	m := newModel("T", "```bash {id=a}\ntrue\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+	m = m.startAssisted()
+	m2, _ := m.assistedActivate("assist-run")
+	if m2.blockStates["a"].Status != "running" {
+		t.Errorf("Run must mark ready block running; got %q", m2.blockStates["a"].Status)
+	}
+	if m2.assistedFooter != "" {
+		t.Error("footer must hide while the step runs")
+	}
+}
+
+func TestAssisted_RollbackResolvesFailure(t *testing.T) {
+	m := newModel("T", "```bash {id=a rollback=undo-a}\ntrue\n```\n\n```bash {id=undo-a}\ntrue\n```\n\n```bash {id=boom needs=a}\nfalse\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+	m = m.startAssisted()
+	m.blockStates["a"] = blockRunState{Status: "ok"}
+	m.assistedFooter = "failure"
+	m.assistedFailedID = "boom"
+	m.exitCode = 1
+	m2, _ := m.assistedActivate("assist-rollback")
+	if m2.blockStates["a"].Status != "rolledback" {
+		t.Errorf("rollback must fire (a→rolledback); got %q", m2.blockStates["a"].Status)
+	}
+	if m2.exitCode != 0 {
+		t.Errorf("Roll back resolves the failure → exit 0; got %d", m2.exitCode)
+	}
+}
+
+func TestAssisted_LeaveAsIsKeepsNonZeroExit(t *testing.T) {
+	m := newModel("T", "```bash {id=a}\nfalse\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+	m = m.startAssisted()
+	m.assistedFooter = "failure"
+	m.assistedFailedID = "a"
+	m.exitCode = 1
+	m2, _ := m.assistedActivate("assist-leave")
+	if m2.exitCode != 1 {
+		t.Errorf("Leave as-is keeps exit 1; got %d", m2.exitCode)
+	}
+}
