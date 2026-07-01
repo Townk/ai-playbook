@@ -25,6 +25,7 @@ const (
 	StatusFailed     = "failed"
 	StatusSkipped    = "skipped"
 	StatusRolledBack = "rolledback"
+	StatusCancelled  = "cancelled"
 )
 
 // Sequence returns the forward-runnable blocks in document order: not Static and

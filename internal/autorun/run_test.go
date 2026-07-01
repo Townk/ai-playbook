@@ -70,12 +70,13 @@ func TestRunStep_Interrupt_CancelsQuickly(t *testing.T) {
 	runner.stopCh = stopCh
 
 	type stepResult struct {
-		exit int
+		exit      int
+		cancelled bool
 	}
 	done := make(chan stepResult, 1)
 	go func() {
-		exit, _ := runner.RunStep(Step{ID: "slow", Kind: KindRun, Command: "sleep 5"})
-		done <- stepResult{exit: exit}
+		exit, _, cancelled := runner.RunStep(Step{ID: "slow", Kind: KindRun, Command: "sleep 5"})
+		done <- stepResult{exit: exit, cancelled: cancelled}
 	}()
 
 	// Give the block a moment to actually start running before interrupting.
@@ -86,6 +87,9 @@ func TestRunStep_Interrupt_CancelsQuickly(t *testing.T) {
 	case r := <-done:
 		if r.exit == 0 {
 			t.Errorf("interrupted step exit = 0, want non-zero")
+		}
+		if !r.cancelled {
+			t.Error("interrupted step cancelled = false, want true")
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("RunStep did not return within 2s of stopCh closing")

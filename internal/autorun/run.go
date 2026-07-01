@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"strings"
 	"time"
 
 	"github.com/Townk/ai-playbook/internal/cache"
@@ -106,14 +107,13 @@ func kindFor(k StepKind) orchestrator.Kind {
 // cancelExit — a non-zero exit Execute treats as a failure, stopping the
 // run. A nil stopCh (the zero value) never fires, so RunStep behaves exactly
 // as before for callers that don't opt into interruption.
-func (r *orchRunner) RunStep(s Step) (exit int, outputPath string) {
+func (r *orchRunner) RunStep(s Step) (exit int, outputPath string, cancelled bool) {
 	doneCh := make(chan driver.Result, 1)
 	go func() {
 		res, _ := r.orch.Do(orchestrator.Action{Kind: kindFor(s.Kind), ID: s.ID, Payload: s.Command})
 		doneCh <- res
 	}()
 
-	cancelled := false
 	var res driver.Result
 	select {
 	case res = <-doneCh:
@@ -125,6 +125,9 @@ func (r *orchRunner) RunStep(s Step) (exit int, outputPath string) {
 
 	if res.Out != "" {
 		fmt.Fprint(r.out, res.Out)
+		if res.Err != "" && !strings.HasSuffix(res.Out, "\n") {
+			fmt.Fprintln(r.out)
+		}
 	}
 	if res.Err != "" {
 		fmt.Fprint(r.out, res.Err)
@@ -132,9 +135,9 @@ func (r *orchRunner) RunStep(s Step) (exit int, outputPath string) {
 
 	logPath := writeStepLog(s.ID, res.Out, res.Err)
 	if cancelled {
-		return cancelExit, logPath
+		return cancelExit, logPath, true
 	}
-	return res.Exit, logPath
+	return res.Exit, logPath, false
 }
 
 // writeStepLog writes a step's captured stdout then stderr to a temp file and

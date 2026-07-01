@@ -11,10 +11,11 @@ type Step struct {
 	Kind        StepKind
 }
 
-// StepRunner executes one step and returns its exit + captured output path.
-// Task 4 supplies the real orchestrator-backed impl; tests supply a fake.
+// StepRunner executes one step and returns its exit + captured output path +
+// whether the step was aborted by an interrupt signal (as opposed to merely
+// exiting non-zero on its own).
 type StepRunner interface {
-	RunStep(s Step) (exit int, outputPath string)
+	RunStep(s Step) (exit int, outputPath string, cancelled bool)
 }
 
 // Config drives Execute. Out receives the streamed per-step headers + final summary.
@@ -33,6 +34,7 @@ func Execute(cfg Config, r StepRunner) int {
 	status := map[string]string{}
 	var results []StepResult
 	failedExit := 0
+	wasCancelled := false
 
 	for {
 		b, ok := NextRunnable(cfg.Blocks, status)
@@ -41,15 +43,27 @@ func Execute(cfg Config, r StepRunner) int {
 		}
 
 		fmt.Fprintf(cfg.Out, "[%s] %s\n", b.ID, b.Command)
-		exit, out := r.RunStep(Step{ID: b.ID, Command: b.Command, Kind: b.Kind})
+		exit, out, cancelled := r.RunStep(Step{ID: b.ID, Command: b.Command, Kind: b.Kind})
+		fmt.Fprintln(cfg.Out)
 
+		st := statusFor(exit)
+		if cancelled {
+			st = StatusCancelled
+		}
 		results = append(results, StepResult{
 			ID:         b.ID,
 			Command:    b.Command,
 			Exit:       exit,
-			Status:     statusFor(exit),
+			Status:     st,
 			OutputPath: out,
 		})
+
+		if cancelled {
+			status[b.ID] = StatusFailed
+			failedExit = exit
+			wasCancelled = true
+			break
+		}
 
 		if exit == 0 {
 			status[b.ID] = StatusOK
@@ -60,18 +74,27 @@ func Execute(cfg Config, r StepRunner) int {
 		}
 	}
 
-	if failedExit != 0 && cfg.AutoRollback {
+	if failedExit != 0 && cfg.AutoRollback && !wasCancelled {
 		pairs := RollbackPairs(cfg.Blocks, status)
 		for _, pair := range pairs {
 			origin, target := pair[0], pair[1]
 			command := commandFor(cfg.Blocks, target)
-			exit, out := r.RunStep(Step{ID: target, Command: command, Kind: KindRun})
+			fmt.Fprintf(cfg.Out, "[%s] %s\n", target, command)
+			exit, out, _ := r.RunStep(Step{ID: target, Command: command, Kind: KindRun})
+			fmt.Fprintln(cfg.Out)
+
 			status[origin] = StatusRolledBack
+			for i := range results {
+				if results[i].ID == origin {
+					results[i].Status = StatusRolledBack
+					break
+				}
+			}
 			results = append(results, StepResult{
 				ID:         target,
 				Command:    command,
 				Exit:       exit,
-				Status:     StatusRolledBack,
+				Status:     statusFor(exit),
 				OutputPath: out,
 			})
 		}
@@ -80,6 +103,7 @@ func Execute(cfg Config, r StepRunner) int {
 	if cfg.LogDir != "" {
 		_, _ = WriteRunLog(cfg.LogDir, cfg.Stamp, cfg.Slug, results)
 	}
+	fmt.Fprintln(cfg.Out)
 	fmt.Fprint(cfg.Out, Summarize(results))
 
 	if failedExit == 0 {

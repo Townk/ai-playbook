@@ -31,6 +31,8 @@ func Summarize(results []StepResult) string {
 			symbol = "↺"
 		case StatusSkipped:
 			symbol = "–"
+		case StatusCancelled:
+			symbol = "⊘"
 		}
 
 		line := fmt.Sprintf("  %s %-9s %-7s", symbol, r.Status, r.ID)
