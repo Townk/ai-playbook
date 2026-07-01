@@ -90,6 +90,11 @@ type renderer struct {
 	// when the background shell isn't open yet. Copy is never dimmed. The buttons keep
 	// their positions/width (only the color changes), so nothing jumps when they enable.
 	shellDisabled bool
+	// reengageAvail gates the "try another fix" (followup) affordance: it only renders
+	// when in-process re-engagement is wired (an authoring/troubleshoot session). A plain
+	// `run --file` viewer has no agent to re-engage, so the button is suppressed. Defaults
+	// to true so existing 4-arg callers / tests keep the prior always-show behavior.
+	reengageAvail bool
 }
 
 // Render parses markdown and returns tagged, laid-out lines, a button
@@ -98,22 +103,27 @@ type renderer struct {
 // is the identity of the button currently being flash-highlighted
 // ("<blockID>:<kind>"); pass "" when no flash is active. Callers that don't
 // need blocks can discard the third value with _.
-// The optional shellDisabled argument (used by model.reflow on the async-startup
-// path) dims the shell-action button glyphs to the muted overlay color while the
-// background shell is still opening; existing 4-arg callers (tests, the static
-// block-count path) leave it false.
-func Render(md string, width int, states map[string]blockRunState, flashKey string, shellDisabled ...bool) ([]Line, []Button, []Block) {
+// The optional trailing bool flags are, in order: shellDisabled (used by model.reflow
+// on the async-startup path — dims the shell-action button glyphs while the background
+// shell is still opening) and reengageAvail (whether the "try another fix" affordance
+// should render). Existing 4-arg callers (tests, the static block-count path) leave
+// shellDisabled false and reengageAvail true (the prior always-show behavior).
+func Render(md string, width int, states map[string]blockRunState, flashKey string, flags ...bool) ([]Line, []Button, []Block) {
 	if width < 1 {
 		width = 1
 	}
 	disabled := false
-	for _, d := range shellDisabled {
-		disabled = disabled || d
+	if len(flags) >= 1 {
+		disabled = flags[0]
+	}
+	reengageAvail := true
+	if len(flags) >= 2 {
+		reengageAvail = flags[1]
 	}
 	src := []byte(normalizeFences(md))
 	gm := goldmark.New(goldmark.WithExtensions(extension.GFM))
 	doc := gm.Parser().Parse(text.NewReader(src))
-	r := &renderer{src: src, width: width, states: states, flashKey: flashKey, shellDisabled: disabled}
+	r := &renderer{src: src, width: width, states: states, flashKey: flashKey, shellDisabled: disabled, reengageAvail: reengageAvail}
 	r.block(doc, 0)
 	r.blocks = assignIDs(r.blocks)
 	return r.lines, r.buttons, r.blocks
@@ -646,13 +656,23 @@ func (r *renderer) code(n ast.Node) {
 	if len(unmet) == 0 {
 		if blk.Type == "shell" || blk.Type == "run" {
 			runActionCol := col
-			if r.states[blk.ID].Status == "running" {
+			switch r.states[blk.ID].Status {
+			case "running":
 				sb.WriteString(r.buttonGlyph(blk.ID, "stop", glyphStop, colStop, bg))
 				col++
 				sb.WriteString(bg.Render(" "))
 				col++
 				r.buttons = append(r.buttons, Button{Line: lineIdx, Col: runActionCol, Width: 2, Kind: "stop", BlockID: blk.ID})
-			} else {
+			case "ok":
+				// Already ran successfully → disable the run action: a dimmed "done" cue
+				// with no button registered, so an idempotency-unsafe re-run can't happen
+				// by accident. An undo/rollback of a dependency clears this state and the
+				// active button returns.
+				sb.WriteString(bg.Foreground(lipgloss.Color(colOverlay0)).Render(glyphRun))
+				col++
+				sb.WriteString(bg.Render(" "))
+				col++
+			default:
 				sb.WriteString(r.buttonGlyph(blk.ID, "run", glyphRun, colRun, bg))
 				col++
 				sb.WriteString(bg.Render(" "))
@@ -662,11 +682,19 @@ func (r *renderer) code(n ast.Node) {
 		}
 		if blk.Type == "shell" {
 			playCol := col
-			sb.WriteString(r.buttonGlyph(blk.ID, "play", glyphPlay, colGreen, bg))
-			col++
-			sb.WriteString(bg.Render(" "))
-			col++
-			r.buttons = append(r.buttons, Button{Line: lineIdx, Col: playCol, Width: 2, Kind: "play", Payload: src, BlockID: blk.ID})
+			if r.states[blk.ID].Status == "ok" {
+				// Done → disabled play, matching the run action's dimmed "done" cue.
+				sb.WriteString(bg.Foreground(lipgloss.Color(colOverlay0)).Render(glyphPlay))
+				col++
+				sb.WriteString(bg.Render(" "))
+				col++
+			} else {
+				sb.WriteString(r.buttonGlyph(blk.ID, "play", glyphPlay, colGreen, bg))
+				col++
+				sb.WriteString(bg.Render(" "))
+				col++
+				r.buttons = append(r.buttons, Button{Line: lineIdx, Col: playCol, Width: 2, Kind: "play", Payload: src, BlockID: blk.ID})
+			}
 		}
 	}
 	if blk.Type == "diff" {
@@ -890,7 +918,7 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 		// but once the auto-follow-up cap is reached (st.FollowupExhausted) it shows
 		// the button so the user can keep iterating by hand.
 		followupCol := -1
-		if st.Status == "failed" && (id != "verify" || st.FollowupExhausted) && (blk.Type == "run" || blk.Type == "shell") {
+		if st.Status == "failed" && (id != "verify" || st.FollowupExhausted) && (blk.Type == "run" || blk.Type == "shell") && r.reengageAvail {
 			sep := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).Render(glyphSep)
 			followupCol = indentW + lipgloss.Width(label) + 1 + lipgloss.Width(rawToggle) + 1 + lipgloss.Width(glyphSep) + 1
 			retryGlyph := glyphRetry
@@ -984,6 +1012,35 @@ func needsSatisfied(blk Block, states map[string]blockRunState) []string {
 		}
 	}
 	return unmet
+}
+
+// resetDependents clears the run-state of every block that transitively depends (via
+// needs=) on rootID, so undoing/rolling back rootID drops their stale results and
+// re-locks them instead of leaving a leftover "✓ ran" beside a now-blocked block. The
+// root block itself is left untouched. Deleting an entry resets it to the zero
+// (idle) blockRunState.
+func resetDependents(states map[string]blockRunState, blocks []Block, rootID string) {
+	depend := map[string]bool{rootID: true}
+	for changed := true; changed; {
+		changed = false
+		for _, b := range blocks {
+			if depend[b.ID] {
+				continue
+			}
+			for _, n := range b.Needs {
+				if depend[n] {
+					depend[b.ID] = true
+					changed = true
+					break
+				}
+			}
+		}
+	}
+	for id := range depend {
+		if id != rootID {
+			delete(states, id)
+		}
+	}
 }
 
 // emitBlocked appends a single "⊘ needs: <ids>" indicator line styled with

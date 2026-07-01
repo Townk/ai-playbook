@@ -557,7 +557,7 @@ func (m *model) body() int {
 }
 
 func (m *model) reflow() {
-	m.lines, m.buttons, m.blocks = Render(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey, m.driverPending)
+	m.lines, m.buttons, m.blocks = Render(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey, m.driverPending, m.canReengageInProc())
 	m.appendCachedButton()
 	m.appendEditButton()
 	m.appendConfirmButtons()
@@ -1471,6 +1471,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Successful undo: patch is no longer applied; clear status so dependents re-lock.
 			st.Status = ""
 			st.Action = ""
+			// Drop stale run results on blocks that (transitively) needed this one, so they
+			// re-lock cleanly instead of showing a leftover "✓ ran" beside a blocked block.
+			resetDependents(m.blockStates, m.blocks, msg.ID)
 		case msg.Exit != 0 && st.Action == "undo":
 			// Failed undo: patch is still applied (graceful — surface error, keep button as undo).
 			st.Status = "ok"
@@ -1831,8 +1834,26 @@ func (m model) header() string {
 	if m.title != "" {
 		label = m.title
 	}
-	return lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve)).Bold(true).
+	styled := lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve)).Bold(true).
 		Render(strings.Repeat("▓", 3) + " " + label)
+	if m.anyStepFailed() {
+		// Playbook-level failure cue: a prior step failed, so a later health-check (e.g.
+		// Verify) is not presented as if all is well. Left-flowing after the title, so it
+		// never collides with the right-aligned [edit]/cached badges.
+		styled += lipgloss.NewStyle().Foreground(lipgloss.Color(colRed)).Render("  ⚠ a step failed")
+	}
+	return styled
+}
+
+// anyStepFailed reports whether any block ended in the failed state. Drives the
+// header's playbook-level "a step failed" indicator (F11).
+func (m model) anyStepFailed() bool {
+	for _, st := range m.blockStates {
+		if st.Status == "failed" {
+			return true
+		}
+	}
+	return false
 }
 
 // subtitleRowString returns the styled subtitle row (the front-matter

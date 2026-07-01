@@ -186,8 +186,11 @@ func TestHelpModalDocumentsWrapUp(t *testing.T) {
 
 // TestNonVerifyFailureDoesNotAutoFire verifies a non-verify failed run result
 // does NOT auto-emit a followup; the block instead renders a followup button.
+// The manual followup affordance only exists in a re-engagement-capable session, so
+// the model is wired with an orchestrator whose Reengage is set (canReengageInProc).
 func TestNonVerifyFailureDoesNotAutoFire(t *testing.T) {
 	m := newModel("T", "```bash {id=fix}\nmake build\n```\n")
+	m.orch = orchWithReengage(t) // reengage available → the manual followup button renders
 	m.width, m.height = 80, 24
 	m.reflow()
 
