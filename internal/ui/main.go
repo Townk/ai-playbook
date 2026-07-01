@@ -479,6 +479,16 @@ func Main() int {
 	m.answerRegen = answerRegen
 	m.askBridge = askBridge
 	m.finalDraft = finalDraft
+	if m.assisted {
+		// The real terminal size only arrives via the first tea.WindowSizeMsg
+		// (handled in Update, after prog.Run() starts) — reflow() hasn't run yet
+		// at this point, so m.buttons/m.lines are still nil. Reflow now (against
+		// newModel's 80x24 default) so startAssisted's lineForBlock/scrollToFraction
+		// have real data; the WindowSizeMsg handler reflows again once the actual
+		// size is known, so this is just priming, not a final layout.
+		m.reflow()
+		m = m.startAssisted()
+	}
 	prog := tea.NewProgram(
 		m,
 		tea.WithInput(tty),

@@ -383,6 +383,22 @@ type model struct {
 	// override" — a GUIDED/assisted run that ends on a failed/aborted step can
 	// set this to signal failure to the caller.
 	exitCode int
+	// readyID is the assisted-mode cursor: the block id the GUIDED run wants the
+	// user to act on next ("" when no step is ready — either not started, or the
+	// playbook is done). Advanced by startAssisted/assistedAdvance/assistedSkip.
+	readyID string
+	// assistedFooter selects which GUIDED bottom bar (wired in a later Plan 2
+	// task) to render: "" (hidden — not in assisted mode, or not yet started),
+	// "step" (readyID has a next action), "failure" (readyID's run just failed),
+	// or "done" (no runnable blocks remain).
+	assistedFooter string
+	// footerFocus is the assisted footer's own button-focus index (independent of
+	// the pager's hint-mode focus); reset to 0 whenever the footer's button set
+	// changes (start/advance/failure).
+	footerFocus int
+	// assistedFailedID is the block id whose failure raised assistedFooter="failure";
+	// "" when the footer isn't in the failure state.
+	assistedFailedID string
 	// rollbackFailedID is the failed block currently driving a rollback chain (it shows
 	// the "rolling back…" spinner, then the "all steps rolled back" suffix); "" = none.
 	// rollbackPending counts the rollback targets still running, so we know when the chain
@@ -1801,6 +1817,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.blockStates[msg.ID] = st
 		dbg("result id=%s exit=%d action=%s status->%s", msg.ID, msg.Exit, prevAction, st.Status)
+		// Assisted (GUIDED) advance hook: the readyID cursor only reacts to its OWN
+		// step's result (never a rollback target's — prevAction=="rollback" is that
+		// chain, handled below by the ordinary rollback bookkeeping instead).
+		if m.assisted && msg.ID == m.readyID && prevAction != "rollback" {
+			switch st.Status {
+			case "ok":
+				m = m.assistedAdvance()
+			case "failed":
+				m.assistedFailedID = msg.ID
+				m.assistedFooter = "failure"
+				m.footerFocus = 0
+				m.exitCode = 1
+			}
+		}
 		// A rollback target completed: count it down; when the whole chain is done, clear
 		// the failed block's spinner and append its "all steps rolled back" suffix.
 		if prevAction == "rollback" {
