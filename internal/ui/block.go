@@ -6,13 +6,14 @@ import (
 )
 
 type Block struct {
-	ID      string
-	Type    string // "shell" | "run" | "diff" | "static" | "create"
-	Lang    string
-	Needs   []string
-	Static  bool
-	File    string
-	Payload string
+	ID       string
+	Type     string // "shell" | "run" | "diff" | "static" | "create"
+	Lang     string
+	Needs    []string
+	Static   bool
+	File     string
+	Rollback string // id of the block that undoes this one (rollback=<id>); "" if none
+	Payload  string
 }
 
 // parseFenceInfo splits a fence info string "<lang> {k=v flag …}" into the lang

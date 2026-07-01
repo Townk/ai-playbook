@@ -1,6 +1,6 @@
 ---
 name: Needs, Verify, and Rollback
-description: Chain steps with needs=, guard your work with a Verify section, and watch rollback fire automatically when a step fails.
+description: Chain steps with needs=, guard your work with a Verify section, and roll back your changes with one click when a step fails.
 category: tutorial
 tags: [tutorial, needs, rollback, verify]
 created: 2026-06-30
@@ -8,7 +8,7 @@ created: 2026-06-30
 
 # Needs, Verify, and Rollback
 
-Chapter 01 showed you how to run individual blocks. This chapter introduces three features that turn a playbook into a reliable sequence: `needs=` for ordering, `## Verify` for end-to-end confirmation, and `rollback=` for automatic undo when something goes wrong.
+Chapter 01 showed you how to run individual blocks. This chapter introduces three features that turn a playbook into a reliable sequence: `needs=` for ordering, `## Verify` for end-to-end confirmation, and `rollback=` to undo your changes when a step fails.
 
 All commands run relative to `examples/`. The project used here is the same `tidy-shop` from chapter 01.
 
@@ -53,19 +53,19 @@ rm -f projects/tidy-shop/.work/stage-marker
 echo "stage marker removed"
 ```
 
-You would not normally click `undo-stage` by hand — it runs automatically when a downstream step fails. The block below is *designed* to fail so you can see rollback fire:
+You would not normally click `undo-stage` by hand. Instead, when a later step fails, the viewer offers a **Rollback playbook** button that runs it for you. The block below is *designed* to fail so you can see that button appear:
 
 ```bash {id=boom needs=stage}
 exit 1
 ```
 
 > [!CAUTION]
-> The `boom` block is **designed to fail**. Running it will trigger the rollback chain and undo what `stage` put in place. Do not run `boom` in a real workflow where `stage` has made changes you want to keep.
+> The `boom` block is **designed to fail**. After it fails you can click **Rollback playbook** to undo what `stage` put in place. Do not click Rollback in a real workflow where `stage` has made changes you want to keep.
 
-Run `stage` first (it creates the marker), then run `boom`. Because `boom` exits 1, ai-playbook fires the rollback chain in reverse: `undo-stage` runs and the stage marker disappears.
+Run `stage` first (it creates the marker), then run `boom`. Because `boom` exits 1, the header shows a **⚠ a step failed** indicator and the failed block grows a **Rollback playbook** button. Click it: ai-playbook runs the rollback chain in reverse — `undo-stage` runs and the stage marker disappears.
 
 > [!WARNING]
-> Rollback blocks fire **in reverse registration order** when multiple steps in a chain fail. Design each rollback to be safe even if the forward step only partially completed — for example, use `rm -f` instead of `rm` so a missing file is not itself an error.
+> Rollback runs **in reverse registration order**: the most recently applied step is undone first. Design each rollback to be safe even if the forward step only partially completed — for example, use `rm -f` instead of `rm` so a missing file is not itself an error.
 
 ## Verify
 

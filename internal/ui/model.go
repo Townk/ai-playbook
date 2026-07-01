@@ -557,7 +557,7 @@ func (m *model) body() int {
 }
 
 func (m *model) reflow() {
-	m.lines, m.buttons, m.blocks = Render(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey, m.driverPending, m.canReengageInProc())
+	m.lines, m.buttons, m.blocks = Render(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey, m.driverPending, m.canReengageInProc(), m.anyRollbackable())
 	m.appendCachedButton()
 	m.appendEditButton()
 	m.appendConfirmButtons()
@@ -964,6 +964,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reflow()
 					return m, m.flashCmd()
 				}
+				if b.Kind == "rollback" {
+					m.flashKey = b.BlockID + ":rollback"
+					return m.beginRollback()
+				}
 				if b.Kind == "confirm-yes" || b.Kind == "confirm-no" {
 					if cmd := m.resolveConfirm(b.Kind == "confirm-yes"); cmd != nil {
 						return m, tea.Batch(m.flashCmd(), cmd)
@@ -1198,6 +1202,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 						m.reflow()
 						return m, m.flashCmd()
+					}
+					if b.Kind == "rollback" {
+						m.flashKey = b.BlockID + ":rollback"
+						return m.beginRollback()
 					}
 					if b.Kind == "confirm-yes" || b.Kind == "confirm-no" {
 						if cmd := m.resolveConfirm(b.Kind == "confirm-yes"); cmd != nil {
@@ -1854,6 +1862,60 @@ func (m model) anyStepFailed() bool {
 		}
 	}
 	return false
+}
+
+// anyRollbackable reports whether at least one already-run block (Status=="ok") declares
+// a rollback= target — i.e. there is something a "Rollback playbook" click could undo.
+// Gates the rollback affordance on a failed step (render's rollbackAvail flag).
+func (m model) anyRollbackable() bool {
+	for _, b := range m.blocks {
+		if b.Rollback != "" && m.blockStates[b.ID].Status == "ok" {
+			return true
+		}
+	}
+	return false
+}
+
+// beginRollback runs the manual rollback chain (a "Rollback playbook" click): every
+// already-run block (Status=="ok") that declares a rollback= target has that target
+// executed, in REVERSE registration order, each as a normal run so its result shows
+// (visible rollback). The rolled-back blocks' own state is reset — undoing their forward
+// effect and re-locking any dependents. tea.Sequence runs the targets one at a time so a
+// later undo never races an earlier one.
+func (m model) beginRollback() (model, tea.Cmd) {
+	var origins, targets []string
+	for i := len(m.blocks) - 1; i >= 0; i-- {
+		b := m.blocks[i]
+		if b.Rollback != "" && m.blockStates[b.ID].Status == "ok" {
+			origins = append(origins, b.ID)
+			targets = append(targets, b.Rollback)
+		}
+	}
+	if len(targets) == 0 {
+		return m, nil
+	}
+	// Reset the rolled-back origins first (undo their forward effect + re-lock dependents).
+	for _, id := range origins {
+		resetDependents(m.blockStates, m.blocks, id)
+		delete(m.blockStates, id)
+	}
+	// Then mark each rollback target running and queue its execution (reverse order).
+	var cmds []tea.Cmd
+	for _, tgt := range targets {
+		st := m.blockStates[tgt]
+		st.Status = "running"
+		st.Action = "rollback"
+		st.SpinFrame = 0
+		m.blockStates[tgt] = st
+		if c := m.emitAction(Button{Kind: "run", Payload: m.blockCommand(tgt), BlockID: tgt}); c != nil {
+			cmds = append(cmds, c)
+		}
+	}
+	m.reflow()
+	if len(cmds) == 0 {
+		return m, m.flashCmd()
+	}
+	return m, tea.Batch(m.startTick(), m.flashCmd(), tea.Sequence(cmds...))
 }
 
 // subtitleRowString returns the styled subtitle row (the front-matter

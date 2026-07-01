@@ -95,6 +95,31 @@ type renderer struct {
 	// `run --file` viewer has no agent to re-engage, so the button is suppressed. Defaults
 	// to true so existing 4-arg callers / tests keep the prior always-show behavior.
 	reengageAvail bool
+	// rollbackAvail gates the "Rollback playbook" affordance on a failed step: it renders
+	// only when at least one already-run block declares a rollback= target (so there is
+	// something to undo). Defaults to false (no rollback button) for 4-arg callers/tests.
+	rollbackAvail bool
+	// rollbackTargets is the set of block IDs referenced by some block's rollback=
+	// attribute. Such a block is rollback-only: it never gets its own run/play button
+	// (it executes solely as part of a Rollback playbook chain), so it can't be run
+	// independently — e.g. before its paired forward step ran.
+	rollbackTargets map[string]bool
+	// blockNum is the running visual-ID counter: each actionable (shell/run/diff/create)
+	// non-rollback block gets the next circled number ①②③… at its tab's top-left.
+	blockNum int
+	// rollbackForNum maps a rollback-target block ID → the visual number of the forward
+	// block that declares it (rollback=<id>), so the target's bottom border can read
+	// "rollback ②". Filled as forward blocks render (which precede their targets).
+	rollbackForNum map[string]int
+	// nextNumAssigned records that the single green "next to run" visual number has been
+	// claimed by the first un-run, needs-satisfied block — later un-run blocks render red.
+	nextNumAssigned bool
+}
+
+// rollbackRef renders n (1-based) as the "(n)" reference shown in a rollback block's
+// "rollback (n)" under-tab.
+func rollbackRef(n int) string {
+	return "(" + itoa(n) + ")"
 }
 
 // Render parses markdown and returns tagged, laid-out lines, a button
@@ -105,9 +130,10 @@ type renderer struct {
 // need blocks can discard the third value with _.
 // The optional trailing bool flags are, in order: shellDisabled (used by model.reflow
 // on the async-startup path — dims the shell-action button glyphs while the background
-// shell is still opening) and reengageAvail (whether the "try another fix" affordance
-// should render). Existing 4-arg callers (tests, the static block-count path) leave
-// shellDisabled false and reengageAvail true (the prior always-show behavior).
+// shell is still opening), reengageAvail (whether the "try another fix" affordance
+// should render), and rollbackAvail (whether the "Rollback playbook" affordance should
+// render on a failed step). Existing 4-arg callers (tests, the static block-count path)
+// leave shellDisabled false, reengageAvail true (prior always-show), rollbackAvail false.
 func Render(md string, width int, states map[string]blockRunState, flashKey string, flags ...bool) ([]Line, []Button, []Block) {
 	if width < 1 {
 		width = 1
@@ -120,10 +146,14 @@ func Render(md string, width int, states map[string]blockRunState, flashKey stri
 	if len(flags) >= 2 {
 		reengageAvail = flags[1]
 	}
+	rollbackAvail := false
+	if len(flags) >= 3 {
+		rollbackAvail = flags[2]
+	}
 	src := []byte(normalizeFences(md))
 	gm := goldmark.New(goldmark.WithExtensions(extension.GFM))
 	doc := gm.Parser().Parse(text.NewReader(src))
-	r := &renderer{src: src, width: width, states: states, flashKey: flashKey, shellDisabled: disabled, reengageAvail: reengageAvail}
+	r := &renderer{src: src, width: width, states: states, flashKey: flashKey, shellDisabled: disabled, reengageAvail: reengageAvail, rollbackAvail: rollbackAvail, rollbackTargets: collectRollbackTargets(doc, src), rollbackForNum: map[string]int{}}
 	r.block(doc, 0)
 	r.blocks = assignIDs(r.blocks)
 	return r.lines, r.buttons, r.blocks
@@ -544,11 +574,12 @@ func (r *renderer) code(n ast.Node) {
 	}
 	lang, attrs, flags := parseFenceInfo(info)
 	blk := Block{
-		ID:      attrs["id"],
-		Lang:    lang,
-		Needs:   splitNeeds(attrs["needs"]), // helper: strings.Split on "," trimmed, nil if empty
-		Static:  flags["static"],
-		Payload: src,
+		ID:       attrs["id"],
+		Lang:     lang,
+		Needs:    splitNeeds(attrs["needs"]), // helper: strings.Split on "," trimmed, nil if empty
+		Rollback: attrs["rollback"],
+		Static:   flags["static"],
+		Payload:  src,
 	}
 	blk.Type = classifyType(lang, blk.Static)
 	if f := attrs["file"]; f != "" {
@@ -613,12 +644,48 @@ func (r *renderer) code(n ast.Node) {
 	// Compute unmet needs now so we can know which buttons to reserve space for.
 	unmet := needsSatisfied(blk, r.states)
 
+	// Visual ID: an actionable (shell/run/diff/create) block that is NOT a rollback
+	// target gets the next circled number ①②③… at its tab's top-left. Rollback targets
+	// carry no number of their own (they show "rollback ⟨N⟩" on their bottom border, N
+	// being the forward block's number, recorded here as the forward block renders).
+	isRollbackTarget := r.rollbackTargets[blk.ID]
+	actionable := blk.Type == "shell" || blk.Type == "run" || blk.Type == "diff" || blk.Type == "create"
+	num := 0
+	if actionable && !isRollbackTarget {
+		r.blockNum++
+		num = r.blockNum
+		if blk.Rollback != "" {
+			r.rollbackForNum[blk.Rollback] = num
+		}
+	}
+	numGlyph := ""
+	numW := 0
+	if num > 0 {
+		g := itoa(num) // top-left block ID: "1", "2", …
+		// Foreground encodes run progress: grey = already acted on; green = THE next block
+		// to run (first un-run, needs-satisfied block); red = un-run but not yet next.
+		numColor := colSubtext
+		switch {
+		case r.states[blk.ID].Status != "":
+			numColor = colSubtext // light grey — ran / running
+		case !r.nextNumAssigned && len(unmet) == 0:
+			numColor = colGreen // the single "next to run"
+			r.nextNumAssigned = true
+		default:
+			numColor = colRed // pending — not run and not the next one
+		}
+		// Leading + trailing space, all on the code-block background (a little top-left
+		// tab mirroring the button tab on the right).
+		numGlyph = bg.Render(" ") + bg.Foreground(lipgloss.Color(numColor)).Render(g) + bg.Render(" ")
+		numW = 1 + lipgloss.Width(g) + 1
+	}
+
 	// region width: leadpad(1) + langW + sep(" ❘ "=3) + run(2 if shell/run+unblocked) + play(2 if shell+unblocked) + diff(2 if diff) + apply-diff or undo-diff(2 if diff+unblocked or applied) + copy(2)
 	regionW := 1 + langW + 3 + 2
-	if (blk.Type == "shell" || blk.Type == "run") && len(unmet) == 0 {
+	if (blk.Type == "shell" || blk.Type == "run") && len(unmet) == 0 && !isRollbackTarget {
 		regionW += 2 // run(2)
 	}
-	if blk.Type == "shell" && len(unmet) == 0 {
+	if blk.Type == "shell" && len(unmet) == 0 && !isRollbackTarget {
 		regionW += 2 // play(2)
 	}
 	if blk.Type == "diff" {
@@ -631,14 +698,18 @@ func (r *renderer) code(n ast.Node) {
 	if blk.Type == "create" {
 		regionW += 2 // create(2) or undo-create(2) — always shown (no needs gate)
 	}
-	fillCols := width - regionW
+	fillCols := width - regionW - numW
 	if fillCols < 0 {
 		fillCols = 0
 	}
 
 	var sb strings.Builder
+	// Top-left visual number (on the document bg, left of the tab's ▂ edge), then the
+	// ▂ fill. col is advanced past both so button columns stay put (numW is reclaimed
+	// from the fill, keeping the total tab width constant).
+	sb.WriteString(numGlyph)
 	sb.WriteString(codeFgANSI + strings.Repeat("▂", fillCols) + "\x1b[0m")
-	col := fillCols
+	col := numW + fillCols
 
 	sb.WriteString(bg.Render(" "))
 	col++ // leading pad
@@ -654,7 +725,10 @@ func (r *renderer) code(n ast.Node) {
 	sb.WriteString(bg.Render(" "))
 	col++
 	if len(unmet) == 0 {
-		if blk.Type == "shell" || blk.Type == "run" {
+		// A rollback-only block gets NO run/play/stop button — it executes solely via a
+		// Rollback playbook chain. Its running…/✓ ran feedback still shows in the run
+		// region below the tab.
+		if (blk.Type == "shell" || blk.Type == "run") && !isRollbackTarget {
 			runActionCol := col
 			switch r.states[blk.ID].Status {
 			case "running":
@@ -680,7 +754,7 @@ func (r *renderer) code(n ast.Node) {
 				r.buttons = append(r.buttons, Button{Line: lineIdx, Col: runActionCol, Width: 2, Kind: "run", Payload: runPayload(blk), BlockID: blk.ID})
 			}
 		}
-		if blk.Type == "shell" {
+		if blk.Type == "shell" && !isRollbackTarget {
 			playCol := col
 			if r.states[blk.ID].Status == "ok" {
 				// Done → disabled play, matching the run action's dimmed "done" cue.
@@ -782,6 +856,23 @@ func (r *renderer) code(n ast.Node) {
 	// the normal 🮂 bottom edge.
 	if blockW > width {
 		r.lines = append(r.lines, Line{Wide: false, HBar: blockW, Code: true})
+	} else if isRollbackTarget {
+		// Rollback-only block: annotate the bottom edge with "rollback ⟨N⟩" (N = the
+		// forward block's visual number), right-aligned, so it's clear this block is the
+		// undo for step N. The ⟨N⟩ is omitted if the forward block hasn't been numbered.
+		lbl := "rollback"
+		if n := r.rollbackForNum[blk.ID]; n > 0 {
+			lbl += " " + rollbackRef(n)
+		}
+		label := " " + lbl + " " // leading + trailing space
+		fill := width - lipgloss.Width(label)
+		if fill < 0 {
+			fill = 0
+		}
+		// Code-block bg, peach fg — matching the "Rollback playbook" button by the error.
+		styled := bg.Foreground(lipgloss.Color(colPeach)).Render(label)
+		bottomLine := codeFgANSI + strings.Repeat("🮂", fill) + "\x1b[0m" + styled
+		r.lines = append(r.lines, Line{Text: bottomLine, Wide: false, Code: true})
 	} else {
 		// Bottom edge bar: 🮂 characters in fg colCodeBg (#282C41), no background.
 		// Total display width == width. Wide=false.
@@ -911,30 +1002,41 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 			toggleRendered = rawToggle
 		}
 		summary := statusPart + " " + toggleRendered
-		// On a failed run/shell block (other than the verify re-run, which auto-fires
-		// a follow-up), offer a "↻ try another fix" button that re-engages the agent.
-		// Its click payload is the block's raw command text.
-		// The verify block normally hides this button (it auto-fires a follow-up),
-		// but once the auto-follow-up cap is reached (st.FollowupExhausted) it shows
-		// the button so the user can keep iterating by hand.
-		followupCol := -1
-		if st.Status == "failed" && (id != "verify" || st.FollowupExhausted) && (blk.Type == "run" || blk.Type == "shell") && r.reengageAvail {
-			sep := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).Render(glyphSep)
-			followupCol = indentW + lipgloss.Width(label) + 1 + lipgloss.Width(rawToggle) + 1 + lipgloss.Width(glyphSep) + 1
-			retryGlyph := glyphRetry
-			if r.flashKey != "" && r.flashKey == id+":followup" {
-				retryGlyph = lipgloss.NewStyle().Foreground(lipgloss.Color(colFlashOn)).Bold(true).Render(retryGlyph)
-			} else {
-				retryGlyph = lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render(retryGlyph)
+		// On a failed run/shell block, offer ONE extra action after the toggle:
+		//   - "↻ try another fix" (followup) when in-process re-engagement is wired — the
+		//     verify block hides it while auto-firing, showing it only past the cap; OR
+		//   - "⤺ Rollback playbook" when re-engagement is unavailable (a plain run --file)
+		//     and some already-run step declares a rollback= target.
+		// Re-engagement takes precedence when both are possible.
+		extraCol := -1
+		extraKind := ""
+		extraLabel := ""
+		extraGlyph := ""
+		if st.Status == "failed" && (blk.Type == "run" || blk.Type == "shell") {
+			switch {
+			case (id != "verify" || st.FollowupExhausted) && r.reengageAvail:
+				extraKind, extraLabel, extraGlyph = "followup", "try another fix", glyphRetry
+			case r.rollbackAvail:
+				extraKind, extraLabel, extraGlyph = "rollback", "Rollback playbook", glyphUndo
 			}
-			summary += " " + sep + " " + retryGlyph + " " +
-				lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Render("try another fix")
+		}
+		if extraKind != "" {
+			sep := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).Render(glyphSep)
+			extraCol = indentW + lipgloss.Width(label) + 1 + lipgloss.Width(rawToggle) + 1 + lipgloss.Width(glyphSep) + 1
+			glyph := extraGlyph
+			if r.flashKey != "" && r.flashKey == id+":"+extraKind {
+				glyph = lipgloss.NewStyle().Foreground(lipgloss.Color(colFlashOn)).Bold(true).Render(glyph)
+			} else {
+				glyph = lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render(glyph)
+			}
+			summary += " " + sep + " " + glyph + " " +
+				lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Render(extraLabel)
 		}
 		summaryLineIdx := len(r.lines)
 		r.lines = append(r.lines, Line{Text: indentStr + summary, Wide: false, Code: true})
 		r.buttons = append(r.buttons, Button{Line: summaryLineIdx, Col: toggleCol, Width: 2, Kind: "toggle", BlockID: id})
-		if followupCol >= 0 {
-			r.buttons = append(r.buttons, Button{Line: summaryLineIdx, Col: followupCol, Width: 2, Kind: "followup", Payload: blk.Payload, BlockID: id})
+		if extraCol >= 0 {
+			r.buttons = append(r.buttons, Button{Line: summaryLineIdx, Col: extraCol, Width: 2, Kind: extraKind, Payload: blk.Payload, BlockID: id})
 		}
 		if st.Expanded {
 			tail := tailFile(st.Logpath, 50)
@@ -1012,6 +1114,26 @@ func needsSatisfied(blk Block, states map[string]blockRunState) []string {
 		}
 	}
 	return unmet
+}
+
+// collectRollbackTargets pre-scans the parsed document for every fenced block's
+// rollback= attribute and returns the set of referenced target IDs. A block in this set
+// is rollback-only — it renders without its own run/play button.
+func collectRollbackTargets(doc ast.Node, src []byte) map[string]bool {
+	targets := map[string]bool{}
+	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		if fc, ok := n.(*ast.FencedCodeBlock); ok && fc.Info != nil {
+			_, attrs, _ := parseFenceInfo(string(fc.Info.Segment.Value(src)))
+			if rb := attrs["rollback"]; rb != "" {
+				targets[rb] = true
+			}
+		}
+		return ast.WalkContinue, nil
+	})
+	return targets
 }
 
 // resetDependents clears the run-state of every block that transitively depends (via
