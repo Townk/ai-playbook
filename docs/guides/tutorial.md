@@ -157,14 +157,14 @@ Features: project_bound · $PROJECT_ROOT · env declaration · confirmation gate
 
 ---
 
-## Chapter 07 — Run Modes ⏳
+## Chapter 07 — Run Modes
 
 File: [`examples/07-run-modes.md`](../../examples/07-run-modes.md)
 
-Features: --assisted (confirm-each-step) · --auto · stop ⏳
+Features: --assisted (confirm-each-step) ⏳ · --auto · stop
 
 > [!NOTE]
-> The `--assisted` and `--auto` flags are marked ⏳ — they are documented here as if shipped, and will be verified once the feature lands. The interactive viewer blocks in this chapter work today.
+> The `--assisted` flag is marked ⏳ — documented here as if shipped, and will be verified once the feature lands. The `--auto` flag and interactive viewer blocks in this chapter are shipped and work today.
 
 **Run:** `ai-playbook run --file examples/07-run-modes.md`
 
@@ -174,7 +174,7 @@ Features: --assisted (confirm-each-step) · --auto · stop ⏳
 
 - `ai-playbook run --file examples/07-run-modes.md` — press Enter before each block (manual step-through)
 - `ai-playbook run --assisted --file examples/07-run-modes.md` — explicit y/n/q prompt before each block ⏳
-- `ai-playbook run --auto --file examples/07-run-modes.md` — runs all blocks without pausing; exits non-zero on first failure ⏳
+- `ai-playbook run --auto --file examples/07-run-modes.md` — runs all blocks without pausing; exits non-zero on first failure
 
 **Notice:** The stop behaviour section explains that in `--assisted` and `--auto` modes, **Ctrl-C** aborts the current block and exits non-zero — so the calling script or CI step detects the failure.
 
@@ -265,7 +265,7 @@ You have now used every surface:
 | diff apply / view-diff / undo | 04 |
 | drift / resolve manually / regenerate | 05 |
 | project_bound / $PROJECT_ROOT / env gate | 06 |
-| --assisted / --auto run modes ⏳ | 07 |
+| --assisted ⏳ / --auto run modes | 07 |
 | list / search / show / [edit] / validate ⏳ | 08 |
 | create / assist / followup / cached | 09 |
 

@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Townk/ai-playbook/internal/autorun"
 	"github.com/Townk/ai-playbook/internal/store"
 )
 
@@ -31,26 +32,43 @@ func TestResolveRunArgs_Matrix(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			kind, value, auto, err := resolveRunArgs(c.args)
+			ra, err := resolveRunArgs(c.args)
 			if c.wantErr {
 				if err == nil {
-					t.Fatalf("resolveRunArgs(%v): want error, got (%q,%q,%v,nil)", c.args, kind, value, auto)
+					t.Fatalf("resolveRunArgs(%v): want error, got (%+v,nil)", c.args, ra)
 				}
 				return
 			}
 			if err != nil {
 				t.Fatalf("resolveRunArgs(%v): unexpected error: %v", c.args, err)
 			}
-			if kind != c.wantKind {
-				t.Errorf("kind = %q, want %q", kind, c.wantKind)
+			if ra.Kind != c.wantKind {
+				t.Errorf("kind = %q, want %q", ra.Kind, c.wantKind)
 			}
-			if value != c.wantValue {
-				t.Errorf("value = %q, want %q", value, c.wantValue)
+			if ra.Value != c.wantValue {
+				t.Errorf("value = %q, want %q", ra.Value, c.wantValue)
 			}
-			if auto != c.wantAuto {
-				t.Errorf("autoRollback = %v, want %v", auto, c.wantAuto)
+			if ra.AutoRollback != c.wantAuto {
+				t.Errorf("autoRollback = %v, want %v", ra.AutoRollback, c.wantAuto)
 			}
 		})
+	}
+}
+
+// TestResolveRunArgs_AutoFlags covers the --auto / --no-auto-rollback flag
+// wiring: --auto sets Mode; --no-auto-rollback without --auto is a usage
+// error; --auto combined with --auto-rollback is a usage error (the two
+// rollback opt-ins are mutually exclusive across run modes).
+func TestResolveRunArgs_AutoFlags(t *testing.T) {
+	ra, err := resolveRunArgs([]string{"--auto", "--file", "x.md"})
+	if err != nil || ra.Mode != modeAuto || ra.Kind != "file" || ra.Value != "x.md" {
+		t.Fatalf("--auto: %+v err=%v", ra, err)
+	}
+	if _, err := resolveRunArgs([]string{"--no-auto-rollback", "--file", "x.md"}); err == nil {
+		t.Error("--no-auto-rollback without --auto must error")
+	}
+	if _, err := resolveRunArgs([]string{"--auto", "--auto-rollback", "--file", "x.md"}); err == nil {
+		t.Error("--auto with --auto-rollback must error")
 	}
 }
 
@@ -279,5 +297,44 @@ func TestRunMain_FileProjectBound_ResolvesDeclaredProjectRoot(t *testing.T) {
 	}
 	if captured[3] != fmFile {
 		t.Errorf("declared project_root: file = %q, want original %q", captured[3], fmFile)
+	}
+}
+
+// ---- RunMain: the --auto headless branch ----
+
+// TestRunMain_AutoBranch_CallsAutorun verifies `run --auto --file <md>` never
+// opens a viewer: it converts the parsed blocks to autorun.Block and calls the
+// autorunRunFn seam, with AutoRollback defaulting to true (no
+// --no-auto-rollback given).
+func TestRunMain_AutoBranch_CallsAutorun(t *testing.T) {
+	origRun := autorunRunFn
+	t.Cleanup(func() { autorunRunFn = origRun })
+
+	dir := t.TempDir()
+	f := filepath.Join(dir, "auto.md")
+	content := "# Auto\n\n```bash {id=a}\necho a\n```\n\n```bash {id=b needs=a}\necho b\n```\n"
+	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withArgs(t, []string{"ai-playbook", "run", "--auto", "--file", f})
+
+	var gotAutoRB bool
+	var gotIDs []string
+	autorunRunFn = func(rc autorun.RunConfig) int {
+		gotAutoRB = rc.AutoRollback
+		for _, b := range rc.Blocks {
+			gotIDs = append(gotIDs, b.ID)
+		}
+		return 0
+	}
+
+	if code := RunMain(); code != 0 {
+		t.Fatalf("RunMain auto = %d", code)
+	}
+	if !gotAutoRB {
+		t.Error("auto default must set AutoRollback=true")
+	}
+	if len(gotIDs) != 2 || gotIDs[0] != "a" || gotIDs[1] != "b" {
+		t.Errorf("blocks converted = %v, want [a b]", gotIDs)
 	}
 }

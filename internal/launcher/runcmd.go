@@ -27,7 +27,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
+	"github.com/Townk/ai-playbook/internal/autorun"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/frontmatter"
@@ -55,6 +57,11 @@ var setReengageFn = ui.SetReengage
 // observe it without a viewer.
 var setAutoRollbackFn = ui.SetAutoRollback
 
+// autorunRunFn is the autorun.Run seam: the headless (`--auto`) run executes the
+// converted block sequence without a driver/viewer. Tests inject a fake so the
+// auto branch is exercised without opening a real shell.
+var autorunRunFn = autorun.Run
+
 // RunMain is the `ai-playbook run` subcommand: it owns config loading + the
 // configured-shell hand-off (ui stays config-agnostic), resolves the run
 // argument, and renders the resolved playbook through ui.Main (via uiMainFn). A
@@ -66,18 +73,23 @@ func RunMain() int {
 	cfg, _ := config.Load()
 	ui.SetShell(cfg.Driver.Shell)
 
-	kind, value, autoRollback, err := resolveRunArgs(os.Args[2:])
+	ra, err := resolveRunArgs(os.Args[2:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", err)
 		return 2
 	}
-	setAutoRollbackFn(autoRollback) // opt-in: auto-fire rollback on a step failure
 
-	switch kind {
+	if ra.Mode == modeAuto {
+		return autoRun(ra) // headless: never opens ui.Main / a driver pane
+	}
+
+	setAutoRollbackFn(ra.AutoRollback) // opt-in: auto-fire rollback on a step failure
+
+	switch ra.Kind {
 	case "file":
-		return runFile(value)
+		return runFile(ra.Value)
 	case "playbook":
-		return runPlaybook(value)
+		return runPlaybook(ra.Value)
 	}
 	return 0
 }
@@ -134,6 +146,96 @@ func runFile(file string) int {
 		}
 	}
 	return runViewer(file, cwd)
+}
+
+// autoRun executes ra headlessly (`run --auto`): it resolves the same source
+// (markdown + cwd + PROJECT_ROOT) that runFile/runPlaybook would open a viewer
+// on, parses the front-matter-stripped body into blocks with the SAME parser
+// the viewer uses (ui.Render), converts them to autorun.Block, and hands the
+// sequence to autorunRunFn. No viewer/driver pane is ever opened.
+func autoRun(ra runArgs) int {
+	cfg, _ := config.Load()
+
+	var body, cwd, slug string
+	var fm frontmatter.FrontMatter
+
+	switch ra.Kind {
+	case "file":
+		data, rerr := os.ReadFile(ra.Value)
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", rerr)
+			return 1
+		}
+		var ok bool
+		fm, body, ok = frontmatter.Parse(string(data))
+		if ok && fm.ProjectBound {
+			root := resolveProjectRoot(fm.ProjectRoot)
+			os.Setenv("PROJECT_ROOT", root) // mirrors setProjectRootFn's driver export
+			cwd = root
+		} else if dir := filepath.Dir(ra.Value); dir != "" {
+			// Mirrors the `run --file` cwd rule (runFile / ui.Main's --cwd default):
+			// blocks run in the playbook file's own directory.
+			if abs, aerr := filepath.Abs(dir); aerr == nil {
+				cwd = abs
+			} else {
+				cwd = dir
+			}
+		}
+		base := filepath.Base(ra.Value)
+		slug = strings.TrimSuffix(base, filepath.Ext(base))
+	case "playbook":
+		meta, b, lerr := storeLoadFn(ra.Value)
+		if lerr != nil {
+			fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", lerr)
+			return 1
+		}
+		body = b
+		if meta.ProjectBound {
+			root := projectRootFn()
+			os.Setenv("PROJECT_ROOT", root)
+			cwd = root
+		}
+		slug = ra.Value
+	}
+
+	// Pass the front-matter-stripped body — NOT the raw source — so the YAML
+	// fence never gets mis-parsed as a code block.
+	_, _, uiBlocks := ui.Render(body, 80, nil, "")
+	blocks := make([]autorun.Block, 0, len(uiBlocks))
+	for _, b := range uiBlocks {
+		blocks = append(blocks, autorun.Block{
+			ID:       b.ID,
+			Command:  b.Payload,
+			Needs:    b.Needs,
+			Rollback: b.Rollback,
+			Static:   b.Static,
+			Kind:     kindFromType(b.Type),
+		})
+	}
+
+	return autorunRunFn(autorun.RunConfig{
+		Blocks:       blocks,
+		EnvVars:      fm.Env,
+		Cwd:          cwd,
+		Shell:        cfg.Driver.Shell,
+		Slug:         slug,
+		AutoRollback: !ra.NoAutoRollback,
+	})
+}
+
+// kindFromType maps a ui.Block's Type tag to autorun's StepKind: "diff" →
+// KindApplyDiff, "create" → KindCreateFile; everything else ("shell", "run",
+// "static") → KindRun (a static block is excluded from execution by its Static
+// flag / autorun.Sequence, not by its Kind).
+func kindFromType(t string) autorun.StepKind {
+	switch t {
+	case "diff":
+		return autorun.KindApplyDiff
+	case "create":
+		return autorun.KindCreateFile
+	default:
+		return autorun.KindRun
+	}
 }
 
 // resolveProjectRoot resolves a project_bound playbook's root. An explicit
@@ -207,6 +309,24 @@ func writeTempMarkdown(tag, content string) (string, error) {
 	return name, nil
 }
 
+// runMode selects between the default (interactive viewer) and headless run
+// paths. modeAssisted (Plan 2) is not added by this task.
+type runMode int
+
+const (
+	modeDefault runMode = iota
+	modeAuto
+)
+
+// runArgs is the resolved `run` invocation: the single playbook source (Kind +
+// Value) plus the run-mode/rollback opt-ins.
+type runArgs struct {
+	Kind, Value    string // "file"|"playbook", the path/slug
+	Mode           runMode
+	AutoRollback   bool // existing default-viewer --auto-rollback opt-in
+	NoAutoRollback bool // --no-auto-rollback (valid only with --auto)
+}
+
 // resolveRunArgs resolves the single playbook source from the `run` arguments.
 // Exactly one of {bare positional, --playbook, --file} must be present:
 //
@@ -217,16 +337,22 @@ func writeTempMarkdown(tag, content string) (string, error) {
 // Zero sources or more than one is an error. When a slug is supplied both as a
 // positional and via --playbook (or --file) it counts as two sources → an error,
 // so the caller's intent is never ambiguous.
-func resolveRunArgs(args []string) (kind, value string, autoRollback bool, err error) {
+//
+// --auto switches to the headless run mode (Mode: modeAuto); --no-auto-rollback
+// is only meaningful there (an error otherwise), and --auto-rollback (the
+// default-viewer opt-in) is mutually exclusive with --auto.
+func resolveRunArgs(args []string) (runArgs, error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var playbook, file string
-	var auto bool
+	var auto, autoMode, noAutoRollback bool
 	fs.StringVar(&playbook, "playbook", "", "slug of a saved playbook to run")
 	fs.StringVar(&file, "file", "", "path to a markdown file to run")
 	fs.BoolVar(&auto, "auto-rollback", false, "on a step failure, automatically roll back applied steps (else a manual button)")
+	fs.BoolVar(&autoMode, "auto", false, "run headless: execute every block in order with no viewer/driver pane")
+	fs.BoolVar(&noAutoRollback, "no-auto-rollback", false, "with --auto, do not roll back applied steps on a failure")
 	if perr := fs.Parse(args); perr != nil {
-		return "", "", false, perr
+		return runArgs{}, perr
 	}
 	// The stdlib flag package stops at the FIRST non-flag token, so anything after a
 	// bare positional (e.g. `run build --file x`) lands here unparsed. Treat any
@@ -234,7 +360,7 @@ func resolveRunArgs(args []string) (kind, value string, autoRollback bool, err e
 	// unambiguous.
 	rest := fs.Args()
 	if len(rest) > 1 {
-		return "", "", false, fmt.Errorf("specify exactly one of <slug>, --playbook, or --file")
+		return runArgs{}, fmt.Errorf("specify exactly one of <slug>, --playbook, or --file")
 	}
 	positional := ""
 	if len(rest) == 1 {
@@ -249,14 +375,29 @@ func resolveRunArgs(args []string) (kind, value string, autoRollback bool, err e
 	}
 	switch {
 	case count == 0:
-		return "", "", false, fmt.Errorf("specify a playbook: run <slug> | --playbook <slug> | --file <path>")
+		return runArgs{}, fmt.Errorf("specify a playbook: run <slug> | --playbook <slug> | --file <path>")
 	case count > 1:
-		return "", "", false, fmt.Errorf("specify exactly one of <slug>, --playbook, or --file")
-	case file != "":
-		return "file", file, auto, nil
-	case playbook != "":
-		return "playbook", playbook, auto, nil
-	default:
-		return "playbook", positional, auto, nil
+		return runArgs{}, fmt.Errorf("specify exactly one of <slug>, --playbook, or --file")
 	}
+
+	if noAutoRollback && !autoMode {
+		return runArgs{}, fmt.Errorf("--no-auto-rollback is only valid with --auto")
+	}
+	if autoMode && auto {
+		return runArgs{}, fmt.Errorf("--auto and --auto-rollback are mutually exclusive (auto mode rolls back by default; use --no-auto-rollback to opt out)")
+	}
+
+	ra := runArgs{AutoRollback: auto, NoAutoRollback: noAutoRollback}
+	if autoMode {
+		ra.Mode = modeAuto
+	}
+	switch {
+	case file != "":
+		ra.Kind, ra.Value = "file", file
+	case playbook != "":
+		ra.Kind, ra.Value = "playbook", playbook
+	default:
+		ra.Kind, ra.Value = "playbook", positional
+	}
+	return ra, nil
 }
