@@ -76,6 +76,56 @@ func TestRollbackTargetNotIndependentlyRunnable(t *testing.T) {
 	}
 }
 
+// TestAutoRollback_FiresOnFailure verifies that with --auto-rollback (m.autoRollback),
+// a step failure auto-fires the rollback chain: the rolled-back origin is reset and its
+// rollback target is marked running.
+func TestAutoRollback_FiresOnFailure(t *testing.T) {
+	body := "```bash {id=a rollback=undo-a}\ntrue\n```\n\n" +
+		"```bash {id=undo-a}\ntrue\n```\n\n" +
+		"```bash {id=boom needs=a}\nfalse\n```\n"
+	m := newModel("T", body)
+	m.width, m.height = 80, 24
+	m.autoRollback = true
+	m.reflow()
+	m.blockStates["a"] = blockRunState{Status: "ok"} // a applied → rollbackable
+	m.reflow()
+
+	m2 := mustModel(m.Update(resultMsg{ID: "boom", Exit: 1, Logpath: "/tmp/x.log"}))
+
+	if _, ok := m2.blockStates["a"]; ok {
+		t.Error("auto-rollback must reset the rolled-back origin a")
+	}
+	if m2.blockStates["undo-a"].Status != "running" {
+		t.Errorf("auto-rollback must mark undo-a running; got %q", m2.blockStates["undo-a"].Status)
+	}
+}
+
+// TestAutoRollback_OffKeepsManualPath verifies that WITHOUT --auto-rollback, a step
+// failure leaves the applied step in place (manual "Rollback playbook" button path).
+func TestAutoRollback_OffKeepsManualPath(t *testing.T) {
+	body := "```bash {id=a rollback=undo-a}\ntrue\n```\n\n" +
+		"```bash {id=undo-a}\ntrue\n```\n\n" +
+		"```bash {id=boom needs=a}\nfalse\n```\n"
+	m := newModel("T", body)
+	m.width, m.height = 80, 24
+	m.autoRollback = false
+	m.reflow()
+	m.blockStates["a"] = blockRunState{Status: "ok"}
+	m.reflow()
+
+	m2 := mustModel(m.Update(resultMsg{ID: "boom", Exit: 1, Logpath: "/tmp/x.log"}))
+
+	if m2.blockStates["a"].Status != "ok" {
+		t.Error("without --auto-rollback, the applied step a must stay applied")
+	}
+	if m2.blockStates["undo-a"].Status == "running" {
+		t.Error("without --auto-rollback, no rollback target should run")
+	}
+	if m2.blockStates["boom"].Status != "failed" {
+		t.Errorf("boom must be failed; got %q", m2.blockStates["boom"].Status)
+	}
+}
+
 // TestRollbackButtonGating verifies the "Rollback playbook" button shows on a failed
 // step only when rollback is available and re-engagement is not; re-engagement (an
 // authoring session) takes precedence over rollback when both are possible.

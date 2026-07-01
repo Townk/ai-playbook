@@ -17,21 +17,24 @@ func TestResolveRunArgs_Matrix(t *testing.T) {
 		args      []string
 		wantKind  string
 		wantValue string
+		wantAuto  bool
 		wantErr   bool
 	}{
-		{"bare positional ⇒ playbook", []string{"build"}, "playbook", "build", false},
-		{"--playbook flag", []string{"--playbook", "build"}, "playbook", "build", false},
-		{"--file flag", []string{"--file", "/p.md"}, "file", "/p.md", false},
-		{"both --playbook and --file → error", []string{"--playbook", "build", "--file", "/p.md"}, "", "", true},
-		{"positional + --file → error", []string{"build", "--file", "/p.md"}, "", "", true},
-		{"none → error", []string{}, "", "", true},
+		{"bare positional ⇒ playbook", []string{"build"}, "playbook", "build", false, false},
+		{"--playbook flag", []string{"--playbook", "build"}, "playbook", "build", false, false},
+		{"--file flag", []string{"--file", "/p.md"}, "file", "/p.md", false, false},
+		{"--auto-rollback with --file", []string{"--auto-rollback", "--file", "/p.md"}, "file", "/p.md", true, false},
+		{"--file without --auto-rollback → auto false", []string{"--file", "/p.md"}, "file", "/p.md", false, false},
+		{"both --playbook and --file → error", []string{"--playbook", "build", "--file", "/p.md"}, "", "", false, true},
+		{"positional + --file → error", []string{"build", "--file", "/p.md"}, "", "", false, true},
+		{"none → error", []string{}, "", "", false, true},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			kind, value, err := resolveRunArgs(c.args)
+			kind, value, auto, err := resolveRunArgs(c.args)
 			if c.wantErr {
 				if err == nil {
-					t.Fatalf("resolveRunArgs(%v): want error, got (%q,%q,nil)", c.args, kind, value)
+					t.Fatalf("resolveRunArgs(%v): want error, got (%q,%q,%v,nil)", c.args, kind, value, auto)
 				}
 				return
 			}
@@ -43,6 +46,9 @@ func TestResolveRunArgs_Matrix(t *testing.T) {
 			}
 			if value != c.wantValue {
 				t.Errorf("value = %q, want %q", value, c.wantValue)
+			}
+			if auto != c.wantAuto {
+				t.Errorf("autoRollback = %v, want %v", auto, c.wantAuto)
 			}
 		})
 	}

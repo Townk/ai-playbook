@@ -51,6 +51,10 @@ var setProjectRootFn = ui.SetProjectRoot
 // wiring for regenerating a drifted diff). Seam so tests observe the wiring without a viewer.
 var setReengageFn = ui.SetReengage
 
+// setAutoRollbackFn stashes the --auto-rollback opt-in for the next viewer. Seam so tests
+// observe it without a viewer.
+var setAutoRollbackFn = ui.SetAutoRollback
+
 // RunMain is the `ai-playbook run` subcommand: it owns config loading + the
 // configured-shell hand-off (ui stays config-agnostic), resolves the run
 // argument, and renders the resolved playbook through ui.Main (via uiMainFn). A
@@ -62,11 +66,12 @@ func RunMain() int {
 	cfg, _ := config.Load()
 	ui.SetShell(cfg.Driver.Shell)
 
-	kind, value, err := resolveRunArgs(os.Args[2:])
+	kind, value, autoRollback, err := resolveRunArgs(os.Args[2:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", err)
 		return 2
 	}
+	setAutoRollbackFn(autoRollback) // opt-in: auto-fire rollback on a step failure
 
 	switch kind {
 	case "file":
@@ -212,14 +217,16 @@ func writeTempMarkdown(tag, content string) (string, error) {
 // Zero sources or more than one is an error. When a slug is supplied both as a
 // positional and via --playbook (or --file) it counts as two sources → an error,
 // so the caller's intent is never ambiguous.
-func resolveRunArgs(args []string) (kind, value string, err error) {
+func resolveRunArgs(args []string) (kind, value string, autoRollback bool, err error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var playbook, file string
+	var auto bool
 	fs.StringVar(&playbook, "playbook", "", "slug of a saved playbook to run")
 	fs.StringVar(&file, "file", "", "path to a markdown file to run")
+	fs.BoolVar(&auto, "auto-rollback", false, "on a step failure, automatically roll back applied steps (else a manual button)")
 	if perr := fs.Parse(args); perr != nil {
-		return "", "", perr
+		return "", "", false, perr
 	}
 	// The stdlib flag package stops at the FIRST non-flag token, so anything after a
 	// bare positional (e.g. `run build --file x`) lands here unparsed. Treat any
@@ -227,7 +234,7 @@ func resolveRunArgs(args []string) (kind, value string, err error) {
 	// unambiguous.
 	rest := fs.Args()
 	if len(rest) > 1 {
-		return "", "", fmt.Errorf("specify exactly one of <slug>, --playbook, or --file")
+		return "", "", false, fmt.Errorf("specify exactly one of <slug>, --playbook, or --file")
 	}
 	positional := ""
 	if len(rest) == 1 {
@@ -242,14 +249,14 @@ func resolveRunArgs(args []string) (kind, value string, err error) {
 	}
 	switch {
 	case count == 0:
-		return "", "", fmt.Errorf("specify a playbook: run <slug> | --playbook <slug> | --file <path>")
+		return "", "", false, fmt.Errorf("specify a playbook: run <slug> | --playbook <slug> | --file <path>")
 	case count > 1:
-		return "", "", fmt.Errorf("specify exactly one of <slug>, --playbook, or --file")
+		return "", "", false, fmt.Errorf("specify exactly one of <slug>, --playbook, or --file")
 	case file != "":
-		return "file", file, nil
+		return "file", file, auto, nil
 	case playbook != "":
-		return "playbook", playbook, nil
+		return "playbook", playbook, auto, nil
 	default:
-		return "playbook", positional, nil
+		return "playbook", positional, auto, nil
 	}
 }

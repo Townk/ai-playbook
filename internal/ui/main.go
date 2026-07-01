@@ -33,6 +33,15 @@ var pendingReengage *orchestrator.Reengage
 // kinds can re-author in-process). It is consumed (and cleared) by Main.
 func SetReengage(re *orchestrator.Reengage) { pendingReengage = re }
 
+// pendingAutoRollback is the --auto-rollback opt-in consumed by the next Main() call,
+// set by SetAutoRollback. When true, a step failure auto-fires the rollback chain
+// instead of only showing the manual "Rollback playbook" button.
+var pendingAutoRollback bool
+
+// SetAutoRollback stashes the --auto-rollback opt-in for the next ui.Main() invocation.
+// Consumed (and cleared) by Main.
+func SetAutoRollback(v bool) { pendingAutoRollback = v }
+
 // pendingDriver is the session's shared shell driver consumed by the next Main()
 // call, set by SetDriver. The cached-replay path (troubleshoot →
 // serveCachedPlaybook → ui.Main via os.Args reshaping) can't pass a struct
@@ -436,6 +445,8 @@ func Main() int {
 	m.confirmEnv = playbookEnv  // front-matter env for the B2b confirmation gate
 	m.projectRoot = projectRoot // heuristic project root (also in driver.Options.Env)
 	m.sourcePath = sourcePath   // on-disk .md path; non-empty → file-backed, [edit] enabled
+	m.autoRollback = pendingAutoRollback
+	pendingAutoRollback = false // consume once
 	// NOTE (Phase-2 / in-session assisted-run): the async-startup and reused-driver
 	// paths leave m.projectRoot empty (projectRoot is only set on the sync new-driver
 	// path). When the gate is reused for an in-session assisted run, projectRoot must

@@ -370,7 +370,10 @@ type model struct {
 	// content from just BEFORE the resolve, so the "resolved manually" block's Undo can
 	// restore it (reverting to the drifted state — there is no git patch to reverse).
 	driftResolveBackup map[string]string
-	gateSatisfied      bool // the gate ran (or wasn't needed) this session
+	// autoRollback (set from the --auto-rollback run flag) makes a step failure auto-fire
+	// the rollback chain instead of only showing the manual "Rollback playbook" button.
+	autoRollback  bool
+	gateSatisfied bool // the gate ran (or wasn't needed) this session
 	// gate holds the in-progress pre-run confirmation state machine while the user
 	// steps through the confirm/customize overlays; nil when no gate is active.
 	gate *confirmGate
@@ -1772,6 +1775,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.blockStates[msg.ID] = st
 		dbg("result id=%s exit=%d action=%s status->%s", msg.ID, msg.Exit, prevAction, st.Status)
 		m.reflow()
+		// --auto-rollback: on a step failure, if the user opted in and there are applied
+		// steps to undo, fire the rollback chain automatically (unattended runs) instead
+		// of leaving the manual "Rollback playbook" button. Takes precedence over the
+		// verify auto-followup below (rollback, not re-engage, is the opted-in response).
+		if st.Status == "failed" && m.autoRollback && m.anyRollbackable() {
+			return m.beginRollback()
+		}
 		// Auto-fire a follow-up when the VERIFY re-run fails: a non-zero exit on a
 		// RUN result (not an apply/undo) for block id "verify" is the unambiguous
 		// "the fix didn't work" signal. It fires on EACH verify failure — including

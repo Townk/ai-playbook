@@ -67,6 +67,9 @@ Run `stage` first (it creates the marker), then run `boom`. Because `boom` exits
 > [!WARNING]
 > Rollback runs **in reverse registration order**: the most recently applied step is undone first. Design each rollback to be safe even if the forward step only partially completed — for example, use `rm -f` instead of `rm` so a missing file is not itself an error.
 
+> [!TIP]
+> Rollback is **manual by default** (you click the button). For unattended runs, pass `--auto-rollback` — `ai-playbook run --auto-rollback --file …` — and a step failure fires the rollback chain automatically instead of waiting for a click.
+
 ## Verify
 
 `## Verify` is a top-level section that ai-playbook recognises by name. The viewer surfaces it as a distinct affordance — a quick health-check you can re-run any time to confirm the project is in a good state, independent of the steps above.
