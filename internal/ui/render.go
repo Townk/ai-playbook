@@ -1078,11 +1078,16 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 		if st.Expanded {
 			tail := tailFile(st.Logpath, 50)
 			if len(tail) == 0 {
-				// An empty log on a SUCCESSFUL diff-apply / file-create isn't a missing
-				// log — it's the expected no-output success. Show an affirmative message
-				// instead of "(log unavailable)". (st.Action is cleared once the result
-				// lands, so we key off the block type + ok status, not st.Action.)
+				// An empty log isn't necessarily a missing one. A SUCCESSFUL diff-apply /
+				// file-create shows an affirmative message; a shell/run block that simply
+				// produced no output reads as "(no output)" — not the error-ish
+				// "(log unavailable)", which is reserved for a genuinely missing log
+				// (empty Logpath → writeRunLog failed). (st.Action is cleared once the
+				// result lands, so we key off the block type + status, not st.Action.)
 				msg := "(log unavailable)"
+				if st.Logpath != "" {
+					msg = "(no output)"
+				}
 				if st.Status == "ok" {
 					switch blk.Type {
 					case "diff":
