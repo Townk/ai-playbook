@@ -372,8 +372,14 @@ type model struct {
 	driftResolveBackup map[string]string
 	// autoRollback (set from the --auto-rollback run flag) makes a step failure auto-fire
 	// the rollback chain instead of only showing the manual "Rollback playbook" button.
-	autoRollback  bool
-	gateSatisfied bool // the gate ran (or wasn't needed) this session
+	autoRollback bool
+	// rollbackFailedID is the failed block currently driving a rollback chain (it shows
+	// the "rolling back…" spinner, then the "all steps rolled back" suffix); "" = none.
+	// rollbackPending counts the rollback targets still running, so we know when the chain
+	// finishes (→ mark rollbackFailedID's suffix).
+	rollbackFailedID string
+	rollbackPending  int
+	gateSatisfied    bool // the gate ran (or wasn't needed) this session
 	// gate holds the in-progress pre-run confirmation state machine while the user
 	// steps through the confirm/customize overlays; nil when no gate is active.
 	gate *confirmGate
@@ -1080,7 +1086,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		running := false
 		for id, st := range m.blockStates {
-			if st.Status == "running" || st.Status == "regenerating" {
+			if st.Status == "running" || st.Status == "regenerating" || st.RollingBack {
 				st.SpinFrame++
 				m.blockStates[id] = st
 				running = true
@@ -1229,7 +1235,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				if b.Kind == "rollback" {
 					m.flashKey = b.BlockID + ":rollback"
-					return m.beginRollback()
+					return m.beginRollback(b.BlockID)
 				}
 				if b.Kind == "confirm-yes" || b.Kind == "confirm-no" {
 					if cmd := m.resolveConfirm(b.Kind == "confirm-yes"); cmd != nil {
@@ -1475,7 +1481,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					if b.Kind == "rollback" {
 						m.flashKey = b.BlockID + ":rollback"
-						return m.beginRollback()
+						return m.beginRollback(b.BlockID)
 					}
 					if b.Kind == "confirm-yes" || b.Kind == "confirm-no" {
 						if cmd := m.resolveConfirm(b.Kind == "confirm-yes"); cmd != nil {
@@ -1751,6 +1757,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		switch {
+		case st.Action == "rollback":
+			// A rollback-chain target (the undo command) finished. Exit 0 → a normal
+			// success (✓ ran) — the rolled-back step it undid is what shows "↺ step
+			// rolled back". A non-zero rollback is itself a failure (undo didn't run
+			// cleanly).
+			if msg.Exit == 0 {
+				st.Status = "ok"
+			} else {
+				st.Status = "failed"
+			}
+			st.Action = ""
 		case msg.Exit == 0 && st.Action == "undo":
 			// Successful undo: patch is no longer applied; clear status so dependents re-lock.
 			st.Status = ""
@@ -1774,13 +1791,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.blockStates[msg.ID] = st
 		dbg("result id=%s exit=%d action=%s status->%s", msg.ID, msg.Exit, prevAction, st.Status)
+		// A rollback target completed: count it down; when the whole chain is done, clear
+		// the failed block's spinner and append its "all steps rolled back" suffix.
+		if prevAction == "rollback" {
+			if m.rollbackPending > 0 {
+				m.rollbackPending--
+			}
+			m = m.finishRollbackIfDone()
+		}
 		m.reflow()
 		// --auto-rollback: on a step failure, if the user opted in and there are applied
 		// steps to undo, fire the rollback chain automatically (unattended runs) instead
 		// of leaving the manual "Rollback playbook" button. Takes precedence over the
 		// verify auto-followup below (rollback, not re-engage, is the opted-in response).
-		if st.Status == "failed" && m.autoRollback && m.anyRollbackable() {
-			return m.beginRollback()
+		// Guard against re-firing on a rollback TARGET's own result (prevAction rollback).
+		if prevAction != "rollback" && st.Status == "failed" && m.autoRollback && m.anyRollbackable() {
+			return m.beginRollback(msg.ID)
 		}
 		// Auto-fire a follow-up when the VERIFY re-run fails: a non-zero exit on a
 		// RUN result (not an apply/undo) for block id "verify" is the unambiguous
@@ -2231,7 +2257,7 @@ func (m model) anyRollbackable() bool {
 // (visible rollback). The rolled-back blocks' own state is reset — undoing their forward
 // effect and re-locking any dependents. tea.Sequence runs the targets one at a time so a
 // later undo never races an earlier one.
-func (m model) beginRollback() (model, tea.Cmd) {
+func (m model) beginRollback(failedID string) (model, tea.Cmd) {
 	var origins, targets []string
 	for i := len(m.blocks) - 1; i >= 0; i-- {
 		b := m.blocks[i]
@@ -2243,11 +2269,33 @@ func (m model) beginRollback() (model, tea.Cmd) {
 	if len(targets) == 0 {
 		return m, nil
 	}
-	// Reset the rolled-back origins first (undo their forward effect + re-lock dependents).
+	// Capture the failed block's state BEFORE resetting dependents — it usually needs= a
+	// rolled-back step, so resetDependents would otherwise wipe its ✗ failed status.
+	failedState := m.blockStates[failedID]
+	// Clear stale results on everything that (transitively) depended on a rolled-back step
+	// so they re-lock, THEN mark each rolled-back step itself "rolledback" (↺ step rolled
+	// back) — its forward effect is being undone. (Two passes so a reset of one origin's
+	// dependents can't wipe another origin we already marked.) The rollback TARGET blocks
+	// that do the undoing land as a normal success (✓ ran) via their own result.
 	for _, id := range origins {
 		resetDependents(m.blockStates, m.blocks, id)
-		delete(m.blockStates, id)
 	}
+	for _, id := range origins {
+		ost := m.blockStates[id]
+		ost.Status = "rolledback"
+		ost.Action = ""
+		m.blockStates[id] = ost
+	}
+	// Restore the failed block and mark it rolling back: it shows a "rolling back applied
+	// steps…" spinner under its ✗ failure until every target completes (rollbackPending → 0).
+	if failedID != "" {
+		failedState.RollingBack = true
+		failedState.RolledBack = false
+		failedState.SpinFrame = 0
+		m.blockStates[failedID] = failedState
+	}
+	m.rollbackFailedID = failedID
+	m.rollbackPending = len(targets)
 	// Then mark each rollback target running and queue its execution (reverse order).
 	var cmds []tea.Cmd
 	for _, tgt := range targets {
@@ -2265,6 +2313,22 @@ func (m model) beginRollback() (model, tea.Cmd) {
 		return m, m.flashCmd()
 	}
 	return m, tea.Batch(m.startTick(), m.flashCmd(), tea.Sequence(cmds...))
+}
+
+// finishRollbackIfDone settles the rollback chain when no targets remain pending: it
+// clears the failed block's spinner and appends the "all steps rolled back" suffix.
+func (m model) finishRollbackIfDone() model {
+	if m.rollbackPending > 0 {
+		return m
+	}
+	if id := m.rollbackFailedID; id != "" {
+		fst := m.blockStates[id]
+		fst.RollingBack = false
+		fst.RolledBack = true
+		m.blockStates[id] = fst
+	}
+	m.rollbackFailedID = ""
+	return m
 }
 
 // subtitleRowString returns the styled subtitle row (the front-matter

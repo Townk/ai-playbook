@@ -100,4 +100,12 @@ type blockRunState struct {
 	// that driftMsg. (An unchanged "kept current" resolve leaves it false, so the block
 	// correctly stays Drifted.)
 	pendingResolve bool
+
+	// RollingBack / RolledBack decorate the FAILED block that triggered a rollback chain
+	// (manual "Rollback playbook" or --auto-rollback): while the chain runs, RollingBack
+	// shows a "rolling back applied steps…" spinner under the failure; when it finishes,
+	// RolledBack appends a " — all steps rolled back" suffix to the failure line. (The
+	// rolled-back TARGET blocks themselves render via Status "rolledback".)
+	RollingBack bool
+	RolledBack  bool
 }
