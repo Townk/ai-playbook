@@ -358,7 +358,19 @@ type model struct {
 	// and re-checks drift when it is saved (mirrors sourcePath/sourceMtime for [edit]).
 	driftEditPath  string
 	driftEditMtime time.Time
-	gateSatisfied  bool // the gate ran (or wasn't needed) this session
+	// driftTempPath/driftTempTarget back the conflict-marked "resolve manually" flow:
+	// instead of editing the raw target, we write a conflict-marked COPY to a temp file
+	// (driftTempPath) and, on save, read it back, reconcile it into the real target
+	// (driftTempTarget), and re-check drift. Empty driftTempPath ⇒ the raw-file fallback
+	// is in effect (ConflictMarkup couldn't locate the hunk) and driftEditPath is used.
+	driftTempPath    string
+	driftTempTarget  string
+	driftTempBlockID string // the diff block being resolved (so driftResolveFinish can flag it)
+	// driftResolveBackup maps a manually-resolved diff block's ID → the target file's
+	// content from just BEFORE the resolve, so the "resolved manually" block's Undo can
+	// restore it (reverting to the drifted state — there is no git patch to reverse).
+	driftResolveBackup map[string]string
+	gateSatisfied      bool // the gate ran (or wasn't needed) this session
 	// gate holds the in-progress pre-run confirmation state machine while the user
 	// steps through the confirm/customize overlays; nil when no gate is active.
 	gate *confirmGate
@@ -478,39 +490,170 @@ func (m model) activateDiffButton(b Button) (model, tea.Cmd) {
 
 // driftResolveDispatch handles a "resolve manually" press on a DRIFTED diff block.
 // The patch no longer applies, so — unlike the read-only view-diff button (that path
-// is F30's job) — this OPENS THE PATCH'S TARGET FILE IN $EDITOR so the user can
-// reconcile it by hand, then re-checks drift on return so a successful edit clears
-// the Drifted flag (the fresh patch now applies). Mirrors editDispatch's two paths:
-// no-mux suspends the TUI and opens the editor inline; the mux path spawns a docked
-// editor pane and polls the target file's mtime to re-check drift on save.
+// is F30's job) — this opens a CONFLICT-MARKED COPY of the target in $EDITOR: the
+// file's current content and the patch's proposed replacement sit side-by-side under
+// git-style `-[current]`/`-[patch proposes]` markers, so the user sees WHAT to change
+// and WHERE. On save we read the copy back, reconcile it into the REAL target, and
+// re-check drift so a completed edit clears the Drifted flag.
+//
+// If ConflictMarkup can't locate the hunk (ok=false) — or the target can't be read —
+// we FALL BACK to the legacy behaviour of opening the raw target file directly, so we
+// never regress. driftTempPath!="" is the signal that the temp-file flow is active;
+// the reload/poll handlers key off it.
+//
+// Mirrors editDispatch's two paths: no-mux suspends the TUI and opens the editor
+// inline; the mux path spawns a docked editor pane and polls the watched file's mtime.
 func (m model) driftResolveDispatch(b Button) (model, tea.Cmd) {
 	path := m.driftTargetPath(b.Payload)
 	if path == "" {
 		m.status = "resolve manually: couldn't determine the diff's target file"
 		return m, nil
 	}
-	// NO-MUX: suspend the TUI, open the editor on the target file, re-check drift on return.
+
+	// Try to build a conflict-marked copy. tempPath stays "" (→ raw-file fallback) when
+	// the target can't be read or no hunk could be located.
+	var tempPath string
+	if data, err := os.ReadFile(path); err == nil {
+		if marked, ok := idiff.ConflictMarkup(string(data), idiff.Parse(b.Payload)); ok {
+			// Suffix with the target's extension so the editor gets syntax highlighting.
+			if f, err := os.CreateTemp("", "ai-playbook-resolve-*"+filepath.Ext(path)); err == nil {
+				_, werr := f.WriteString(marked)
+				f.Close()
+				if werr == nil {
+					tempPath = f.Name()
+				} else {
+					_ = os.Remove(f.Name())
+				}
+			}
+		}
+	}
+
+	// The file we hand the editor: the temp copy when markup succeeded, else the raw target.
+	editTarget := path
+	if tempPath != "" {
+		editTarget = tempPath
+	}
+
+	// NO-MUX: suspend the TUI, open the editor, reconcile / re-check drift on return.
 	if m.asker == nil {
 		parts := strings.Fields(resolveEditor())
-		args := append(parts[1:], path)
+		args := append(parts[1:], editTarget)
 		cmd := exec.Command(parts[0], args...)
+		if tempPath != "" {
+			m.driftTempPath = tempPath
+			m.driftTempTarget = path
+			m.driftTempBlockID = b.BlockID
+		}
 		return m, tea.ExecProcess(cmd, func(err error) tea.Msg { return driftResolveReloadMsg{Err: err} })
 	}
-	// MUX path: spawn the editor in a docked pane and watch the TARGET file; a save
-	// re-checks drift. Reuses the shared 1-second mtime-poll loop (the [edit] path's),
-	// guarded by m.polling so a second click doesn't spawn a second timer goroutine.
+
+	// MUX path: spawn the editor in a docked pane and watch the edited file; a save
+	// reconciles (temp path) or re-checks drift (fallback). Reuses the shared 1-second
+	// mtime-poll loop (the [edit] path's), guarded by m.polling so a second click
+	// doesn't spawn a second timer goroutine.
 	if m.orch != nil {
-		_ = m.orch.EditSource(resolveEditor(), path)
+		_ = m.orch.EditSource(resolveEditor(), editTarget)
 	}
-	if st, err := os.Stat(path); err == nil {
+	if st, err := os.Stat(editTarget); err == nil {
 		m.driftEditMtime = st.ModTime()
 	}
-	m.driftEditPath = path
+	if tempPath != "" {
+		m.driftTempPath = tempPath
+		m.driftTempTarget = path
+		m.driftTempBlockID = b.BlockID
+		m.driftEditPath = "" // the poll watches driftTempPath in this mode
+	} else {
+		m.driftEditPath = path
+	}
 	if !m.polling {
 		m.polling = true
 		return m, m.sourcePollCmd()
 	}
 	return m, nil
+}
+
+// driftResolveFinish reconciles a saved conflict-marked temp copy into the real target
+// and re-checks drift. It is the shared read-back → write-back → re-check step for both
+// the no-mux ExecProcess callback and the mux mtime-poll. If the user left the openers
+// in place (HasConflictMarkers), the edit is treated as UNRESOLVED: the real file is
+// left untouched and a status explains why. The temp file is always removed. The real
+// target NEVER receives conflict markers — that is the whole point of the indirection.
+func (m model) driftResolveFinish() (model, tea.Cmd) {
+	temp, target, blockID := m.driftTempPath, m.driftTempTarget, m.driftTempBlockID
+	m.driftTempPath, m.driftTempTarget, m.driftTempBlockID = "", "", ""
+	if temp == "" {
+		return m, m.driftCheckCmds()
+	}
+	defer os.Remove(temp)
+
+	data, err := os.ReadFile(temp)
+	if err != nil {
+		m.status = "resolve manually: couldn't read the edited copy — the file was left unchanged"
+		return m, nil
+	}
+	content := string(data)
+	if idiff.HasConflictMarkers(content) {
+		m.status = "unresolved conflict markers — the file was left unchanged"
+		return m, nil
+	}
+
+	// Preserve the target's original trailing newline and file mode; capture the prior
+	// content so we can tell whether the resolve actually CHANGED anything.
+	mode := os.FileMode(0o644)
+	if fi, err := os.Stat(target); err == nil {
+		mode = fi.Mode()
+	}
+	orig, _ := os.ReadFile(target)
+	if strings.HasSuffix(string(orig), "\n") && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	if err := os.WriteFile(target, []byte(content), mode); err != nil {
+		m.status = "resolve manually: couldn't write the reconciled file"
+		return m, nil
+	}
+	// If the resolve changed the file, flag the block so a still-Drifted re-check verdict
+	// is read as a CUSTOM manual resolution (→ Resolved), not unresolved drift. An
+	// unchanged "kept current" resolve leaves the flag off, so the block stays Drifted.
+	// Also back up the pre-resolve content so the resolved block's Undo can restore it.
+	if blockID != "" && content != string(orig) {
+		st := m.blockStates[blockID]
+		st.pendingResolve = true
+		m.blockStates[blockID] = st
+		if m.driftResolveBackup == nil {
+			m.driftResolveBackup = map[string]string{}
+		}
+		m.driftResolveBackup[blockID] = string(orig)
+	}
+	return m, m.driftCheckCmds()
+}
+
+// undoResolve reverts a manually-resolved diff block: it restores the target file to its
+// pre-resolve (drifted) content from the backup, clears Resolved, and re-checks drift (so
+// the block returns to its Drifted state). A custom manual resolution has no git patch to
+// reverse, so this file-restore IS the undo.
+func (m model) undoResolve(b Button) (model, tea.Cmd) {
+	backup, ok := m.driftResolveBackup[b.BlockID]
+	if !ok {
+		return m, nil
+	}
+	target := m.driftTargetPath(b.Payload)
+	if target == "" {
+		m.status = "undo: couldn't determine the diff's target file"
+		return m, nil
+	}
+	mode := os.FileMode(0o644)
+	if fi, err := os.Stat(target); err == nil {
+		mode = fi.Mode()
+	}
+	if err := os.WriteFile(target, []byte(backup), mode); err != nil {
+		m.status = "undo: couldn't restore the file"
+		return m, nil
+	}
+	delete(m.driftResolveBackup, b.BlockID)
+	st := m.blockStates[b.BlockID]
+	st.Resolved = false
+	m.blockStates[b.BlockID] = st
+	return m, m.driftCheckCmds()
 }
 
 // driftTargetPath resolves the on-disk path of a patch's target file: the parsed
@@ -542,16 +685,17 @@ func (m model) driftTargetPath(patch string) string {
 
 func newModel(harness, md string) model {
 	return model{
-		harness:      harness,
-		md:           md,
-		width:        80,
-		height:       24,
-		helpLines:    buildHelpLines(),
-		defaultLabel: "Working…",
-		follow:       false, // start at the top on load; only append (wrap-up) re-enables follow
-		pinTop:       -1,    // no pin until a follow-up announcement frames itself at the top
-		blockStates:  map[string]blockRunState{},
-		maxFollowups: resolveMaxFollowups(),
+		harness:            harness,
+		md:                 md,
+		width:              80,
+		height:             24,
+		helpLines:          buildHelpLines(),
+		defaultLabel:       "Working…",
+		follow:             false, // start at the top on load; only append (wrap-up) re-enables follow
+		pinTop:             -1,    // no pin until a follow-up announcement frames itself at the top
+		blockStates:        map[string]blockRunState{},
+		maxFollowups:       resolveMaxFollowups(),
+		driftResolveBackup: map[string]string{},
 	}
 }
 
@@ -1020,6 +1164,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.reflow()
 					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 				}
+				if b.Kind == "undo-resolve" {
+					m.flashKey = b.BlockID + ":undo-resolve"
+					return m.undoResolve(b)
+				}
 				if b.Kind == "create" {
 					st := m.blockStates[b.BlockID]
 					st.Status = "running"
@@ -1263,6 +1411,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						ac := m.emitAction(b)
 						m.reflow()
 						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
+					}
+					if b.Kind == "undo-resolve" {
+						m.flashKey = b.BlockID + ":undo-resolve"
+						return m.undoResolve(b)
 					}
 					if b.Kind == "create" {
 						st := m.blockStates[b.BlockID]
@@ -1701,11 +1853,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case driftMsg:
-		// Async drift-check result: update Drifted on the block's state and reflow so
-		// the render picks up the badge (Tasks 3-4). Only DriftDrifted sets Drifted;
-		// DriftClean / DriftApplied (already-applied detection) clear it.
+		// Async drift-check result. The verdict fully describes the diff block's state
+		// against its target file, so drive both Drifted AND the applied/not-applied
+		// status off it:
+		//   - DriftDrifted → the patch neither applies nor reverses: show the drift region.
+		//   - DriftApplied → the file already matches the patch's NEW side (it was applied,
+		//     or a manual resolve kept the "proposed" lines) → mark it APPLIED so the block
+		//     shows Undo + a greyed number, not an Apply button.
+		//   - DriftClean → the patch applies but isn't applied yet → Apply available.
 		st := m.blockStates[msg.ID]
-		st.Drifted = msg.Verdict == orchestrator.DriftDrifted
+		switch msg.Verdict {
+		case orchestrator.DriftDrifted:
+			if st.pendingResolve {
+				// A manual resolve CHANGED the file to a custom/mixed state the whole-patch
+				// git-apply can neither apply nor reverse → terminal "resolved manually",
+				// not unresolved drift. (An unchanged "kept current" resolve never sets
+				// pendingResolve, so it correctly falls through to Drifted below.)
+				st.Drifted = false
+				st.Resolved = true
+			} else {
+				st.Drifted = true
+			}
+		case orchestrator.DriftApplied:
+			st.Drifted = false
+			st.Resolved = false
+			st.Status = "ok"
+		default: // DriftClean
+			st.Drifted = false
+			st.Resolved = false
+			if st.Status == "ok" {
+				st.Status = "" // not applied → don't linger as applied (Apply, not Undo)
+			}
+		}
+		st.pendingResolve = false
 		m.blockStates[msg.ID] = st
 		m.reflow()
 		return m, nil
@@ -1871,10 +2051,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_ = m.reloadSource()
 		return m, nil
 	case driftResolveReloadMsg:
-		// The $EDITOR opened on a drifted patch's target file (resolve manually, F21)
-		// exited. Re-check drift so a successful manual edit clears Drifted (the fresh
-		// patch now applies); a still-mismatched file keeps the drift region. Errors are
-		// ignored — the drift state simply stays as it was.
+		// The $EDITOR opened for "resolve manually" exited. When the conflict-marked
+		// temp flow is active (driftTempPath set), reconcile the saved copy into the real
+		// target and re-check drift; otherwise (raw-file fallback) just re-check so a
+		// successful manual edit clears Drifted. Errors leave the drift state as it was.
+		if m.driftTempPath != "" {
+			return m.driftResolveFinish()
+		}
 		return m, m.driftCheckCmds()
 	case sourcePollMsg:
 		// Mux editor poll: stat the watched file(s) and act when the mtime has advanced
@@ -1889,13 +2072,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_ = m.reloadSource()
 			}
 		}
-		if m.driftEditPath != "" {
+		if m.driftTempPath != "" {
+			// Conflict-marked temp copy under edit: on save, reconcile it into the real
+			// target (or report unresolved markers) and re-check drift. driftResolveFinish
+			// clears driftTempPath, so the loop stops on the next tick unless still watched.
+			if st, err := os.Stat(m.driftTempPath); err == nil && st.ModTime().After(m.driftEditMtime) {
+				m.driftEditMtime = st.ModTime()
+				m, recheck = m.driftResolveFinish()
+			}
+		} else if m.driftEditPath != "" {
 			if st, err := os.Stat(m.driftEditPath); err == nil && st.ModTime().After(m.driftEditMtime) {
 				m.driftEditMtime = st.ModTime()
 				recheck = m.driftCheckCmds()
 			}
 		}
-		if m.sourcePath == "" && m.driftEditPath == "" {
+		if m.sourcePath == "" && m.driftEditPath == "" && m.driftTempPath == "" {
 			m.polling = false
 			return m, nil
 		}

@@ -2,11 +2,14 @@ package ui
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
 
+	idiff "github.com/Townk/ai-playbook/internal/diff"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
 
@@ -57,10 +60,83 @@ func TestDriftMsg_DriftAppliedClearsDrifted(t *testing.T) {
 		t.Fatal("precondition: DriftDrifted must set Drifted")
 	}
 
-	// Then deliver DriftApplied — must clear Drifted.
+	// Then deliver DriftApplied — must clear Drifted AND mark the block applied
+	// (Status "ok") so it renders Undo + a greyed number, not an Apply button.
 	m3, _ := m2.(model).Update(driftMsg{ID: "fix", Verdict: orchestrator.DriftApplied})
-	if m3.(model).blockStates["fix"].Drifted {
+	st := m3.(model).blockStates["fix"]
+	if st.Drifted {
 		t.Fatal("driftMsg DriftApplied must clear Drifted (patch already applied is not drift)")
+	}
+	if st.Status != "ok" {
+		t.Fatalf("driftMsg DriftApplied must mark the block applied (Status ok); got %q", st.Status)
+	}
+}
+
+// TestDriftMsg_PendingResolveBecomesResolved verifies the custom/mixed manual-resolve
+// path: a resolve that CHANGED the file (pendingResolve) whose re-check is still
+// DriftDrifted becomes the terminal "resolved manually" state — not unresolved drift.
+// Without pendingResolve, the same verdict stays Drifted (a "kept current" resolve).
+func TestDriftMsg_PendingResolveBecomesResolved(t *testing.T) {
+	m := newTestModelWithDiffBlock(t, "fix")
+	m.blockStates["fix"] = blockRunState{Drifted: true, pendingResolve: true}
+	st := mustModel(m.Update(driftMsg{ID: "fix", Verdict: orchestrator.DriftDrifted})).blockStates["fix"]
+	if st.Drifted || !st.Resolved || st.pendingResolve {
+		t.Fatalf("changed resolve + DriftDrifted → Resolved (not Drifted, flag cleared); got %+v", st)
+	}
+
+	m2 := newTestModelWithDiffBlock(t, "fix")
+	m2.blockStates["fix"] = blockRunState{}
+	st2 := mustModel(m2.Update(driftMsg{ID: "fix", Verdict: orchestrator.DriftDrifted})).blockStates["fix"]
+	if !st2.Drifted || st2.Resolved {
+		t.Fatalf("plain DriftDrifted (no pendingResolve) must stay Drifted, not Resolved; got %+v", st2)
+	}
+}
+
+// TestResolvedDiffBlock_Render verifies a manually-resolved diff block shows an
+// undo-resolve button (not apply/undo-diff), keeps view-diff, and renders the note.
+func TestResolvedDiffBlock_Render(t *testing.T) {
+	md := "```diff {id=fix}\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n```\n"
+	lines, buttons, _ := Render(md, 80, map[string]blockRunState{"fix": {Resolved: true}}, "")
+	if buttonForBlock(buttons, "fix", "apply-diff") != nil || buttonForBlock(buttons, "fix", "undo-diff") != nil {
+		t.Error("a resolved diff block must show neither apply-diff nor undo-diff")
+	}
+	if buttonForBlock(buttons, "fix", "undo-resolve") == nil {
+		t.Error("a resolved diff block must show an undo-resolve button")
+	}
+	if buttonForBlock(buttons, "fix", "diff") == nil {
+		t.Error("view-diff must remain available on a resolved block")
+	}
+	if !strings.Contains(joinText(lines), "resolved manually") {
+		t.Error("a resolved diff block must show the 'resolved manually' note")
+	}
+}
+
+// TestUndoResolve_RestoresBackup verifies undo-resolve restores the pre-resolve file
+// content, clears Resolved, and consumes the backup.
+func TestUndoResolve_RestoresBackup(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "f.conf")
+	if err := os.WriteFile(target, []byte("resolved-content\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// An absolute +++ path so driftTargetPath (no orch) resolves straight to it.
+	patch := "--- " + target + "\n+++ " + target + "\n@@ -1 +1 @@\n-old\n+new\n"
+	m := newModel("T", "```diff {id=fix}\n"+patch+"```\n")
+	m.width, m.height = 80, 24
+	m.reflow()
+	m.blockStates["fix"] = blockRunState{Resolved: true}
+	m.driftResolveBackup["fix"] = "original-drifted\n"
+
+	m2, _ := m.undoResolve(Button{Kind: "undo-resolve", BlockID: "fix", Payload: patch})
+
+	if got, _ := os.ReadFile(target); string(got) != "original-drifted\n" {
+		t.Fatalf("undoResolve must restore the pre-resolve content; got %q", got)
+	}
+	if m2.blockStates["fix"].Resolved {
+		t.Error("undoResolve must clear Resolved")
+	}
+	if _, ok := m2.driftResolveBackup["fix"]; ok {
+		t.Error("undoResolve must consume the backup")
 	}
 }
 
@@ -326,6 +402,144 @@ func TestDriftHint_DoesNotClobberBanner(t *testing.T) {
 	}
 	if !strings.Contains(got, "⚠") {
 		t.Fatal("F20: the ⚠ banner glyph must not be overwritten by a hint label")
+	}
+}
+
+// driftedConfContent is the on-disk (drifted) target content used by the resolve-
+// manually temp-file tests: it has `timeout = 99` where the patch expected `= 30`.
+const driftedConfContent = "[server]\nhost = localhost\nport = 8080\ntimeout = 99\nmax_connections = 100\n"
+
+// patchForTarget builds a well-formed unified patch (drifted against `timeout = 30`,
+// proposing `= 60`) whose target is the given absolute path, so driftTargetPath
+// resolves to it without an orchestrator.
+func patchForTarget(abs string) string {
+	return "--- a/" + abs + "\n+++ b/" + abs + "\n@@ -2,4 +2,4 @@\n" +
+		" host = localhost\n port = 8080\n-timeout = 30\n+timeout = 60\n max_connections = 100\n"
+}
+
+// TestDriftResolve_OpensTempFileWhenMarkupSucceeds verifies the new flow: when
+// ConflictMarkup can locate the hunk, resolve-manually opens the editor on a TEMP
+// file (not the real target), the real target is untouched, and the temp carries
+// conflict markers.
+func TestDriftResolve_OpensTempFileWhenMarkupSucceeds(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "settings.conf")
+	if err := os.WriteFile(target, []byte(driftedConfContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel("T", "# x")
+	m.asker = nil // no-mux → ExecProcess path
+
+	m2i, cmd := m.driftResolveDispatch(Button{Payload: patchForTarget(target)})
+	m2 := m2i
+	if cmd == nil {
+		t.Fatal("resolve manually must return an editor ExecProcess cmd")
+	}
+	if m2.driftTempPath == "" {
+		t.Fatal("markup success must set driftTempPath (temp-file flow active)")
+	}
+	if m2.driftTempPath == target {
+		t.Fatal("the editor must open a TEMP file, not the real target")
+	}
+	if m2.driftTempTarget != target {
+		t.Fatalf("driftTempTarget must be the real target, got %q", m2.driftTempTarget)
+	}
+	// Real target still drifted; temp carries markers.
+	if got, _ := os.ReadFile(target); string(got) != driftedConfContent {
+		t.Fatal("the real target must be untouched until the user saves a resolution")
+	}
+	tempBytes, err := os.ReadFile(m2.driftTempPath)
+	if err != nil {
+		t.Fatalf("temp file must exist: %v", err)
+	}
+	if !idiff.HasConflictMarkers(string(tempBytes)) {
+		t.Fatal("the temp copy must contain conflict markers")
+	}
+}
+
+// TestDriftResolve_ReadbackWritesRealFileWhenResolved verifies that on editor return
+// with the markers removed, the reconciled content is written to the REAL target, the
+// temp file is cleaned up, and drift is re-checked.
+func TestDriftResolve_ReadbackWritesRealFileWhenResolved(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "settings.conf")
+	if err := os.WriteFile(target, []byte(driftedConfContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel("T", "# x")
+	m.asker = nil
+	m2i, _ := m.driftResolveDispatch(Button{Payload: patchForTarget(target)})
+	m2 := m2i
+
+	// User resolves in the editor: markers gone, timeout set to 60.
+	resolved := "[server]\nhost = localhost\nport = 8080\ntimeout = 60\nmax_connections = 100\n"
+	if err := os.WriteFile(m2.driftTempPath, []byte(resolved), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	tempPath := m2.driftTempPath
+
+	m3 := mustModel(m2.Update(driftResolveReloadMsg{}))
+	if got, _ := os.ReadFile(target); string(got) != resolved {
+		t.Fatalf("resolved content must be written back to the real target, got:\n%s", got)
+	}
+	if _, err := os.Stat(tempPath); !os.IsNotExist(err) {
+		t.Fatal("the temp file must be removed after read-back")
+	}
+	if m3.driftTempPath != "" {
+		t.Fatal("driftTempPath must clear after read-back")
+	}
+}
+
+// TestDriftResolve_UnresolvedMarkersLeaveFileUnchanged verifies that if the user
+// saves with the openers still present, the real target is NOT modified and a status
+// explains it; the temp file is removed.
+func TestDriftResolve_UnresolvedMarkersLeaveFileUnchanged(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "settings.conf")
+	if err := os.WriteFile(target, []byte(driftedConfContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel("T", "# x")
+	m.asker = nil
+	m2i, _ := m.driftResolveDispatch(Button{Payload: patchForTarget(target)})
+	m2 := m2i
+	tempPath := m2.driftTempPath
+
+	// User saves WITHOUT resolving (leaves the marked copy as-is).
+	m3 := mustModel(m2.Update(driftResolveReloadMsg{}))
+	if got, _ := os.ReadFile(target); string(got) != driftedConfContent {
+		t.Fatal("unresolved markers must leave the real target unchanged")
+	}
+	if !strings.Contains(m3.status, "unresolved conflict markers") {
+		t.Fatalf("status must flag unresolved markers, got %q", m3.status)
+	}
+	if _, err := os.Stat(tempPath); !os.IsNotExist(err) {
+		t.Fatal("the temp file must be removed even when left unresolved")
+	}
+}
+
+// TestDriftResolve_FallsBackToRawFileWhenMarkupFails verifies that when ConflictMarkup
+// can't locate the hunk, the flow falls back to opening the raw target (driftTempPath
+// stays empty) — no regression from the legacy behaviour.
+func TestDriftResolve_FallsBackToRawFileWhenMarkupFails(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "settings.conf")
+	// Content that shares NONE of the patch's context → unlocatable → ok=false.
+	if err := os.WriteFile(target, []byte("totally different\ncontent here\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel("T", "# x")
+	m.asker = nil
+	m2i, cmd := m.driftResolveDispatch(Button{Payload: patchForTarget(target)})
+	m2 := m2i
+	if cmd == nil {
+		t.Fatal("fallback must still return an editor ExecProcess cmd")
+	}
+	if m2.driftTempPath != "" {
+		t.Fatal("markup failure must fall back to the raw file (driftTempPath empty)")
+	}
+	if strings.Contains(m2.status, "couldn't determine") {
+		t.Fatalf("target path must resolve for a well-formed patch, got %q", m2.status)
 	}
 }
 

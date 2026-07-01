@@ -668,8 +668,8 @@ func (r *renderer) code(n ast.Node) {
 		// to run (first un-run, needs-satisfied block); red = un-run but not yet next.
 		numColor := colSubtext
 		switch {
-		case r.states[blk.ID].Status != "":
-			numColor = colSubtext // light grey — ran / running
+		case r.states[blk.ID].Status != "" || r.states[blk.ID].Resolved:
+			numColor = colSubtext // light grey — ran / running / manually resolved
 		case !r.nextNumAssigned && len(unmet) == 0:
 			numColor = colGreen // the single "next to run"
 			r.nextNumAssigned = true
@@ -692,9 +692,10 @@ func (r *renderer) code(n ast.Node) {
 	}
 	if blk.Type == "diff" {
 		regionW += 2 // diff(2) — always ungated; opens patch in float viewer
-		// undo-diff is always shown when applied (Status=="ok"); apply-diff only when needs are met.
-		if r.states[blk.ID].Status == "ok" || len(unmet) == 0 {
-			regionW += 2 // undo-diff(2) or apply-diff(2)
+		// One action button after view-diff: undo-resolve on a manually-resolved block,
+		// else undo-diff when applied (Status=="ok") or apply-diff when needs are met.
+		if r.states[blk.ID].Resolved || r.states[blk.ID].Status == "ok" || len(unmet) == 0 {
+			regionW += 2
 		}
 	}
 	if blk.Type == "create" {
@@ -783,7 +784,16 @@ func (r *renderer) code(n ast.Node) {
 		r.buttons = append(r.buttons, Button{Line: lineIdx, Col: diffCol, Width: 2, Kind: "diff", Payload: src, BlockID: blk.ID})
 		// undo-diff when applied (Status=="ok") — always available, not needs-gated.
 		// apply-diff otherwise — needs-gated (only when all needs are satisfied).
-		if r.states[blk.ID].Status == "ok" {
+		// A manually-resolved block shows an undo-resolve button (restores the pre-resolve
+		// file) — there's no git patch to reverse, so Undo means "revert my manual edit".
+		if r.states[blk.ID].Resolved {
+			undoCol := col
+			sb.WriteString(r.buttonGlyph(blk.ID, "undo-resolve", glyphUndo, colPeach, bg))
+			col++
+			sb.WriteString(bg.Render(" "))
+			col++
+			r.buttons = append(r.buttons, Button{Line: lineIdx, Col: undoCol, Width: 2, Kind: "undo-resolve", Payload: src, BlockID: blk.ID})
+		} else if r.states[blk.ID].Status == "ok" {
 			undoCol := col
 			sb.WriteString(r.buttonGlyph(blk.ID, "undo-diff", glyphUndo, colPeach, bg))
 			col++
@@ -890,6 +900,13 @@ func (r *renderer) code(n ast.Node) {
 	// message line + a [resolve manually] tag-button that opens the FC1 diff view.
 	// Placed after the diff body (and any blocked notice) but before runRegion so it
 	// sits visually between the block content and the run-state summary.
+	//
+	// A block the user reconciled by hand to a custom state (Resolved) shows a terminal
+	// "resolved manually" note instead — no drift region, no apply/undo.
+	if blk.Type == "diff" && r.states != nil && r.states[blk.ID].Resolved {
+		note := lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen)).Render("✓ resolved manually")
+		r.lines = append(r.lines, Line{Text: "  " + note, Wide: false, Code: true})
+	}
 	if blk.Type == "diff" && r.states != nil && r.states[blk.ID].Drifted {
 		const indentStr = "  "
 		const indentW = 2

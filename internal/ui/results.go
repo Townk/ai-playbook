@@ -85,4 +85,19 @@ type blockRunState struct {
 	// a specific cause (e.g. "no AI backend available…") is surfaced instead of a silent
 	// no-op. Set together with RegenFailed; cleared on a fresh regenerate attempt.
 	RegenNote string
+
+	// Resolved marks a diff block the user reconciled by hand to a CUSTOM state (via
+	// resolve-manually) that the whole-patch git-apply can neither cleanly apply nor
+	// fully reverse — e.g. a multi-hunk patch resolved partly to "expected" and partly
+	// to "proposed". Such a block is terminal: greyed number, no drift region, no
+	// Apply/Undo (there is nothing for git to apply or reverse). Distinct from Drifted
+	// (unresolved) and Status "ok" (cleanly applied/undoable).
+	Resolved bool
+
+	// pendingResolve is a transient flag set by driftResolveFinish when a manual resolve
+	// CHANGED the file; it tells the next driftMsg to treat a DriftDrifted verdict as a
+	// custom manual resolution (→ Resolved) rather than an unresolved drift. Cleared by
+	// that driftMsg. (An unchanged "kept current" resolve leaves it false, so the block
+	// correctly stays Drifted.)
+	pendingResolve bool
 }
