@@ -676,17 +676,17 @@ func (r *renderer) code(n ast.Node) {
 	numW := 0
 	if num > 0 {
 		g := itoa(num) // top-left block ID: "1", "2", …
-		// Foreground encodes run progress: grey = already acted on; green = THE next block
-		// to run (first un-run, needs-satisfied block); red = un-run but not yet next.
+		// Foreground encodes run progress: grey (default) = already acted on / manually
+		// resolved; among un-run blocks, THE next one (first needs-satisfied) is green and
+		// the rest red. Grey is the init so the switch only overrides the un-run states.
 		numColor := colSubtext
-		switch {
-		case r.states[blk.ID].Status != "" || r.states[blk.ID].Resolved:
-			numColor = colSubtext // light grey — ran / running / manually resolved
-		case !r.nextNumAssigned && len(unmet) == 0:
-			numColor = colGreen // the single "next to run"
-			r.nextNumAssigned = true
-		default:
-			numColor = colRed // pending — not run and not the next one
+		if r.states[blk.ID].Status == "" && !r.states[blk.ID].Resolved {
+			if !r.nextNumAssigned && len(unmet) == 0 {
+				numColor = colGreen // the single "next to run"
+				r.nextNumAssigned = true
+			} else {
+				numColor = colRed // pending — not run and not the next one
+			}
 		}
 		// Leading + trailing space, all on the code-block background (a little top-left
 		// tab mirroring the button tab on the right).
