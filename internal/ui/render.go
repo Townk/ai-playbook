@@ -99,6 +99,12 @@ type renderer struct {
 	// only when at least one already-run block declares a rollback= target (so there is
 	// something to undo). Defaults to false (no rollback button) for 4-arg callers/tests.
 	rollbackAvail bool
+	// muxActive gates the green "Play" button (run a shell block in the ORIGIN pane): it
+	// types the command into the origin split, which only exists under a terminal
+	// multiplexer. The default no-mux `run --file` viewer has no origin pane, so Play is
+	// meaningless there and is suppressed. Defaults to false (no Play) for callers/tests
+	// that don't pass the flag; model.reflow passes m.asker != nil (mux active).
+	muxActive bool
 	// rollbackTargets is the set of block IDs referenced by some block's rollback=
 	// attribute. Such a block is rollback-only: it never gets its own run/play button
 	// (it executes solely as part of a Rollback playbook chain), so it can't be run
@@ -131,9 +137,11 @@ func rollbackRef(n int) string {
 // The optional trailing bool flags are, in order: shellDisabled (used by model.reflow
 // on the async-startup path — dims the shell-action button glyphs while the background
 // shell is still opening), reengageAvail (whether the "try another fix" affordance
-// should render), and rollbackAvail (whether the "Rollback playbook" affordance should
-// render on a failed step). Existing 4-arg callers (tests, the static block-count path)
-// leave shellDisabled false, reengageAvail true (prior always-show), rollbackAvail false.
+// should render), rollbackAvail (whether the "Rollback playbook" affordance should
+// render on a failed step), and muxActive (whether the green "Play" button renders — it
+// needs an origin pane, so only under a terminal multiplexer). Existing 4-arg callers
+// (tests, the static block-count path) leave shellDisabled false, reengageAvail true
+// (prior always-show), rollbackAvail false, and muxActive false (no Play button).
 func Render(md string, width int, states map[string]blockRunState, flashKey string, flags ...bool) ([]Line, []Button, []Block) {
 	if width < 1 {
 		width = 1
@@ -150,10 +158,14 @@ func Render(md string, width int, states map[string]blockRunState, flashKey stri
 	if len(flags) >= 3 {
 		rollbackAvail = flags[2]
 	}
+	muxActive := false
+	if len(flags) >= 4 {
+		muxActive = flags[3]
+	}
 	src := []byte(normalizeFences(md))
 	gm := goldmark.New(goldmark.WithExtensions(extension.GFM))
 	doc := gm.Parser().Parse(text.NewReader(src))
-	r := &renderer{src: src, width: width, states: states, flashKey: flashKey, shellDisabled: disabled, reengageAvail: reengageAvail, rollbackAvail: rollbackAvail, rollbackTargets: collectRollbackTargets(doc, src), rollbackForNum: map[string]int{}}
+	r := &renderer{src: src, width: width, states: states, flashKey: flashKey, shellDisabled: disabled, reengageAvail: reengageAvail, rollbackAvail: rollbackAvail, muxActive: muxActive, rollbackTargets: collectRollbackTargets(doc, src), rollbackForNum: map[string]int{}}
 	r.block(doc, 0)
 	r.blocks = assignIDs(r.blocks)
 	return r.lines, r.buttons, r.blocks
@@ -687,8 +699,8 @@ func (r *renderer) code(n ast.Node) {
 	if (blk.Type == "shell" || blk.Type == "run") && len(unmet) == 0 && !isRollbackTarget {
 		regionW += 2 // run(2)
 	}
-	if blk.Type == "shell" && len(unmet) == 0 && !isRollbackTarget {
-		regionW += 2 // play(2)
+	if blk.Type == "shell" && len(unmet) == 0 && !isRollbackTarget && r.muxActive {
+		regionW += 2 // play(2) — only under a mux (needs an origin pane)
 	}
 	if blk.Type == "diff" {
 		regionW += 2 // diff(2) — always ungated; opens patch in float viewer
@@ -757,7 +769,7 @@ func (r *renderer) code(n ast.Node) {
 				r.buttons = append(r.buttons, Button{Line: lineIdx, Col: runActionCol, Width: 2, Kind: "run", Payload: runPayload(blk), BlockID: blk.ID})
 			}
 		}
-		if blk.Type == "shell" && !isRollbackTarget {
+		if blk.Type == "shell" && !isRollbackTarget && r.muxActive {
 			playCol := col
 			if r.states[blk.ID].Status == "ok" {
 				// Done → disabled play, matching the run action's dimmed "done" cue.
@@ -1341,7 +1353,7 @@ func (r *renderer) quote(n ast.Node, indent int) {
 
 	// Step 5: top border row — TL corner + (contentWidth) TB sextants, all on doc bg.
 	topRow := accentSty.Render(calloutTL) + strings.Repeat(toneSty.Render(calloutTB), contentWidth)
-	r.lines = append(r.lines, Line{Text: topRow, Wide: false})
+	r.lines = append(r.lines, Line{Text: topRow, Wide: false, Callout: true})
 
 	// Step 6: content rows.
 	// Left bar: accent fg on document bg (single cell). Content: band over callout bg.
@@ -1350,7 +1362,7 @@ func (r *renderer) quote(n ast.Node, indent int) {
 	// Helper: emit one content row with the left bar + bg-banded content.
 	emitContent := func(text string) {
 		content := band(" "+text, bg, contentWidth)
-		r.lines = append(r.lines, Line{Text: leftBar + content, Wide: false})
+		r.lines = append(r.lines, Line{Text: leftBar + content, Wide: false, Callout: true})
 	}
 
 	// Header row (only for recognized [!type] admonitions).
@@ -1374,5 +1386,5 @@ func (r *renderer) quote(n ast.Node, indent int) {
 
 	// Step 7: bottom border row — BL corner + (contentWidth) BB sextants, all on doc bg.
 	botRow := accentSty.Render(calloutBL) + strings.Repeat(toneSty.Render(calloutBB), contentWidth)
-	r.lines = append(r.lines, Line{Text: botRow, Wide: false})
+	r.lines = append(r.lines, Line{Text: botRow, Wide: false, Callout: true})
 }

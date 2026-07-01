@@ -791,7 +791,7 @@ func (m *model) body() int {
 }
 
 func (m *model) reflow() {
-	m.lines, m.buttons, m.blocks = Render(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey, m.driverPending, m.canReengageInProc(), m.anyRollbackable())
+	m.lines, m.buttons, m.blocks = Render(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey, m.driverPending, m.canReengageInProc(), m.anyRollbackable(), m.asker != nil)
 	m.appendCachedButton()
 	m.appendEditButton()
 	m.appendConfirmButtons()
@@ -2937,6 +2937,8 @@ func (m model) viewString() string {
 			var base string
 			if idx >= 0 && idx < len(m.lines) && m.lines[idx].Code {
 				base = hintCodeRow(row, cw, buttonColsByRow[idx]) // fill + dark-red button cells
+			} else if idx >= 0 && idx < len(m.lines) && m.lines[idx].Callout {
+				base = hintCalloutRow(row, cw) // dimmed but keeps the framed-block look
 			} else {
 				base = dim.Render(padTo(strip(row), cw))
 			}

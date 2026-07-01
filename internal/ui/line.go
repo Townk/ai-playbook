@@ -12,4 +12,9 @@ type Line struct {
 	HBar int // >0 ⇒ render as a horizontal scrollbar for a code block of this
 	//      content width; Text is an empty placeholder.
 	Code bool // belongs to a code block (tab, body, bottom bar, or HBar row)
+	// Callout marks a callout/admonition frame row (top border, left-bar content
+	// line, or bottom border). Like Code rows, these carry a colored frame + bg
+	// tone; in hint mode they are dimmed while preserving their fill rather than
+	// stripped to plain text (which would read as a badly-framed floating line).
+	Callout bool
 }

@@ -8,7 +8,7 @@ created: 2026-06-30
 
 # Run modes
 
-Every chapter up to this point has opened in the interactive viewer where you click ▶ Run on each block. That works well for exploration, but ai-playbook also ships a `run` subcommand that drives the same blocks from your terminal — useful for shell scripts, automation, and CI pipelines.
+Every chapter up to this point has opened in the interactive viewer where you click **Run** on each block. That works well for exploration, but ai-playbook also ships a `run` subcommand that drives the same blocks from your terminal — useful for shell scripts, automation, and CI pipelines.
 
 This chapter is both a live playbook and a tutorial about running playbooks. The three blocks below build and verify `tidy-shop`; the prose that follows shows you three different ways to invoke the whole file.
 
@@ -92,12 +92,12 @@ ai-playbook run --auto --file examples/07-run-modes.md 2>&1 | tee run.log
 
 ## The stop button
 
-In the viewer, the ▶ Run button becomes **■ Stop** the moment a block starts executing. Click Stop any time to send SIGTERM to the running process; the block is marked as cancelled and no downstream `needs=` blocks will run.
+In the viewer, the **Run** button becomes **Stop** the moment a block starts executing. Click **Stop** any time to send SIGTERM to the running process; the block is marked as cancelled and no downstream `needs=` blocks will run.
 
 In `--assisted` and `--auto` modes, press **Ctrl-C** in the terminal to abort the current block. ai-playbook catches the interrupt, prints a cancellation summary, and exits non-zero so the calling script or CI step detects the failure.
 
 > [!NOTE]
-> **Mux mode:** With a terminal multiplexer active, **■ Stop** appears in the playbook pane while the block's output streams in an adjacent split. Without a mux, Stop and the live output share the same inline area below the block.
+> **Mux mode:** With a terminal multiplexer active, **Stop** appears in the playbook pane while the block's output streams in an adjacent split. Without a mux, **Stop** and the live output share the same inline area below the block.
 
 ## What's next
 

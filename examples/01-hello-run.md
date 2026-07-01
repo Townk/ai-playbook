@@ -14,9 +14,9 @@ Open this file with `ai-playbook run --file examples/01-hello-run.md` and work t
 
 ## Run a shell block
 
-Every fenced `bash` block gets a **▶ Run** button and a **⧉ Copy** button. When the block carries an `id=` attribute it also gets a **▷ Play** button. Play streams output continuously (useful for build logs), while Run collects output and displays it when the command exits.
+Every fenced `bash` block gets a **Run** button and a **Copy** button. When a terminal multiplexer is active, shell blocks also get a **Play** button: **Play** streams output continuously into a split pane (useful for build logs), while **Run** collects output and displays it inline when the command exits. Without a multiplexer there is no **Play** button — just use **Run**.
 
-Click **▶ Run** on the block below:
+Click **Run** on the block below:
 
 ```bash {id=build}
 bash projects/tidy-shop/build.sh
@@ -25,10 +25,10 @@ bash projects/tidy-shop/build.sh
 You should see two lines — `tidy-shop: building…` then `tidy-shop: build OK`. The block turns green when the command exits 0.
 
 > [!TIP]
-> **Copy before you run.** The ⧉ Copy button puts the raw command on your clipboard so you can paste it into any terminal and tweak a flag before running. Nothing executes until you actually click Run.
+> **Copy before you run.** The **Copy** button puts the raw command on your clipboard so you can paste it into any terminal and tweak a flag before running. Nothing executes until you actually click **Run**.
 
 > [!NOTE]
-> **Mux mode:** With a terminal multiplexer active, **▷ Play** opens a split pane so you can watch the stream alongside the playbook. Without a mux the output appears inline below the block — identical content, different layout.
+> **Mux mode:** The **Play** button appears only when a terminal multiplexer is active — it opens a split pane so you can watch the stream alongside the playbook. Without a mux there is no **Play** button; use **Run** instead and its output shows inline below the block.
 
 ## Run a non-shell block
 
@@ -38,14 +38,14 @@ Not every language gets a Play button. For languages like Python, ai-playbook ca
 print("Hello from tidy-shop!")
 ```
 
-Click **▶ Run**. The interpreter runs the snippet and displays `Hello from tidy-shop!` when it finishes.
+Click **Run**. The interpreter runs the snippet and displays `Hello from tidy-shop!` when it finishes.
 
 > [!TIP]
 > If the Run button is missing for a language, check that the interpreter is on your `$PATH`. Run `which python3` in a terminal to verify.
 
 ## Meet the stop button
 
-Some commands take a while. The moment you click **▶ Run** on a long-running block, the button changes to **■ Stop**. Click Stop any time to send SIGTERM and cancel the command cleanly.
+Some commands take a while. The moment you click **Run** on a long-running block, the button changes to **Stop**. Click **Stop** any time to send SIGTERM and cancel the command cleanly.
 
 Try it: click Run below, then click Stop before the five-second sleep finishes.
 

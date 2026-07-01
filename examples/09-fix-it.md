@@ -84,7 +84,7 @@ Whichever path you took, the viewer now shows a freshly authored playbook. It co
 - One or more sections with blocks that implement the fix — a `file=` block, a `diff` block, or a shell command to rename `VERSION` to `version.txt`.
 - Possibly a `## Verify` section that re-runs `bash build.sh` to confirm the fix worked.
 
-Read through the playbook before running anything. The model's draft is a starting point — you own the blocks and should satisfy yourself that each one does what you expect before clicking **▶ Run**.
+Read through the playbook before running anything. The model's draft is a starting point — you own the blocks and should satisfy yourself that each one does what you expect before clicking **Run**.
 
 ## Re-engage: try another fix (followup)
 

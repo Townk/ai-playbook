@@ -31,7 +31,7 @@ The block below reads the file that `prep` created. Notice its fence tag: `{id=u
 cat projects/tidy-shop/.work/seed
 ```
 
-If you click **▶ Run** on `use` before running `prep`, you will see a **blocked** notice instead of output — ai-playbook refuses to start the dependent step until its dependency is green. Run `prep` first and the notice clears automatically.
+If you click **Run** on `use` before running `prep`, you will see a **blocked** notice instead of output — ai-playbook refuses to start the dependent step until its dependency is green. Run `prep` first and the notice clears automatically.
 
 > [!TIP]
 > `needs=` accepts a comma-separated list: `needs=a,b,c`. Every listed block must succeed before the dependent block unlocks.
@@ -75,7 +75,7 @@ Run `stage` first (it creates the marker), then run `boom`. Because `boom` exits
 bash projects/tidy-shop/test.sh
 ```
 
-Click **▶ Run** in the Verify section. You should see `tidy-shop: tests passed`. If rollback left the workspace in an unexpected state, fix it and run Verify again until it goes green.
+Click **Run** in the Verify section. You should see `tidy-shop: tests passed`. If rollback left the workspace in an unexpected state, fix it and run Verify again until it goes green.
 
 ---
 

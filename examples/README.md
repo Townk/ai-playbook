@@ -32,7 +32,7 @@ button on a block. However:
 
 | Chapter | File | Feature(s) demonstrated |
 |---------|------|------------------------|
-| 01 | [01-hello-run.md](01-hello-run.md) | run ▶ / play / stop / copy · static blocks · callouts |
+| 01 | [01-hello-run.md](01-hello-run.md) | Run / Play / Stop / Copy · static blocks · callouts |
 | 02 | [02-needs-verify-rollback.md](02-needs-verify-rollback.md) | needs → blocked notice · verify block · rollback |
 | 03 | [03-create-a-file.md](03-create-a-file.md) | file= create / undo |
 | 04 | [04-edit-with-diff.md](04-edit-with-diff.md) | diff view-diff / apply / undo |

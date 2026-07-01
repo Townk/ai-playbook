@@ -171,6 +171,58 @@ func hintCodeRow(row string, width int, buttonCols map[int]bool) string {
 	return sb.String()
 }
 
+// hintCalloutRow renders a callout/admonition frame row for hint mode. Like
+// hintCodeRow, it keeps the block reading as a framed unit (rather than being
+// stripped to floating plain text): the decorative frame glyphs (corners, top/
+// bottom border sextants, the content left bar) keep their shape in the muted
+// overlay color with no background, and the interior content is muted text on a
+// solid muted-surface fill. The whole thing is dimmed and uniform, matching the
+// dimmed code-block treatment.
+func hintCalloutRow(row string, width int) string {
+	plain := []rune(strip(row))
+	for len(plain) < width {
+		plain = append(plain, ' ')
+	}
+	if len(plain) > width {
+		plain = plain[:width]
+	}
+	const (
+		kEdge    = iota // top/bottom border sextants
+		kBar            // content-row left bar
+		kContent        // interior text/fill
+	)
+	styles := map[int]lipgloss.Style{
+		// Horizontal top/bottom border runs: fg = the body's greyout fill (colSurface0),
+		// so the edge tone matches the block. No background (they sit on the document bg).
+		kEdge: lipgloss.NewStyle().Foreground(lipgloss.Color(colSurface0)),
+		// Corners + content-row left bar: dim outline (keeps the frame's left edge crisp).
+		kBar: lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)),
+		// Interior: muted text on the solid greyout fill, so the row reads as a filled
+		// framed block rather than floating text.
+		kContent: lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Background(lipgloss.Color(colSurface0)),
+	}
+	kind := func(i int) int {
+		switch string(plain[i]) {
+		case calloutTB, calloutBB:
+			return kEdge
+		case calloutTL, calloutBL, calloutCL:
+			return kBar
+		default:
+			return kContent
+		}
+	}
+	var sb strings.Builder
+	for i := 0; i < len(plain); {
+		j, k := i, kind(i)
+		for j < len(plain) && kind(j) == k {
+			j++
+		}
+		sb.WriteString(styles[k].Render(string(plain[i:j])))
+		i = j
+	}
+	return sb.String()
+}
+
 // overlayLabels splices each label char into an already-styled row at its
 // display column (ANSI-aware, via hslice). Works on dim prose or filled code rows.
 func overlayLabels(row string, labels map[int]string, lab lipgloss.Style) string {

@@ -259,6 +259,49 @@ func TestQuote_BorderedFrame(t *testing.T) {
 	}
 }
 
+// TestCalloutRowsTaggedAndDimPreservesFrame (F2) verifies callout frame rows are tagged
+// Callout so hint mode can dim them WITH their frame (rather than strip()-ing them to
+// plain floating text). hintCalloutRow must keep the frame glyphs and lay a muted-surface
+// background fill for the interior — reading as a dimmed framed block, like a code row.
+func TestCalloutRowsTaggedAndDimPreservesFrame(t *testing.T) {
+	lines, _, _ := Render("> [!NOTE]\n> Hello world\n", 30, nil, "")
+	var calloutRow string
+	sawCallout := false
+	for _, l := range lines {
+		if l.Callout {
+			sawCallout = true
+			if l.Code {
+				t.Errorf("callout row must not also be Code-tagged: %q", strip(l.Text))
+			}
+			if strings.Contains(l.Text, "▐") { // a content row (has the left bar)
+				calloutRow = l.Text
+			}
+		}
+	}
+	if !sawCallout {
+		t.Fatal("callout frame rows must be tagged Callout")
+	}
+	if calloutRow == "" {
+		t.Fatal("expected a callout content row with the ▐ left bar")
+	}
+	dimmed := hintCalloutRow(calloutRow, 30)
+	// Frame glyph survives (not stripped to plain text).
+	if !strings.Contains(dimmed, "▐") {
+		t.Errorf("hintCalloutRow must preserve the ▐ frame glyph:\n%s", dimmed)
+	}
+	// Interior carries a muted-surface background fill (framed block, not floating text).
+	// lipgloss may merge the bg SGR params with the fg into one sequence, so match the
+	// bg color params (48;2;r;g;b) rather than the standalone \x1b[…m escape.
+	bgParams := strings.TrimSuffix(strings.TrimPrefix(bgANSI(colSurface0), "\x1b["), "m")
+	if !strings.Contains(dimmed, bgParams) {
+		t.Errorf("hintCalloutRow must lay a muted-surface bg fill (%s):\n%q", bgParams, dimmed)
+	}
+	// The visible text is preserved.
+	if !strings.Contains(strip(dimmed), "Hello world") {
+		t.Errorf("hintCalloutRow must keep the content text:\n%q", strip(dimmed))
+	}
+}
+
 func TestQuote_BareBlockquoteFallback(t *testing.T) {
 	lines, _, _ := Render("> just a quote\n", 30, nil, "")
 	joined := joinText(lines)
@@ -522,7 +565,8 @@ func TestRenderCodeBlockBottomBar(t *testing.T) {
 }
 
 func TestCodeBlockButtonsShell(t *testing.T) {
-	_, btns, _ := Render("```sh\nmake all\n```", 40, nil, "")
+	// muxActive=true so the Play button renders (it needs an origin pane).
+	_, btns, _ := Render("```sh\nmake all\n```", 40, nil, "", false, true, false, true)
 	var runB, play, copyB *Button
 	for i := range btns {
 		switch btns[i].Kind {
@@ -552,7 +596,8 @@ func TestCodeBlockButtonsShell(t *testing.T) {
 }
 
 func TestCodeBlockButtonsNonShell(t *testing.T) {
-	_, btns, _ := Render("```python\nx=1\n```", 40, nil, "")
+	// muxActive=true so the "no play" assertion is meaningful (python never gets play).
+	_, btns, _ := Render("```python\nx=1\n```", 40, nil, "", false, true, false, true)
 	kinds := map[string]int{}
 	for _, b := range btns {
 		kinds[b.Kind]++
@@ -564,8 +609,9 @@ func TestCodeBlockButtonsNonShell(t *testing.T) {
 }
 
 func TestRunButtonShellAndScript(t *testing.T) {
-	_, b1, _ := Render("```bash {id=a}\nls\n```\n", 80, nil, "")
-	_, b2, _ := Render("```python {id=p}\nprint(1)\n```\n", 80, nil, "")
+	// muxActive=true so the Play button renders for the shell block.
+	_, b1, _ := Render("```bash {id=a}\nls\n```\n", 80, nil, "", false, true, false, true)
+	_, b2, _ := Render("```python {id=p}\nprint(1)\n```\n", 80, nil, "", false, true, false, true)
 	if buttonForBlock(b1, "a", "run") == nil || buttonForBlock(b1, "a", "play") == nil {
 		t.Fatal("shell needs run+play")
 	}
@@ -618,7 +664,8 @@ func TestCodeBlockLineMarkers(t *testing.T) {
 }
 
 func TestStaticBlockHasNoPlay(t *testing.T) {
-	_, buttons, _ := Render("```console {static}\nboom: error\n```\n", 80, nil, "")
+	// muxActive=true so the absence is meaningful (a shell block would get Play here).
+	_, buttons, _ := Render("```console {static}\nboom: error\n```\n", 80, nil, "", false, true, false, true)
 	for _, b := range buttons {
 		if b.Kind == "play" {
 			t.Fatalf("static block must not get a play button: %+v", b)
@@ -627,7 +674,8 @@ func TestStaticBlockHasNoPlay(t *testing.T) {
 }
 
 func TestShellBlockKeepsPlayAndCarriesID(t *testing.T) {
-	_, buttons, blocks := Render("```bash {id=fix}\nls\n```\n", 80, nil, "")
+	// muxActive=true so the Play button renders (it needs an origin pane).
+	_, buttons, blocks := Render("```bash {id=fix}\nls\n```\n", 80, nil, "", false, true, false, true)
 	var sawPlay bool
 	for _, b := range buttons {
 		if b.Kind == "play" {
@@ -642,6 +690,31 @@ func TestShellBlockKeepsPlayAndCarriesID(t *testing.T) {
 	}
 	if len(blocks) != 1 || blocks[0].Type != "shell" || blocks[0].ID != "fix" {
 		t.Fatalf("blocks wrong: %+v", blocks)
+	}
+}
+
+// TestPlayButtonGatedByMux (F3) verifies the green Play button (run in the ORIGIN pane)
+// only renders when a terminal multiplexer is active — the default no-mux `run --file`
+// viewer has no origin pane, so Play is suppressed. Run/Copy are unaffected.
+func TestPlayButtonGatedByMux(t *testing.T) {
+	md := "```bash {id=go}\nls\n```\n"
+
+	// muxActive=false (default 4-arg call) → no Play, but Run stays.
+	_, noMux, _ := Render(md, 80, map[string]blockRunState{}, "")
+	if buttonForBlock(noMux, "go", "play") != nil {
+		t.Error("Play button must be absent without a multiplexer")
+	}
+	if buttonForBlock(noMux, "go", "run") == nil {
+		t.Error("Run button must still render without a multiplexer")
+	}
+
+	// muxActive=true → Play appears alongside Run.
+	_, mux, _ := Render(md, 80, map[string]blockRunState{}, "", false, true, false, true)
+	if buttonForBlock(mux, "go", "play") == nil {
+		t.Error("Play button must render when a multiplexer is active")
+	}
+	if buttonForBlock(mux, "go", "run") == nil {
+		t.Error("Run button must render when a multiplexer is active")
 	}
 }
 
@@ -737,17 +810,18 @@ func buttonForBlock(btns []Button, id, kind string) *Button {
 
 func TestNeedsGatingHidesRunUntilDepOk(t *testing.T) {
 	md := "```bash {id=diag}\nls\n```\n\n```bash {id=fix needs=diag}\nrm x\n```\n"
+	// muxActive=true throughout so the run/play gating (not the mux gate) is what's tested.
 	// diag not yet run → fix is blocked: no run/play for fix; blocked indicator shown.
-	_, btns, _ := Render(md, 80, map[string]blockRunState{}, "")
+	_, btns, _ := Render(md, 80, map[string]blockRunState{}, "", false, true, false, true)
 	if buttonForBlock(btns, "fix", "run") != nil || buttonForBlock(btns, "fix", "play") != nil {
 		t.Fatalf("blocked block must have no run/play")
 	}
-	lines, _, _ := Render(md, 80, map[string]blockRunState{}, "")
+	lines, _, _ := Render(md, 80, map[string]blockRunState{}, "", false, true, false, true)
 	if !linesContain(lines, "needs: diag") {
 		t.Fatalf("blocked block must show a needs indicator")
 	}
 	// diag ok → fix is unblocked.
-	_, btns2, _ := Render(md, 80, map[string]blockRunState{"diag": {Status: "ok"}}, "")
+	_, btns2, _ := Render(md, 80, map[string]blockRunState{"diag": {Status: "ok"}}, "", false, true, false, true)
 	if buttonForBlock(btns2, "fix", "run") == nil || buttonForBlock(btns2, "fix", "play") == nil {
 		t.Fatalf("satisfied block must regain run+play")
 	}

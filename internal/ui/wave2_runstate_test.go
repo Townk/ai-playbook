@@ -11,7 +11,8 @@ import (
 func TestRunActionDisabledWhenOk(t *testing.T) {
 	md := "```bash {id=go}\necho hi\n```\n"
 
-	_, okButtons, _ := Render(md, 80, map[string]blockRunState{"go": {Status: "ok"}}, "")
+	// muxActive=true so the Play action is in scope (it needs an origin pane).
+	_, okButtons, _ := Render(md, 80, map[string]blockRunState{"go": {Status: "ok"}}, "", false, true, false, true)
 	if b := buttonForBlock(okButtons, "go", "run"); b != nil {
 		t.Errorf("run action must be disabled (no button) once the block ran ok; got %+v", b)
 	}
@@ -19,7 +20,7 @@ func TestRunActionDisabledWhenOk(t *testing.T) {
 		t.Errorf("play action must be disabled (no button) once the block ran ok; got %+v", b)
 	}
 
-	_, idleButtons, _ := Render(md, 80, map[string]blockRunState{}, "")
+	_, idleButtons, _ := Render(md, 80, map[string]blockRunState{}, "", false, true, false, true)
 	if b := buttonForBlock(idleButtons, "go", "run"); b == nil {
 		t.Error("run action must be present when the block is idle")
 	}

@@ -62,7 +62,8 @@ func TestRollbackAttrParsed(t *testing.T) {
 func TestRollbackTargetNotIndependentlyRunnable(t *testing.T) {
 	md := "```bash {id=stage rollback=undo-stage}\ntrue\n```\n\n" +
 		"```bash {id=undo-stage}\ntrue\n```\n"
-	_, buttons, _ := Render(md, 80, map[string]blockRunState{}, "")
+	// muxActive=true so the "no play" assertion on the rollback target is meaningful.
+	_, buttons, _ := Render(md, 80, map[string]blockRunState{}, "", false, true, false, true)
 
 	if buttonForBlock(buttons, "undo-stage", "run") != nil {
 		t.Error("a rollback-target block must not have an independent run button")
