@@ -1,8 +1,10 @@
 package autorun
 
 import (
+	"io"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Townk/ai-playbook/internal/frontmatter"
 )
@@ -50,5 +52,42 @@ func TestRun_Failure_Integration(t *testing.T) {
 	})
 	if code == 0 {
 		t.Error("a failing block must exit non-zero")
+	}
+}
+
+func TestRunStep_Interrupt_CancelsQuickly(t *testing.T) {
+	if testing.Short() {
+		t.Skip("opens a real driver")
+	}
+
+	runner, cleanup, err := newOrchRunner(RunConfig{}, io.Discard, nil)
+	if err != nil {
+		t.Fatalf("newOrchRunner: %v", err)
+	}
+	defer cleanup()
+
+	stopCh := make(chan struct{})
+	runner.stopCh = stopCh
+
+	type stepResult struct {
+		exit int
+	}
+	done := make(chan stepResult, 1)
+	go func() {
+		exit, _ := runner.RunStep(Step{ID: "slow", Kind: KindRun, Command: "sleep 5"})
+		done <- stepResult{exit: exit}
+	}()
+
+	// Give the block a moment to actually start running before interrupting.
+	time.Sleep(300 * time.Millisecond)
+	close(stopCh)
+
+	select {
+	case r := <-done:
+		if r.exit == 0 {
+			t.Errorf("interrupted step exit = 0, want non-zero")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunStep did not return within 2s of stopCh closing")
 	}
 }

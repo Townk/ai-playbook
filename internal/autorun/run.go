@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/signal"
 	"time"
 
 	"github.com/Townk/ai-playbook/internal/cache"
@@ -11,6 +12,12 @@ import (
 	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
+
+// cancelExit is the exit code RunStep reports for a step aborted by an
+// interrupt (SIGINT, or the test-only stopCh). Execute treats any non-zero
+// exit as a failure and stops the loop, which is exactly the behavior an
+// interrupted run wants — a cancelled step is a failure, not a success.
+const cancelExit = 130
 
 // RunConfig is the launcher's headless-run request.
 type RunConfig struct {
@@ -68,6 +75,12 @@ func resolveEnv(vars map[string]frontmatter.EnvValue) (env []string, missing []s
 type orchRunner struct {
 	orch *orchestrator.Orchestrator
 	out  io.Writer
+
+	// stopCh, when non-nil, is watched by RunStep alongside the in-flight
+	// Do call: closing it aborts the running block exactly like a SIGINT
+	// would. Run wires this to real signal.Notify delivery; tests close it
+	// directly for deterministic, signal-free coverage of the abort path.
+	stopCh chan struct{}
 }
 
 // kindFor maps an autorun StepKind onto its orchestrator.Kind equivalent.
@@ -85,8 +98,30 @@ func kindFor(k StepKind) orchestrator.Kind {
 // RunStep executes one step via the orchestrator, streams its output to
 // r.out, and captures it to a temp log file (mirrors internal/ui's
 // writeRunLog shape; kept private here to avoid importing internal/ui).
+//
+// The block runs on its own goroutine so RunStep can race it against
+// r.stopCh: if stopCh closes first (a real SIGINT via Run, or a direct close
+// in tests), RunStep asks the orchestrator to stop the child (SIGTERM via
+// the driver), waits for the in-flight Do to actually return, and reports
+// cancelExit — a non-zero exit Execute treats as a failure, stopping the
+// run. A nil stopCh (the zero value) never fires, so RunStep behaves exactly
+// as before for callers that don't opt into interruption.
 func (r *orchRunner) RunStep(s Step) (exit int, outputPath string) {
-	res, _ := r.orch.Do(orchestrator.Action{Kind: kindFor(s.Kind), ID: s.ID, Payload: s.Command})
+	doneCh := make(chan driver.Result, 1)
+	go func() {
+		res, _ := r.orch.Do(orchestrator.Action{Kind: kindFor(s.Kind), ID: s.ID, Payload: s.Command})
+		doneCh <- res
+	}()
+
+	cancelled := false
+	var res driver.Result
+	select {
+	case res = <-doneCh:
+	case <-r.stopCh:
+		cancelled = true
+		_, _ = r.orch.Do(orchestrator.Action{Kind: orchestrator.KindStop})
+		res = <-doneCh // wait for the in-flight Do to return before continuing
+	}
 
 	if res.Out != "" {
 		fmt.Fprint(r.out, res.Out)
@@ -95,7 +130,11 @@ func (r *orchRunner) RunStep(s Step) (exit int, outputPath string) {
 		fmt.Fprint(r.out, res.Err)
 	}
 
-	return res.Exit, writeStepLog(s.ID, res.Out, res.Err)
+	logPath := writeStepLog(s.ID, res.Out, res.Err)
+	if cancelled {
+		return cancelExit, logPath
+	}
+	return res.Exit, logPath
 }
 
 // writeStepLog writes a step's captured stdout then stderr to a temp file and
@@ -177,6 +216,25 @@ func Run(rc RunConfig) int {
 		return 1
 	}
 	defer cleanup()
+
+	// Ctrl-C aborts the currently-running block: convert a delivered SIGINT
+	// into the same stopCh-close path RunStep's select watches, so real
+	// signal delivery and the test-only direct close share one mechanism.
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, os.Interrupt)
+	defer signal.Stop(sig)
+
+	stopCh := make(chan struct{})
+	runner.stopCh = stopCh
+	runDone := make(chan struct{})
+	defer close(runDone)
+	go func() {
+		select {
+		case <-sig:
+			close(stopCh)
+		case <-runDone:
+		}
+	}()
 
 	return Execute(Config{
 		Blocks:       rc.Blocks,
