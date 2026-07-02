@@ -29,14 +29,25 @@ func (m model) assistedNextID() string {
 	return ""
 }
 
+// assistedStartMsg is emitted once an assisted-start env gate's export
+// completes (enterAssistedReady); its Update arm raises the ready
+// cursor/footer (startAssisted) — so the footer appears only AFTER the
+// declared vars are confirmed and exported, never before.
+type assistedStartMsg struct{}
+
 // maybeStartAssisted enters the guided walk once the playbook's blocks are
-// available (stream EOF). Guarded so it fires exactly once.
-func (m model) maybeStartAssisted() model {
+// available (stream EOF). Guarded so it fires exactly once. Per the spec, the
+// playbook's declared env vars (if any) must be confirmed BEFORE the ready
+// cursor/footer appear, so this fires the assisted-start env gate
+// (beginAssistedGate) rather than jumping straight to startAssisted — a
+// playbook with no declared vars (or an already-satisfied gate) falls
+// straight through to the ready footer, same as before.
+func (m model) maybeStartAssisted() (model, tea.Cmd) {
 	if m.assisted && !m.assistedStarted {
 		m.assistedStarted = true
-		return m.startAssisted()
+		return m.beginAssistedGate()
 	}
-	return m
+	return m, nil
 }
 
 // startAssisted sets the initial readyID cursor (the first runnable block) and

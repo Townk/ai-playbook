@@ -62,7 +62,7 @@ If a block fails, the footer switches to **`[ Roll back ] [ Leave as-is ] [ Quit
 
 The document stays scrollable the whole time — `j`/`k` and the other viewer navigation keys work even while the footer is showing — and **Ctrl-C** aborts the run at any point.
 
-Assisted mode is useful when you are running a playbook written by someone else and want fine-grained control over which steps execute, without fully committing to running everything.
+Assisted mode is useful when you are running a playbook written by someone else and want fine-grained control over which steps execute, without fully committing to running everything. If a playbook declares variables (see Chapter 06), `--assisted` confirms them as soon as the viewer opens, before the first step's `[ Run ]` footer appears.
 
 ## Auto run
 

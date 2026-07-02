@@ -70,12 +70,13 @@ const gateExportTimeout = 10 * time.Second
 
 // confirmGate holds the state of an in-progress pre-run variable confirmation.
 type confirmGate struct {
-	groups      [][]confirmVar    // balanced ≤5 groups
-	values      map[string]string // name → final value (seeded from current, edited by Customize)
-	gi          int               // current group index (confirm phase)
-	ci          int               // current var index within the group (customize phase)
-	customizing bool              // editing the current group's vars
-	block       Button            // the deferred block to run after the gate
+	groups        [][]confirmVar    // balanced ≤5 groups
+	values        map[string]string // name → final value (seeded from current, edited by Customize)
+	gi            int               // current group index (confirm phase)
+	ci            int               // current var index within the group (customize phase)
+	customizing   bool              // editing the current group's vars
+	block         Button            // the deferred block to run after the gate
+	assistedStart bool              // when true, completion enters the assisted ready state (enterAssistedReady) instead of running block
 }
 
 // gateAnswerMsg is produced by the gate's askCompletion (via handleAskKey) when one
@@ -121,6 +122,33 @@ func (m model) beginGate(block Button) (model, tea.Cmd) {
 		return m.runGateBlock(block, nil)
 	}
 	g := &confirmGate{values: map[string]string{}, block: block}
+	for _, v := range vars {
+		g.values[v.Name] = v.Value
+	}
+	// Partition the vars into balanced ≤5 groups, one confirm dialog each.
+	i := 0
+	for _, sz := range groupSizes(len(vars)) {
+		g.groups = append(g.groups, vars[i:i+sz])
+		i += sz
+	}
+	m.gate = g
+	return m.raiseGroupConfirm()
+}
+
+// beginAssistedGate is the assisted-run counterpart to beginGate: it raises
+// the same confirm-groups flow over the playbook's declared env vars, but
+// defers NO block — completion enters the assisted ready state
+// (enterAssistedReady) instead of running a specific block. Called once, at
+// the start of the guided walk (maybeStartAssisted), so declared vars are
+// confirmed before the ready cursor/footer ever appear — not on the first
+// [Run] press (that's beginGate/runOrGate's job for the default pager path).
+func (m model) beginAssistedGate() (model, tea.Cmd) {
+	vars := buildConfirmVars(m.confirmEnv, m.projectRoot, os.Getenv)
+	if len(vars) == 0 || m.gateSatisfied {
+		m.gateSatisfied = true
+		return m.startAssisted(), nil // nothing to confirm → straight to the ready footer
+	}
+	g := &confirmGate{values: map[string]string{}, assistedStart: true}
 	for _, v := range vars {
 		g.values[v.Name] = v.Value
 	}
@@ -203,17 +231,41 @@ func (m model) advanceGate(value string, submitted bool) (model, tea.Cmd) {
 	return m.afterGroup()
 }
 
-// afterGroup advances to the next group's confirm, or finishes the gate (export the
-// final values, mark satisfied, run the deferred block).
+// afterGroup advances to the next group's confirm, or finishes the gate: for
+// an assisted-start gate (assistedStart), enters the assisted ready state
+// (enterAssistedReady); otherwise exports the final values, marks satisfied,
+// and runs the deferred block (runGateBlock) — the default/manual pager path.
 func (m model) afterGroup() (model, tea.Cmd) {
 	g := m.gate
 	if g.gi < len(g.groups) {
 		return m.raiseGroupConfirm()
 	}
-	block := g.block
-	values := g.values
+	values, assisted, block := g.values, g.assistedStart, g.block
 	m.gate = nil
+	if assisted {
+		return m.enterAssistedReady(values)
+	}
 	return m.runGateBlock(block, values)
+}
+
+// enterAssistedReady finishes an assisted-start gate: it exports the
+// confirmed values via the SAME driver path runGateBlock uses (so the
+// exported vars persist into the shell's MAIN context identically), then —
+// only once that synchronous export completes — emits assistedStartMsg so
+// the ready cursor/footer appear. tea.Sequence guarantees the ordering.
+func (m model) enterAssistedReady(values map[string]string) (model, tea.Cmd) {
+	m.gateSatisfied = true
+	exportCmd := buildExportCmd(values)
+	drv := m.orchDriver()
+	return m, tea.Sequence(
+		func() tea.Msg {
+			if drv != nil && exportCmd != "" {
+				drv.RunMain(exportCmd, gateExportTimeout)
+			}
+			return nil
+		},
+		func() tea.Msg { return assistedStartMsg{} },
+	)
 }
 
 // runGateBlock marks the gate satisfied, marks the block running, (re-)starts the
