@@ -48,7 +48,7 @@ func finalizeDoc(
 ) (full string, err error) {
 	// (1) Drop any existing front matter (idempotency) then strip preamble above
 	// the first H1, so we re-assemble from the literate body only.
-	_, body, _ := frontmatter.Parse(raw)
+	old, body, _ := frontmatter.Parse(raw)
 	body = orchestrator.StripPreamble(body)
 
 	// (2) name: same derivation as the commit path (# Playbook — <t> else first H1).
@@ -84,6 +84,7 @@ func finalizeDoc(
 		Description: meta.Description,
 		Category:    meta.Category,
 		Tags:        meta.Tags,
+		DependsOn:   old.DependsOn,
 		Env:         env,
 		Created:     created,
 		ProjectRoot: frontmatter.NormalizeHome(projectRoot, home),

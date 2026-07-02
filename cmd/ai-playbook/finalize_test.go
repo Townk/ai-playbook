@@ -144,6 +144,31 @@ func TestFinalizeDoc_NoHeading(t *testing.T) {
 	}
 }
 
+// TestFinalizeDoc_PreservesDependsOn verifies an existing depends_on front-matter
+// field survives finalizeDoc's rebuild (which otherwise discards the parsed old
+// front matter entirely).
+func TestFinalizeDoc_PreservesDependsOn(t *testing.T) {
+	raw := "---\nname: STALE\ndepends_on:\n  - dep-a\n---\n\n" +
+		"# Playbook — X\n\nDo the thing.\n"
+
+	metaFn := func(string) (author.Metadata, error) { return author.Metadata{}, nil }
+
+	full, err := finalizeDoc(raw, metaFn, fakeLookup(nil), "2026-06-25", "/home/me/proj", "")
+	if err != nil {
+		t.Fatalf("finalizeDoc returned error: %v", err)
+	}
+	if !strings.Contains(full, "depends_on") || !strings.Contains(full, "dep-a") {
+		t.Fatalf("depends_on not preserved:\n%s", full)
+	}
+	fm, _, ok := frontmatter.Parse(full)
+	if !ok {
+		t.Fatalf("output does not parse back as front matter:\n%s", full)
+	}
+	if strings.Join(fm.DependsOn, ",") != "dep-a" {
+		t.Errorf("DependsOn = %v, want [dep-a]", fm.DependsOn)
+	}
+}
+
 // TestFinalizeSummary verifies the one-line summary reads name/category/tags/env
 // back from the assembled artifact.
 func TestFinalizeSummary(t *testing.T) {

@@ -380,6 +380,25 @@ func TestParse_UnterminatedIsNotFrontMatter(t *testing.T) {
 	}
 }
 
+// TestFrontMatter_DependsOnRoundTrip verifies depends_on round-trips through
+// Parse and that Assemble re-emits a depends_on: block.
+func TestFrontMatter_DependsOnRoundTrip(t *testing.T) {
+	fm := FrontMatter{Name: "N", DependsOn: []string{"a", "b"}}
+
+	assembled := Assemble(fm)
+	if !strings.Contains(assembled, "depends_on") {
+		t.Fatalf("depends_on not assembled:\n%s", assembled)
+	}
+
+	got, _, ok := Parse(Assemble(fm) + "\nbody\n")
+	if !ok {
+		t.Fatalf("Parse must report ok")
+	}
+	if !reflect.DeepEqual(got.DependsOn, []string{"a", "b"}) {
+		t.Fatalf("DependsOn = %v, want [a b]", got.DependsOn)
+	}
+}
+
 func TestFrontMatter_ProjectBoundRoundTrip(t *testing.T) {
 	fm := FrontMatter{Name: "N", ProjectBound: true}
 	full := Prepend(fm, "body")

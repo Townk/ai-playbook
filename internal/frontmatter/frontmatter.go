@@ -220,6 +220,7 @@ type FrontMatter struct {
 	Description  string              `yaml:"description,omitempty"`
 	Category     string              `yaml:"category,omitempty"`
 	Tags         []string            `yaml:"tags,omitempty"`
+	DependsOn    []string            `yaml:"depends_on,omitempty"`
 	Env          map[string]EnvValue `yaml:"env,omitempty"`
 	Created      string              `yaml:"created,omitempty"`
 	ProjectRoot  string              `yaml:"project_root,omitempty"`

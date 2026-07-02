@@ -57,6 +57,7 @@ type Meta struct {
 	Description  string
 	Category     string
 	Tags         []string
+	DependsOn    []string
 	Env          []EnvVar
 	ProjectBound bool
 	Path         string
@@ -130,6 +131,7 @@ func metaFromFM(fm frontmatter.FrontMatter, path string, project bool) Meta {
 		Description:  fm.Description,
 		Category:     fm.Category,
 		Tags:         fm.Tags,
+		DependsOn:    fm.DependsOn,
 		Env:          envFromFM(fm.Env),
 		ProjectBound: fm.ProjectBound,
 		Path:         path,

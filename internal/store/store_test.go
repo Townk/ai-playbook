@@ -3,6 +3,7 @@ package store
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -249,6 +250,16 @@ func TestCreatedFallsBackToModTime(t *testing.T) {
 	}
 	if metas[0].Created.IsZero() {
 		t.Errorf("Created is zero, want ModTime fallback")
+	}
+}
+
+// TestMetaFromFM_CopiesDependsOn verifies metaFromFM copies DependsOn from the
+// parsed front matter onto Meta.
+func TestMetaFromFM_CopiesDependsOn(t *testing.T) {
+	fm := frontmatter.FrontMatter{Name: "X", DependsOn: []string{"x"}}
+	m := metaFromFM(fm, filepath.Join(t.TempDir(), "x.md"), false)
+	if !reflect.DeepEqual(m.DependsOn, []string{"x"}) {
+		t.Fatalf("Meta.DependsOn = %v, want [x]", m.DependsOn)
 	}
 }
 
