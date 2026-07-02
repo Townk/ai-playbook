@@ -11,10 +11,12 @@
 // The check runs in two passes: a deterministic structural pass
 // (internal/validate.Check — front matter, duplicate ids, needs/cycle,
 // unbalanced fences, runnable/lang warnings) that drives the exit code, and an
-// optional AI review pass (author.ReviewOnce, via the reviewFn seam) that
-// surfaces prose-level feedback but never affects the exit code and never
-// aborts the command — a missing/failing model backend degrades to a note in
-// the report, not an error.
+// optional AI review pass (author.ReviewStream, via the reviewStreamFn seam,
+// fanned out with live progress — a TTY spinner + model activity, or a
+// stderr heartbeat when there's no TTY) that surfaces prose-level feedback
+// but never affects the exit code and never aborts the command — a
+// missing/failing model backend degrades to a note in the report, not an
+// error.
 package launcher
 
 import (
@@ -23,7 +25,9 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
+	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/frontmatter"
@@ -31,9 +35,9 @@ import (
 	"github.com/Townk/ai-playbook/internal/validate"
 )
 
-// reviewFn is the author.ReviewOnce seam: the AI review pass. Tests inject a
-// fake so ValidateMain is exercised without a live model backend.
-var reviewFn = author.ReviewOnce
+// reviewStreamFn is the author.ReviewStream seam: the AI review pass. Tests
+// inject a fake so ValidateMain is exercised without a live model backend.
+var reviewStreamFn = author.ReviewStream
 
 // reviewSystemPrompt is the AI review pass's system prompt: a concise reviewer
 // instruction, not a rewrite request.
@@ -105,14 +109,35 @@ func ValidateMain() int {
 	ranAI := !noAI
 	if ranAI {
 		cfg, _ := config.Load()
-		text, aerr := reviewFn(cfg, reviewSystemPrompt, body)
+		events, closeFn, serr := reviewStreamFn(cfg, reviewSystemPrompt, body)
 		switch {
-		case aerr == nil:
-			aiText = text
-		case isNoBackend(aerr):
+		case serr == nil:
+			reader, activity, _ := agentstream.FanOut(events, closeFn, ActivityBuffer)
+
+			done := make(chan struct{})
+			go func() {
+				b, _ := io.ReadAll(reader)
+				aiText = strings.TrimSpace(string(b))
+				close(done)
+			}()
+
+			if hasTTY() {
+				runCreateProgressFn(activity, nil, done)
+			} else {
+				// Mandatory drain: FanOut's activity sends are best-effort/non-blocking,
+				// but nothing else reads this channel in the no-TTY path, so an unread
+				// buffer would just sit there — draining it keeps the fan-out tidy.
+				go func() {
+					for range activity {
+					}
+				}()
+				heartbeat(os.Stderr, done, 2*time.Second)
+			}
+			<-done
+		case isNoBackend(serr):
 			aiText = aiSkipNote
 		default:
-			aiText = fmt.Sprintf("AI review failed: %v", aerr)
+			aiText = fmt.Sprintf("AI review failed: %v", serr)
 		}
 	}
 
@@ -157,6 +182,36 @@ func printValidateReport(w io.Writer, name string, findings []validate.Finding, 
 		fmt.Fprintln(w, "\nAI review:")
 		for _, line := range strings.Split(strings.TrimRight(aiText, "\n"), "\n") {
 			fmt.Fprintf(w, "  %s\n", line)
+		}
+	}
+}
+
+// hasTTY reports whether /dev/tty can be opened for read+write — mirroring
+// runCreateProgress's own check so the AI-pass progress mechanism (inline
+// spinner vs. stderr heartbeat) agrees with create's.
+func hasTTY() bool {
+	f, err := os.OpenFile("/dev/tty", os.O_RDWR, 0)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
+}
+
+// heartbeat writes a "." to w every `every` until done closes, then a trailing
+// newline — the no-TTY (piped/CI) progress indicator for the AI review pass,
+// kept off stdout (the report's channel) by always being called with
+// os.Stderr.
+func heartbeat(w io.Writer, done <-chan struct{}, every time.Duration) {
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-t.C:
+			fmt.Fprint(w, ".")
+		case <-done:
+			fmt.Fprintln(w)
+			return
 		}
 	}
 }

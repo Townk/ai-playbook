@@ -1,10 +1,15 @@
 package launcher
 
 import (
+	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+	"time"
 
+	"github.com/Townk/ai-playbook/internal/agentstream"
+	"github.com/Townk/ai-playbook/internal/askbridge"
 	"github.com/Townk/ai-playbook/internal/config"
 )
 
@@ -52,7 +57,10 @@ func TestResolveValidateArgs(t *testing.T) {
 // ---- ValidateMain: clean vs error exit codes ----
 
 func TestValidateMain_CleanVsError(t *testing.T) {
-	defer swap(&reviewFn, func(_ *config.Config, _, _ string) (string, error) { return "looks good", nil })()
+	defer swap(&reviewStreamFn, func(_ *config.Config, _, _ string) (<-chan agentstream.Event, func() error, error) {
+		return canned("looks good"), noopClose, nil
+	})()
+	defer swap(&runCreateProgressFn, func(_ <-chan string, _ *askbridge.Bridge, done <-chan struct{}) { <-done })()
 
 	clean := "---\nname: N\ndescription: D\ncategory: C\ncreated: 2026-01-01\n---\n\n# T\n\n```bash {id=a}\ntrue\n```\n"
 	cleanPath := writeValidateTemp(t, "clean.md", clean)
@@ -73,9 +81,9 @@ func TestValidateMain_CleanVsError(t *testing.T) {
 
 func TestValidateMain_NoAISkip(t *testing.T) {
 	var called bool
-	defer swap(&reviewFn, func(_ *config.Config, _, _ string) (string, error) {
+	defer swap(&reviewStreamFn, func(_ *config.Config, _, _ string) (<-chan agentstream.Event, func() error, error) {
 		called = true
-		return "", nil
+		return nil, nil, nil
 	})()
 
 	clean := "---\nname: N\ndescription: D\ncategory: C\ncreated: 2026-01-01\n---\n\n# T\n\n```bash {id=a}\ntrue\n```\n"
@@ -83,5 +91,78 @@ func TestValidateMain_NoAISkip(t *testing.T) {
 	withArgs(t, []string{"ai-playbook", "validate", "--no-ai", "--file", cleanPath})
 	if code := ValidateMain(); code != 0 || called {
 		t.Fatalf("--no-ai must skip the AI pass (called=%v, code=%d)", called, code)
+	}
+}
+
+// TestValidateMain_NoAISkipsStream is the brief's dedicated --no-ai seam-not-called
+// assertion (distinct name from TestValidateMain_NoAISkip, kept alongside it since
+// both already cover the same behavior end-to-end).
+func TestValidateMain_NoAISkipsStream(t *testing.T) {
+	var called bool
+	defer swap(&reviewStreamFn, func(_ *config.Config, _, _ string) (<-chan agentstream.Event, func() error, error) {
+		called = true
+		return nil, nil, nil
+	})()
+
+	clean := "---\nname: N\ndescription: D\ncategory: C\ncreated: 2026-01-01\n---\n\n# T\n\n```bash {id=a}\ntrue\n```\n"
+	cleanPath := writeValidateTemp(t, "clean.md", clean)
+	withArgs(t, []string{"ai-playbook", "validate", "--no-ai", "--file", cleanPath})
+	if code := ValidateMain(); code != 0 {
+		t.Fatalf("--no-ai clean file → exit %d, want 0", code)
+	}
+	if called {
+		t.Fatal("--no-ai must not call the review stream")
+	}
+}
+
+// ---- ValidateMain: AI pass streams + captures text via the new seam ----
+
+// canned returns a closed agentstream.Event channel carrying a single Final
+// event whose text is text — the shape ReviewStream's real callers drain
+// (mirrors internal/author/review_test.go's drainReviewText contract).
+func canned(text string) <-chan agentstream.Event {
+	ch := make(chan agentstream.Event, 1)
+	ch <- agentstream.Event{Kind: agentstream.Final, Text: text}
+	close(ch)
+	return ch
+}
+
+// noopClose is a canned reviewStreamFn's closeFn: FanOut calls it once the
+// pump drains the event channel, so it must be non-nil and side-effect-free.
+func noopClose() error { return nil }
+
+func TestValidateMain_AITextCaptured(t *testing.T) {
+	defer swap(&reviewStreamFn, func(_ *config.Config, _, _ string) (<-chan agentstream.Event, func() error, error) {
+		return canned("looks good"), noopClose, nil
+	})()
+	defer swap(&runCreateProgressFn, func(_ <-chan string, _ *askbridge.Bridge, done <-chan struct{}) { <-done })()
+
+	clean := "---\nname: N\ndescription: D\ncategory: C\ncreated: 2026-01-01\n---\n\n# T\n\n```bash {id=a}\ntrue\n```\n"
+	cleanPath := writeValidateTemp(t, "clean.md", clean)
+	withArgs(t, []string{"ai-playbook", "validate", "--file", cleanPath})
+
+	var code int
+	out := captureStdout(t, func() { code = ValidateMain() })
+	if code != 0 {
+		t.Fatalf("clean → exit %d, want 0", code)
+	}
+	if !strings.Contains(out, "looks good") {
+		t.Fatalf("AI review text not in report:\n%s", out)
+	}
+}
+
+// ---- heartbeat: pure dots-then-newline, no TTY/model needed ----
+
+func TestHeartbeat_DotsThenNewline(t *testing.T) {
+	var buf bytes.Buffer
+	done := make(chan struct{})
+	go func() { time.Sleep(120 * time.Millisecond); close(done) }()
+	heartbeat(&buf, done, 40*time.Millisecond) // >=2 ticks before done
+	out := buf.String()
+	if !strings.Contains(out, ".") {
+		t.Fatalf("expected dots, got %q", out)
+	}
+	if !strings.HasSuffix(out, "\n") {
+		t.Fatalf("expected trailing newline, got %q", out)
 	}
 }
