@@ -317,8 +317,8 @@ func TestAssistedFooterButtons_ModeAccents(t *testing.T) {
 
 	m.assistedFooter = "step"
 	for _, b := range m.assistedFooterButtons() {
-		if b.Accent != colSurface1 {
-			t.Errorf("step button %q: Accent=%q, want colSurface1 (%q)", b.Label, b.Accent, colSurface1)
+		if b.Accent != colOverlay1 {
+			t.Errorf("step button %q: Accent=%q, want colOverlay1 (%q)", b.Label, b.Accent, colOverlay1)
 		}
 	}
 
@@ -352,8 +352,8 @@ func TestAssistedFooterButtons_SelectionColors(t *testing.T) {
 
 	m.assistedFooter = "step"
 	for _, b := range m.assistedFooterButtons() {
-		if b.Accent != colSurface1 {
-			t.Errorf("step button %q: Accent=%q, want colSurface1 (%q)", b.Label, b.Accent, colSurface1)
+		if b.Accent != colOverlay1 {
+			t.Errorf("step button %q: Accent=%q, want colOverlay1 (%q)", b.Label, b.Accent, colOverlay1)
 		}
 	}
 

@@ -718,10 +718,23 @@ func (r *renderer) code(n ast.Node) {
 		numW = lipgloss.Width(caret) + 1 + lipgloss.Width(g) + 1
 	}
 
-	// region width: leadpad(1) + langW + sep(" ❘ "=3) + run(2 if shell/run+unblocked) + play(2 if shell+unblocked) + diff(2 if diff) + apply-diff or undo-diff(2 if diff+unblocked or applied) + copy(2)
+	// region width: leadpad(1) + langW + sep(" ❘ "=3) + run(2 if shell/run+unblocked, gated below) + play(2 if shell+unblocked) + diff(2 if diff) + apply-diff or undo-diff(2 if diff+unblocked or applied) + copy(2)
 	regionW := 1 + langW + 3 + 2
 	if (blk.Type == "shell" || blk.Type == "run") && len(unmet) == 0 && !isRollbackTarget {
-		regionW += 2 // run(2)
+		switch r.states[blk.ID].Status {
+		case "running", "ok":
+			// The stop button / dimmed "done" glyph always draws its 2 cols,
+			// assisted or not — reserve unconditionally so those rows don't
+			// overflow past width.
+			regionW += 2
+		default:
+			// The plain run button only draws (and only needs its 2-col slot)
+			// when there's no assisted cursor collapsing it away (see the
+			// render switch's default arm below).
+			if r.readyID == "" {
+				regionW += 2 // run(2) — assisted has no inline run slot to reserve
+			}
+		}
 	}
 	if blk.Type == "shell" && len(unmet) == 0 && !isRollbackTarget && r.muxActive {
 		regionW += 2 // play(2) — only under a mux (needs an origin pane)
@@ -788,21 +801,19 @@ func (r *renderer) code(n ast.Node) {
 			default:
 				// Assisted (GUIDED): the footer's Run drives the ready step, so the
 				// inline run button on the code-block's right tab would be a redundant
-				// (and now ambiguous) second way to fire it. Blank it out instead —
-				// two spaces on the code-block bg, no Button registered — while keeping
-				// the reserved region width unchanged so alignment with non-assisted
-				// renders is preserved. Non-assisted (r.readyID == "") keeps the
-				// existing plain run button untouched.
-				if r.readyID != "" {
-					sb.WriteString(bg.Render("  "))
-					col += 2
-				} else {
+				// (and now ambiguous) second way to fire it. Render nothing at all —
+				// no glyph, no blanks, no column advance, no Button — and the run slot
+				// isn't reserved in regionW either (see above), so the copy button
+				// follows the separator directly with no gap. Non-assisted
+				// (r.readyID == "") keeps the existing plain run button untouched.
+				if r.readyID == "" {
 					sb.WriteString(r.buttonGlyph(blk.ID, "run", glyphRun, colRun, bg))
 					col++
 					sb.WriteString(bg.Render(" "))
 					col++
 					r.buttons = append(r.buttons, Button{Line: lineIdx, Col: runActionCol, Width: 2, Kind: "run", Payload: runPayload(blk), BlockID: blk.ID})
 				}
+				// else: assisted — collapse the slot entirely, nothing to render.
 			}
 		}
 		if blk.Type == "shell" && !isRollbackTarget && r.muxActive {

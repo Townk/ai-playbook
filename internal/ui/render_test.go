@@ -1956,6 +1956,69 @@ func TestAssisted_NoInlineRunButtonInAssisted(t *testing.T) {
 	}
 }
 
+// TestAssisted_RunSlotCollapses verifies fix B (live-testing feedback):
+// removing the inline run button in assisted mode must also collapse its
+// reserved region-width slot, not just blank the glyph — the previous fix
+// left a 2-space dead gap between the separator and the copy button because
+// the slot was still reserved in regionW while the glyph was blanked out.
+//
+// Collapsing the reservation grows fillCols (the "▂" fill bar) by the same 2
+// columns it reclaims from the run slot, so the copy button's absolute
+// column is IDENTICAL between assisted and non-assisted renders — both stay
+// flush to the same right edge (width). What changes is what sits between
+// the separator and the copy button: two dead background cells (the old,
+// buggy blank-glyph approach) vs. nothing at all (this fix). This test pins
+// the flush-edge invariant; TestAssisted_NoInlineRunButtonInAssisted already
+// pins the "no run Button registered" half.
+func TestAssisted_RunSlotCollapses(t *testing.T) {
+	md := "```bash {id=a}\ntrue\n```\n"
+
+	_, nonAssistedBtns, _ := renderCursor(md, 80, map[string]blockRunState{}, "", "")
+	_, assistedBtns, _ := renderCursor(md, 80, map[string]blockRunState{}, "", "a")
+
+	nonAssistedCopy := buttonForBlock(nonAssistedBtns, "a", "copy")
+	assistedCopy := buttonForBlock(assistedBtns, "a", "copy")
+	if nonAssistedCopy == nil || assistedCopy == nil {
+		t.Fatalf("setup: expected a copy button in both renders (non-assisted=%v, assisted=%v)", nonAssistedCopy, assistedCopy)
+	}
+	if assistedCopy.Col != nonAssistedCopy.Col {
+		t.Errorf("assisted copy button Col=%d, want %d (same as non-assisted) — the reclaimed run slot should be absorbed by the fill bar, keeping buttons flush to the same edge",
+			assistedCopy.Col, nonAssistedCopy.Col)
+	}
+}
+
+// TestAssisted_OkStatusBlockNoOverflowWhenCursorElsewhere is a regression test
+// for a bug found while implementing the run-slot collapse above: gating the
+// regionW run-slot reservation purely on "is assisted mode active at all"
+// (r.readyID != "") — rather than on this particular block's own render
+// path — also stripped the reservation from blocks whose Status is "running"
+// or "ok". Those blocks still draw their own 2-column glyph (a stop button or
+// a dimmed "done" cue) unconditionally, regardless of assisted mode, so
+// under-reserving regionW for them made the row 2 columns too wide (spilling
+// the copy button past the render width) while the assisted cursor sat on a
+// different, still-unrun block. The fix reserves the 2 columns whenever
+// Status is "running"/"ok" (unconditionally) and only skips the reservation
+// for the still-runnable ("default") case when there's an assisted cursor.
+func TestAssisted_OkStatusBlockNoOverflowWhenCursorElsewhere(t *testing.T) {
+	const width = 80
+	md := "```bash {id=a}\ntrue\n```\n\n```bash {id=b needs=a}\ntrue\n```\n"
+	states := map[string]blockRunState{"a": {Status: "ok"}}
+
+	lines, btns, _ := renderCursor(md, width, states, "", "b")
+	for i, l := range lines {
+		if w := lipgloss.Width(strip(l.Text)); w > width {
+			t.Errorf("line %d is %d cols wide, want <= %d (overflow): %q", i, w, width, strip(l.Text))
+		}
+	}
+	aCopy := buttonForBlock(btns, "a", "copy")
+	if aCopy == nil {
+		t.Fatal("setup: expected a copy button for the already-ok block \"a\"")
+	}
+	if aCopy.Col+aCopy.Width > width {
+		t.Errorf("block a's copy button extends to col %d, past width %d", aCopy.Col+aCopy.Width, width)
+	}
+}
+
 // TestRender_SkippedStatus verifies a block whose run state is "skipped"
 // renders a "skipped" label instead of reading as merely un-run.
 func TestRender_SkippedStatus(t *testing.T) {

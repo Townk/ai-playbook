@@ -121,8 +121,8 @@ func (m model) lineForBlock(id string) int {
 // label shown, the Kind that identifies it to the click hit-test/flash (e.g.
 // "assist-run") and assistedFooterButtonLabel's flash lookup, and the Accent —
 // the FOCUSED-highlight color for this footer mode (all buttons in a mode
-// share one accent: the neutral dialog blue for "step", the warn peach for
-// "failure", green only for the terminal "done" success state).
+// share one accent: a lighter "selected tab" grey for "step", the warn peach
+// for "failure", green only for the terminal "done" success state).
 type footerBtn struct{ Label, Kind, Accent string }
 
 // assistedFooterButtons returns the button set for the current assistedFooter
@@ -131,17 +131,20 @@ type footerBtn struct{ Label, Kind, Accent string }
 // a single Quit; "" (footer not shown) → nil.
 //
 // Accent is mode-wide, not per-button: "step" hasn't succeeded at anything yet,
-// so its FOCUSED button reads as a neutral "selected tab" surface (colSurface1)
-// rather than success-green or the dialog accent. "failure" uses the warn tone
-// (colPeach) already used elsewhere for rollback/danger actions. "done" is the
-// one case a completed run legitimately reads as success (colGreen).
+// so its FOCUSED button reads as a neutral "selected tab" — a lighter grey
+// (colOverlay1) than the unfocused buttons' colSurface1, with bright-white text
+// (see assistedFooterButtonLabel) — rather than success-green or the dialog
+// accent. "failure" uses the warn tone (colPeach) already used elsewhere for
+// rollback/danger actions. "done" is the one case a completed run legitimately
+// reads as success (colGreen). Both "failure" and "done" pair their colored
+// accent with dark (colBase) focused text, readable on a light background.
 func (m model) assistedFooterButtons() []footerBtn {
 	switch m.assistedFooter {
 	case "step":
 		return []footerBtn{
-			{"Run", "assist-run", colSurface1},
-			{"Skip", "assist-skip", colSurface1},
-			{"Quit", "assist-quit", colSurface1},
+			{"Run", "assist-run", colOverlay1},
+			{"Skip", "assist-skip", colOverlay1},
+			{"Quit", "assist-quit", colOverlay1},
 		}
 	case "failure":
 		var btns []footerBtn
@@ -237,26 +240,32 @@ func (m model) assistedFooterContextRowString() string {
 
 // assistedFooterButtonLabel renders one footer button, mirroring
 // confirmButtonLabel's filled-control structure (same padding, same flash
-// treatment, same dim "unfocused" look) but WITHOUT confirmButtonLabel's
-// always-green focused highlight: the focused color comes from the button's
-// own Accent (mode-wide — see assistedFooterButtons), so the "step" footer
-// reads as a neutral "selected tab" rather than "success" before anything has
-// run. confirmButtonLabel itself is left untouched — the verify-success
-// confirm row still shares it.
+// treatment) but WITHOUT confirmButtonLabel's always-green focused highlight:
+// the focused color comes from the button's own Accent (mode-wide — see
+// assistedFooterButtons), so the "step" footer's selected button reads as a
+// lighter-grey "selected tab" (colOverlay1 bg) with bright-white text, rather
+// than "success" before anything has run. The colored "failure"/"done" accents
+// pair with dark (colBase) text instead, since colBase would be unreadable on
+// their light backgrounds. confirmButtonLabel itself is left untouched — the
+// verify-success confirm row still shares it.
 func (m model) assistedFooterButtonLabel(label, kind, accent string, focused bool) string {
 	st := lipgloss.NewStyle().Padding(0, confirmButtonPad)
 	if m.flashKey == "assist:"+kind {
 		return st.Foreground(lipgloss.Color(colFlashOn)).Bold(true).Render(label)
 	}
 	if focused {
+		fg := colBase
+		if accent == colOverlay1 {
+			fg = colWhite
+		}
 		return st.
-			Foreground(lipgloss.Color(colBase)).
+			Foreground(lipgloss.Color(fg)).
 			Background(lipgloss.Color(accent)).
 			Bold(true).Render(label)
 	}
 	return st.
-		Foreground(lipgloss.Color(colSubtext)).
-		Background(lipgloss.Color(colSurface0)).
+		Foreground(lipgloss.Color(colSubtext0)).
+		Background(lipgloss.Color(colSurface1)).
 		Render(label)
 }
 
