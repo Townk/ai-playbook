@@ -1,6 +1,10 @@
 package author
 
-import "os/exec"
+import (
+	"os/exec"
+
+	"github.com/Townk/ai-playbook/internal/config"
+)
 
 // reviewProcess overrides process construction for ReviewOnce — the test seam
 // mirroring AuthorOptions.Command (the fake-harness pattern ClassifyRequest/
@@ -32,8 +36,15 @@ var reviewProcess func(bin string, args []string) *exec.Cmd
 // (string, error) from runMetadataOnce is returned to the caller as-is, so a
 // no-backend/harness-unsupported condition surfaces as a plain error the
 // caller can detect, rather than being swallowed into a retry-failed wrapper.
-func ReviewOnce(systemPrompt, userMessage string) (string, error) {
+//
+// cfg supplies the project's configured [agent] harness/model/bin (same as
+// ClassifyRequest/PlaybookMetadata's callers, e.g. internal/launcher) so
+// RunHarnessEvents doesn't silently fall back to config.Default() for a
+// project that configured a non-default harness/model. Task 4's `validate`
+// command loads the project config and passes it here.
+func ReviewOnce(cfg *config.Config, systemPrompt, userMessage string) (string, error) {
 	opts := AuthorOptions{
+		Cfg:           cfg,
 		MCPConfigPath: "",
 		Bare:          true,
 		NoThinking:    true,

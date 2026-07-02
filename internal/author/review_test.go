@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Townk/ai-playbook/internal/config"
 )
 
 // runReview drives ReviewOnce against a fake harness emitting resultText,
@@ -25,7 +27,7 @@ func runReview(t *testing.T, systemPrompt, userMessage, resultText string) (stri
 	}
 	t.Cleanup(func() { reviewProcess = old })
 
-	got, err := ReviewOnce(systemPrompt, userMessage)
+	got, err := ReviewOnce(config.Default(), systemPrompt, userMessage)
 	return got, gotArgs, err
 }
 
@@ -100,7 +102,7 @@ func TestReviewOnce_PropagatesHarnessErrorWithNoRetry(t *testing.T) {
 	}
 	t.Cleanup(func() { reviewProcess = old })
 
-	got, err := ReviewOnce("you are a reviewer", "the playbook body")
+	got, err := ReviewOnce(config.Default(), "you are a reviewer", "the playbook body")
 	if err == nil {
 		t.Fatal("expected an error from a failing harness")
 	}
