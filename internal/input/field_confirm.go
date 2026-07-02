@@ -169,9 +169,8 @@ func (f *confirmField) filled() bool { return true }
 func (f *confirmField) initCmd() tea.Cmd { return nil }
 
 // hint returns the accelerator hint string for this field.
-func (f *confirmField) hint() string {
-	key := lipgloss.NewStyle().Foreground(lipgloss.Color(f.theme.Key))
-	word := lipgloss.NewStyle().Foreground(lipgloss.Color(f.theme.Muted))
+func (f *confirmField) hint(bg string) string {
+	key, word := hintKW(f.theme, bg)
 	seg := func(k, w string) string { return key.Render(k) + word.Render(" "+w) }
 	sep := word.Render(" · ")
 	segs := []string{

@@ -202,7 +202,7 @@ func TestChooseModel_InnerWNarrow(t *testing.T) {
 
 func TestChooseHintMulti(t *testing.T) {
 	// multi=true must add the "space toggle" segment
-	h := strip(chooseHint(defaultTheme(), 3, true))
+	h := strip(chooseHint(defaultTheme(), 3, true, ""))
 	if !strings.Contains(h, "toggle") {
 		t.Fatalf("multi hint must show 'toggle': %q", h)
 	}

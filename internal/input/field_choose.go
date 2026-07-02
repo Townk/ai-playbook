@@ -476,4 +476,4 @@ func (f *chooseField) initCmd() tea.Cmd { return nil }
 // hint returns the accelerator hint string for this field. It lets the generic
 // model frame (used by the embeddable Ask) render the choose-specific hint without
 // going through chooseModel.
-func (f *chooseField) hint() string { return chooseHint(f.theme, f.totalRows(), f.multi) }
+func (f *chooseField) hint(bg string) string { return chooseHint(f.theme, f.totalRows(), f.multi, bg) }

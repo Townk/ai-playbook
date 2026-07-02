@@ -261,8 +261,7 @@ func (m formModel) tabRow() string {
 
 // hint returns the keyboard hint line for the form.
 func (m formModel) hint() string {
-	key := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Key))
-	word := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted))
+	key, word := hintKW(m.theme, hintFrameBG)
 	seg := func(k, w string) string { return key.Render(k) + word.Render(" "+w) }
 	sep := word.Render(" · ")
 	return strings.Join([]string{

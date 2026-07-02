@@ -96,7 +96,7 @@ func (m confirmModel) render() string {
 		sections = append(sections, promptStyle(m.theme).Render(m.prompt))
 	}
 	sections = append(sections, m.fld.view(iW, true))
-	return renderFrame(m.theme, m.variant, m.title, sections, m.fld.hint(), m.width, m.padding, m.inset)
+	return renderFrame(m.theme, m.variant, m.title, sections, m.fld.hint(hintFrameBG), m.width, m.padding, m.inset)
 }
 
 func (m confirmModel) View() tea.View { return tea.NewView(m.render()) }

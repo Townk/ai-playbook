@@ -77,9 +77,8 @@ func (m chooseModel) innerW() int {
 // Only key glyphs are rendered in theme.Key (bright white); separators,
 // dashes, and descriptive words are in theme.Muted (dark grey).
 // rows is kept for API compatibility but is no longer used.
-func chooseHint(t Theme, rows int, multi bool) string {
-	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(t.Key))
-	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(t.Muted))
+func chooseHint(t Theme, rows int, multi bool, bg string) string {
+	keyStyle, mutedStyle := hintKW(t, bg)
 	seg := func(k, w string) string { return keyStyle.Render(k) + mutedStyle.Render(w) }
 	sep := mutedStyle.Render(" · ")
 
@@ -97,7 +96,7 @@ func chooseHint(t Theme, rows int, multi bool) string {
 }
 
 func (m chooseModel) hint() string {
-	return chooseHint(m.theme, m.fld.totalRows(), m.multi)
+	return chooseHint(m.theme, m.fld.totalRows(), m.multi, hintFrameBG)
 }
 
 func (m chooseModel) render() string {

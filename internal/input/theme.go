@@ -105,3 +105,22 @@ func promptStyle(t Theme) lipgloss.Style {
 		Foreground(lipgloss.Color(t.Text)).
 		Background(lipgloss.Color(theme.Mantle))
 }
+
+// hintFrameBG is the background hint segments paint on inside a frame, so their
+// per-segment SGR resets don't drop to the terminal default (the same bleed
+// promptStyle prevents for the prompt body). The inline/unframed layout passes
+// "" instead — it composites on the terminal background, not Mantle.
+const hintFrameBG = theme.Mantle
+
+// hintKW returns the key (accelerator) and word (description) styles for a hint
+// line. When bg is non-empty the styles paint on it; pass hintFrameBG inside a
+// frame and "" for the inline layout.
+func hintKW(t Theme, bg string) (key, word lipgloss.Style) {
+	key = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Key))
+	word = lipgloss.NewStyle().Foreground(lipgloss.Color(t.Muted))
+	if bg != "" {
+		key = key.Background(lipgloss.Color(bg))
+		word = word.Background(lipgloss.Color(bg))
+	}
+	return key, word
+}

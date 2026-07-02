@@ -69,6 +69,18 @@ func TestConfirmField_TertiaryButtonAndValue(t *testing.T) {
 	}
 }
 
+func TestConfirmField_HintBackground(t *testing.T) {
+	f := newConfirmField(defaultTheme(), "default", "Confirm", "Customize", false)
+	// theme.Mantle (#181825) => rgb(24,24,37); its truecolor bg SGR params:
+	const mantleBG = "48;2;24;24;37"
+	if got := f.hint(theme.Mantle); !strings.Contains(got, mantleBG) {
+		t.Errorf("framed hint must paint segments on the Mantle background; got %q", got)
+	}
+	if got := f.hint(""); strings.Contains(got, mantleBG) {
+		t.Errorf("inline hint must not paint a background; got %q", got)
+	}
+}
+
 func TestConfirmField_FocusCyclesThroughThree(t *testing.T) {
 	f := newConfirmField(defaultTheme(), "default", "Confirm", "Customize", false)
 	a := &Ask{m: model{fld: f}}

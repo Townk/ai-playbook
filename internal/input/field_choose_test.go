@@ -225,7 +225,7 @@ func TestChooseOtherFocusToTypeStillWorks(t *testing.T) {
 }
 
 func TestChooseHintRangeAndEscGlyph(t *testing.T) {
-	h := chooseHint(defaultTheme(), 3 /*rows*/, false /*multi*/)
+	h := chooseHint(defaultTheme(), 3 /*rows*/, false /*multi*/, "")
 	plain := strip(h)
 	// Number range is gone.
 	if strings.Contains(plain, "1-3") || strings.Contains(plain, "pick") {
@@ -285,7 +285,7 @@ func TestChooseNoNumberShortcuts(t *testing.T) {
 }
 
 func TestChooseHintNoNumberRange(t *testing.T) {
-	h := strip(chooseHint(defaultTheme(), 3, false))
+	h := strip(chooseHint(defaultTheme(), 3, false, ""))
 	if strings.Contains(h, "1-3") || strings.Contains(h, "pick") {
 		t.Fatalf("hint must not mention a number range/pick: %q", h)
 	}

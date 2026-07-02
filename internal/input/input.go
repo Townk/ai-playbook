@@ -221,9 +221,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 // --- render ------------------------------------------------------------------
 
-func (m model) hint() string {
-	key := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Key))
-	word := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted))
+func (m model) hint(bg string) string {
+	key, word := hintKW(m.theme, bg)
 	seg := func(k, w string) string { return key.Render(k) + word.Render(" "+w) }
 	sep := word.Render(" · ")
 	if m.singleLine {
@@ -244,9 +243,13 @@ func (m model) render() string {
 	// type-specific accelerators); text/line fields have none, so the generic
 	// submit/newline/cancel hint applies. This makes the embeddable Ask render the
 	// correct hint per type while the standalone text/line path is unchanged.
-	hint := m.hint()
-	if h, ok := m.fld.(interface{ hint() string }); ok {
-		hint = h.hint()
+	hintBG := hintFrameBG
+	if m.inline {
+		hintBG = ""
+	}
+	hint := m.hint(hintBG)
+	if h, ok := m.fld.(interface{ hint(string) string }); ok {
+		hint = h.hint(hintBG)
 	}
 	if m.inline {
 		inlinePrompt := prompt
