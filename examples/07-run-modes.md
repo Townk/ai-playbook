@@ -81,7 +81,7 @@ ai-playbook run --auto --file examples/07-run-modes.md 2>&1 | tee run.log
 ```
 
 > [!TIP]
-> In project-bound playbooks (see Chapter 06) auto mode skips the interactive env-variable confirmation gate if all required variables are already present in the environment. Export them before calling ai-playbook and the gate is satisfied silently.
+> In project-bound playbooks (see Chapter 06) auto mode skips the interactive env-variable confirmation gate if all required variables are already present in the environment. Export them before calling ai-playbook and the gate is satisfied silently. Or pass them inline with `--with-env` — a JSON object (`--with-env '{"PROJECT_ROOT":"/path"}'`) or a path to a JSON file. Values given this way take precedence over the environment; undeclared keys are ignored with a warning.
 
 ## Rollback in CI
 

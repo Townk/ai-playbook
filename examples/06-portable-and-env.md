@@ -53,7 +53,7 @@ On the **first block run** of a session, ai-playbook pauses and shows a grouped 
 
 This means you can share a playbook with a colleague who has the project checked out at a different path: they simply update `PROJECT_ROOT` in the confirmation dialog, and every downstream reference (`$DATA_DIR` and any others built on top of it) resolves correctly without editing the file.
 
-The confirmation gate also applies when running this playbook non-interactively. `ai-playbook run --assisted --file examples/06-portable-and-env.md` opens the guided viewer and confirms the variables as soon as it loads—before the first step—so you can review and adjust them up front. With `ai-playbook run --auto --file examples/06-portable-and-env.md`, the playbook runs unattended: it requires the variables already set in the environment (export them first) and errors listing any that are missing.
+The confirmation gate also applies when running this playbook non-interactively. `ai-playbook run --assisted --file examples/06-portable-and-env.md` opens the guided viewer and confirms the variables as soon as it loads—before the first step—so you can review and adjust them up front. With `ai-playbook run --auto --file examples/06-portable-and-env.md`, the playbook runs unattended: it requires the variables already set in the environment (export them first) and errors listing any that are missing — or supply them with `--with-env '{"PROJECT_ROOT":"…","DATA_DIR":"…"}'` (or `--with-env env.json`) instead of exporting.
 
 ## Writing to $DATA_DIR
 
