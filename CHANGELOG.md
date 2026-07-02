@@ -91,14 +91,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- The variable-confirmation dialog is now fully painted on its background — the
-  prompt body, the button row (now `[ Confirm ][ Customize ][ Quit ]`), and the
-  hint line no longer bleed the terminal's default background — and variables
-  render in an aligned two-column layout with long values wrapping under the value
-  column.
+- Framed dialogs are now fully painted on their background — no bleed-through of
+  the terminal's default: the variable-confirmation dialog's prompt body, button
+  row (now `[ Confirm ][ Customize ][ Quit ]`), and hint line; the `choose`
+  dialog's prompt; and the text-input box interior. The hint line sits flush
+  against the bottom border (no trailing blank line), and the confirmation
+  dialog's variables render in an aligned two-column layout with long values
+  wrapping under the value column.
 - In the confirm gate, **ESC** and the new **Quit** button end the run; ESC while
   editing a variable (Customize) steps back to the confirm dialog instead of
   quitting.
+- ESC during the `assist` classify wait now cancels the request instead of
+  proceeding to route it as if submitted.
 - `--assisted` now confirms a project-bound playbook's declared variables at load
   (before the first step), matching the run-modes spec.
 
