@@ -491,6 +491,91 @@ func TestAutoRun_DanglingDep_Exit2(t *testing.T) {
 	}
 }
 
+// TestAutoRun_StoredParent_EnvReachesRunner verifies a STORED (--playbook)
+// parent's declared front-matter env reaches the runner via --auto. Every
+// other chain test in this file drives a "file" parent; loadParent's
+// "playbook" branch (storeLoadFn → re-read + parse meta.Path) has its own
+// code path and, before Task 3, the old autoRun "playbook" branch never
+// parsed the file at all — silently dropping a stored parent's declared env.
+// A future refactor reverting that branch must fail THIS test.
+func TestAutoRun_StoredParent_EnvReachesRunner(t *testing.T) {
+	dir := t.TempDir()
+	parentPath := writeDepPlaybook(t, dir, "parent", "env:\n  FOO:\n    value: bar\n    why: test\n")
+
+	withStoreLoadFn(t, func(slug string) (store.Meta, string, error) {
+		if slug == "parent" {
+			return store.Meta{Slug: "parent", Path: parentPath}, "", nil
+		}
+		return store.Meta{}, "", os.ErrNotExist
+	})
+
+	var gotRC autorun.RunConfig
+	restore := swap(&autorunRunFn, func(rc autorun.RunConfig) int {
+		gotRC = rc
+		return 0
+	})
+	defer restore()
+
+	ra := runArgs{Kind: "playbook", Value: "parent", Mode: modeAuto}
+	if code := autoRun(ra); code != 0 {
+		t.Fatalf("autoRun = %d, want 0", code)
+	}
+	if gotRC.EnvVars["FOO"].Value != "bar" {
+		t.Fatalf("EnvVars[FOO] = %+v, want value bar (a stored parent's fm.Env must reach the runner)", gotRC.EnvVars["FOO"])
+	}
+}
+
+// TestAutoRun_StoredParent_WithDependsOn_OrderAndEnv extends the lock-in: a
+// STORED parent that ALSO declares depends_on must have loadParent surface
+// fm.DependsOn (not just fm.Env) — resolveChain must run the dependency
+// first, and both the dependency's and the stored parent's declared env must
+// reach their respective RunConfigs.
+func TestAutoRun_StoredParent_WithDependsOn_OrderAndEnv(t *testing.T) {
+	dir := t.TempDir()
+	depPath := writeDepPlaybook(t, dir, "dep", "env:\n  DEP_VAR:\n    value: depval\n    why: test\n")
+	parentPath := writeDepPlaybook(t, dir, "parent",
+		"env:\n  FOO:\n    value: bar\n    why: test\ndepends_on:\n  - dep\n")
+
+	withStoreLoadFn(t, func(slug string) (store.Meta, string, error) {
+		if slug == "parent" {
+			return store.Meta{Slug: "parent", Path: parentPath}, "", nil
+		}
+		return store.Meta{}, "", os.ErrNotExist
+	})
+	defer swap(&storePathForFn, func(slug string) (string, bool) {
+		if slug == "dep" {
+			return depPath, true
+		}
+		return "", false
+	})()
+
+	var order []string
+	var configs []autorun.RunConfig
+	restore := swap(&autorunRunFn, func(rc autorun.RunConfig) int {
+		order = append(order, rc.Slug)
+		configs = append(configs, rc)
+		return 0
+	})
+	defer restore()
+
+	ra := runArgs{Kind: "playbook", Value: "parent", Mode: modeAuto}
+	if code := autoRun(ra); code != 0 {
+		t.Fatalf("autoRun = %d, want 0", code)
+	}
+	if want := []string{"dep", "parent"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("order = %v, want %v", order, want)
+	}
+	if len(configs) != 2 {
+		t.Fatalf("want 2 RunConfigs (dep + stored parent), got %d: %+v", len(configs), configs)
+	}
+	if configs[0].EnvVars["DEP_VAR"].Value != "depval" {
+		t.Errorf("dep EnvVars[DEP_VAR] = %+v, want value depval", configs[0].EnvVars["DEP_VAR"])
+	}
+	if configs[1].EnvVars["FOO"].Value != "bar" {
+		t.Errorf("stored parent EnvVars[FOO] = %+v, want value bar", configs[1].EnvVars["FOO"])
+	}
+}
+
 // ---- RunMain: depends_on wiring for the non-auto (interactive/assisted) path ----
 
 // TestRunMain_NonAuto_DanglingDep_Exit2 verifies the interactive dispatch also
