@@ -73,15 +73,22 @@ func resolveEnvArgs(args []string) (envArgs, error) {
 // else the declared default) and redacts sensitive ones to "". Returns the
 // name→value map and the sorted names of the redacted vars. Pure — getenv is
 // injected so tests never touch the process environment.
+//
+// A var is redacted when its resolved value is sensitive (frontmatter.Redact:
+// secret-looking name or high-entropy value) OR its DECLARED default is already
+// the <redacted> mask — the latter means the value was masked at build time, so
+// the var stays masked here even if the current environment supplies a benign
+// override (once sensitive, always redacted; a safe default for a secrets dump).
 func resolveEnvJSON(vars map[string]frontmatter.EnvValue, getenv func(string) string) (map[string]string, []string) {
 	out := make(map[string]string, len(vars))
 	var redacted []string
 	for name, ev := range vars {
+		declaredMasked := frontmatter.IsRedactedMask(ev.Value)
 		raw := ev.Value
 		if v := getenv(name); v != "" {
 			raw = v
 		}
-		if _, isRedacted := frontmatter.Redact(name, raw); isRedacted || frontmatter.IsRedactedMask(raw) {
+		if _, isRedacted := frontmatter.Redact(name, raw); isRedacted || declaredMasked {
 			out[name] = ""
 			redacted = append(redacted, name)
 			continue

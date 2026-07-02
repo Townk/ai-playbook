@@ -46,6 +46,29 @@ func TestResolveEnvJSON(t *testing.T) {
 	}
 }
 
+// TestResolveEnvJSON_BuiltMaskStaysRedacted covers the edge the declared-default
+// gate closes: a var whose default was masked at build time but whose name is NOT
+// secret-looking and whose live override is short/low-entropy (so frontmatter.Redact
+// alone would miss it) must STILL come out "" — once masked at build, always masked.
+func TestResolveEnvJSON_BuiltMaskStaysRedacted(t *testing.T) {
+	vars := map[string]frontmatter.EnvValue{
+		"BLOB": {Value: "<redacted>"}, // masked at build (by value entropy), benign name
+	}
+	getenv := func(name string) string {
+		if name == "BLOB" {
+			return "ab" // short, low-entropy: Redact's heuristic would not flag it
+		}
+		return ""
+	}
+	out, redacted := resolveEnvJSON(vars, getenv)
+	if out["BLOB"] != "" {
+		t.Errorf("a build-masked var must stay redacted despite a benign override; got %q", out["BLOB"])
+	}
+	if !reflect.DeepEqual(redacted, []string{"BLOB"}) {
+		t.Errorf("redacted = %v, want [BLOB]", redacted)
+	}
+}
+
 func TestResolveEnvArgs(t *testing.T) {
 	if ra, err := resolveEnvArgs([]string{"--file", "p.md"}); err != nil || ra.Kind != "file" || ra.Value != "p.md" {
 		t.Fatalf("--file: ra=%+v err=%v", ra, err)
