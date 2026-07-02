@@ -8,6 +8,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
+
+	"github.com/Townk/ai-playbook/internal/theme"
 )
 
 // formField is a parsed entry from the US/RS form spec.
@@ -294,6 +296,13 @@ func (m formModel) render() string {
 	iW := m.innerW()
 	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text))
 	desc := descStyle.Render(m.specs[m.focus].label)
+	// Form fields are always rendered inside the dialog frame, so a text field's
+	// box interior must carry Mantle too, or it bleeds to the terminal default
+	// (same bleed promptStyle/hintFrameBG fix for the prompt/hint sections; see
+	// input.go's model.render() framed branch for the non-form counterpart).
+	if tf, ok := m.fields[m.focus].(*textField); ok {
+		tf.boxBG = theme.Mantle
+	}
 	body := []string{
 		m.tabRow(),
 		desc,

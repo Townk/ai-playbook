@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 )
 
@@ -103,7 +102,7 @@ func (m chooseModel) render() string {
 	iW := m.innerW()
 	sections := []string{}
 	if m.prompt != "" {
-		sections = append(sections, lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text)).Render(m.prompt))
+		sections = append(sections, promptStyle(m.theme).Render(m.prompt))
 	}
 	sections = append(sections, m.fld.view(iW, true))
 	return renderFrame(m.theme, m.variant, m.title, sections, m.hint(), m.width, m.padding, m.inset)

@@ -10,6 +10,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
 	"github.com/mattn/go-runewidth"
+
+	"github.com/Townk/ai-playbook/internal/theme"
 )
 
 const promptIcon = "❯"
@@ -252,11 +254,22 @@ func (m model) render() string {
 		hint = h.hint(hintBG)
 	}
 	if m.inline {
+		// Inline composites on the pane/terminal background, not Mantle — the box
+		// interior must stay bg-less (mirrors why hintFrameBG passes "" here too).
+		if tf, ok := m.fld.(*textField); ok {
+			tf.boxBG = ""
+		}
 		inlinePrompt := prompt
 		if m.prompt != "" {
 			inlinePrompt = lipgloss.NewStyle().Foreground(lipgloss.Color(inlineDescColor)).Render(m.prompt)
 		}
 		return m.inlineLayout(inlinePrompt, m.fld.view(inlineBoxWidth, true), hint)
+	}
+	// Framed: the dialog frame fills Mantle (frame.go), so the box interior must
+	// carry it too, or its interior (and border background) bleeds to the
+	// terminal default — the same bleed promptStyle/hintFrameBG fix elsewhere.
+	if tf, ok := m.fld.(*textField); ok {
+		tf.boxBG = theme.Mantle
 	}
 	iW := m.innerW()
 	sections := []string{}

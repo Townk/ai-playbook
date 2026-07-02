@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+
+	"github.com/Townk/ai-playbook/internal/theme"
 )
 
 const us, rs, gs = "\x1f", "\x1e", "\x1d"
@@ -135,6 +137,30 @@ func TestFormMaxHeightIsTallestField(t *testing.T) {
 	}
 	if got <= h0 {
 		t.Fatalf("maxHeight(%d)=%d must be > height when focus=0 (%d)", w, got, h0)
+	}
+}
+
+// TestFormTextField_BoxHasMantleBackground pins the form-field counterpart of
+// TestTextBox_FramedSetsMantleBoxBG_InlineDoesNot (render_test.go): form
+// fields are ALWAYS rendered inside the dialog frame (no inline layout for
+// forms), so formModel.render() must set the focused text field's boxBG to
+// theme.Mantle. See that test's comment for why the assertion targets the
+// field's boxBG/unwrapped view() output rather than the fully-framed render
+// string (renderFrame's own Background(Mantle) wrap confounds a naive
+// whole-string SGR check).
+func TestFormTextField_BoxHasMantleBackground(t *testing.T) {
+	const mantleBG = "48;2;24;24;37"
+	m := newFormModel(defaultTheme(), "Setup", []formField{
+		{"a", "line", "First", ""},
+	}, 1, 1)
+	m.width = 50
+	m.render()
+	tf := m.fields[m.focus].(*textField)
+	if tf.boxBG != theme.Mantle {
+		t.Fatalf("form render must set the text field's boxBG to theme.Mantle, got %q", tf.boxBG)
+	}
+	if got := tf.view(m.innerW(), true); !strings.Contains(got, mantleBG) {
+		t.Fatalf("form text field box must paint the Mantle background; got %q", got)
 	}
 }
 
