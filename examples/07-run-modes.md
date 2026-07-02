@@ -83,6 +83,13 @@ ai-playbook run --auto --file examples/07-run-modes.md 2>&1 | tee run.log
 > [!TIP]
 > In project-bound playbooks (see Chapter 06) auto mode skips the interactive env-variable confirmation gate if all required variables are already present in the environment. Export them before calling ai-playbook and the gate is satisfied silently. Or pass them inline with `--with-env` — a JSON object (`--with-env '{"PROJECT_ROOT":"/path"}'`) or a path to a JSON file. Values given this way take precedence over the environment; undeclared keys are ignored with a warning.
 
+To scaffold that JSON, run `ai-playbook env --file <playbook>` (or `ai-playbook env <slug>`): it prints the declared variables as a JSON object — each resolved from your current environment, with sensitive values (tokens, keys, passwords) left empty and noted on stderr. Redirect it to a file, fill in the blanks, and pass it back:
+
+```bash {static}
+ai-playbook env --file examples/06-portable-and-env.md > env.json
+ai-playbook run --auto --with-env env.json --file examples/06-portable-and-env.md
+```
+
 ## Rollback in CI
 
 When an `--auto` run hits a failing step it stops immediately and — by default — **undoes the steps that already succeeded**, running each completed block's `rollback=` target in reverse order. That is what makes `--auto` safe to drop into a pipeline: a failed run doesn't leave half-applied state behind, and the non-zero exit still fails the CI step.
