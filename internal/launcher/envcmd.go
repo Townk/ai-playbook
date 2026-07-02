@@ -14,6 +14,13 @@
 // redacting sensitive values to "" — both secret-shaped values (via
 // frontmatter.Redact) and build-time-masked defaults whose corresponding env
 // var is unset (via frontmatter.IsRedactedMask).
+//
+// A playbook that declares depends_on gets the UNION of its own declared vars
+// and every dependency's, transitively (resolveChain, mirroring the run
+// chain): the parent's declaration wins on a name collision (envUnionChain).
+// A dangling or cyclic depends_on chain is fatal — it prints the same
+// structural diagnostics as `run` (printDepIssues) and exits 2 before any
+// output is produced.
 package launcher
 
 import (
@@ -99,6 +106,29 @@ func resolveEnvJSON(vars map[string]frontmatter.EnvValue, getenv func(string) st
 	return out, redacted
 }
 
+// envUnionChain builds the union of declared env vars for `env`'s chain-aware
+// output: the parent's parentEnv wins on a name collision (env shows the
+// value a human running the parent would see), and each dependency in deps
+// (the resolver's order) contributes any name not already present. Unlike
+// unionDeclared (deps.go, dep-wins — it only feeds the --with-env undeclared
+// check, where "known to any node in the chain" is all that matters), env
+// must reflect what actually resolves, so the parent's own declaration always
+// takes precedence.
+func envUnionChain(parentEnv map[string]frontmatter.EnvValue, deps []depNode) map[string]frontmatter.EnvValue {
+	union := make(map[string]frontmatter.EnvValue, len(parentEnv))
+	for name, ev := range parentEnv {
+		union[name] = ev
+	}
+	for _, dep := range deps {
+		for name, ev := range dep.FM.Env {
+			if _, exists := union[name]; !exists {
+				union[name] = ev
+			}
+		}
+	}
+	return union
+}
+
 // EnvMain implements `ai-playbook env <source>`: it resolves a playbook's
 // declared env: map against the current environment and prints it as a
 // --with-env-compatible JSON object on stdout (sensitive values emitted empty and
@@ -129,7 +159,18 @@ func EnvMain() int {
 	}
 
 	fm, _, _ := frontmatter.Parse(content)
-	out, redacted := resolveEnvJSON(fm.Env, os.Getenv)
+
+	vars := fm.Env
+	if len(fm.DependsOn) > 0 {
+		order, issues := resolveChain(fm.DependsOn)
+		if len(issues) > 0 {
+			printDepIssues(os.Stderr, issues)
+			return 2
+		}
+		vars = envUnionChain(fm.Env, order)
+	}
+
+	out, redacted := resolveEnvJSON(vars, os.Getenv)
 
 	data, merr := json.MarshalIndent(out, "", "  ")
 	if merr != nil {

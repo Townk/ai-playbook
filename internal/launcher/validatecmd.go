@@ -10,7 +10,10 @@
 //
 // The check runs in two passes: a deterministic structural pass
 // (internal/validate.Check — front matter, duplicate ids, needs/cycle,
-// unbalanced fences, runnable/lang warnings) that drives the exit code, and an
+// unbalanced fences, runnable/lang warnings), extended here with a
+// depends_on chain check (dependsOnFindings, via resolveChain — the same
+// resolver `run`/`env` use — since internal/validate itself stays a pure leaf
+// with no store coupling) that together drive the exit code, and an
 // optional AI review pass (author.ReviewStream, via the reviewStreamFn seam,
 // fanned out with live progress — a TTY spinner + model activity, or a
 // stderr heartbeat when there's no TTY, or --plain to force the heartbeat
@@ -109,6 +112,7 @@ func ValidateMain() int {
 	bodyLineOffset := strings.Count(content[:len(content)-len(body)], "\n")
 
 	findings := validate.Check(body, fm, ok, blocks, bodyLineOffset)
+	findings = append(findings, dependsOnFindings(fm.DependsOn)...)
 
 	var aiText string
 	// runAI: the AI pass runs unless explicitly skipped via --no-ai, or
@@ -157,6 +161,38 @@ func ValidateMain() int {
 		return 1
 	}
 	return 0
+}
+
+// dependsOnFindings resolves rootDeps' whole depends_on chain (resolveChain,
+// the same resolver `run`/`env` use) and turns each structural DepIssue into a
+// validate.Finding: a dangling dependency names the missing slug; a cycle
+// lists its participants joined by " → " (mirroring printDepIssues' own
+// wording). Both are Error severity under the "depends_on" check, so a
+// dep issue folds into ValidateMain's existing findings/exit-code/print path
+// exactly like any structural finding. internal/validate itself stays a pure
+// leaf — the resolver call lives here in the launcher, not there.
+func dependsOnFindings(rootDeps []string) []validate.Finding {
+	if len(rootDeps) == 0 {
+		return nil
+	}
+	_, issues := resolveChain(rootDeps)
+	findings := make([]validate.Finding, 0, len(issues))
+	for _, issue := range issues {
+		var msg string
+		switch issue.Kind {
+		case "dangling":
+			msg = fmt.Sprintf("depends_on %q does not exist in the store", issue.Slug)
+		case "cycle":
+			msg = "depends_on cycle: " + strings.Join(issue.Path, " → ")
+		}
+		findings = append(findings, validate.Finding{
+			Severity: validate.Error,
+			Check:    "depends_on",
+			Message:  msg,
+			Where:    "front matter",
+		})
+	}
+	return findings
 }
 
 // printValidateReport writes the plain-text report: a header, then every

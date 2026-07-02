@@ -244,6 +244,67 @@ func TestValidateMain_PlainForcesDots(t *testing.T) {
 	}
 }
 
+// ---- ValidateMain: depends_on chain findings ----
+
+// TestValidateMain_DanglingDependsOn verifies a playbook whose depends_on
+// names a slug missing from the store gets a depends_on Error finding and
+// exits 1 (folded into the same structural exit code as any other Error).
+func TestValidateMain_DanglingDependsOn(t *testing.T) {
+	defer swap(&reviewStreamFn, func(_ *config.Config, _, _ string) (<-chan agentstream.Event, func() error, error) {
+		return canned("looks good"), noopClose, nil
+	})()
+	defer swap(&runCreateProgressFn, func(_ <-chan string, _ *askbridge.Bridge, done <-chan struct{}) { <-done })()
+	defer swap(&storePathForFn, func(string) (string, bool) { return "", false })()
+
+	pb := "---\nname: N\ndescription: D\ncategory: C\ncreated: 2026-01-01\ndepends_on:\n  - ghost\n---\n\n# T\n\n```bash {id=a}\ntrue\n```\n"
+	path := writeValidateTemp(t, "parent.md", pb)
+	withArgs(t, []string{"ai-playbook", "validate", "--file", path})
+
+	var code int
+	out := captureStdout(t, func() { code = ValidateMain() })
+	if code != 1 {
+		t.Fatalf("dangling depends_on → exit %d, want 1", code)
+	}
+	if !strings.Contains(out, "depends_on") || !strings.Contains(out, `"ghost" does not exist in the store`) {
+		t.Fatalf("missing depends_on finding in report:\n%s", out)
+	}
+}
+
+// TestValidateMain_DependsOnCycle verifies a depends_on cycle reachable
+// through the store gets a cycle Error finding and exits 1.
+func TestValidateMain_DependsOnCycle(t *testing.T) {
+	defer swap(&reviewStreamFn, func(_ *config.Config, _, _ string) (<-chan agentstream.Event, func() error, error) {
+		return canned("looks good"), noopClose, nil
+	})()
+	defer swap(&runCreateProgressFn, func(_ <-chan string, _ *askbridge.Bridge, done <-chan struct{}) { <-done })()
+
+	dir := t.TempDir()
+	aPath := writeDepPlaybook(t, dir, "a", "depends_on:\n  - b\n")
+	bPath := writeDepPlaybook(t, dir, "b", "depends_on:\n  - a\n")
+	defer swap(&storePathForFn, func(slug string) (string, bool) {
+		switch slug {
+		case "a":
+			return aPath, true
+		case "b":
+			return bPath, true
+		}
+		return "", false
+	})()
+
+	pb := "---\nname: N\ndescription: D\ncategory: C\ncreated: 2026-01-01\ndepends_on:\n  - a\n---\n\n# T\n\n```bash {id=x}\ntrue\n```\n"
+	path := writeValidateTemp(t, "parent.md", pb)
+	withArgs(t, []string{"ai-playbook", "validate", "--file", path})
+
+	var code int
+	out := captureStdout(t, func() { code = ValidateMain() })
+	if code != 1 {
+		t.Fatalf("depends_on cycle → exit %d, want 1", code)
+	}
+	if !strings.Contains(out, "depends_on cycle:") {
+		t.Fatalf("missing cycle finding in report:\n%s", out)
+	}
+}
+
 // ---- heartbeat: pure dots-then-newline, no TTY/model needed ----
 
 func TestHeartbeat_DotsThenNewline(t *testing.T) {

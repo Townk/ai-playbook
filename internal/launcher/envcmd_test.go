@@ -101,3 +101,78 @@ func TestEnvMain_FileSmoke(t *testing.T) {
 		t.Errorf("FOO = %q, want bar", got["FOO"])
 	}
 }
+
+// ---- EnvMain: depends_on chain union ----
+
+// TestEnvMain_ChainUnion verifies a parent declaring depends_on emits the
+// UNION of its own declared vars and every dependency's — both A (the
+// parent's) and B (the dependency's) must appear in the output.
+func TestEnvMain_ChainUnion(t *testing.T) {
+	depPath := writeDepPlaybook(t, t.TempDir(), "dep", "env:\n  B:\n    value: depval\n")
+	defer swap(&storePathForFn, func(slug string) (string, bool) {
+		if slug == "dep" {
+			return depPath, true
+		}
+		return "", false
+	})()
+
+	pb := "---\nname: N\ndescription: D\ncategory: C\ncreated: 2026-01-01\ndepends_on:\n  - dep\nenv:\n  A:\n    value: parentval\n---\n\n# T\n\n```bash {id=a}\ntrue\n```\n"
+	path := writeValidateTemp(t, "parent.md", pb)
+	withArgs(t, []string{"ai-playbook", "env", "--file", path})
+	out := captureStdout(t, func() {
+		if code := EnvMain(); code != 0 {
+			t.Fatalf("EnvMain exit %d, want 0", code)
+		}
+	})
+	var got map[string]string
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, out)
+	}
+	if got["A"] != "parentval" {
+		t.Errorf("A = %q, want parentval (parent's own declared var)", got["A"])
+	}
+	if got["B"] != "depval" {
+		t.Errorf("B = %q, want depval (dependency's declared var)", got["B"])
+	}
+}
+
+// TestEnvMain_ChainCollision_ParentWins verifies that when the parent and a
+// dependency both declare the same var name, the parent's value wins.
+func TestEnvMain_ChainCollision_ParentWins(t *testing.T) {
+	depPath := writeDepPlaybook(t, t.TempDir(), "dep", "env:\n  X:\n    value: d\n")
+	defer swap(&storePathForFn, func(slug string) (string, bool) {
+		if slug == "dep" {
+			return depPath, true
+		}
+		return "", false
+	})()
+
+	pb := "---\nname: N\ndescription: D\ncategory: C\ncreated: 2026-01-01\ndepends_on:\n  - dep\nenv:\n  X:\n    value: p\n---\n\n# T\n\n```bash {id=a}\ntrue\n```\n"
+	path := writeValidateTemp(t, "parent.md", pb)
+	withArgs(t, []string{"ai-playbook", "env", "--file", path})
+	out := captureStdout(t, func() {
+		if code := EnvMain(); code != 0 {
+			t.Fatalf("EnvMain exit %d, want 0", code)
+		}
+	})
+	var got map[string]string
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, out)
+	}
+	if got["X"] != "p" {
+		t.Errorf("X = %q, want %q (parent wins the collision)", got["X"], "p")
+	}
+}
+
+// TestEnvMain_ChainIssues_Exit2 verifies a dangling/cyclic depends_on chain
+// exits 2 (mirroring the run gate), never printing a JSON body.
+func TestEnvMain_ChainIssues_Exit2(t *testing.T) {
+	defer swap(&storePathForFn, func(string) (string, bool) { return "", false })()
+
+	pb := "---\nname: N\ndescription: D\ncategory: C\ncreated: 2026-01-01\ndepends_on:\n  - ghost\n---\n\n# T\n\n```bash {id=a}\ntrue\n```\n"
+	path := writeValidateTemp(t, "parent.md", pb)
+	withArgs(t, []string{"ai-playbook", "env", "--file", path})
+	if code := EnvMain(); code != 2 {
+		t.Fatalf("dangling depends_on → exit %d, want 2", code)
+	}
+}
