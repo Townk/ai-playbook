@@ -11,6 +11,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/askbridge"
 	"github.com/Townk/ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/store"
 )
 
 // swap replaces *target with fn for the duration of the test, returning a
@@ -302,6 +303,43 @@ func TestValidateMain_DependsOnCycle(t *testing.T) {
 	}
 	if !strings.Contains(out, "depends_on cycle:") {
 		t.Fatalf("missing cycle finding in report:\n%s", out)
+	}
+}
+
+// TestValidateMain_StoredSlug_ReadsFullFile is the regression lock-in for the
+// stored-slug front-matter-drop bug: store.Load's second return value (body)
+// is front-matter-STRIPPED, so a "playbook" branch that set content = body
+// (the old code) fed frontmatter.Parse a document with no front matter at
+// all — frontmatter.Parse's `ok` came back false, validate.Check raised a
+// false "missing or malformed front matter" error, and the depends_on chain
+// (which reads fm.DependsOn) never ran at all. The fix re-reads meta.Path
+// (the FULL file) instead. Without the fix this test fails: the report
+// contains "missing or malformed front matter" and omits the depends_on
+// finding.
+func TestValidateMain_StoredSlug_ReadsFullFile(t *testing.T) {
+	defer swap(&storePathForFn, func(string) (string, bool) { return "", false })() // "ghost" unresolvable
+
+	pb := "---\nname: N\ndescription: D\ncategory: C\ncreated: 2026-01-01\ndepends_on:\n  - ghost\n---\n\n# T\n\n```bash {id=a}\ntrue\n```\n"
+	path := writeValidateTemp(t, "stored.md", pb)
+	// strippedBody mimics store.Load's real second return value: the SAME
+	// file with its front matter removed — distinct from the full file at
+	// meta.Path, so a regression back to `content = body` is caught.
+	strippedBody := "\n# T\n\n```bash {id=a}\ntrue\n```\n"
+	defer swap(&storeLoadFn, func(string) (store.Meta, string, error) {
+		return store.Meta{Path: path}, strippedBody, nil
+	})()
+
+	withArgs(t, []string{"ai-playbook", "validate", "--no-ai", "myslug"})
+	var code int
+	out := captureStdout(t, func() { code = ValidateMain() })
+	if code != 1 {
+		t.Fatalf("ValidateMain exit %d, want 1 (dangling depends_on)", code)
+	}
+	if strings.Contains(out, "missing or malformed front matter") {
+		t.Fatalf("false front-matter error: front matter must parse from the FULL stored file, got:\n%s", out)
+	}
+	if !strings.Contains(out, "depends_on") || !strings.Contains(out, `"ghost" does not exist in the store`) {
+		t.Fatalf("missing depends_on finding in report (front matter must be parsed to see depends_on at all):\n%s", out)
 	}
 }
 

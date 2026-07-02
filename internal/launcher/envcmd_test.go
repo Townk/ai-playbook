@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/internal/store"
 )
 
 func TestResolveEnvJSON(t *testing.T) {
@@ -174,5 +175,39 @@ func TestEnvMain_ChainIssues_Exit2(t *testing.T) {
 	withArgs(t, []string{"ai-playbook", "env", "--file", path})
 	if code := EnvMain(); code != 2 {
 		t.Fatalf("dangling depends_on → exit %d, want 2", code)
+	}
+}
+
+// TestEnvMain_StoredSlug_ReadsFullFile is the regression lock-in for the
+// stored-slug front-matter-drop bug: store.Load's second return value (body)
+// is front-matter-STRIPPED, so a "playbook" branch that set content = body
+// (the old code) fed frontmatter.Parse a document with no front matter at
+// all — fm.Env came back empty and `env <stored-slug>` printed "{}" no
+// matter what the playbook declared. The fix re-reads meta.Path (the FULL
+// file) instead. Without the fix this test fails: got["FOO"] is "" (key
+// absent from an empty map), not "bar".
+func TestEnvMain_StoredSlug_ReadsFullFile(t *testing.T) {
+	pb := "---\nname: N\ndescription: D\ncategory: C\ncreated: 2026-01-01\nenv:\n  FOO:\n    value: bar\n---\n\n# T\n\n```bash {id=a}\ntrue\n```\n"
+	path := writeValidateTemp(t, "stored.md", pb)
+	// strippedBody mimics store.Load's real second return value: the SAME
+	// file with its front matter removed — distinct from the full file at
+	// meta.Path, so a regression back to `content = body` is caught.
+	strippedBody := "\n# T\n\n```bash {id=a}\ntrue\n```\n"
+	defer swap(&storeLoadFn, func(string) (store.Meta, string, error) {
+		return store.Meta{Path: path}, strippedBody, nil
+	})()
+
+	withArgs(t, []string{"ai-playbook", "env", "myslug"})
+	var code int
+	out := captureStdout(t, func() { code = EnvMain() })
+	if code != 0 {
+		t.Fatalf("EnvMain exit %d, want 0", code)
+	}
+	var got map[string]string
+	if err := json.Unmarshal([]byte(out), &got); err != nil {
+		t.Fatalf("stdout is not valid JSON: %v\n%s", err, out)
+	}
+	if got["FOO"] != "bar" {
+		t.Errorf("FOO = %q, want bar (stored slug must read meta.Path's full file, not the stripped body)", got["FOO"])
 	}
 }

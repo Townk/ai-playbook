@@ -150,12 +150,19 @@ func EnvMain() int {
 		}
 		content = string(data)
 	case "playbook":
-		_, body, lerr := storeLoadFn(ra.Value)
+		meta, _, lerr := storeLoadFn(ra.Value)
 		if lerr != nil {
 			fmt.Fprintf(os.Stderr, "ai-playbook env: %v\n", lerr)
 			return 2
 		}
-		content = body
+		// Read the full file (store.Load's body is front-matter-stripped, so
+		// re-parsing it would yield an empty FrontMatter — no env, no depends_on).
+		data, rerr := os.ReadFile(meta.Path)
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "ai-playbook env: %v\n", rerr)
+			return 2
+		}
+		content = string(data)
 	}
 
 	fm, _, _ := frontmatter.Parse(content)

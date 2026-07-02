@@ -82,12 +82,20 @@ func ValidateMain() int {
 		content = string(data)
 		name = ra.Value
 	case "playbook":
-		_, body, lerr := storeLoadFn(ra.Value)
+		meta, _, lerr := storeLoadFn(ra.Value)
 		if lerr != nil {
 			fmt.Fprintf(os.Stderr, "ai-playbook validate: %v\n", lerr)
 			return 2
 		}
-		content = body
+		// Read the full file (store.Load's body is front-matter-stripped, so
+		// re-parsing it would drop the front matter — a false "missing front
+		// matter" error and no depends_on checks).
+		data, rerr := os.ReadFile(meta.Path)
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "ai-playbook validate: %v\n", rerr)
+			return 2
+		}
+		content = string(data)
 		name = ra.Value
 	}
 
