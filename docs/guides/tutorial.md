@@ -184,10 +184,7 @@ Features: --assisted (confirm-each-step) · --auto · stop
 
 File: [`examples/08-the-store.md`](../../examples/08-the-store.md)
 
-Features: list · search · show · [edit]+reload · validate ⏳
-
-> [!NOTE]
-> The `validate` command is marked ⏳ — documented as if shipped, verified once the feature lands.
+Features: list · search · show · [edit]+reload · validate
 
 **Setup:** In the shell where you will run these commands, export the fixture store path:
 
@@ -209,7 +206,7 @@ export AI_PLAYBOOK_DATA_DIR="$PWD/examples/store"
 
 **Click:** **[edit]**. **Notice:** Without a mux, the viewer suspends and opens the file in your `$EDITOR`. With a mux, the file opens in a new pane or tab while the viewer stays live. Edit the `description` line in the front matter, save, and return to the viewer — the updated description appears without reopening the file.
 
-**Read:** The `## Validate a playbook` section. It shows `ai-playbook validate --file examples/01-hello-run.md` ⏳ — a structural + AI review pass that checks front matter, `needs=` references, and fence balance.
+**Read:** The `## Validate a playbook` section. It shows `ai-playbook validate --file examples/01-hello-run.md` — a structural + AI review pass that checks front matter, `needs=` references, and fence balance.
 
 ---
 
@@ -266,7 +263,7 @@ You have now used every surface:
 | drift / resolve manually / regenerate | 05 |
 | project_bound / $PROJECT_ROOT / env gate | 06 |
 | --assisted / --auto run modes | 07 |
-| list / search / show / [edit] / validate ⏳ | 08 |
+| list / search / show / [edit] / validate | 08 |
 | create / assist / followup / cached | 09 |
 
 From here, read the reference documentation for the full list of front-matter keys, block attributes, and CLI flags — or open any playbook in `examples/store/` and start editing.
