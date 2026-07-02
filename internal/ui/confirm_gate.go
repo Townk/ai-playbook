@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/frontmatter"
@@ -166,17 +167,116 @@ func (m model) beginAssistedGate() (model, tea.Cmd) {
 // Customize), routing its result back through askCompletion as a gateAnswerMsg.
 func (m model) raiseGroupConfirm() (model, tea.Cmd) {
 	g := m.gate
+	names := make([]string, 0, len(g.groups[g.gi]))
+	for _, v := range g.groups[g.gi] {
+		names = append(names, v.Name)
+	}
 	var b strings.Builder
 	b.WriteString("Confirm these variables for this run:\n\n")
-	for _, v := range g.groups[g.gi] {
-		fmt.Fprintf(&b, "  %s = %s\n", v.Name, g.values[v.Name])
-	}
+	b.WriteString(formatConfirmVars(names, g.values, input.AskInnerWidth()))
 	m.ask = input.NewAsk("Variables", b.String(), "", "confirm", nil, "Confirm", "Customize")
 	m.askMode = true
 	m.askCompletion = func(value string, submitted bool) tea.Msg {
 		return gateAnswerMsg{value: value, submitted: submitted}
 	}
 	return m, m.ask.Init()
+}
+
+// formatConfirmVars renders names/values as an aligned two-column block: labels
+// ("NAME:") are right-padded to a common column (the widest name + ": "), and
+// each value is word-wrapped to the remaining width, with continuation lines
+// indented to the value column. A single token longer than the available width
+// is hard-broken (char-split) rather than left to overflow. Pure/deterministic —
+// no dependency beyond lipgloss (for display-width) and strings.
+func formatConfirmVars(names []string, values map[string]string, innerW int) string {
+	nameW := 0
+	for _, n := range names {
+		if w := lipgloss.Width(n); w > nameW {
+			nameW = w
+		}
+	}
+	valueCol := nameW + 2 // name + ":" + one space
+	avail := innerW - valueCol
+	if avail < 8 {
+		avail = 8
+	}
+	var lines []string
+	for _, n := range names {
+		label := n + ":"
+		if pad := valueCol - lipgloss.Width(label); pad > 0 {
+			label += strings.Repeat(" ", pad)
+		}
+		for i, chunk := range wrapWithHardBreak(values[n], avail) {
+			if i == 0 {
+				lines = append(lines, label+chunk)
+			} else {
+				lines = append(lines, strings.Repeat(" ", valueCol)+chunk)
+			}
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// wrapWithHardBreak word-wraps s to width (display columns via lipgloss.Width),
+// breaking on spaces; a single word wider than width is char-broken across
+// multiple chunks so no returned line ever exceeds width. Always returns at
+// least one (possibly empty) chunk.
+func wrapWithHardBreak(s string, width int) []string {
+	if width < 1 {
+		width = 1
+	}
+	words := strings.Fields(s)
+	if len(words) == 0 {
+		return []string{""}
+	}
+	var lines []string
+	cur := ""
+	for _, word := range words {
+		for lipgloss.Width(word) > width {
+			if cur != "" {
+				lines = append(lines, cur)
+				cur = ""
+			}
+			var chunk string
+			chunk, word = hardBreakToken(word, width)
+			lines = append(lines, chunk)
+		}
+		if word == "" {
+			continue
+		}
+		candidate := word
+		if cur != "" {
+			candidate = cur + " " + word
+		}
+		if lipgloss.Width(candidate) <= width {
+			cur = candidate
+		} else {
+			if cur != "" {
+				lines = append(lines, cur)
+			}
+			cur = word
+		}
+	}
+	if cur != "" {
+		lines = append(lines, cur)
+	}
+	if len(lines) == 0 {
+		lines = []string{""}
+	}
+	return lines
+}
+
+// hardBreakToken splits token at the largest rune-aligned prefix whose display
+// width is ≤ width, returning that prefix and the remainder. Always consumes at
+// least one rune so callers make progress even when a single rune is wider than
+// width.
+func hardBreakToken(token string, width int) (chunk, rest string) {
+	runes := []rune(token)
+	i := 1
+	for i < len(runes) && lipgloss.Width(string(runes[:i+1])) <= width {
+		i++
+	}
+	return string(runes[:i]), string(runes[i:])
 }
 
 // raiseVarEdit opens a prefilled single-line dialog for the current customize var.

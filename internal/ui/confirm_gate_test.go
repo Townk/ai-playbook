@@ -2,12 +2,64 @@ package ui
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/Townk/ai-playbook/internal/frontmatter"
 )
+
+func TestFormatConfirmVars_AlignsAndWraps(t *testing.T) {
+	names := []string{"DATA_DIR", "SOME_LONG_VARIABLE", "PROJECT_ROOT"}
+	vals := map[string]string{
+		"DATA_DIR":           "$PROJECT_ROOT/data",
+		"SOME_LONG_VARIABLE": "The value of this variable could span many lines depending on how long it is!",
+		"PROJECT_ROOT":       "~/Projects/langs/go/ai-playbook/some/other/directory",
+	}
+	out := formatConfirmVars(names, vals, 51)
+	lines := strings.Split(out, "\n")
+	// value column = len("SOME_LONG_VARIABLE")=18 + 2 = 20
+	// short value fits on the label line, aligned at col 20:
+	if !strings.HasPrefix(lines[0], "DATA_DIR:") {
+		t.Fatalf("line0 = %q", lines[0])
+	}
+	if !strings.Contains(lines[0], "$PROJECT_ROOT/data") {
+		t.Fatalf("short value must sit on the label line: %q", lines[0])
+	}
+	// the label is padded so the value starts at col 20 (18 + colon + space):
+	if idx := strings.Index(lines[0], "$PROJECT_ROOT/data"); idx != 20 {
+		t.Errorf("value column = %d, want 20", idx)
+	}
+	// the long value wraps: a continuation line is indented to col 20 (all spaces before it):
+	var cont string
+	for _, l := range lines[1:] {
+		if strings.TrimSpace(l) != "" && strings.HasPrefix(l, strings.Repeat(" ", 20)) {
+			cont = l
+			break
+		}
+	}
+	if cont == "" {
+		t.Fatal("expected a continuation line indented to the value column")
+	}
+	// no rendered line exceeds the inner width:
+	for _, l := range lines {
+		if lipgloss.Width(l) > 51 {
+			t.Errorf("line exceeds innerW: %q (%d)", l, lipgloss.Width(l))
+		}
+	}
+}
+
+func TestFormatConfirmVars_HardBreaksLongToken(t *testing.T) {
+	// a single unbreakable token longer than the available width must char-break, not overflow.
+	out := formatConfirmVars([]string{"P"}, map[string]string{"P": strings.Repeat("x", 200)}, 51)
+	for _, l := range strings.Split(out, "\n") {
+		if lipgloss.Width(l) > 51 {
+			t.Fatalf("long token must hard-break; line width %d: %q", lipgloss.Width(l), l)
+		}
+	}
+}
 
 func TestGroupSizes(t *testing.T) {
 	cases := []struct {

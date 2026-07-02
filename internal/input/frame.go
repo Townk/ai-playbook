@@ -52,6 +52,14 @@ func renderFrame(t Theme, variant, title string, body []string, hint string, wid
 		Render(strings.Join(rows, "\n"))
 }
 
+// AskInnerWidth returns the ask dialog's inner content width — the fixed
+// float width minus the outer border and both horizontal paddings — so
+// callers (e.g. the confirm gate's variable list) can wrap text to the exact
+// dialog geometry without hard-coding it.
+func AskInnerWidth() int {
+	return FloatWidthDefault - frameBorder - 2*frameHPad
+}
+
 func appendBlanks(rows []string, n int) []string {
 	for i := 0; i < n; i++ {
 		rows = append(rows, "")
