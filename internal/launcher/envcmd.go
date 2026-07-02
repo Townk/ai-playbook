@@ -1,0 +1,137 @@
+// envcmd.go — the `ai-playbook env` subcommand entrypoint.
+//
+// `env` accepts a single playbook source, expressed one of two ways:
+//
+//   - env <slug>            a bare positional ⇒ a saved playbook, resolved
+//     through the store
+//   - env --file <path>     a raw markdown file, read as-is
+//
+// Exactly one source must be given; zero or more than one is a usage error.
+//
+// It parses the playbook's front matter and prints the declared `env:` map as
+// a --with-env-compatible JSON object on stdout, resolving each value against
+// the current process environment (falling back to the declared default) and
+// redacting sensitive values to "" — both secret-shaped values (via
+// frontmatter.Redact) and build-time-masked defaults whose corresponding env
+// var is unset (via frontmatter.IsRedactedMask).
+package launcher
+
+import (
+	"encoding/json"
+	"flag"
+	"fmt"
+	"io"
+	"os"
+	"sort"
+	"strings"
+
+	"github.com/Townk/ai-playbook/internal/frontmatter"
+)
+
+// envArgs is resolveEnvArgs's parsed result: the single playbook source.
+type envArgs struct {
+	Kind, Value string // "file" | "playbook"
+}
+
+// resolveEnvArgs resolves the single playbook source from the `env` arguments —
+// exactly one of {bare positional, --file}, mirroring resolveValidateArgs.
+func resolveEnvArgs(args []string) (envArgs, error) {
+	fs := flag.NewFlagSet("env", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	var file string
+	fs.StringVar(&file, "file", "", "path to a markdown file")
+	if perr := fs.Parse(args); perr != nil {
+		return envArgs{}, perr
+	}
+	rest := fs.Args()
+	if len(rest) > 1 {
+		return envArgs{}, fmt.Errorf("specify exactly one of <slug> or --file")
+	}
+	positional := ""
+	if len(rest) == 1 {
+		positional = rest[0]
+	}
+	count := 0
+	for _, s := range []string{file, positional} {
+		if s != "" {
+			count++
+		}
+	}
+	switch {
+	case count == 0:
+		return envArgs{}, fmt.Errorf("specify a playbook: env <slug> | --file <path>")
+	case count > 1:
+		return envArgs{}, fmt.Errorf("specify exactly one of <slug> or --file")
+	}
+	if file != "" {
+		return envArgs{Kind: "file", Value: file}, nil
+	}
+	return envArgs{Kind: "playbook", Value: positional}, nil
+}
+
+// resolveEnvJSON resolves each declared var against getenv (env value when set,
+// else the declared default) and redacts sensitive ones to "". Returns the
+// name→value map and the sorted names of the redacted vars. Pure — getenv is
+// injected so tests never touch the process environment.
+func resolveEnvJSON(vars map[string]frontmatter.EnvValue, getenv func(string) string) (map[string]string, []string) {
+	out := make(map[string]string, len(vars))
+	var redacted []string
+	for name, ev := range vars {
+		raw := ev.Value
+		if v := getenv(name); v != "" {
+			raw = v
+		}
+		if _, isRedacted := frontmatter.Redact(name, raw); isRedacted || frontmatter.IsRedactedMask(raw) {
+			out[name] = ""
+			redacted = append(redacted, name)
+			continue
+		}
+		out[name] = raw
+	}
+	sort.Strings(redacted)
+	return out, redacted
+}
+
+// EnvMain implements `ai-playbook env <source>`: it resolves a playbook's
+// declared env: map against the current environment and prints it as a
+// --with-env-compatible JSON object on stdout (sensitive values emitted empty and
+// listed on stderr). Source-resolution errors return exit 2, mirroring validate.
+func EnvMain() int {
+	ra, err := resolveEnvArgs(os.Args[2:])
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook env: %v\n", err)
+		return 2
+	}
+
+	var content string
+	switch ra.Kind {
+	case "file":
+		data, rerr := os.ReadFile(ra.Value)
+		if rerr != nil {
+			fmt.Fprintf(os.Stderr, "ai-playbook env: %v\n", rerr)
+			return 2
+		}
+		content = string(data)
+	case "playbook":
+		_, body, lerr := storeLoadFn(ra.Value)
+		if lerr != nil {
+			fmt.Fprintf(os.Stderr, "ai-playbook env: %v\n", lerr)
+			return 2
+		}
+		content = body
+	}
+
+	fm, _, _ := frontmatter.Parse(content)
+	out, redacted := resolveEnvJSON(fm.Env, os.Getenv)
+
+	data, merr := json.MarshalIndent(out, "", "  ")
+	if merr != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook env: %v\n", merr)
+		return 1
+	}
+	fmt.Fprintln(os.Stdout, string(data))
+	if len(redacted) > 0 {
+		fmt.Fprintf(os.Stderr, "env: redacted %d sensitive variable(s): %s\n", len(redacted), strings.Join(redacted, ", "))
+	}
+	return 0
+}
