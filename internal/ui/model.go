@@ -374,6 +374,35 @@ type model struct {
 	// autoRollback (set from the --auto-rollback run flag) makes a step failure auto-fire
 	// the rollback chain instead of only showing the manual "Rollback playbook" button.
 	autoRollback bool
+	// assisted (set from the --assisted run flag / ui.SetAssisted) opts into the
+	// GUIDED-fullscreen run mode; it rides the same viewer path as the default
+	// run — the assisted behavior itself is wired by later Plan 2 tasks.
+	assisted bool
+	// exitCode is the process exit code Main() surfaces after prog.Run() returns
+	// the final model (in place of the default 0). Zero (the default) means "no
+	// override" — a GUIDED/assisted run that ends on a failed/aborted step can
+	// set this to signal failure to the caller.
+	exitCode int
+	// readyID is the assisted-mode cursor: the block id the GUIDED run wants the
+	// user to act on next ("" when no step is ready — either not started, or the
+	// playbook is done). Advanced by startAssisted/assistedAdvance/assistedSkip.
+	readyID string
+	// assistedStarted guards maybeStartAssisted so the guided walk is entered
+	// exactly once, at the stream-EOF where m.md/m.blocks first become final —
+	// not at model-build time (Main()), when the playbook hasn't streamed in yet.
+	assistedStarted bool
+	// assistedFooter selects which GUIDED bottom bar (wired in a later Plan 2
+	// task) to render: "" (hidden — not in assisted mode, or not yet started),
+	// "step" (readyID has a next action), "failure" (readyID's run just failed),
+	// or "done" (no runnable blocks remain).
+	assistedFooter string
+	// footerFocus is the assisted footer's own button-focus index (independent of
+	// the pager's hint-mode focus); reset to 0 whenever the footer's button set
+	// changes (start/advance/failure).
+	footerFocus int
+	// assistedFailedID is the block id whose failure raised assistedFooter="failure";
+	// "" when the footer isn't in the failure state.
+	assistedFailedID string
 	// rollbackFailedID is the failed block currently driving a rollback chain (it shows
 	// the "rolling back…" spinner, then the "all steps rolled back" suffix); "" = none.
 	// rollbackPending counts the rollback targets still running, so we know when the chain
@@ -794,6 +823,13 @@ func (m *model) body() int {
 		// without overlapping content.
 		h -= m.confirmQuestionLines() + 3
 	}
+	if m.assistedFooterActive() {
+		// Same replace-the-bottom-pad reasoning as the confirmResolved branch
+		// above, for the GUIDED footer's own blank+context+blank+buttons+blank
+		// block (assistedFooterLines is that block's net addition over the one
+		// already-reserved pad).
+		h -= m.assistedFooterLines()
+	}
 	if h < 1 {
 		h = 1
 	}
@@ -801,10 +837,18 @@ func (m *model) body() int {
 }
 
 func (m *model) reflow() {
-	m.lines, m.buttons, m.blocks = Render(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey, m.driverPending, m.canReengageInProc(), m.anyRollbackable(), m.asker != nil)
+	// readyID threads the assisted-mode (--assisted/GUIDED) ready-cursor into the
+	// renderer ONLY while a GUIDED run is active, so every non-assisted render is
+	// byte-for-byte unchanged (m.readyID is otherwise left as its own zero value).
+	readyID := ""
+	if m.assisted {
+		readyID = m.readyID
+	}
+	m.lines, m.buttons, m.blocks = renderCursor(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey, readyID, m.driverPending, m.canReengageInProc(), m.anyRollbackable(), m.asker != nil)
 	m.appendCachedButton()
 	m.appendEditButton()
 	m.appendConfirmButtons()
+	m.appendAssistedFooter()
 	m.clampScroll()
 }
 
@@ -1035,6 +1079,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			// Site 2: diff blocks are now fully parsed (reflow ran above). Fire async
 			// drift checks so the badge appears without blocking the event loop.
+			// Assisted (GUIDED) entry: m.md/m.blocks are now final for this EOF (the
+			// structured/finalDraft branches above have already rewritten m.md and
+			// reflowed if applicable) — safe to compute the first ready block now.
+			m = m.maybeStartAssisted()
 			return m, m.driftCheckCmds()
 		}
 		cmds := []tea.Cmd{readStream(m.reader, m.parser)}
@@ -1244,6 +1292,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.reflow()
 					return m, m.flashCmd()
+				}
+				if strings.HasPrefix(b.Kind, "assist-") {
+					return m.assistedActivate(b.Kind)
 				}
 				if b.Kind == "edit" {
 					return m.editDispatch()
@@ -1503,6 +1554,57 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		}
+		// Assisted (GUIDED) footer: while a footer row is up (Run/Skip/Quit,
+		// Roll-back/Leave-as-is/Quit, or the done Quit) it is keyboard-FOCUSABLE —
+		// ←/→ (also h/l, Tab) move focus between its buttons, Enter activates the
+		// focused one. Captured BEFORE the confirm/leader/global switch so footer
+		// nav keys are never mistaken for normal nav while a footer is active; a
+		// mouse click still resolves regardless of focus (click-dispatch path).
+		//
+		// Only the nav/activate keys below are captured (each returns explicitly).
+		// Any OTHER key (ctrl+c, q, esc, scroll keys, space, ?, w, ...) falls
+		// through to the confirm/leader/global handling further down — in
+		// particular ctrl+c must always be able to quit, the doc must stay
+		// scrollable while a footer is on screen, and Space must reach the
+		// Space-leader → hint mode so the ready block's copy/expand buttons stay
+		// hintable instead of the footer swallowing Space as "activate".
+		if m.assistedFooterActive() {
+			btns := m.assistedFooterButtons()
+			// Clamp a stale focus (e.g. carried over from a footer with more buttons)
+			// before using it as an index below.
+			if m.footerFocus > len(btns)-1 {
+				m.footerFocus = len(btns) - 1
+			}
+			if m.footerFocus < 0 {
+				m.footerFocus = 0
+			}
+			switch msg.String() {
+			case "left", "h":
+				if m.footerFocus > 0 {
+					m.footerFocus--
+				}
+				return m, nil
+			case "right", "l":
+				if m.footerFocus < len(btns)-1 {
+					m.footerFocus++
+				}
+				return m, nil
+			case "tab":
+				if len(btns) > 0 {
+					m.footerFocus = (m.footerFocus + 1) % len(btns)
+				}
+				return m, nil
+			case "enter":
+				if m.footerFocus >= 0 && m.footerFocus < len(btns) {
+					return m.assistedActivate(btns[m.footerFocus].Kind)
+				}
+				return m, nil
+			}
+			// space/" " deliberately falls through (no case above, no catch-all
+			// return) to the Space-leader → hint mode below, so the user can
+			// hint-select the ready block's copy/expand buttons while the footer
+			// is shown, instead of the footer swallowing Space as "activate".
+		}
 		// Issue #4: while the verify-success confirm row is active it is keyboard-
 		// FOCUSABLE — ←/→ (also h/l, Tab) move focus between [ Yes ] and [ No ], and
 		// Enter/Space SELECT the focused button. These keys are captured ONLY while the
@@ -1574,6 +1676,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.quitGuard = true
 				m.status = "uncommitted playbook — w to save, quit again to discard"
 				return m, nil
+			}
+			if m.assisted && msg.String() == "ctrl+c" {
+				// Abort is non-zero; q/esc stay a clean exit (0 unless an unresolved
+				// failure already set it).
+				m.exitCode = 1
 			}
 			return m, tea.Quit
 		case "w":
@@ -1792,6 +1899,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.blockStates[msg.ID] = st
 		dbg("result id=%s exit=%d action=%s status->%s", msg.ID, msg.Exit, prevAction, st.Status)
+		// Assisted (GUIDED) advance hook: the readyID cursor only reacts to its OWN
+		// step's result (never a rollback target's — prevAction=="rollback" is that
+		// chain, handled below by the ordinary rollback bookkeeping instead).
+		if m.assisted && msg.ID == m.readyID && prevAction != "rollback" {
+			switch st.Status {
+			case "ok":
+				m = m.assistedAdvance()
+			case "failed":
+				m.assistedFailedID = msg.ID
+				m.assistedFooter = "failure"
+				m.footerFocus = 0
+				m.exitCode = 1
+			}
+		}
 		// A rollback target completed: count it down; when the whole chain is done, clear
 		// the failed block's spinner and append its "all steps rolled back" suffix.
 		if prevAction == "rollback" {
@@ -1806,7 +1927,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// of leaving the manual "Rollback playbook" button. Takes precedence over the
 		// verify auto-followup below (rollback, not re-engage, is the opted-in response).
 		// Guard against re-firing on a rollback TARGET's own result (prevAction rollback).
-		if prevAction != "rollback" && st.Status == "failed" && m.autoRollback && m.anyRollbackable() {
+		if prevAction != "rollback" && st.Status == "failed" && m.autoRollback && m.anyRollbackable() && !m.assisted {
 			return m.beginRollback(msg.ID)
 		}
 		// Auto-fire a follow-up when the VERIFY re-run fails: a non-zero exit on a
@@ -1828,7 +1949,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// runnable block as the verify so success/follow-up detection still works.
 		verifyID := m.verifyBlockID()
 		if msg.ID == verifyID && msg.Exit != 0 &&
-			prevAction != "apply" && prevAction != "undo" {
+			prevAction != "apply" && prevAction != "undo" && !m.assisted {
 			switch {
 			case m.followups >= m.maxFollowups:
 				// Cap reached: stop auto-firing. Mark the verify block so render.go shows
@@ -1878,7 +1999,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// live session path), so the confirm's Yes can actually generate.
 		if msg.ID == verifyID && msg.Exit == 0 && !m.wrappedUp &&
 			prevAction != "apply" && prevAction != "undo" &&
-			m.canReengageInProc() {
+			m.canReengageInProc() && !m.assisted {
 			m.wrappedUp = true
 			m.confirmResolved = true
 			m.confirmFocus = 0 // default keyboard focus = Yes
@@ -3197,6 +3318,20 @@ func (m model) normalLines() []string {
 		out = append(out, pad(""))                               // blank   (m.height-4)
 		out = append(out, pad("  "+m.confirmButtonsRowString())) // buttons (m.height-3)
 		out = append(out, pad(""))                               // blank   (m.height-2)
+	} else if m.assistedFooterActive() {
+		// The GUIDED footer mirrors the confirm block's shape (blank, content,
+		// blank, buttons, blank) so the buttons row lands on the SAME pinned
+		// m.height-3 row appendAssistedFooter registers its Screen buttons on.
+		rows := m.assistedFooterRows()
+		var ctx, btns string
+		if len(rows) == 2 {
+			ctx, btns = rows[0], rows[1]
+		}
+		out = append(out, pad(""))        // blank above the context line
+		out = append(out, pad("  "+ctx))  // context line
+		out = append(out, pad(""))        // blank   (m.height-4)
+		out = append(out, pad("  "+btns)) // buttons (m.height-3)
+		out = append(out, pad(""))        // blank   (m.height-2)
 	} else {
 		out = append(out, pad("")) // bottom pad
 	}

@@ -13,3 +13,19 @@ func TestSetSourcePath_ConsumeOnce(t *testing.T) {
 		t.Fatalf("second take must be empty (consume-once), got %q", got)
 	}
 }
+
+// TestSetAssisted_ConsumeOnce verifies SetAssisted stashes the opt-in on
+// pendingAssisted, and that pendingAssisted can be cleared the same way
+// Main's consume-once cluster clears it (m.assisted = pendingAssisted;
+// pendingAssisted = false) — mirroring pendingAutoRollback's consume-once
+// wiring.
+func TestSetAssisted_ConsumeOnce(t *testing.T) {
+	SetAssisted(true)
+	if !pendingAssisted {
+		t.Fatal("SetAssisted must set pendingAssisted")
+	}
+	pendingAssisted = false // mirrors Main()'s consume-once clear
+	if pendingAssisted {
+		t.Fatal("pendingAssisted must clear (consume-once)")
+	}
+}

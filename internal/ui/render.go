@@ -120,6 +120,12 @@ type renderer struct {
 	// nextNumAssigned records that the single green "next to run" visual number has been
 	// claimed by the first un-run, needs-satisfied block — later un-run blocks render red.
 	nextNumAssigned bool
+	// readyID is the assisted-mode (--assisted/GUIDED) cursor: the block id the run wants
+	// the user to act on next (model.readyID, threaded only while model.assisted is true).
+	// Empty for every non-assisted render, which keeps their output byte-for-byte
+	// unchanged. When set, the matching block's tab gets a ▶ caret and its Run button
+	// renders in the ready/highlighted style instead of the plain run color.
+	readyID string
 }
 
 // rollbackRef renders n (1-based) as the "(n)" reference shown in a rollback block's
@@ -143,6 +149,16 @@ func rollbackRef(n int) string {
 // (tests, the static block-count path) leave shellDisabled false, reengageAvail true
 // (prior always-show), rollbackAvail false, and muxActive false (no Play button).
 func Render(md string, width int, states map[string]blockRunState, flashKey string, flags ...bool) ([]Line, []Button, []Block) {
+	return renderCursor(md, width, states, flashKey, "", flags...)
+}
+
+// renderCursor is Render's actual implementation, extended with readyID: the
+// assisted-mode (--assisted/GUIDED) ready-cursor block id (model.readyID when
+// model.assisted; "" otherwise). It's kept as a separate, unexported entry
+// point specifically so Render's public arity — and every existing caller and
+// test across the package — is untouched; model.reflow is the only caller that
+// needs the cursor and calls renderCursor directly with m.readyID.
+func renderCursor(md string, width int, states map[string]blockRunState, flashKey string, readyID string, flags ...bool) ([]Line, []Button, []Block) {
 	if width < 1 {
 		width = 1
 	}
@@ -165,7 +181,7 @@ func Render(md string, width int, states map[string]blockRunState, flashKey stri
 	src := []byte(normalizeFences(md))
 	gm := goldmark.New(goldmark.WithExtensions(extension.GFM))
 	doc := gm.Parser().Parse(text.NewReader(src))
-	r := &renderer{src: src, width: width, states: states, flashKey: flashKey, shellDisabled: disabled, reengageAvail: reengageAvail, rollbackAvail: rollbackAvail, muxActive: muxActive, rollbackTargets: collectRollbackTargets(doc, src), rollbackForNum: map[string]int{}}
+	r := &renderer{src: src, width: width, states: states, flashKey: flashKey, shellDisabled: disabled, reengageAvail: reengageAvail, rollbackAvail: rollbackAvail, muxActive: muxActive, rollbackTargets: collectRollbackTargets(doc, src), rollbackForNum: map[string]int{}, readyID: readyID}
 	r.block(doc, 0)
 	r.blocks = assignIDs(r.blocks)
 	return r.lines, r.buttons, r.blocks
@@ -557,6 +573,7 @@ const (
 	glyphUndo     = "\U000F054D" // nf-md undo-variant — undo an applied patch (git apply --reverse)
 	glyphRetry    = "\U000F0450" // nf-md refresh/retry — re-engage the agent for a different fix
 	glyphCreate   = "\U000F0224" // nf-md file-plus — create a new file
+	glyphReady    = "▶"          // U+25B6 — assisted (GUIDED) ready-cursor caret, tab gutter
 )
 
 // Callout (admonition) bordered-frame glyphs — Symbols for Legacy Computing block.
@@ -688,16 +705,36 @@ func (r *renderer) code(n ast.Node) {
 				numColor = colRed // pending — not run and not the next one
 			}
 		}
+		// Assisted (GUIDED) ready cursor: prefix a ▶ caret in the tab gutter, ahead of
+		// the leading pad, when this is the block the run wants acted on next. Empty
+		// r.readyID (every non-assisted render) leaves caret == "" and numW unchanged.
+		caret := ""
+		if r.readyID != "" && blk.ID == r.readyID {
+			caret = bg.Render(" ") + bg.Foreground(lipgloss.Color(colGreen)).Bold(true).Render(glyphReady)
+		}
 		// Leading + trailing space, all on the code-block background (a little top-left
 		// tab mirroring the button tab on the right).
-		numGlyph = bg.Render(" ") + bg.Foreground(lipgloss.Color(numColor)).Render(g) + bg.Render(" ")
-		numW = 1 + lipgloss.Width(g) + 1
+		numGlyph = caret + bg.Render(" ") + bg.Foreground(lipgloss.Color(numColor)).Render(g) + bg.Render(" ")
+		numW = lipgloss.Width(caret) + 1 + lipgloss.Width(g) + 1
 	}
 
-	// region width: leadpad(1) + langW + sep(" ❘ "=3) + run(2 if shell/run+unblocked) + play(2 if shell+unblocked) + diff(2 if diff) + apply-diff or undo-diff(2 if diff+unblocked or applied) + copy(2)
+	// region width: leadpad(1) + langW + sep(" ❘ "=3) + run(2 if shell/run+unblocked, gated below) + play(2 if shell+unblocked) + diff(2 if diff) + apply-diff or undo-diff(2 if diff+unblocked or applied) + copy(2)
 	regionW := 1 + langW + 3 + 2
 	if (blk.Type == "shell" || blk.Type == "run") && len(unmet) == 0 && !isRollbackTarget {
-		regionW += 2 // run(2)
+		switch r.states[blk.ID].Status {
+		case "running", "ok":
+			// The stop button / dimmed "done" glyph always draws its 2 cols,
+			// assisted or not — reserve unconditionally so those rows don't
+			// overflow past width.
+			regionW += 2
+		default:
+			// The plain run button only draws (and only needs its 2-col slot)
+			// when there's no assisted cursor collapsing it away (see the
+			// render switch's default arm below).
+			if r.readyID == "" {
+				regionW += 2 // run(2) — assisted has no inline run slot to reserve
+			}
+		}
 	}
 	if blk.Type == "shell" && len(unmet) == 0 && !isRollbackTarget && r.muxActive {
 		regionW += 2 // play(2) — only under a mux (needs an origin pane)
@@ -762,11 +799,21 @@ func (r *renderer) code(n ast.Node) {
 				sb.WriteString(bg.Render(" "))
 				col++
 			default:
-				sb.WriteString(r.buttonGlyph(blk.ID, "run", glyphRun, colRun, bg))
-				col++
-				sb.WriteString(bg.Render(" "))
-				col++
-				r.buttons = append(r.buttons, Button{Line: lineIdx, Col: runActionCol, Width: 2, Kind: "run", Payload: runPayload(blk), BlockID: blk.ID})
+				// Assisted (GUIDED): the footer's Run drives the ready step, so the
+				// inline run button on the code-block's right tab would be a redundant
+				// (and now ambiguous) second way to fire it. Render nothing at all —
+				// no glyph, no blanks, no column advance, no Button — and the run slot
+				// isn't reserved in regionW either (see above), so the copy button
+				// follows the separator directly with no gap. Non-assisted
+				// (r.readyID == "") keeps the existing plain run button untouched.
+				if r.readyID == "" {
+					sb.WriteString(r.buttonGlyph(blk.ID, "run", glyphRun, colRun, bg))
+					col++
+					sb.WriteString(bg.Render(" "))
+					col++
+					r.buttons = append(r.buttons, Button{Line: lineIdx, Col: runActionCol, Width: 2, Kind: "run", Payload: runPayload(blk), BlockID: blk.ID})
+				}
+				// else: assisted — collapse the slot entirely, nothing to render.
 			}
 		}
 		if blk.Type == "shell" && !isRollbackTarget && r.muxActive {
@@ -998,7 +1045,7 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 	case "regenerating":
 		sl := spinnerLine(st.SpinFrame, "regenerating…", st.SpinFrame/10)
 		r.lines = append(r.lines, Line{Text: indentStr + sl, Wide: false, Code: true})
-	case "ok", "failed", "stopped", "rolledback":
+	case "ok", "failed", "stopped", "rolledback", "skipped":
 		rawToggle := "▸"
 		if st.Expanded {
 			rawToggle = "▾"
@@ -1020,6 +1067,12 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 			// A rollback-chain target that finished — undone, in the rollback (peach) hue.
 			sty := lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach))
 			label = "↺ step rolled back"
+			statusPart = sty.Render(label)
+		case "skipped":
+			// Assisted (GUIDED) run: the user deliberately skipped this step (assistedSkip).
+			// Neutral grey, reading as intentionally passed over rather than merely un-run.
+			sty := lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext))
+			label = "– skipped"
 			statusPart = sty.Render(label)
 		default: // "failed"
 			sty := lipgloss.NewStyle().Foreground(lipgloss.Color(colRed))

@@ -50,22 +50,17 @@ This mode is ideal when you want to step through an unfamiliar playbook, read ea
 
 ## Assisted run
 
-<!-- ⏳ needs assisted/auto run modes (not yet built) -->
-
-The `--assisted` flag adds an explicit **[y/n/q]** prompt before each block:
+The `--assisted` flag opens the same fullscreen viewer as manual step-through, but in **guided mode**:
 
 ```bash {static}
 ai-playbook run --assisted --file examples/07-run-modes.md
 ```
 
-At each step you see the block header and command followed by a confirmation line:
+A **ready** cursor (`▶`) points at the next runnable block, and the viewer auto-scrolls that block into view — about a third of the way down the screen — so you can read its prose before deciding what to do with it. A footer with focusable buttons, **`[ Run ] [ Skip ] [ Quit ]`**, confirms each step: move focus with **←/→** or **Tab**, and select with **Enter**/**Space** or a mouse click. Choosing `Run` executes the ready block and advances the cursor to the next one; `Skip` marks it skipped without running it — and any block whose `needs=` dependency was skipped is automatically skipped too, since ai-playbook never runs a block against an unmet dependency; `Quit` exits the viewer immediately.
 
-```text {static}
-[build] bash projects/tidy-shop/build.sh
-Run this block? [y/n/q]
-```
+If a block fails, the footer switches to **`[ Roll back ] [ Leave as-is ] [ Quit ]`**: `Roll back` undoes the blocks that already completed, in reverse order, and `Leave as-is` stops the run and keeps whatever state the completed blocks produced.
 
-Press `y` to run, `n` to skip, or `q` to quit immediately. Skipped blocks are recorded in the run summary at the end. Any block whose `needs=` dependency was skipped is automatically skipped too — ai-playbook never runs a block against an unmet dependency.
+The document stays scrollable the whole time — `j`/`k` and the other viewer navigation keys work even while the footer is showing — and **Ctrl-C** aborts the run at any point.
 
 Assisted mode is useful when you are running a playbook written by someone else and want fine-grained control over which steps execute, without fully committing to running everything.
 
