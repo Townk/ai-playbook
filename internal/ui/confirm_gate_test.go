@@ -172,12 +172,18 @@ func TestGate_ConfirmRunsBlockOnce(t *testing.T) {
 	}
 }
 
+// TestGate_EscReturnsToReading: ESC on the confirm dialog (not a per-var edit) now ends
+// the run — it does not return to reading. Confirm the gate clears and the model exits
+// ask-mode without ever being satisfied, and that the returned cmd is tea.Quit.
 func TestGate_EscReturnsToReading(t *testing.T) {
 	m := gateModel(t)
 	m, _ = m.beginGate(Button{Kind: "run", BlockID: "fix", Payload: "x"})
-	m, _ = m.advanceGate("", false) // ESC
+	m, cmd := m.advanceGate("", false) // ESC on the confirm dialog
 	if m.gate != nil || m.askMode || m.gateSatisfied {
 		t.Fatalf("ESC must clear the gate, leave it unsatisfied, exit ask mode")
+	}
+	if !isQuitCmd(cmd) {
+		t.Fatal("confirm-phase ESC must return a tea.Quit command")
 	}
 }
 
@@ -247,14 +253,89 @@ func TestGate_ESCDoesNotMarkRunning(t *testing.T) {
 	if st := m.blockStates[blkID]; st.Status == "running" {
 		t.Fatalf("opening the gate must not mark block running; got Status=%q", st.Status)
 	}
-	// ESC: gate cancelled.
-	m, _ = m.advanceGate("", false)
+	// ESC on the confirm dialog: gate cancelled, run ends.
+	m, cmd := m.advanceGate("", false)
 	if m.gate != nil || m.askMode || m.gateSatisfied {
 		t.Fatal("ESC must clear the gate, exit ask-mode, and leave gate unsatisfied")
+	}
+	if !isQuitCmd(cmd) {
+		t.Fatal("confirm-phase ESC must return a tea.Quit command")
 	}
 	// After ESC the block must still NOT be running.
 	if st := m.blockStates[blkID]; st.Status == "running" {
 		t.Fatalf("ESC must not leave block %q in running state; got Status=%q", blkID, st.Status)
+	}
+}
+
+// newGateModelInConfirmPhase builds a model with a live m.gate in the confirm
+// phase (beginGate raises the first group's Confirm/Customize/Quit dialog).
+func newGateModelInConfirmPhase(t *testing.T) model {
+	t.Helper()
+	m := gateModel(t)
+	m, _ = m.beginGate(Button{Kind: "run", BlockID: "fix", Payload: "x"})
+	if m.gate == nil || m.gate.customizing {
+		t.Fatal("newGateModelInConfirmPhase: expected a live gate in the confirm phase")
+	}
+	return m
+}
+
+// newGateModelInCustomizePhase builds a model with a live m.gate in the
+// customizing phase (Customize answered on the confirm dialog).
+func newGateModelInCustomizePhase(t *testing.T) model {
+	t.Helper()
+	m := newGateModelInConfirmPhase(t)
+	m, _ = m.advanceGate("no", true) // Customize → per-var edit phase
+	if m.gate == nil || !m.gate.customizing {
+		t.Fatal("newGateModelInCustomizePhase: expected a live gate in the customizing phase")
+	}
+	return m
+}
+
+// isQuitCmd reports whether cmd, when invoked, yields tea.QuitMsg.
+func isQuitCmd(cmd tea.Cmd) bool {
+	if cmd == nil {
+		return false
+	}
+	_, ok := cmd().(tea.QuitMsg)
+	return ok
+}
+
+func TestAdvanceGate_QuitButtonQuitsRun(t *testing.T) {
+	m := newGateModelInConfirmPhase(t)
+	m, cmd := m.advanceGate("quit", true)
+	if m.gate != nil {
+		t.Fatal("Quit must clear the gate")
+	}
+	if !isQuitCmd(cmd) {
+		t.Fatal("Quit must return a tea.Quit command")
+	}
+}
+
+func TestAdvanceGate_ConfirmEscQuitsRun(t *testing.T) {
+	m := newGateModelInConfirmPhase(t)
+	m, cmd := m.advanceGate("", false) // ESC on the confirm dialog
+	if m.gate != nil {
+		t.Fatal("confirm-phase ESC must clear the gate")
+	}
+	if !isQuitCmd(cmd) {
+		t.Fatal("confirm-phase ESC must return a tea.Quit command")
+	}
+}
+
+func TestAdvanceGate_EditEscReturnsToConfirm(t *testing.T) {
+	m := newGateModelInCustomizePhase(t)
+	m, cmd := m.advanceGate("", false) // ESC while editing a var
+	if m.gate == nil {
+		t.Fatal("edit-phase ESC must keep the gate (back to confirm, not quit)")
+	}
+	if m.gate.customizing {
+		t.Fatal("edit-phase ESC must leave the customizing phase")
+	}
+	if isQuitCmd(cmd) {
+		t.Fatal("edit-phase ESC must not quit the run")
+	}
+	if !m.askMode { // re-raised the confirm dialog
+		t.Fatal("edit-phase ESC must re-raise the confirm dialog")
 	}
 }
 

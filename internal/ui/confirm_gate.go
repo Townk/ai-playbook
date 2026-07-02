@@ -174,7 +174,7 @@ func (m model) raiseGroupConfirm() (model, tea.Cmd) {
 	var b strings.Builder
 	b.WriteString("Confirm these variables for this run:\n\n")
 	b.WriteString(formatConfirmVars(names, g.values, input.AskInnerWidth()))
-	m.ask = input.NewAsk("Variables", b.String(), "", "confirm", nil, "Confirm", "Customize")
+	m.ask = input.NewAsk("Variables", b.String(), "", "confirm", nil, "Confirm", "Customize").WithTertiaryButton("Quit")
 	m.askMode = true
 	m.askCompletion = func(value string, submitted bool) tea.Msg {
 		return gateAnswerMsg{value: value, submitted: submitted}
@@ -295,9 +295,11 @@ func (m model) raiseVarEdit() (model, tea.Cmd) {
 	return m, m.ask.Init()
 }
 
-// advanceGate consumes one dialog answer and drives the state machine: ESC cancels
-// (gate stays unsatisfied, back to reading); Customize enters the per-var edit phase;
-// Confirm (or finishing a group's edits) advances to the next group or finishes.
+// advanceGate consumes one dialog answer and drives the state machine: ESC during a
+// per-var edit backs out to the group's confirm dialog (gate intact); ESC on the confirm
+// dialog, or choosing Quit, ends the run (gate cleared, tea.Quit); Customize enters the
+// per-var edit phase; Confirm (or finishing a group's edits) advances to the next group
+// or finishes.
 func (m model) advanceGate(value string, submitted bool) (model, tea.Cmd) {
 	g := m.gate
 	if g == nil {
@@ -306,9 +308,14 @@ func (m model) advanceGate(value string, submitted bool) (model, tea.Cmd) {
 	m.askMode = false
 	m.ask = nil
 	m.askCompletion = nil
-	if !submitted { // ESC → cancel, return to reading, gate stays unsatisfied
-		m.gate = nil
-		return m, nil
+	if !submitted {
+		if g.customizing { // ESC during a per-var edit → back to the group's confirm
+			g.customizing = false
+			g.ci = 0
+			return m.raiseGroupConfirm()
+		}
+		m.gate = nil // ESC on the confirm dialog → quit the run
+		return m, tea.Quit
 	}
 	if g.customizing {
 		g.values[g.groups[g.gi][g.ci].Name] = value
@@ -322,6 +329,10 @@ func (m model) advanceGate(value string, submitted bool) (model, tea.Cmd) {
 		return m.afterGroup()
 	}
 	// confirm phase
+	if value == "quit" { // Quit button → quit the run
+		m.gate = nil
+		return m, tea.Quit
+	}
 	if value == "no" { // Customize → edit this group's vars
 		g.customizing = true
 		g.ci = 0
