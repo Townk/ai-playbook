@@ -83,8 +83,6 @@ Try it: click **[edit]**, update the `description` line in the front matter, sav
 
 ## Validate a playbook
 
-<!-- ⏳ needs validate (not yet built) -->
-
 `ai-playbook validate` checks a playbook file for structural correctness and, when a model is configured, requests an AI review of the prose:
 
 ```bash {static}
@@ -97,7 +95,7 @@ The structural pass verifies:
 - Every `needs=` reference points to a block `id` that exists in the same file.
 - All fenced blocks are balanced (no unclosed fences or mismatched attributes).
 
-The AI review pass (requires `AI_PLAYBOOK_MODEL` to be set) reads the playbook prose and returns a short summary of any inconsistencies, missing callouts, or steps that look non-idempotent.
+The AI review pass runs when the Claude CLI backend is available and is skipped with a note otherwise (it never fails the check). Set `AI_PLAYBOOK_MODEL` (or `ASSIST_MODEL`) to choose the model; pass `--no-ai` to skip it for a purely deterministic or CI run.
 
 > [!TIP]
 > Run `ai-playbook validate --file examples/07-run-modes.md` to check the previous chapter's playbook blocks — a good habit before sharing any file with your team.
