@@ -3,7 +3,7 @@
 Durable single source of truth for the feature roadmap. Each phase lists its
 goal, status, settled decisions, and open questions. Per-phase, step-by-step
 implementation plans are written just-in-time when a phase starts (they're
-ephemeral; this doc is not). Last updated: 2026-07-01.
+ephemeral; this doc is not). Last updated: 2026-07-02.
 
 ## Vision
 
@@ -49,11 +49,16 @@ show   <slug>                          render a playbook (read-only)
 run    [[--playbook] <slug>            execute a runbook
        | --file <path>]
        [--assisted
-       | --auto [--no-auto-rollback]]
+       | --auto [--no-auto-rollback]
+                [--with-env <json|file>]]
 
 edit   <slug>                          open the playbook in $EDITOR
 
 validate [<slug> | --file <path>]      AI + structural review of a playbook
+
+env    [<slug> | --file <path>]        print declared env as --with-env JSON
+                                       (resolved from the environment; secrets
+                                       redacted)
 
    (internal/aux: session · answer · finalize · mcp · input · selftest)
 ```
@@ -63,6 +68,9 @@ validate [<slug> | --file <path>]      AI + structural review of a playbook
 - Run modes (mutually exclusive): default = interactive pager (free-form),
   `--assisted` = guided confirm-each-step, `--auto` = unattended.
   `--no-auto-rollback` is valid only with `--auto` (auto-rollback is ON by default under `--auto`; use `--no-auto-rollback` to opt out and leave failed state in place).
+- `--with-env <json|file>` (valid only with `--auto`) supplies declared `env:`
+  values on the CLI (precedence over the environment; undeclared keys warned).
+  The `env` command scaffolds that JSON from a playbook's declaration.
 
 ## Schema (evolves across phases)
 
@@ -203,6 +211,15 @@ rollback, and execution log shipped 2026-07-01 (spec
   forward step reads "↺ rolled back"; its undo command reads as a success.)
 - [DONE] **Execution log:** per-step `{command, exit, output}` → a run summary +
   a JSON log under `${XDG_DATA_HOME}/ai-playbook/runs/` (`internal/autorun`).
+- [DONE] **CLI env values for `--auto`:** `--with-env <inline-JSON | file>`
+  supplies declared `env:` values without exporting them (precedence: `--with-env`
+  → exported env → front-matter default → missing; undeclared keys warned; valid
+  only with `--auto`). The companion **`env [<slug>|--file]`** command prints a
+  playbook's declared env as a `--with-env`-compatible JSON template, each value
+  resolved against the current environment with secrets redacted to `""`
+  (round-trip: `env > env.json` → edit → `run --auto --with-env env.json`).
+  (Specs `docs/specifications/2026-07-02-with-env-auto.md`,
+  `.../2026-07-02-env-command.md`.)
 
 **Settled decisions:** adapt uses the authoring model (default thinking).
 Per-mode rollback behavior as above.
@@ -303,6 +320,14 @@ commit re-engagement, the no-mux inline input + ask overlay.
 6. [DONE] **In-process side-by-side diff view** (Phase 4, [ADR-0008](architecture/adrs/0008-in-process-diff-view.md)).
 7. [DONE] **`--assisted` guided mode** (Phase 2) — the previously-carved-out
    run-assisted feature.
+
+**Refinements (2026-07-02):** `--assisted` confirms declared variables at load
+(before the first step); the variable-confirmation dialog is fully painted on its
+background (prompt, buttons, hint) with an aligned + wrapping two-column var list
+and a `[ Confirm ][ Customize ][ Quit ]` footer where ESC / Quit end the run;
+`--with-env` + the `env` command (above) complete the non-interactive env story.
+_Remaining polish (backlog):_ `choose.go` and the text-input box interior share
+the same frame-background bleed and want the same treatment.
 
 ---
 

@@ -16,7 +16,8 @@ _(none — phase work lives in the roadmap)_
 
 ## Tasks
 
-- [ ] ESC-audit: ensure ESC consistently *cancels the current operation / dismisses a modal* (never exits the app — that's Ctrl+C). Known case: ESC during the in-box classify-wave currently proceeds/routes instead of cancelling (2026-06-27)
+- [ ] Dialog frame-background bleed: `choose.go` and the text-input box interior still render foreground-only styles inside the Mantle frame, so they bleed the terminal default (the same class fixed for the confirm dialog's prompt/buttons/hint). Apply the `promptStyle`/`hintKW` Mantle treatment there too (2026-07-02)
+- [ ] ESC-audit: ensure ESC consistently *cancels the current operation / dismisses a modal* (never exits the app — that's Ctrl+C). Known case: ESC during the in-box classify-wave currently proceeds/routes instead of cancelling. Note: the `--assisted`/`run` variable-confirm gate is a deliberate exception — ESC there ends the run (a mandatory pre-run gate) (2026-06-27)
 - [ ] internal/ui test suite is slow on CI (~10min+ under -race on 2-core runners) — parallelize / reduce per-test zsh-driver spawns (2026-06-27)
 - [ ] Coverage pass toward ~90% — unit-testable packages first: mcpserver 42%, input 66%, capture 70%, triage 73%, tools/floatinput 77%; launcher/cmd orchestration needs integration tests (harder) (2026-06-27)
 - [ ] 2-tier integration config — residual: the named-preset selectors are DONE and uniform (`[mux] backend`, `[driver] shell`, `[agent] harness`) and mux has per-command overrides; consider whether shell/AI want per-command/per-aspect overrides too (likely not needed — revisit if a use case appears) (2026-06-27)

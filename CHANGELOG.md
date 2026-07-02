@@ -25,6 +25,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   shell — `zsh`, `bash`, or POSIX `sh`. bash and sh are supported with per-shell
   value-passing that round-trips special characters; zsh gives full fidelity
   (aliases/functions/rc). The default honors `$SHELL` (see *Changed*).
+- **Run modes for `run`** — `--assisted` (guided: a "ready" cursor auto-scrolls
+  each next step into view; a focusable `[ Run ][ Skip ][ Quit ]` footer confirms
+  each step; on failure it switches to `[ Roll back ][ Leave as-is ][ Quit ]`) and
+  `--auto` (headless: runs every block in `needs=` order, stops on the first
+  failure with a non-zero exit and a summary; renders inline in the terminal /
+  CI-friendly). `--auto` rolls back completed steps in reverse order on failure by
+  default (via `{rollback=<id>}` blocks); `--no-auto-rollback` opts out. Each run
+  writes a structured JSON log under `${XDG_DATA_HOME}/ai-playbook/runs/`.
+- **`validate [<slug> | --file <path>]`** — deterministic structural checks
+  (front-matter required keys, `needs=` existence and cycles, duplicate ids, fence
+  balance; plus no-runnable / missing-language warnings) and an advisory AI prose
+  review, with live progress (a spinner on a TTY, a dot heartbeat in CI) and
+  `--no-ai` / `--plain` / `--quiet`. Exits non-zero on structural errors only.
+- **Viewer affordances** — an `[edit]` tag-button opens `$EDITOR` on a file-backed
+  playbook and the viewer reloads on save (1s mtime watch); a pure-Go side-by-side,
+  syntax-highlighted diff view (ADR-0008) backs both the `diff`-block "view diff"
+  button and the adapt-on-run `d` overlay, mux-aware (a floating pane with a
+  multiplexer, a modal overlay without).
+- **`run --auto --with-env <JSON | file>`** — supply a project-bound playbook's
+  declared `env:` values on the CLI as an inline JSON object or a path to a JSON
+  file, instead of exporting them. Values take precedence over the environment;
+  undeclared keys are ignored with a warning. Valid only with `--auto`.
+- **`env [<slug> | --file <path>]`** — print a playbook's declared `env:` as a
+  `--with-env`-compatible JSON object, each value resolved from the current
+  environment (sensitive values — token/key/secret/password-like names or
+  high-entropy values — are emitted empty and listed on stderr). Scaffolds the
+  round-trip `env > env.json` → edit → `run --auto --with-env env.json`.
 
 ### Changed
 
@@ -53,6 +80,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   from the retired "ai-assist" shell stack. If you have saved playbooks that reference
   the old names, update them: `s/\$AAS_/\$APB_/g`. The store is days old so few if
   any saved playbooks should be affected.
+
+### Fixed
+
+- The variable-confirmation dialog is now fully painted on its background — the
+  prompt body, the button row (now `[ Confirm ][ Customize ][ Quit ]`), and the
+  hint line no longer bleed the terminal's default background — and variables
+  render in an aligned two-column layout with long values wrapping under the value
+  column.
+- In the confirm gate, **ESC** and the new **Quit** button end the run; ESC while
+  editing a variable (Customize) steps back to the confirm dialog instead of
+  quitting.
+- `--assisted` now confirms a project-bound playbook's declared variables at load
+  (before the first step), matching the run-modes spec.
 
 ## [0.3.0] - 2026-06-26
 
