@@ -83,6 +83,34 @@ ai-playbook run --auto --file examples/07-run-modes.md 2>&1 | tee run.log
 > [!TIP]
 > In project-bound playbooks (see Chapter 06) auto mode skips the interactive env-variable confirmation gate if all required variables are already present in the environment. Export them before calling ai-playbook and the gate is satisfied silently.
 
+## Rollback in CI
+
+When an `--auto` run hits a failing step it stops immediately and — by default — **undoes the steps that already succeeded**, running each completed block's `rollback=` target in reverse order. That is what makes `--auto` safe to drop into a pipeline: a failed run doesn't leave half-applied state behind, and the non-zero exit still fails the CI step.
+
+Chapter 02's playbook is built to show this — its `stage` block declares a `rollback=` target and a later block fails on purpose:
+
+```bash {static}
+ai-playbook run --auto --file examples/02-needs-verify-rollback.md
+```
+
+The run stops at the failing block, rolls `stage` back, and prints a summary:
+
+```text {static}
+  ✓ ok        prep    (exit 0)
+  ✓ ok        use     (exit 0)
+  ↺ rolledback stage
+  ✗ failed    boom    (exit 1)
+  ✓ ok        undo-stage (exit 0)
+```
+
+The forward step that was undone reads `↺ rolledback`; the rollback command that ran to undo it reads `✓ ok`. The process exits non-zero (here `1`, the failing block's code) **even though the rollback itself succeeded** — so a CI step that checks the exit status fails the build, while the workspace is left clean.
+
+To stop on failure *without* rolling back — leaving the completed steps in place for post-mortem inspection — add `--no-auto-rollback`:
+
+```bash {static}
+ai-playbook run --auto --no-auto-rollback --file examples/02-needs-verify-rollback.md
+```
+
 ## The stop button
 
 In the viewer, the **Run** button becomes **Stop** the moment a block starts executing. Click **Stop** any time to send SIGTERM to the running process; the block is marked as cancelled and no downstream `needs=` blocks will run.
