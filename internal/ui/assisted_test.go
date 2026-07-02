@@ -102,6 +102,35 @@ func TestAssistedFooter_FailureButtons(t *testing.T) {
 	}
 }
 
+// TestAssisted_SpaceStartsHintNotActivate verifies fix 4 (live-testing
+// feedback): while the assisted footer is up, Space must NOT activate the
+// focused footer button (that would make Space ambiguous with the Space-leader
+// hint mode) — it must fall through to hint mode instead, so the user can
+// hint-select the ready block's copy/expand buttons. Enter, by contrast, still
+// activates (see TestAssisted_RunActivatesReadyBlock).
+func TestAssisted_SpaceStartsHintNotActivate(t *testing.T) {
+	m := newModel("T", "```bash {id=a}\ntrue\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+	m = m.startAssisted()
+	if m.assistedFooter != "step" {
+		t.Fatalf("setup: expected a step footer, got %q", m.assistedFooter)
+	}
+	m.footerFocus = 0 // "Run"
+	nm, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	m2 := nm.(model)
+	if m2.blockStates["a"].Status == "running" || m2.blockStates["a"].Status == "ok" {
+		t.Errorf("space must NOT activate Run; got Status=%q", m2.blockStates["a"].Status)
+	}
+	if m2.assistedFooter != "step" {
+		t.Errorf("space must NOT advance the footer past step; got %q", m2.assistedFooter)
+	}
+	if !m2.hintMode {
+		t.Error("space while the assisted footer is active must enter hint mode (fall through to the leader)")
+	}
+}
+
 func TestAssisted_RunActivatesReadyBlock(t *testing.T) {
 	m := newModel("T", "```bash {id=a}\ntrue\n```\n")
 	m.width, m.height = 80, 24
@@ -277,8 +306,9 @@ func TestStartAssisted_ReflowsFromMd(t *testing.T) {
 
 // The "step" footer must NOT reuse the always-green focused highlight the
 // verify-success confirm row uses (that reads as "success" before anything
-// has run) — it should use the neutral dialog-blue accent. "failure" uses the
-// warn/peach tone; "done" (a completed run) is the one legitimate green case.
+// has run) — it should use a neutral "selected tab" surface accent, not a
+// bright mode-accent color. "failure" uses the warn/peach tone; "done" (a
+// completed run) is the one legitimate green case.
 func TestAssistedFooterButtons_ModeAccents(t *testing.T) {
 	m := newModel("T", "```bash {id=a rollback=undo-a}\ntrue\n```\n\n```bash {id=undo-a}\ntrue\n```\n\n```bash {id=boom needs=a}\nfalse\n```\n")
 	m.width, m.height = 80, 24
@@ -287,8 +317,43 @@ func TestAssistedFooterButtons_ModeAccents(t *testing.T) {
 
 	m.assistedFooter = "step"
 	for _, b := range m.assistedFooterButtons() {
-		if b.Accent != colBlue {
-			t.Errorf("step button %q: Accent=%q, want colBlue (%q)", b.Label, b.Accent, colBlue)
+		if b.Accent != colSurface1 {
+			t.Errorf("step button %q: Accent=%q, want colSurface1 (%q)", b.Label, b.Accent, colSurface1)
+		}
+	}
+
+	m.blockStates["a"] = blockRunState{Status: "ok"}
+	m.assistedFooter = "failure"
+	m.assistedFailedID = "boom"
+	for _, b := range m.assistedFooterButtons() {
+		if b.Accent != colPeach {
+			t.Errorf("failure button %q: Accent=%q, want colPeach (%q)", b.Label, b.Accent, colPeach)
+		}
+	}
+
+	m.assistedFooter = "done"
+	for _, b := range m.assistedFooterButtons() {
+		if b.Accent != colGreen {
+			t.Errorf("done button %q: Accent=%q, want colGreen (%q)", b.Label, b.Accent, colGreen)
+		}
+	}
+}
+
+// TestAssistedFooterButtons_SelectionColors pins the exact "selected tab"
+// palette per footer mode (fix 3, live-testing feedback): "step"'s FOCUSED
+// button must read as a neutral grey surface, not the mode's old bright-blue
+// accent — the footer's Run/Skip/Quit haven't earned a success/brand color
+// yet. "failure"/"done" keep their warn/success tones.
+func TestAssistedFooterButtons_SelectionColors(t *testing.T) {
+	m := newModel("T", "```bash {id=a rollback=undo-a}\ntrue\n```\n\n```bash {id=undo-a}\ntrue\n```\n\n```bash {id=boom needs=a}\nfalse\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+
+	m.assistedFooter = "step"
+	for _, b := range m.assistedFooterButtons() {
+		if b.Accent != colSurface1 {
+			t.Errorf("step button %q: Accent=%q, want colSurface1 (%q)", b.Label, b.Accent, colSurface1)
 		}
 	}
 

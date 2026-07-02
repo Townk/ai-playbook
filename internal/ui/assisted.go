@@ -131,18 +131,17 @@ type footerBtn struct{ Label, Kind, Accent string }
 // a single Quit; "" (footer not shown) → nil.
 //
 // Accent is mode-wide, not per-button: "step" hasn't succeeded at anything yet,
-// so it uses the standard dialog accent (colBlue — the same blue as the
-// confirm-dialog/help-modal border) rather than success-green. "failure" uses
-// the warn tone (colPeach) already used elsewhere for rollback/danger actions.
-// "done" is the one case a completed run legitimately reads as success
-// (colGreen).
+// so its FOCUSED button reads as a neutral "selected tab" surface (colSurface1)
+// rather than success-green or the dialog accent. "failure" uses the warn tone
+// (colPeach) already used elsewhere for rollback/danger actions. "done" is the
+// one case a completed run legitimately reads as success (colGreen).
 func (m model) assistedFooterButtons() []footerBtn {
 	switch m.assistedFooter {
 	case "step":
 		return []footerBtn{
-			{"Run", "assist-run", colBlue},
-			{"Skip", "assist-skip", colBlue},
-			{"Quit", "assist-quit", colBlue},
+			{"Run", "assist-run", colSurface1},
+			{"Skip", "assist-skip", colSurface1},
+			{"Quit", "assist-quit", colSurface1},
 		}
 	case "failure":
 		var btns []footerBtn
@@ -241,8 +240,9 @@ func (m model) assistedFooterContextRowString() string {
 // treatment, same dim "unfocused" look) but WITHOUT confirmButtonLabel's
 // always-green focused highlight: the focused color comes from the button's
 // own Accent (mode-wide — see assistedFooterButtons), so the "step" footer
-// doesn't read as "success" before anything has run. confirmButtonLabel itself
-// is left untouched — the verify-success confirm row still shares it.
+// reads as a neutral "selected tab" rather than "success" before anything has
+// run. confirmButtonLabel itself is left untouched — the verify-success
+// confirm row still shares it.
 func (m model) assistedFooterButtonLabel(label, kind, accent string, focused bool) string {
 	st := lipgloss.NewStyle().Padding(0, confirmButtonPad)
 	if m.flashKey == "assist:"+kind {
@@ -256,7 +256,7 @@ func (m model) assistedFooterButtonLabel(label, kind, accent string, focused boo
 	}
 	return st.
 		Foreground(lipgloss.Color(colSubtext)).
-		Background(lipgloss.Color(colSurface1)).
+		Background(lipgloss.Color(colSurface0)).
 		Render(label)
 }
 

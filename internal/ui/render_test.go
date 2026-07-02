@@ -1909,6 +1909,53 @@ func TestRender_ReadyCursorMarksNextStep(t *testing.T) {
 	}
 }
 
+// TestAssisted_CaretHasLeadingSpace verifies the ready-cursor caret (fix 2,
+// live-testing feedback) gets left padding — " ▶" rather than a bare "▶"
+// flush against the tab's left edge.
+func TestAssisted_CaretHasLeadingSpace(t *testing.T) {
+	m := newModel("T", "```bash {id=a}\ntrue\n```\n\n```bash {id=b needs=a}\ntrue\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+	m = m.startAssisted() // readyID=a
+	out := strip(m.viewString())
+	if !strings.Contains(out, " ▶") {
+		t.Errorf("ready caret must have a leading space (\" ▶\"):\n%s", out)
+	}
+}
+
+// TestAssisted_NoInlineRunButtonInAssisted verifies fix 1 (live-testing
+// feedback): once GUIDED mode is driving a walk, the footer's Run is the only
+// way to fire the ready step — the code-block's own inline run button (right
+// tab) must NOT be registered, so there's no redundant/ambiguous second Run
+// control. The copy button (unrelated to Run) must still be present. A
+// non-assisted render of the identical markdown is the regression check: it
+// must still register the run button exactly as before.
+func TestAssisted_NoInlineRunButtonInAssisted(t *testing.T) {
+	md := "```bash {id=a}\ntrue\n```\n\n```bash {id=b needs=a}\ntrue\n```\n"
+	m := newModel("T", md)
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+	m = m.startAssisted() // readyID=a
+	if m.readyID == "" {
+		t.Fatal("setup: expected a non-empty readyID")
+	}
+	if buttonForBlock(m.buttons, m.readyID, "run") != nil {
+		t.Errorf("assisted mode must NOT register an inline run button for the ready block %q", m.readyID)
+	}
+	if buttonForBlock(m.buttons, m.readyID, "copy") == nil {
+		t.Errorf("assisted mode must still register the copy button for the ready block %q", m.readyID)
+	}
+
+	// Regression: the SAME markdown rendered without the assisted cursor
+	// (readyID="") must still show the plain run button, unchanged.
+	_, btns, _ := renderCursor(md, 80, map[string]blockRunState{}, "", "")
+	if buttonForBlock(btns, "a", "run") == nil {
+		t.Error("non-assisted render must still register the inline run button")
+	}
+}
+
 // TestRender_SkippedStatus verifies a block whose run state is "skipped"
 // renders a "skipped" label instead of reading as merely un-run.
 func TestRender_SkippedStatus(t *testing.T) {

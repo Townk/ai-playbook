@@ -710,7 +710,7 @@ func (r *renderer) code(n ast.Node) {
 		// r.readyID (every non-assisted render) leaves caret == "" and numW unchanged.
 		caret := ""
 		if r.readyID != "" && blk.ID == r.readyID {
-			caret = bg.Foreground(lipgloss.Color(colGreen)).Bold(true).Render(glyphReady)
+			caret = bg.Render(" ") + bg.Foreground(lipgloss.Color(colGreen)).Bold(true).Render(glyphReady)
 		}
 		// Leading + trailing space, all on the code-block background (a little top-left
 		// tab mirroring the button tab on the right).
@@ -786,21 +786,23 @@ func (r *renderer) code(n ast.Node) {
 				sb.WriteString(bg.Render(" "))
 				col++
 			default:
-				// Assisted (GUIDED) ready cursor: the Run button for the block the run
-				// wants acted on next renders in the ready/highlighted style (the same
-				// colBase-on-colGreen focus tone used for the confirm-buttons' focused
-				// control, see confirmButtonLabel) instead of the plain run color.
-				// r.shellDisabled still wins (async-startup dimming applies to the ready
-				// button too) and any active flash pulse still wins via buttonGlyph.
-				if r.readyID != "" && blk.ID == r.readyID && !r.shellDisabled && r.flashKey != blk.ID+":run" {
-					sb.WriteString(bg.Foreground(lipgloss.Color(colBase)).Background(lipgloss.Color(colGreen)).Bold(true).Render(glyphRun))
+				// Assisted (GUIDED): the footer's Run drives the ready step, so the
+				// inline run button on the code-block's right tab would be a redundant
+				// (and now ambiguous) second way to fire it. Blank it out instead —
+				// two spaces on the code-block bg, no Button registered — while keeping
+				// the reserved region width unchanged so alignment with non-assisted
+				// renders is preserved. Non-assisted (r.readyID == "") keeps the
+				// existing plain run button untouched.
+				if r.readyID != "" {
+					sb.WriteString(bg.Render("  "))
+					col += 2
 				} else {
 					sb.WriteString(r.buttonGlyph(blk.ID, "run", glyphRun, colRun, bg))
+					col++
+					sb.WriteString(bg.Render(" "))
+					col++
+					r.buttons = append(r.buttons, Button{Line: lineIdx, Col: runActionCol, Width: 2, Kind: "run", Payload: runPayload(blk), BlockID: blk.ID})
 				}
-				col++
-				sb.WriteString(bg.Render(" "))
-				col++
-				r.buttons = append(r.buttons, Button{Line: lineIdx, Col: runActionCol, Width: 2, Kind: "run", Payload: runPayload(blk), BlockID: blk.ID})
 			}
 		}
 		if blk.Type == "shell" && !isRollbackTarget && r.muxActive {

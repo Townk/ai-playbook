@@ -1556,16 +1556,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Assisted (GUIDED) footer: while a footer row is up (Run/Skip/Quit,
 		// Roll-back/Leave-as-is/Quit, or the done Quit) it is keyboard-FOCUSABLE —
-		// ←/→ (also h/l, Tab) move focus between its buttons, Enter/Space/space
-		// activate the focused one. Captured BEFORE the confirm/leader/global switch
-		// so footer keys are never mistaken for normal nav while a footer is active;
-		// a mouse click still resolves regardless of focus (click-dispatch path).
+		// ←/→ (also h/l, Tab) move focus between its buttons, Enter activates the
+		// focused one. Captured BEFORE the confirm/leader/global switch so footer
+		// nav keys are never mistaken for normal nav while a footer is active; a
+		// mouse click still resolves regardless of focus (click-dispatch path).
 		//
 		// Only the nav/activate keys below are captured (each returns explicitly).
-		// Any OTHER key (ctrl+c, q, esc, scroll keys, ?, w, ...) falls through to
-		// the confirm/leader/global handling further down — in particular ctrl+c
-		// must always be able to quit, and the doc must stay scrollable while a
-		// footer is on screen.
+		// Any OTHER key (ctrl+c, q, esc, scroll keys, space, ?, w, ...) falls
+		// through to the confirm/leader/global handling further down — in
+		// particular ctrl+c must always be able to quit, the doc must stay
+		// scrollable while a footer is on screen, and Space must reach the
+		// Space-leader → hint mode so the ready block's copy/expand buttons stay
+		// hintable instead of the footer swallowing Space as "activate".
 		if m.assistedFooterActive() {
 			btns := m.assistedFooterButtons()
 			// Clamp a stale focus (e.g. carried over from a footer with more buttons)
@@ -1592,12 +1594,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.footerFocus = (m.footerFocus + 1) % len(btns)
 				}
 				return m, nil
-			case "enter", "space", " ":
+			case "enter":
 				if m.footerFocus >= 0 && m.footerFocus < len(btns) {
 					return m.assistedActivate(btns[m.footerFocus].Kind)
 				}
 				return m, nil
 			}
+			// space/" " deliberately falls through (no case above, no catch-all
+			// return) to the Space-leader → hint mode below, so the user can
+			// hint-select the ready block's copy/expand buttons while the footer
+			// is shown, instead of the footer swallowing Space as "activate".
 		}
 		// Issue #4: while the verify-success confirm row is active it is keyboard-
 		// FOCUSABLE — ←/→ (also h/l, Tab) move focus between [ Yes ] and [ No ], and
