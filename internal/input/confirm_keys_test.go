@@ -32,12 +32,12 @@ func TestResolveConfirmKey(t *testing.T) {
 		{"n", actNegate}, // alias, affKey != 'n'
 		{"enter", actSubmit},
 		{"esc", actCancel}, {"ctrl+c", actCancel},
-		{"tab", actToggle}, {"shift+tab", actToggle},
+		{"tab", actToggleNext}, {"shift+tab", actTogglePrev},
 		{"left", actFocusLeft}, {"right", actFocusRight},
 		{"z", actNone},
 	}
 	for _, c := range cases {
-		if got := resolveConfirmKey(c.key, aff, neg); got != c.want {
+		if got := resolveConfirmKey(c.key, aff, neg, 0); got != c.want {
 			t.Fatalf("resolveConfirmKey(%q)=%d want %d", c.key, got, c.want)
 		}
 	}
@@ -46,7 +46,24 @@ func TestResolveConfirmKey(t *testing.T) {
 func TestAliasConflict(t *testing.T) {
 	// affirmative "Nope" → affKey 'n'; the 'n' accelerator must affirm, and must
 	// NOT be reinterpreted as the negate alias.
-	if got := resolveConfirmKey("n", 'n', 'c'); got != actAffirm {
+	if got := resolveConfirmKey("n", 'n', 'c', 0); got != actAffirm {
 		t.Fatalf("'n' should hit the affirmative accelerator, got %d", got)
+	}
+}
+
+func TestResolveConfirmKey_Tertiary(t *testing.T) {
+	// terKey 'q' resolves to actTertiary; Tab/Shift-Tab map to the directional actions.
+	if got := resolveConfirmKey("q", 'y', 'n', 'q'); got != actTertiary {
+		t.Errorf("q -> %v, want actTertiary", got)
+	}
+	if got := resolveConfirmKey("tab", 'y', 'n', 'q'); got != actToggleNext {
+		t.Errorf("tab -> %v, want actToggleNext", got)
+	}
+	if got := resolveConfirmKey("shift+tab", 'y', 'n', 'q'); got != actTogglePrev {
+		t.Errorf("shift+tab -> %v, want actTogglePrev", got)
+	}
+	// With no tertiary (terKey 0), 'q' is inert.
+	if got := resolveConfirmKey("q", 'y', 'n', 0); got != actNone {
+		t.Errorf("q with no tertiary -> %v, want actNone", got)
 	}
 }

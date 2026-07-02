@@ -61,6 +61,18 @@ func NewAsk(title, prompt, value, typ string, choices []string, affLabel, negLab
 	}
 }
 
+// WithTertiaryButton adds a third button (e.g. "Quit") to a confirm dialog.
+// Selecting it makes the dialog's value() return "quit". It is a no-op for
+// non-confirm dialogs. Chainable so callers can write
+// NewAsk(...).WithTertiaryButton("Quit").
+func (a *Ask) WithTertiaryButton(label string) *Ask {
+	if cf, ok := a.m.fld.(*confirmField); ok {
+		cf.tertiary = label
+		cf.terKey = deriveTertiaryKey(label, cf.affKey, cf.negKey)
+	}
+	return a
+}
+
 func (a *Ask) Init() tea.Cmd { return a.m.fld.initCmd() }
 
 // Update steps the dialog by delegating to the underlying field. done is true when

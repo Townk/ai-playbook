@@ -1435,7 +1435,7 @@ func TestModelUpdateInlineThinkNonNil(t *testing.T) {
 
 func TestResolveConfirmKeyLenNotOne(t *testing.T) {
 	// A 2-rune key string that doesn't match any special case → actNone via len(r)!=1 guard
-	act := resolveConfirmKey("f1", 'y', 'n')
+	act := resolveConfirmKey("f1", 'y', 'n', 0)
 	if act != actNone {
 		t.Fatalf("2-rune key must return actNone via len guard, got %d", act)
 	}
