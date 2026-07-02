@@ -208,6 +208,22 @@ func autoRun(ra runArgs) int {
 
 	// Pass the front-matter-stripped body — NOT the raw source — so the YAML
 	// fence never gets mis-parsed as a code block.
+	blocks := blocksFor(body)
+
+	return autorunRunFn(autorun.RunConfig{
+		Blocks:       blocks,
+		EnvVars:      fm.Env,
+		Cwd:          cwd,
+		Shell:        cfg.Driver.Shell,
+		Slug:         slug,
+		AutoRollback: !ra.NoAutoRollback,
+		EnvOverrides: ra.EnvOverrides,
+	})
+}
+
+// blocksFor renders a playbook body and converts it to autorun.Block, the
+// headless-run representation (shared by --auto and the depends_on runner).
+func blocksFor(body string) []autorun.Block {
 	_, _, uiBlocks := ui.Render(body, 80, nil, "")
 	blocks := make([]autorun.Block, 0, len(uiBlocks))
 	for _, b := range uiBlocks {
@@ -220,16 +236,7 @@ func autoRun(ra runArgs) int {
 			Kind:     kindFromType(b.Type),
 		})
 	}
-
-	return autorunRunFn(autorun.RunConfig{
-		Blocks:       blocks,
-		EnvVars:      fm.Env,
-		Cwd:          cwd,
-		Shell:        cfg.Driver.Shell,
-		Slug:         slug,
-		AutoRollback: !ra.NoAutoRollback,
-		EnvOverrides: ra.EnvOverrides,
-	})
+	return blocks
 }
 
 // kindFromType maps a ui.Block's Type tag to autorun's StepKind: "diff" →

@@ -26,12 +26,17 @@ type RunConfig struct {
 	Blocks       []Block
 	EnvVars      map[string]frontmatter.EnvValue // declared front-matter env (var → {value,why})
 	EnvOverrides map[string]string               // CLI --with-env values (name → value); win over exported env
-	Cwd          string
-	Shell        string // driver.Options.Shell selector
-	Slug         string
-	AutoRollback bool
-	Out          io.Writer     // default os.Stdout when nil
-	Now          func() string // timestamp source; default UTC "20060102T150405Z"
+	// SuppressUndeclaredWarning skips the per-run warnUndeclared print when
+	// true (default false = today's behavior). A depends_on chain runner sets
+	// this on every run but the last so the undeclared-override warning is
+	// emitted once for the whole chain instead of once per playbook.
+	SuppressUndeclaredWarning bool
+	Cwd                       string
+	Shell                     string // driver.Options.Shell selector
+	Slug                      string
+	AutoRollback              bool
+	Out                       io.Writer     // default os.Stdout when nil
+	Now                       func() string // timestamp source; default UTC "20060102T150405Z"
 }
 
 // noopMux is a package-local orchestrator.Mux for headless runs — there is no
@@ -230,7 +235,9 @@ func Run(rc RunConfig) int {
 		now = defaultStamp
 	}
 
-	warnUndeclared(out, rc.EnvVars, rc.EnvOverrides)
+	if !rc.SuppressUndeclaredWarning {
+		warnUndeclared(out, rc.EnvVars, rc.EnvOverrides)
+	}
 	env, missing := resolveEnv(rc.EnvVars, rc.EnvOverrides)
 	if len(missing) > 0 {
 		for _, m := range missing {
