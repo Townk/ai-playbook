@@ -5,6 +5,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"sort"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ const cancelExit = 130
 type RunConfig struct {
 	Blocks       []Block
 	EnvVars      map[string]frontmatter.EnvValue // declared front-matter env (var → {value,why})
+	EnvOverrides map[string]string               // CLI --with-env values (name → value); win over exported env
 	Cwd          string
 	Shell        string // driver.Options.Shell selector
 	Slug         string
@@ -40,10 +42,12 @@ func (noopMux) Copy(string) error { return nil }
 func (noopMux) Play(string) error { return nil }
 
 // resolveEnv computes the preflighted env slice for the driver, per rc.EnvVars.
-// For each declared var: resolved = os.Getenv(name) if set, else ev.Value; if
-// resolved is "" the var is required-and-missing. missing holds (name, why)
-// pairs for every missing var, in map-iteration order.
-func resolveEnv(vars map[string]frontmatter.EnvValue) (env []string, missing []struct{ name, why string }) {
+// Precedence per declared var: a non-empty overrides[name] (CLI --with-env) wins,
+// else os.Getenv(name), else ev.Value; if the result is "" the var is
+// required-and-missing. An override/default that differs from the exported value
+// is appended so it wins by os/exec last-wins semantics. missing holds
+// (name, why) pairs for every missing var, in map-iteration order.
+func resolveEnv(vars map[string]frontmatter.EnvValue, overrides map[string]string) (env []string, missing []struct{ name, why string }) {
 	env = os.Environ()
 	existing := make(map[string]bool, len(env))
 	for _, e := range env {
@@ -56,19 +60,40 @@ func resolveEnv(vars map[string]frontmatter.EnvValue) (env []string, missing []s
 	}
 
 	for name, ev := range vars {
-		resolved := os.Getenv(name)
-		if resolved == "" {
+		resolved := ""
+		if v, ok := overrides[name]; ok && v != "" {
+			resolved = v
+		} else if v := os.Getenv(name); v != "" {
+			resolved = v
+		} else {
 			resolved = ev.Value
 		}
 		if resolved == "" {
 			missing = append(missing, struct{ name, why string }{name, ev.Why})
 			continue
 		}
-		if !existing[name] {
+		// Append when newly declared OR when the resolved value differs from what
+		// is already exported (an override/default that must win by last-wins).
+		if !existing[name] || os.Getenv(name) != resolved {
 			env = append(env, name+"="+resolved)
 		}
 	}
 	return env, missing
+}
+
+// warnUndeclared prints a sorted warning for every override key not declared in
+// the playbook's env map (they are ignored, never fatal).
+func warnUndeclared(out io.Writer, vars map[string]frontmatter.EnvValue, overrides map[string]string) {
+	var unknown []string
+	for name := range overrides {
+		if _, ok := vars[name]; !ok {
+			unknown = append(unknown, name)
+		}
+	}
+	sort.Strings(unknown)
+	for _, name := range unknown {
+		fmt.Fprintf(out, "with-env: ignoring undeclared variable %s\n", name)
+	}
 }
 
 // orchRunner is the orchestrator-backed StepRunner: it maps autorun's Step
@@ -205,7 +230,8 @@ func Run(rc RunConfig) int {
 		now = defaultStamp
 	}
 
-	env, missing := resolveEnv(rc.EnvVars)
+	warnUndeclared(out, rc.EnvVars, rc.EnvOverrides)
+	env, missing := resolveEnv(rc.EnvVars, rc.EnvOverrides)
 	if len(missing) > 0 {
 		for _, m := range missing {
 			fmt.Fprintf(out, "missing required env: %s — %s\n", m.name, m.why)

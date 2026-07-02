@@ -1,6 +1,7 @@
 package autorun
 
 import (
+	"bytes"
 	"io"
 	"strings"
 	"testing"
@@ -93,5 +94,85 @@ func TestRunStep_Interrupt_CancelsQuickly(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("RunStep did not return within 2s of stopCh closing")
+	}
+}
+
+func TestResolveEnv_OverridePrecedence(t *testing.T) {
+	t.Setenv("PR_EXPORTED", "from-env")
+	vars := map[string]frontmatter.EnvValue{
+		"PR_OVERRIDE": {Value: "from-default", Why: "x"}, // override beats default
+		"PR_EXPORTED": {Value: "from-default", Why: "x"}, // override beats exported env
+		"PR_DEFAULT":  {Value: "from-default", Why: "x"}, // no override, no env → default
+	}
+	overrides := map[string]string{"PR_OVERRIDE": "from-cli", "PR_EXPORTED": "from-cli"}
+	env, missing := resolveEnv(vars, overrides)
+	if len(missing) != 0 {
+		t.Fatalf("unexpected missing: %v", missing)
+	}
+	// last-wins: the resolved value for each var is what the child would see.
+	want := map[string]string{"PR_OVERRIDE": "from-cli", "PR_EXPORTED": "from-cli", "PR_DEFAULT": "from-default"}
+	got := lastEnvValues(env, []string{"PR_OVERRIDE", "PR_EXPORTED", "PR_DEFAULT"})
+	for k, v := range want {
+		if got[k] != v {
+			t.Errorf("%s = %q, want %q", k, got[k], v)
+		}
+	}
+}
+
+func TestResolveEnv_EmptyOverrideFallsThrough(t *testing.T) {
+	t.Setenv("PR_EMPTY", "from-env")
+	vars := map[string]frontmatter.EnvValue{"PR_EMPTY": {Value: "from-default", Why: "x"}}
+	env, missing := resolveEnv(vars, map[string]string{"PR_EMPTY": ""}) // empty → not provided
+	if len(missing) != 0 {
+		t.Fatalf("unexpected missing: %v", missing)
+	}
+	if got := lastEnvValues(env, []string{"PR_EMPTY"})["PR_EMPTY"]; got != "from-env" {
+		t.Errorf("empty override must fall through to exported env; got %q", got)
+	}
+}
+
+func TestResolveEnv_MissingStillReported(t *testing.T) {
+	vars := map[string]frontmatter.EnvValue{"PR_MISSING": {Value: "", Why: "needed"}}
+	_, missing := resolveEnv(vars, nil)
+	if len(missing) != 1 || missing[0].name != "PR_MISSING" {
+		t.Fatalf("missing = %v, want [PR_MISSING]", missing)
+	}
+}
+
+// lastEnvValues returns, for each requested name, the LAST value in env (the
+// value os/exec would give the child for a duplicate key).
+func lastEnvValues(env []string, names []string) map[string]string {
+	want := map[string]bool{}
+	for _, n := range names {
+		want[n] = true
+	}
+	out := map[string]string{}
+	for _, e := range env {
+		if i := strings.IndexByte(e, '='); i >= 0 && want[e[:i]] {
+			out[e[:i]] = e[i+1:]
+		}
+	}
+	return out
+}
+
+func TestRun_WarnsUndeclaredOverride(t *testing.T) {
+	var buf bytes.Buffer
+	rc := RunConfig{
+		Blocks:       nil, // no blocks → Execute no-ops after env preflight
+		EnvVars:      map[string]frontmatter.EnvValue{"KNOWN": {Value: "v", Why: "x"}},
+		EnvOverrides: map[string]string{"KNOWN": "v", "BOGUS": "z", "ALSO_BOGUS": "z"},
+		Out:          &buf,
+		Now:          func() string { return "T" },
+	}
+	_ = Run(rc)
+	got := buf.String()
+	if !strings.Contains(got, "with-env: ignoring undeclared variable ALSO_BOGUS") ||
+		!strings.Contains(got, "with-env: ignoring undeclared variable BOGUS") {
+		t.Fatalf("expected sorted undeclared-key warnings; got:\n%s", got)
+	}
+	// sorted order: ALSO_BOGUS before BOGUS. Match full lines (not the bare
+	// "BOGUS" substring, which also occurs inside "ALSO_BOGUS").
+	if strings.Index(got, "variable ALSO_BOGUS\n") > strings.Index(got, "variable BOGUS\n") {
+		t.Errorf("warnings must be sorted; got:\n%s", got)
 	}
 }
