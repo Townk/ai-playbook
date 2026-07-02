@@ -94,10 +94,10 @@ func TestRenderThinking_LineInModal(t *testing.T) {
 	if activityIdx <= innerBottom {
 		t.Errorf("activity line must be below the input box's ╰ (idx %d), got idx %d", innerBottom, activityIdx)
 	}
-	// It sits roughly two lines above the OUTER modal's ╰ bottom border (an inset
-	// blank above it, the padding blank below it).
-	if want := outerBottom - 2; activityIdx != want {
-		t.Errorf("activity line must be two lines above the modal's ╰ (idx %d), got idx %d", want, activityIdx)
+	// It sits directly above the OUTER modal's ╰ bottom border: the trailing
+	// padding blank was removed, so the hint/activity slot is one line above ╰.
+	if want := outerBottom - 1; activityIdx != want {
+		t.Errorf("activity line must be one line above the modal's ╰ (idx %d), got idx %d", want, activityIdx)
 	}
 
 	// The input box's wave rows stay full: every interior row of the box is a wave
@@ -128,15 +128,15 @@ func TestRenderThinking_EmptyLineSameHeight(t *testing.T) {
 		t.Errorf("hint slot must be reserved (set must not add rows): empty=%d set=%d", len(empty), len(set))
 	}
 
-	// The set line lands in the modal hint slot — two lines above the outer ╰.
+	// The set line lands in the modal hint slot — one line above the outer ╰.
 	ob := outerModalBottom(t, set)
-	if got := strip(set[ob-2]); !strings.Contains(got, "hello") {
-		t.Errorf("set thinking line must fill the modal hint slot (two lines above the modal ╰), got %q", got)
+	if got := strip(set[ob-1]); !strings.Contains(got, "hello") {
+		t.Errorf("set thinking line must fill the modal hint slot (one line above the modal ╰), got %q", got)
 	}
 	// With an empty line the same slot is blank.
 	eb := outerModalBottom(t, empty)
-	if got := strings.TrimSpace(strings.ReplaceAll(strip(empty[eb-2]), "│", "")); got != "" {
-		t.Errorf("empty thinking line must leave the hint slot blank, got %q", strip(empty[eb-2]))
+	if got := strings.TrimSpace(strings.ReplaceAll(strip(empty[eb-1]), "│", "")); got != "" {
+		t.Errorf("empty thinking line must leave the hint slot blank, got %q", strip(empty[eb-1]))
 	}
 }
 
@@ -147,7 +147,7 @@ func TestRenderThinking_LongLineTruncated(t *testing.T) {
 	long := strings.Repeat("verylongword ", 30) // far wider than the modal interior
 	lines := strings.Split(newThinkingLineModel(long).renderThinking(), "\n")
 	ob := outerModalBottom(t, lines)
-	activityRow := strip(lines[ob-2])
+	activityRow := strip(lines[ob-1])
 
 	if !strings.Contains(activityRow, "…") {
 		t.Errorf("truncated activity line must carry an ellipsis, got %q", activityRow)

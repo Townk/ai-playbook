@@ -48,7 +48,9 @@ func renderFrame(t Theme, variant, title string, body []string, hint string, wid
 		BorderForeground(lipgloss.Color(t.variantColor(variant))).
 		Background(lipgloss.Color(theme.Mantle)).
 		BorderBackground(lipgloss.Color(theme.Mantle)).
-		Padding(padding, frameHPad, padding, frameHPad).
+		// Top padding only: the hint sits directly above the bottom border (no
+		// trailing blank line between the hint row and the closing ╰──╯).
+		Padding(padding, frameHPad, 0, frameHPad).
 		Render(strings.Join(rows, "\n"))
 }
 

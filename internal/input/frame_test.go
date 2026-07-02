@@ -17,6 +17,11 @@ func TestRenderFrameStructure(t *testing.T) {
 	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "╰") {
 		t.Fatalf("last line must be the rounded border bottom, got %q", last)
 	}
+	// The hint sits DIRECTLY above the bottom border — no trailing padding blank
+	// between the hint row and the closing ╰──╯.
+	if above := lines[len(lines)-2]; !strings.Contains(above, "hint here") {
+		t.Fatalf("hint must be the line directly above the bottom border, got %q", above)
+	}
 	plain := strip(out)
 	for _, want := range []string{"▓▓▓ Quit Session", "━", "Body line", "hint here"} {
 		if !strings.Contains(plain, want) {
