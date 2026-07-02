@@ -75,6 +75,34 @@ func TestAsk_ViewChooseShowsOptions(t *testing.T) {
 	}
 }
 
+// TestAsk_ConfirmPromptHasMantleBackground exercises the ACTUAL code path
+// behind the reported var-gate dialog: confirm_gate.go's raiseGroupConfirm
+// builds its "Variables" dialog via NewAsk(..., "confirm", ...), which routes
+// through model.render() in input.go (NOT confirmModel in confirm.go — that
+// type only backs the standalone `ai-playbook input --type confirm` CLI). The
+// prompt/var-list line must carry the dialog's Mantle background, not bleed to
+// the terminal default.
+func TestAsk_ConfirmPromptHasMantleBackground(t *testing.T) {
+	a := NewAsk("Variables", "Confirm these variables for this run:", "", "confirm", nil, "Confirm", "Customize")
+	out := a.View(57)
+	promptLine := findLine(t, out, "Confirm these variables")
+	if !strings.Contains(promptLine, mantleBgSGR) {
+		t.Fatalf("confirm-ask prompt line missing Mantle background SGR:\n%q", promptLine)
+	}
+}
+
+// TestAsk_LinePromptHasMantleBackground covers the per-var Customize edit
+// (confirm_gate.go's raiseVarEdit calls NewAsk(..., "line", ...)) — the same
+// model.render() path, same bleed risk for the prompt/label line above the box.
+func TestAsk_LinePromptHasMantleBackground(t *testing.T) {
+	a := NewAsk("Customize", "MY_VAR — why this value", "value", "line", nil, "", "")
+	out := a.View(57)
+	promptLine := findLine(t, out, "MY_VAR")
+	if !strings.Contains(promptLine, mantleBgSGR) {
+		t.Fatalf("line-ask prompt line missing Mantle background SGR:\n%q", promptLine)
+	}
+}
+
 func TestNewAsk_ConfirmCustomLabels(t *testing.T) {
 	a := NewAsk("t", "p", "", "confirm", nil, "Confirm", "Customize")
 	v := a.View(60)

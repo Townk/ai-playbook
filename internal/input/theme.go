@@ -3,6 +3,8 @@ package input
 import (
 	"flag"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/Townk/ai-playbook/internal/theme"
 )
 
@@ -88,4 +90,18 @@ func (t Theme) titleColor(variant string) string {
 	default:
 		return t.Accent
 	}
+}
+
+// promptStyle is the style every dialog prompt/description section must use:
+// the theme's body-text foreground on the dialog's Mantle background. A
+// foreground-only style (no Background) emits a bare SGR reset after its
+// content, which drops those cells to the terminal's default background
+// instead of the enclosing frame's Mantle fill — renderFrame's own
+// Background(Mantle) wrapper (frame.go) does not protect against an inner
+// style's reset. Every prompt/body section rendered inside a Mantle frame
+// must carry this same background to avoid that bleed.
+func promptStyle(t Theme) lipgloss.Style {
+	return lipgloss.NewStyle().
+		Foreground(lipgloss.Color(t.Text)).
+		Background(lipgloss.Color(theme.Mantle))
 }

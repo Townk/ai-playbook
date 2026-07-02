@@ -3,7 +3,56 @@ package input
 import (
 	"strings"
 	"testing"
+
+	"charm.land/lipgloss/v2"
+
+	"github.com/Townk/ai-playbook/internal/theme"
 )
+
+// mantleBgSGR is the truecolor background escape for theme.Mantle (#181825 =
+// R24 G24 B37), used to assert a section's cells carry the dialog background
+// instead of bleeding to the terminal default.
+const mantleBgSGR = "\x1b[48;2;24;24;37m"
+
+// TestPromptStyle_HasMantleBackground pins the shared prompt style (used by
+// both the standalone confirm dialog and the embedded Ask overlay) to carry
+// the dialog's Mantle background — a structural assertion that doesn't rely
+// on brittle SGR-byte matching.
+func TestPromptStyle_HasMantleBackground(t *testing.T) {
+	got := promptStyle(defaultTheme()).GetBackground()
+	want := lipgloss.Color(theme.Mantle)
+	if got != want {
+		t.Fatalf("promptStyle(...).GetBackground() = %v, want %v (theme.Mantle)", got, want)
+	}
+}
+
+// TestConfirmDialog_PromptHasDialogBackground renders a confirm dialog and
+// asserts the prompt LINE itself (not just some cell in the whole frame)
+// carries the Mantle background SGR — the frame's own Background(Mantle)
+// wrapper does not prevent an inner foreground-only style from resetting to
+// the terminal default (see internal/input/frame.go).
+func TestConfirmDialog_PromptHasDialogBackground(t *testing.T) {
+	m := newConfirmModel(defaultTheme(), "default", "T", "Delete it?", "Delete", "Cancel", true, 1, 1)
+	m.width = 50
+	out := m.render()
+	promptLine := findLine(t, out, "Delete it?")
+	if !strings.Contains(promptLine, mantleBgSGR) {
+		t.Fatalf("confirm prompt line missing Mantle background SGR:\n%q", promptLine)
+	}
+}
+
+// findLine returns the raw (unstripped) line of out whose stripped content
+// contains want, failing the test if no such line exists.
+func findLine(t *testing.T, out, want string) string {
+	t.Helper()
+	for _, l := range strings.Split(out, "\n") {
+		if strings.Contains(strip(l), want) {
+			return l
+		}
+	}
+	t.Fatalf("no line containing %q in:\n%s", want, strip(out))
+	return ""
+}
 
 func TestConfirmRender(t *testing.T) {
 	m := newConfirmModel(defaultTheme(), "danger", "Quit Session", "Delete it?", "Delete", "Cancel", true, 1, 1)

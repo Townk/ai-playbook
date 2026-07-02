@@ -238,7 +238,7 @@ func (m model) render() string {
 	}
 	prompt := ""
 	if m.prompt != "" {
-		prompt = lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text)).Render(m.prompt)
+		prompt = promptStyle(m.theme).Render(m.prompt)
 	}
 	// Prefer the field's own hint when it provides one (confirm/choose carry
 	// type-specific accelerators); text/line fields have none, so the generic
