@@ -13,10 +13,12 @@
 // unbalanced fences, runnable/lang warnings) that drives the exit code, and an
 // optional AI review pass (author.ReviewStream, via the reviewStreamFn seam,
 // fanned out with live progress — a TTY spinner + model activity, or a
-// stderr heartbeat when there's no TTY) that surfaces prose-level feedback
-// but never affects the exit code and never aborts the command — a
-// missing/failing model backend degrades to a note in the report, not an
-// error.
+// stderr heartbeat when there's no TTY, or --plain to force the heartbeat
+// even on a TTY) that surfaces prose-level feedback but never affects the
+// exit code and never aborts the command — a missing/failing model backend
+// degrades to a note in the report, not an error. --quiet suppresses all
+// output (report, AI review, progress) and skips the AI pass entirely, since
+// only the exit code can carry any result.
 package launcher
 
 import (
@@ -55,32 +57,35 @@ const aiSkipNote = "AI review skipped — no model backend (install + authentica
 // playbook source (a slug via the store, or --file), runs the deterministic
 // structural check (internal/validate.Check), an optional AI review pass, and
 // prints a plain-text report to stdout. The exit code reflects ONLY the
-// structural check — the AI pass is advisory.
+// structural check — the AI pass is advisory. --plain forces the low-noise
+// dot-heartbeat progress even on a terminal; --quiet suppresses all output
+// (report, AI review, progress) and, since that output would be discarded,
+// also skips the AI pass — only the exit code carries the result.
 func ValidateMain() int {
-	kind, value, noAI, err := resolveValidateArgs(os.Args[2:])
+	ra, err := resolveValidateArgs(os.Args[2:])
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook validate: %v\n", err)
 		return 2
 	}
 
 	var content, name string
-	switch kind {
+	switch ra.Kind {
 	case "file":
-		data, rerr := os.ReadFile(value)
+		data, rerr := os.ReadFile(ra.Value)
 		if rerr != nil {
 			fmt.Fprintf(os.Stderr, "ai-playbook validate: %v\n", rerr)
 			return 2
 		}
 		content = string(data)
-		name = value
+		name = ra.Value
 	case "playbook":
-		_, body, lerr := storeLoadFn(value)
+		_, body, lerr := storeLoadFn(ra.Value)
 		if lerr != nil {
 			fmt.Fprintf(os.Stderr, "ai-playbook validate: %v\n", lerr)
 			return 2
 		}
 		content = body
-		name = value
+		name = ra.Value
 	}
 
 	fm, body, ok := frontmatter.Parse(content)
@@ -106,8 +111,11 @@ func ValidateMain() int {
 	findings := validate.Check(body, fm, ok, blocks, bodyLineOffset)
 
 	var aiText string
-	ranAI := !noAI
-	if ranAI {
+	// runAI: the AI pass runs unless explicitly skipped via --no-ai, or
+	// implicitly skipped by --quiet — quiet discards all output and can't
+	// change the exit code, so paying for a model call would be pure waste.
+	runAI := !ra.NoAI && !ra.Quiet
+	if runAI {
 		cfg, _ := config.Load()
 		events, closeFn, serr := reviewStreamFn(cfg, reviewSystemPrompt, body)
 		switch {
@@ -121,11 +129,11 @@ func ValidateMain() int {
 				close(done)
 			}()
 
-			if hasTTY() {
+			if hasTTYFn() && !ra.Plain {
 				runCreateProgressFn(activity, nil, done)
 			} else {
 				// Mandatory drain: FanOut's activity sends are best-effort/non-blocking,
-				// but nothing else reads this channel in the no-TTY path, so an unread
+				// but nothing else reads this channel in the dots path, so an unread
 				// buffer would just sit there — draining it keeps the fan-out tidy.
 				go func() {
 					for range activity {
@@ -141,7 +149,9 @@ func ValidateMain() int {
 		}
 	}
 
-	printValidateReport(os.Stdout, name, findings, ranAI, aiText)
+	if !ra.Quiet {
+		printValidateReport(os.Stdout, name, findings, runAI, aiText)
+	}
 
 	if validate.HasError(findings) {
 		return 1
@@ -185,6 +195,10 @@ func printValidateReport(w io.Writer, name string, findings []validate.Finding, 
 		}
 	}
 }
+
+// hasTTYFn is the hasTTY seam: tests stub it to force either progress branch
+// (spinner vs. dots) without needing an actual controlling terminal.
+var hasTTYFn = hasTTY
 
 // hasTTY reports whether /dev/tty can be opened for read+write — mirroring
 // runCreateProgress's own check so the AI-pass progress mechanism (inline
@@ -240,26 +254,48 @@ func isNoBackend(err error) bool {
 	return false
 }
 
-// resolveValidateArgs resolves the single playbook source from the `validate`
-// arguments. Exactly one of {bare positional, --file} must be present:
+// validateArgs is resolveValidateArgs's parsed result: the single playbook
+// source (Kind/Value) plus the validate subcommand's flags.
+type validateArgs struct {
+	// Kind is "file" or "playbook", selecting how Value is resolved.
+	Kind, Value string
+	// NoAI skips the AI review pass (structural check only).
+	NoAI bool
+	// Plain forces the low-noise dot-heartbeat progress even on a terminal,
+	// where the animated spinner is otherwise the default.
+	Plain bool
+	// Quiet suppresses all output (report, warnings, AI review, progress);
+	// only the exit code carries the result. Implies skipping the AI pass
+	// (its output would be discarded and it can't affect the exit code) and
+	// takes precedence over Plain.
+	Quiet bool
+}
+
+// resolveValidateArgs resolves the single playbook source and flags from the
+// `validate` arguments. Exactly one of {bare positional, --file} must be
+// present:
 //
-//   - --file <path>      → ("file", path, noAI, nil)
-//   - a bare positional   → ("playbook", slug, noAI, nil)
+//   - --file <path>      → Kind="file", Value=path
+//   - a bare positional   → Kind="playbook", Value=slug
 //
-// Zero sources or both is a usage error. --no-ai skips the AI review pass.
-func resolveValidateArgs(args []string) (kind, value string, noAI bool, err error) {
+// Zero sources or both is a usage error. --no-ai skips the AI review pass;
+// --plain forces plain dot progress; --quiet suppresses all output.
+func resolveValidateArgs(args []string) (validateArgs, error) {
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var file string
+	var noAI, plain, quiet bool
 	fs.StringVar(&file, "file", "", "path to a markdown file to validate")
 	fs.BoolVar(&noAI, "no-ai", false, "skip the AI review pass (structural check only)")
+	fs.BoolVar(&plain, "plain", false, "use plain dot progress instead of the spinner (default when not attached to a terminal)")
+	fs.BoolVar(&quiet, "quiet", false, "suppress all output; report the result only via the exit code")
 	if perr := fs.Parse(args); perr != nil {
-		return "", "", false, perr
+		return validateArgs{}, perr
 	}
 
 	rest := fs.Args()
 	if len(rest) > 1 {
-		return "", "", false, fmt.Errorf("specify exactly one of <slug> or --file")
+		return validateArgs{}, fmt.Errorf("specify exactly one of <slug> or --file")
 	}
 	positional := ""
 	if len(rest) == 1 {
@@ -274,13 +310,13 @@ func resolveValidateArgs(args []string) (kind, value string, noAI bool, err erro
 	}
 	switch {
 	case count == 0:
-		return "", "", false, fmt.Errorf("specify a playbook: validate <slug> | --file <path>")
+		return validateArgs{}, fmt.Errorf("specify a playbook: validate <slug> | --file <path>")
 	case count > 1:
-		return "", "", false, fmt.Errorf("specify exactly one of <slug> or --file")
+		return validateArgs{}, fmt.Errorf("specify exactly one of <slug> or --file")
 	}
 
 	if file != "" {
-		return "file", file, noAI, nil
+		return validateArgs{Kind: "file", Value: file, NoAI: noAI, Plain: plain, Quiet: quiet}, nil
 	}
-	return "playbook", positional, noAI, nil
+	return validateArgs{Kind: "playbook", Value: positional, NoAI: noAI, Plain: plain, Quiet: quiet}, nil
 }
