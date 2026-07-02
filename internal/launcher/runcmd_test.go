@@ -357,3 +357,55 @@ func TestRunMain_AutoBranch_CallsAutorun(t *testing.T) {
 		t.Errorf("blocks converted = %v, want [a b]", gotIDs)
 	}
 }
+
+func TestParseWithEnv(t *testing.T) {
+	// inline JSON
+	m, err := parseWithEnv(`{"A":"1","B":"two"}`)
+	if err != nil || m["A"] != "1" || m["B"] != "two" {
+		t.Fatalf("inline: m=%v err=%v", m, err)
+	}
+	// leading whitespace still detected as inline
+	if m, err := parseWithEnv("  {\"A\":\"1\"}"); err != nil || m["A"] != "1" {
+		t.Fatalf("ws-inline: m=%v err=%v", m, err)
+	}
+	// file path
+	dir := t.TempDir()
+	f := filepath.Join(dir, "env.json")
+	if werr := os.WriteFile(f, []byte(`{"C":"3"}`), 0o644); werr != nil {
+		t.Fatal(werr)
+	}
+	if m, err := parseWithEnv(f); err != nil || m["C"] != "3" {
+		t.Fatalf("file: m=%v err=%v", m, err)
+	}
+	// malformed JSON
+	if _, err := parseWithEnv(`{bad`); err == nil {
+		t.Error("malformed inline JSON must error")
+	}
+	// non-string value
+	if _, err := parseWithEnv(`{"A":1}`); err == nil {
+		t.Error("non-string value must error")
+	}
+	// unreadable file
+	if _, err := parseWithEnv(filepath.Join(dir, "nope.json")); err == nil {
+		t.Error("unreadable file must error")
+	}
+}
+
+func TestResolveRunArgs_WithEnv(t *testing.T) {
+	// --with-env requires --auto
+	if _, err := resolveRunArgs([]string{"--file", "p.md", "--with-env", `{"A":"1"}`}); err == nil {
+		t.Error("--with-env without --auto must error")
+	}
+	// --auto + inline JSON populates EnvOverrides
+	ra, err := resolveRunArgs([]string{"--file", "p.md", "--auto", "--with-env", `{"A":"1"}`})
+	if err != nil {
+		t.Fatalf("unexpected err: %v", err)
+	}
+	if ra.EnvOverrides["A"] != "1" {
+		t.Errorf("EnvOverrides = %v, want A=1", ra.EnvOverrides)
+	}
+	// bad JSON surfaces as an error (caller maps to exit 2)
+	if _, err := resolveRunArgs([]string{"--file", "p.md", "--auto", "--with-env", `{bad`}); err == nil {
+		t.Error("bad --with-env JSON must error")
+	}
+}

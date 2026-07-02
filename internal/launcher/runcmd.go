@@ -22,6 +22,7 @@
 package launcher
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
@@ -227,6 +228,7 @@ func autoRun(ra runArgs) int {
 		Shell:        cfg.Driver.Shell,
 		Slug:         slug,
 		AutoRollback: !ra.NoAutoRollback,
+		EnvOverrides: ra.EnvOverrides,
 	})
 }
 
@@ -334,8 +336,30 @@ const (
 type runArgs struct {
 	Kind, Value    string // "file"|"playbook", the path/slug
 	Mode           runMode
-	AutoRollback   bool // existing default-viewer --auto-rollback opt-in
-	NoAutoRollback bool // --no-auto-rollback (valid only with --auto)
+	AutoRollback   bool              // existing default-viewer --auto-rollback opt-in
+	NoAutoRollback bool              // --no-auto-rollback (valid only with --auto)
+	EnvOverrides   map[string]string // --with-env values (valid only with --auto)
+}
+
+// parseWithEnv resolves a --with-env flag value into a name→value map. A value
+// whose first non-space rune is '{' is parsed as inline JSON; otherwise it is a
+// path to a JSON file. The JSON must be an object of string→string. Malformed
+// JSON, a non-string value, or an unreadable file is an error (the caller maps
+// it to the exit-2 usage path).
+func parseWithEnv(raw string) (map[string]string, error) {
+	data := []byte(raw)
+	if !strings.HasPrefix(strings.TrimLeft(raw, " \t\r\n"), "{") {
+		b, err := os.ReadFile(raw)
+		if err != nil {
+			return nil, fmt.Errorf("--with-env: %v", err)
+		}
+		data = b
+	}
+	var m map[string]string
+	if err := json.Unmarshal(data, &m); err != nil {
+		return nil, fmt.Errorf("--with-env: invalid JSON: %v", err)
+	}
+	return m, nil
 }
 
 // resolveRunArgs resolves the single playbook source from the `run` arguments.
@@ -362,7 +386,7 @@ type runArgs struct {
 func resolveRunArgs(args []string) (runArgs, error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	var playbook, file string
+	var playbook, file, withEnv string
 	var auto, autoMode, noAutoRollback, assisted bool
 	fs.StringVar(&playbook, "playbook", "", "slug of a saved playbook to run")
 	fs.StringVar(&file, "file", "", "path to a markdown file to run")
@@ -370,6 +394,7 @@ func resolveRunArgs(args []string) (runArgs, error) {
 	fs.BoolVar(&autoMode, "auto", false, "run headless: execute every block in order with no viewer/driver pane")
 	fs.BoolVar(&noAutoRollback, "no-auto-rollback", false, "with --auto, do not roll back applied steps on a failure")
 	fs.BoolVar(&assisted, "assisted", false, "run GUIDED fullscreen: step-by-step confirmation in the same viewer/driver pane")
+	fs.StringVar(&withEnv, "with-env", "", "with --auto, supply env var values as inline JSON or a JSON file path")
 	if perr := fs.Parse(args); perr != nil {
 		return runArgs{}, perr
 	}
@@ -411,6 +436,9 @@ func resolveRunArgs(args []string) (runArgs, error) {
 	if assisted && auto {
 		return runArgs{}, fmt.Errorf("--assisted and --auto-rollback are mutually exclusive")
 	}
+	if withEnv != "" && !autoMode {
+		return runArgs{}, fmt.Errorf("--with-env is only valid with --auto")
+	}
 
 	ra := runArgs{AutoRollback: auto, NoAutoRollback: noAutoRollback}
 	switch {
@@ -426,6 +454,13 @@ func resolveRunArgs(args []string) (runArgs, error) {
 		ra.Kind, ra.Value = "playbook", playbook
 	default:
 		ra.Kind, ra.Value = "playbook", positional
+	}
+	if withEnv != "" {
+		overrides, perr := parseWithEnv(withEnv)
+		if perr != nil {
+			return runArgs{}, perr
+		}
+		ra.EnvOverrides = overrides
 	}
 	return ra, nil
 }
