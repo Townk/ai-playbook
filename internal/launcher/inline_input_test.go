@@ -130,6 +130,41 @@ func TestInlineInput_SubmitRoutesClassification(t *testing.T) {
 	}
 }
 
+// Cancel (Esc) during the classify wave must win: even though the classify
+// goroutine ran to completion (onSubmit was driven, same as a real submit),
+// inlineRunFn reporting Submitted: false must make inlineInput return WITHOUT
+// routing the classification. This is the launcher-side regression test for
+// the "cancel-during-thinking is reported as submitted" bug (fixed at the
+// input.inlineResultFromModel conversion — see internal/input/inline_test.go).
+func TestInlineInput_CancelDuringThinkingDoesNotRoute(t *testing.T) {
+	isolateCache(t)
+	origRun, origCls, origSess := inlineRunFn, inlineClassifyFn, routeInlineSessionFn
+	t.Cleanup(func() {
+		inlineRunFn, inlineClassifyFn, routeInlineSessionFn = origRun, origCls, origSess
+	})
+	inlineClassifyFn = fakeClassify(author.Classification{Kind: author.KindEscalate}, nil)
+	routed := false
+	routeInlineSessionFn = func(_ capture.Request, _ string, _ mux.Mux) int { routed = true; return 7 }
+	// Fake the inline runner: drive onSubmit (so the classify goroutine runs and
+	// completes, as it would have by the time Esc lands), THEN report a cancel.
+	inlineRunFn = func(_ *os.File, _ input.InlineRequest, onSubmit func(string) <-chan input.ThinkUpdate) (input.InlineResult, error) {
+		ch := onSubmit("diagnose the crash")
+		for range ch { // drain Line + Done
+		}
+		return input.InlineResult{Submitted: false}, nil
+	}
+	// /dev/tty may be absent in CI: only assert when the inline path is taken.
+	if _, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err != nil {
+		t.Skip("no /dev/tty in this environment")
+	}
+	if code := inlineInput(capture.Request{CWD: "/p"}, mux.Null()); code != 0 {
+		t.Fatalf("inlineInput exit = %d, want 0 (cancel — no route)", code)
+	}
+	if routed {
+		t.Fatal("cancel during thinking must NOT route the classify result — cancel wins over classify")
+	}
+}
+
 // With no controlling terminal and no explicit request, inlineInput exits 0
 // without attempting a stdin line read (the plain-stdin read is superseded).
 func TestInlineInput_NoTTYNoRequestExitsCleanly(t *testing.T) {

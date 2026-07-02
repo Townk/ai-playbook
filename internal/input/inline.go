@@ -87,9 +87,25 @@ func RunInline(w *os.File, req InlineRequest, onSubmit func(value string) <-chan
 	}
 	res := fm.(model)
 	ClearInline(w, measureHeight(res.render()))
-	if res.thinking || res.submitted {
-		recordHistory(req.History, res.fld.value())
-		return InlineResult{Value: res.fld.value(), Submitted: true}, nil
+	return inlineResultFromModel(res, req.History), nil
+}
+
+// inlineResultFromModel converts the ended inline model into its InlineResult,
+// recording history as a side effect on a genuine submit. res.quitting (Esc /
+// ctrl+c) always wins over res.thinking: Update never clears m.thinking on a
+// mid-think cancel (see input.go's `if m.thinking` key handler), so a cancelled
+// wave still has res.thinking == true — checking res.thinking (or res.submitted)
+// alone would misreport a cancel as a submit. Mirrors runConfirm's
+// res.cancelled / !accepted check (confirm.go) rather than a "did we reach some
+// state" flag. Factored out of RunInline so the conversion is unit-testable
+// without a live tea.Program.
+func inlineResultFromModel(res model, history string) InlineResult {
+	if res.quitting {
+		return InlineResult{Submitted: false}
 	}
-	return InlineResult{Submitted: false}, nil
+	if res.thinking || res.submitted {
+		recordHistory(history, res.fld.value())
+		return InlineResult{Value: res.fld.value(), Submitted: true}
+	}
+	return InlineResult{Submitted: false}
 }

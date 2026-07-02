@@ -61,3 +61,36 @@ func TestModel_InlineSubmitEntersThinking(t *testing.T) {
 		t.Fatal("thinking transition must return a batched cmd (waveTick + recvThink)")
 	}
 }
+
+// TestInlineResultFromModel_EscDuringThinkingIsCancelled: ESC pressed while the
+// classify wave is animating (m.thinking) must convert to a cancelled
+// InlineResult, NOT a submitted one — mirrors runConfirm's res.cancelled check
+// (confirm.go). This is the regression test for the bug where res.thinking
+// (never cleared by a mid-think cancel) was mistaken for "submitted", routing a
+// cancelled request as if it had been submitted.
+func TestInlineResultFromModel_EscDuringThinkingIsCancelled(t *testing.T) {
+	m := newInputModel(defaultTheme(), "default", "ai-playbook", "How can I help?", "fix the build", "", 3, 1, 1, false, "")
+	m.inlineSubmit = func(string) <-chan ThinkUpdate { return make(chan ThinkUpdate) }
+	next, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	thinking := next.(model)
+	if !thinking.thinking {
+		t.Fatal("setup: Enter with inlineSubmit must enter the thinking state")
+	}
+
+	cancelled, cmd := thinking.Update(tea.KeyPressMsg{Code: tea.KeyEscape, Text: "esc"})
+	if !isQuit(cmd) {
+		t.Fatal("setup: Escape during thinking must quit")
+	}
+	res := cancelled.(model)
+	if !res.thinking {
+		t.Fatal("setup: a mid-think cancel must NOT clear res.thinking (that's the exact condition the fix must guard against)")
+	}
+	if !res.quitting {
+		t.Fatal("setup: Escape must set res.quitting")
+	}
+
+	got := inlineResultFromModel(res, "")
+	if got.Submitted {
+		t.Fatal("ESC during the classify wave must convert to Submitted: false (cancelled), not be routed as a submit")
+	}
+}

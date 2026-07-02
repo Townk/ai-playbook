@@ -491,7 +491,14 @@ func runInput(theme Theme, variant, title, prompt, value, placeholder string, he
 	// the wave animated) and the launcher already consumed it — do NOT re-write
 	// --out, do NOT print it again, and do NOT write a .cancel marker. Only the
 	// (still-unwritten) history append remains.
-	if res.thinking {
+	//
+	// res.quitting always wins here, even though a mid-think Esc/ctrl+c leaves
+	// res.thinking == true (Update never clears it on cancel — see the
+	// `if m.thinking` key handler above) and even if res.submitted got set before
+	// the cancel: fall through to the cancel-marker branch below instead of
+	// reporting a cancelled wave as a normal completion. Mirrors runConfirm's
+	// res.cancelled check (confirm.go).
+	if res.thinking && !res.quitting {
 		recordHistory(historyPath, res.fld.value())
 		// Signal the launcher the float has fully torn down (the tea program has
 		// returned). The launcher waits for this marker before spawning the result
@@ -499,7 +506,7 @@ func runInput(theme Theme, variant, title, prompt, value, placeholder string, he
 		writeClosedFile(outFile)
 		os.Exit(0)
 	}
-	if res.submitted {
+	if res.submitted && !res.quitting {
 		if outFile != "" {
 			writeOutFile(outFile, res.fld.value())
 		}
