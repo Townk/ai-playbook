@@ -79,3 +79,22 @@ func TestCheck_Clean(t *testing.T) {
 		t.Fatalf("clean playbook must have no findings; got %+v", fs)
 	}
 }
+
+func TestCheck_FenceBalance(t *testing.T) {
+	ok := fm("N", "D", "C", "x")
+	// balanced → no fence finding
+	balanced := "# T\n\n```bash\ntrue\n```\n"
+	if fs := Check(balanced, ok, true, []Block{{ID: "a", Type: "shell", Lang: "bash"}}); has(fs, "fence", Error) {
+		t.Fatalf("balanced fences must not error: %+v", fs)
+	}
+	// unclosed → fence error
+	unclosed := "# T\n\n```bash\ntrue\n"
+	if fs := Check(unclosed, ok, true, nil); !has(fs, "fence", Error) {
+		t.Fatal("an unclosed ``` fence must error")
+	}
+	// tilde fence, closed by a longer run → balanced
+	tilde := "~~~\nx\n~~~\n"
+	if fs := Check(tilde, ok, true, nil); has(fs, "fence", Error) {
+		t.Fatalf("balanced tilde fence must not error: %+v", fs)
+	}
+}

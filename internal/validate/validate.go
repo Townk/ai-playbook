@@ -146,8 +146,92 @@ func Check(rawBody string, fm frontmatter.FrontMatter, fmOK bool, blocks []Block
 	}
 
 	// fence balance: added in Task 2
+	findings = append(findings, fenceFindings(rawBody)...)
 
 	return findings
+}
+
+// fenceFindings scans rawBody line-by-line for an unbalanced code fence
+// (``` or ~~~). The UI renderer's normalizeFences silently repairs malformed
+// closers, so this check is net-new: it reports (does not repair) a fence
+// that is opened but never closed by EOF. See internal/ui/render.go's
+// normalizeFences/openFence for the same fence-tracking pattern.
+func fenceFindings(rawBody string) []Finding {
+	lines := strings.Split(rawBody, "\n")
+
+	inFence := false
+	var fenceChar byte
+	var fenceLen int
+	var openLine int
+
+	for i, line := range lines {
+		lineNo := i + 1
+		if !inFence {
+			if ch, n, ok := fenceOpen(line); ok {
+				inFence = true
+				fenceChar = ch
+				fenceLen = n
+				openLine = lineNo
+			}
+			continue
+		}
+		if fenceCloses(line, fenceChar, fenceLen) {
+			inFence = false
+		}
+	}
+
+	if inFence {
+		return []Finding{{
+			Severity: Error,
+			Check:    "fence",
+			Message:  fmt.Sprintf("unclosed code fence opened at line %d", openLine),
+			Where:    fmt.Sprintf("line %d", openLine),
+		}}
+	}
+	return nil
+}
+
+// fenceOpen reports whether line opens a code fence: after up to 3 leading
+// spaces, a run of >=3 identical fence chars (backtick or tilde). An info
+// string (e.g. "bash {id=a}") may follow the run.
+func fenceOpen(line string) (ch byte, n int, ok bool) {
+	i := 0
+	for i < len(line) && i < 3 && line[i] == ' ' {
+		i++
+	}
+	if i >= len(line) || (line[i] != '`' && line[i] != '~') {
+		return 0, 0, false
+	}
+	ch = line[i]
+	start := i
+	for i < len(line) && line[i] == ch {
+		i++
+	}
+	n = i - start
+	if n < 3 {
+		return 0, 0, false
+	}
+	return ch, n, true
+}
+
+// fenceCloses reports whether line closes a fence opened with fenceChar/
+// fenceLen: after up to 3 leading spaces, the line must be ONLY a run of
+// fenceChar of length >= fenceLen (optionally followed by trailing spaces),
+// with no other info string.
+func fenceCloses(line string, fenceChar byte, fenceLen int) bool {
+	i := 0
+	for i < len(line) && i < 3 && line[i] == ' ' {
+		i++
+	}
+	start := i
+	for i < len(line) && line[i] == fenceChar {
+		i++
+	}
+	runLen := i - start
+	if runLen < fenceLen {
+		return false
+	}
+	return i == len(strings.TrimRight(line, " "))
 }
 
 // detectCycles runs a DFS over the needs= graph (id -> needs that exist in
