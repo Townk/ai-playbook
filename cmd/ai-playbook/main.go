@@ -63,6 +63,8 @@ func main() {
 		// RunMain owns config loading + the configured-shell hand-off and resolves
 		// the --playbook/--file/bare argument before rendering via ui.Main.
 		os.Exit(launcher.RunMain())
+	case "validate":
+		os.Exit(launcher.ValidateMain())
 	case "answer":
 		os.Exit(launcher.AnswerMain())
 	case "finalize":
@@ -83,7 +85,7 @@ func main() {
 }
 
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ai-playbook {assist [<prompt>]|create <prompt> [--template <t>]|list [--format human|fuzzy-data-source|json]|search <query> [--format ...]|show <slug>|edit <slug>|session [--request <json>]|run <file.md>|answer --request <json> --content <file> [--cached <iso>] [--title <t>] [--cwd <dir>]|finalize [--dry-run] <file.md>|diff <patchfile>|mcp --socket <path>|input|selftest}")
+	fmt.Fprintln(os.Stderr, "usage: ai-playbook {assist [<prompt>]|create <prompt> [--template <t>]|list [--format human|fuzzy-data-source|json]|search <query> [--format ...]|show <slug>|edit <slug>|session [--request <json>]|run <file.md>|validate [<slug>|--file <path>]|answer --request <json> --content <file> [--cached <iso>] [--title <t>] [--cwd <dir>]|finalize [--dry-run] <file.md>|diff <patchfile>|mcp --socket <path>|input|selftest}")
 }
 
 // mcpMain is the `ai-playbook mcp --socket <path>` subcommand: an MCP stdio
