@@ -5,9 +5,13 @@
 package launcher
 
 import (
+	"fmt"
+	"io"
+	"os"
 	"sort"
 	"strings"
 
+	"github.com/Townk/ai-playbook/internal/autorun"
 	"github.com/Townk/ai-playbook/internal/frontmatter"
 )
 
@@ -147,4 +151,98 @@ func cycleKey(path []string) string {
 	}
 	sort.Strings(ids)
 	return strings.Join(ids, ",")
+}
+
+// loadDepNode is the store-backed depNode loader for analyzeDeps: it resolves
+// slug through storePathForFn (existence + path, no parse), reads the file,
+// and parses its front matter for the full depNode (FM + Body + Cwd). An
+// unknown slug, an unreadable file, or unparsable front matter is returned as
+// an error naming slug — analyzeDeps records that as a "dangling" issue.
+func loadDepNode(slug string) (depNode, error) {
+	path, ok := storePathForFn(slug)
+	if !ok {
+		return depNode{}, fmt.Errorf("dependency %q not found in the store", slug)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return depNode{}, fmt.Errorf("dependency %q: %w", slug, err)
+	}
+	fm, body, parsed := frontmatter.Parse(string(data))
+	if !parsed {
+		return depNode{}, fmt.Errorf("dependency %q: front matter failed to parse", slug)
+	}
+	cwd := ""
+	if fm.ProjectBound {
+		cwd = resolveProjectRoot(fm.ProjectRoot)
+	}
+	return depNode{Slug: slug, FM: fm, Body: body, Cwd: cwd}, nil
+}
+
+// resolveChain resolves the whole depends_on graph reachable from rootDeps
+// (the root/parent playbook's own DependsOn list) through the real store, via
+// analyzeDeps + loadDepNode.
+func resolveChain(rootDeps []string) (order []depNode, issues []DepIssue) {
+	return analyzeDeps(rootDeps, loadDepNode)
+}
+
+// runDeps runs nodes headless, in order, aborting on the first non-zero exit
+// (later dependencies — and, by the caller not proceeding, the parent — never
+// run). Every dependency's RunConfig has SuppressUndeclaredWarning set so only
+// the chain's single union warning (see unionDeclared) is ever printed, never
+// a per-dependency one. Returns 0 when every node succeeds, else the failing
+// node's exit code.
+func runDeps(nodes []depNode, overrides map[string]string, autoRollback bool, shell string, out io.Writer) int {
+	for _, node := range nodes {
+		fmt.Fprintf(out, "\n→ dependency: %s\n", node.Slug)
+		if node.FM.ProjectBound {
+			os.Setenv("PROJECT_ROOT", node.Cwd)
+		}
+		code := autorunRunFn(autorun.RunConfig{
+			Blocks:                    blocksFor(node.Body),
+			EnvVars:                   node.FM.Env,
+			EnvOverrides:              overrides,
+			Cwd:                       node.Cwd,
+			Shell:                     shell,
+			Slug:                      node.Slug,
+			AutoRollback:              autoRollback,
+			SuppressUndeclaredWarning: true,
+			Out:                       out,
+		})
+		if code != 0 {
+			return code
+		}
+	}
+	return 0
+}
+
+// unionDeclared builds the union of parentFM's declared env vars and every
+// dependency's declared env vars — the set the chain's single WarnUndeclared
+// call checks --with-env overrides against, so a key only a dependency
+// declares is never flagged as undeclared.
+func unionDeclared(parentFM frontmatter.FrontMatter, deps []depNode) map[string]frontmatter.EnvValue {
+	union := make(map[string]frontmatter.EnvValue, len(parentFM.Env))
+	for name, ev := range parentFM.Env {
+		union[name] = ev
+	}
+	for _, dep := range deps {
+		for name, ev := range dep.FM.Env {
+			union[name] = ev
+		}
+	}
+	return union
+}
+
+// printDepIssues prints one line per structural depends_on problem: a
+// dangling dependency names the missing slug; a cycle lists its participants
+// joined by " → ". Callers exit 2 after printing (issues are always fatal —
+// nothing in the chain runs).
+func printDepIssues(w io.Writer, issues []DepIssue) {
+	for _, is := range issues {
+		switch is.Kind {
+		case "dangling":
+			fmt.Fprintf(w, "ai-playbook: dependency %q not found in the store\n", is.Slug)
+		case "cycle":
+			fmt.Fprintf(w, "ai-playbook: depends_on cycle: %s\n", strings.Join(is.Path, " → "))
+		}
+	}
 }

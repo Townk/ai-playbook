@@ -26,7 +26,7 @@ type RunConfig struct {
 	Blocks       []Block
 	EnvVars      map[string]frontmatter.EnvValue // declared front-matter env (var → {value,why})
 	EnvOverrides map[string]string               // CLI --with-env values (name → value); win over exported env
-	// SuppressUndeclaredWarning skips the per-run warnUndeclared print when
+	// SuppressUndeclaredWarning skips the per-run WarnUndeclared print when
 	// true (default false = today's behavior). A depends_on chain runner sets
 	// this on every run but the last so the undeclared-override warning is
 	// emitted once for the whole chain instead of once per playbook.
@@ -86,9 +86,11 @@ func resolveEnv(vars map[string]frontmatter.EnvValue, overrides map[string]strin
 	return env, missing
 }
 
-// warnUndeclared prints a sorted warning for every override key not declared in
-// the playbook's env map (they are ignored, never fatal).
-func warnUndeclared(out io.Writer, vars map[string]frontmatter.EnvValue, overrides map[string]string) {
+// WarnUndeclared prints a sorted warning for every override key not declared in
+// the playbook's env map (they are ignored, never fatal). Exported so a
+// depends_on chain runner can emit ONE warning against the union of the
+// parent's + every dependency's declared vars, instead of once per playbook.
+func WarnUndeclared(out io.Writer, vars map[string]frontmatter.EnvValue, overrides map[string]string) {
 	var unknown []string
 	for name := range overrides {
 		if _, ok := vars[name]; !ok {
@@ -236,7 +238,7 @@ func Run(rc RunConfig) int {
 	}
 
 	if !rc.SuppressUndeclaredWarning {
-		warnUndeclared(out, rc.EnvVars, rc.EnvOverrides)
+		WarnUndeclared(out, rc.EnvVars, rc.EnvOverrides)
 	}
 	env, missing := resolveEnv(rc.EnvVars, rc.EnvOverrides)
 	if len(missing) > 0 {

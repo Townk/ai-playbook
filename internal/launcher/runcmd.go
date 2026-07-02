@@ -42,6 +42,14 @@ import (
 // inject a fake so the run gate is exercised without a real store.
 var storeLoadFn = store.Load
 
+// storePathForFn is the store.PathFor seam: resolves a slug to its file path +
+// whether it exists, with no parse. loadDepNode uses this (rather than
+// storeLoadFn) because a depends_on chain only needs the raw file to re-parse
+// its full front matter — Meta's Env/DependsOn shapes differ from
+// frontmatter.FrontMatter's. Tests inject a fake so dependency resolution is
+// exercised without a real store.
+var storePathForFn = store.PathFor
+
 // projectRootFn is the capture.ProjectRoot seam: the heuristic project root a
 // project_bound playbook is run in (and exported as $PROJECT_ROOT).
 var projectRootFn = capture.ProjectRoot
@@ -85,7 +93,29 @@ func RunMain() int {
 	}
 
 	if ra.Mode == modeAuto {
-		return autoRun(ra) // headless: never opens ui.Main / a driver pane
+		return autoRun(ra) // headless: autoRun owns the whole depends_on chain itself
+	}
+
+	parent, perr := loadParent(ra)
+	if perr != nil {
+		// Same load failure runFile/runPlaybook would hit moments later — exit 1
+		// (not 2) to match their existing, already-tested exit code; 2 is
+		// reserved for depends_on structural issues (cycle/dangling) below.
+		fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", perr)
+		return 1
+	}
+	if len(parent.FM.DependsOn) > 0 {
+		order, issues := resolveChain(parent.FM.DependsOn)
+		if len(issues) > 0 {
+			printDepIssues(os.Stderr, issues)
+			return 2
+		}
+		// Interactive/assisted parent: run the deps headless first (no
+		// --with-env — that flag is --auto only), then dispatch to the viewer
+		// for the parent exactly as today.
+		if code := runDeps(order, nil, true, cfg.Driver.Shell, os.Stdout); code != 0 {
+			return code
+		}
 	}
 
 	setAutoRollbackFn(ra.AutoRollback) // opt-in: auto-fire rollback on a step failure
@@ -158,67 +188,141 @@ func runFile(file string) int {
 
 // autoRun executes ra headlessly (`run --auto`): it resolves the same source
 // (markdown + cwd + PROJECT_ROOT) that runFile/runPlaybook would open a viewer
-// on, parses the front-matter-stripped body into blocks with the SAME parser
-// the viewer uses (ui.Render), converts them to autorun.Block, and hands the
-// sequence to autorunRunFn. No viewer/driver pane is ever opened.
+// on — via loadParent, so the parent's FULL front matter (env + depends_on) is
+// available — parses the front-matter-stripped body into blocks with the SAME
+// parser the viewer uses (ui.Render), converts them to autorun.Block, and
+// hands the sequence to autorunRunFn. No viewer/driver pane is ever opened.
+//
+// When the parent declares no depends_on, this is exactly today's
+// single-playbook run (one autorunRunFn call, its own undeclared-override
+// warning, SuppressUndeclaredWarning: false). When it does, autoRun owns the
+// WHOLE chain: it resolves every dependency (resolveChain), emits ONE
+// union-warning for the parent's + every dependency's declared vars against
+// ra.EnvOverrides (so a --with-env key only a dependency declares is never
+// flagged), runs the dependencies headless in order via runDeps (aborting on
+// the first failure), and finally runs the parent itself, headless and
+// suppressed.
 func autoRun(ra runArgs) int {
 	cfg, _ := config.Load()
 
-	var body, cwd, slug string
-	var fm frontmatter.FrontMatter
+	parent, perr := loadParent(ra)
+	if perr != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", perr)
+		return 1
+	}
+	slug := parentSlug(ra)
 
+	if len(parent.FM.DependsOn) == 0 {
+		// Pass the front-matter-stripped body — NOT the raw source — so the
+		// YAML fence never gets mis-parsed as a code block.
+		if parent.FM.ProjectBound {
+			os.Setenv("PROJECT_ROOT", parent.Cwd) // mirrors setProjectRootFn's driver export
+		}
+		return autorunRunFn(autorun.RunConfig{
+			Blocks:       blocksFor(parent.Body),
+			EnvVars:      parent.FM.Env,
+			Cwd:          parent.Cwd,
+			Shell:        cfg.Driver.Shell,
+			Slug:         slug,
+			AutoRollback: !ra.NoAutoRollback,
+			EnvOverrides: ra.EnvOverrides,
+		})
+	}
+
+	order, issues := resolveChain(parent.FM.DependsOn)
+	if len(issues) > 0 {
+		printDepIssues(os.Stderr, issues)
+		return 2
+	}
+
+	union := unionDeclared(parent.FM, order) // parent + deps declared vars
+	autorun.WarnUndeclared(os.Stdout, union, ra.EnvOverrides)
+
+	if code := runDeps(order, ra.EnvOverrides, !ra.NoAutoRollback, cfg.Driver.Shell, os.Stdout); code != 0 {
+		return code
+	}
+
+	if parent.FM.ProjectBound {
+		os.Setenv("PROJECT_ROOT", parent.Cwd)
+	}
+	return autorunRunFn(autorun.RunConfig{
+		Blocks:                    blocksFor(parent.Body),
+		EnvVars:                   parent.FM.Env,
+		EnvOverrides:              ra.EnvOverrides,
+		Cwd:                       parent.Cwd,
+		Shell:                     cfg.Driver.Shell,
+		Slug:                      slug,
+		AutoRollback:              !ra.NoAutoRollback,
+		SuppressUndeclaredWarning: true,
+		Out:                       os.Stdout,
+	})
+}
+
+// loadParent resolves ra's single playbook source (file or store slug) to a
+// depNode carrying its FULL front matter (env + depends_on), body, and cwd —
+// the same resolution runFile/runPlaybook/autoRun's single-playbook path use,
+// factored out so the depends_on chain (resolveChain) can see the parent's
+// declared dependencies before dispatch.
+//
+// "file": read + parse; cwd mirrors runFile's rule (a project_bound file's
+// resolved project_root, else the file's own directory). "playbook": resolve
+// existence via storeLoadFn (mapping its error, e.g. an unknown slug) then
+// re-read + parse meta.Path directly — storeLoadFn's Meta does not carry the
+// frontmatter.FrontMatter shape (its Env/DependsOn fields differ), so the full
+// front matter is only available by re-parsing the file. Slug is set for a
+// store playbook; a raw file has no store slug (parentSlug derives one from
+// the filename for run-config purposes instead).
+func loadParent(ra runArgs) (depNode, error) {
 	switch ra.Kind {
 	case "file":
 		data, rerr := os.ReadFile(ra.Value)
 		if rerr != nil {
-			fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", rerr)
-			return 1
+			return depNode{}, rerr
 		}
-		var ok bool
-		fm, body, ok = frontmatter.Parse(string(data))
+		fm, body, ok := frontmatter.Parse(string(data))
+		cwd := ""
 		if ok && fm.ProjectBound {
-			root := resolveProjectRoot(fm.ProjectRoot)
-			os.Setenv("PROJECT_ROOT", root) // mirrors setProjectRootFn's driver export
-			cwd = root
+			cwd = resolveProjectRoot(fm.ProjectRoot)
 		} else if dir := filepath.Dir(ra.Value); dir != "" {
-			// Mirrors the `run --file` cwd rule (runFile / ui.Main's --cwd default):
-			// blocks run in the playbook file's own directory.
+			// Mirrors the `run --file` cwd rule (runFile / ui.Main's --cwd
+			// default): blocks run in the playbook file's own directory.
 			if abs, aerr := filepath.Abs(dir); aerr == nil {
 				cwd = abs
 			} else {
 				cwd = dir
 			}
 		}
-		base := filepath.Base(ra.Value)
-		slug = strings.TrimSuffix(base, filepath.Ext(base))
+		return depNode{FM: fm, Body: body, Cwd: cwd}, nil
 	case "playbook":
-		meta, b, lerr := storeLoadFn(ra.Value)
+		meta, _, lerr := storeLoadFn(ra.Value)
 		if lerr != nil {
-			fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", lerr)
-			return 1
+			return depNode{}, lerr
 		}
-		body = b
-		if meta.ProjectBound {
-			root := projectRootFn()
-			os.Setenv("PROJECT_ROOT", root)
-			cwd = root
+		data, rerr := os.ReadFile(meta.Path)
+		if rerr != nil {
+			return depNode{}, rerr
 		}
-		slug = ra.Value
+		fm, body, _ := frontmatter.Parse(string(data))
+		cwd := ""
+		if fm.ProjectBound {
+			cwd = resolveProjectRoot(fm.ProjectRoot)
+		}
+		return depNode{Slug: ra.Value, FM: fm, Body: body, Cwd: cwd}, nil
 	}
+	return depNode{}, fmt.Errorf("unsupported run source kind %q", ra.Kind)
+}
 
-	// Pass the front-matter-stripped body — NOT the raw source — so the YAML
-	// fence never gets mis-parsed as a code block.
-	blocks := blocksFor(body)
-
-	return autorunRunFn(autorun.RunConfig{
-		Blocks:       blocks,
-		EnvVars:      fm.Env,
-		Cwd:          cwd,
-		Shell:        cfg.Driver.Shell,
-		Slug:         slug,
-		AutoRollback: !ra.NoAutoRollback,
-		EnvOverrides: ra.EnvOverrides,
-	})
+// parentSlug derives the Slug a run-config uses for the root/parent playbook:
+// the store slug for a "playbook" source, else (a raw "file" source, which has
+// no store slug) the file's base name with its extension stripped — mirrors
+// autoRun's pre-depends_on slug derivation exactly, so the no-depends_on path
+// is unaffected.
+func parentSlug(ra runArgs) string {
+	if ra.Kind == "file" {
+		base := filepath.Base(ra.Value)
+		return strings.TrimSuffix(base, filepath.Ext(base))
+	}
+	return ra.Value
 }
 
 // blocksFor renders a playbook body and converts it to autorun.Block, the

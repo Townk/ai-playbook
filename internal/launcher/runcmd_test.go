@@ -3,6 +3,7 @@ package launcher
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -355,6 +356,233 @@ func TestRunMain_AutoBranch_CallsAutorun(t *testing.T) {
 	}
 	if len(gotIDs) != 2 || gotIDs[0] != "a" || gotIDs[1] != "b" {
 		t.Errorf("blocks converted = %v, want [a b]", gotIDs)
+	}
+}
+
+// ---- autoRun: depends_on chain wiring (--auto owns the WHOLE chain) ----
+
+// TestAutoRun_Chain_OrderAndAbort verifies autoRun runs a parent's dependency
+// chain in topological order (deps before the parent) and aborts on the first
+// non-zero dependency exit — later dependencies AND the parent are NEVER
+// invoked, and the returned code is the failing dependency's.
+func TestAutoRun_Chain_OrderAndAbort(t *testing.T) {
+	dir := t.TempDir()
+	bPath := writeDepPlaybook(t, dir, "b", "")
+	aPath := writeDepPlaybook(t, dir, "a", "depends_on:\n  - b\n")
+	parentPath := writeDepPlaybook(t, dir, "parent", "depends_on:\n  - a\n")
+
+	defer swap(&storePathForFn, func(slug string) (string, bool) {
+		switch slug {
+		case "a":
+			return aPath, true
+		case "b":
+			return bPath, true
+		}
+		return "", false
+	})()
+
+	var order []string
+	restore := swap(&autorunRunFn, func(rc autorun.RunConfig) int {
+		order = append(order, rc.Slug)
+		if !rc.SuppressUndeclaredWarning {
+			t.Errorf("chain run of %s: SuppressUndeclaredWarning = false, want true", rc.Slug)
+		}
+		return 0
+	})
+	defer restore()
+
+	ra := runArgs{Kind: "file", Value: parentPath, Mode: modeAuto}
+	if code := autoRun(ra); code != 0 {
+		t.Fatalf("autoRun = %d, want 0", code)
+	}
+	if want := []string{"b", "a", "parent"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("order = %v, want %v", order, want)
+	}
+
+	// Abort: b fails → a and the parent are NEVER invoked; the returned code
+	// is b's.
+	order = nil
+	autorunRunFn = func(rc autorun.RunConfig) int {
+		order = append(order, rc.Slug)
+		if rc.Slug == "b" {
+			return 5
+		}
+		return 0
+	}
+	if code := autoRun(ra); code != 5 {
+		t.Fatalf("autoRun abort = %d, want 5", code)
+	}
+	if want := []string{"b"}; !reflect.DeepEqual(order, want) {
+		t.Fatalf("abort order = %v, want %v (a and the parent never invoked)", order, want)
+	}
+}
+
+// TestAutoRun_Chain_SuppressionAndUnionWarning verifies the --auto +
+// --with-env chain: every chain RunConfig is suppressed (no per-playbook
+// undeclared-override warning), and the ONE union warning is checked against
+// the parent's + every dependency's declared vars — a key only a dependency
+// declares (ONLY_DEP) must NOT be flagged; a key no playbook declares (GHOST)
+// must be.
+func TestAutoRun_Chain_SuppressionAndUnionWarning(t *testing.T) {
+	dir := t.TempDir()
+	bPath := writeDepPlaybook(t, dir, "b", "env:\n  ONLY_DEP:\n    value: v\n    why: w\n")
+	parentPath := writeDepPlaybook(t, dir, "parent", "depends_on:\n  - b\n")
+
+	defer swap(&storePathForFn, func(slug string) (string, bool) {
+		if slug == "b" {
+			return bPath, true
+		}
+		return "", false
+	})()
+
+	var configs []autorun.RunConfig
+	restore := swap(&autorunRunFn, func(rc autorun.RunConfig) int {
+		configs = append(configs, rc)
+		return 0
+	})
+	defer restore()
+
+	ra := runArgs{
+		Kind: "file", Value: parentPath, Mode: modeAuto,
+		EnvOverrides: map[string]string{"ONLY_DEP": "x", "GHOST": "y"},
+	}
+	out := captureStdout(t, func() {
+		if code := autoRun(ra); code != 0 {
+			t.Fatalf("autoRun = %d, want 0", code)
+		}
+	})
+
+	if len(configs) != 2 {
+		t.Fatalf("want 2 chain runs (b + parent), got %d: %+v", len(configs), configs)
+	}
+	for _, rc := range configs {
+		if !rc.SuppressUndeclaredWarning {
+			t.Errorf("%s: SuppressUndeclaredWarning = false, want true", rc.Slug)
+		}
+	}
+
+	if !strings.Contains(out, "ignoring undeclared variable GHOST") {
+		t.Errorf("union warning must flag GHOST (declared by no playbook); got:\n%s", out)
+	}
+	if strings.Contains(out, "ONLY_DEP") {
+		t.Errorf("union warning must NOT flag ONLY_DEP (declared by the dependency); got:\n%s", out)
+	}
+}
+
+// TestAutoRun_DanglingDep_Exit2 verifies a dangling dependency (spied loader
+// reports it not found) is caught BEFORE anything runs: autoRun returns 2 and
+// autorunRunFn is never called.
+func TestAutoRun_DanglingDep_Exit2(t *testing.T) {
+	dir := t.TempDir()
+	parentPath := writeDepPlaybook(t, dir, "parent", "depends_on:\n  - ghost\n")
+
+	defer swap(&storePathForFn, func(string) (string, bool) { return "", false })()
+
+	called := false
+	restore := swap(&autorunRunFn, func(autorun.RunConfig) int { called = true; return 0 })
+	defer restore()
+
+	ra := runArgs{Kind: "file", Value: parentPath, Mode: modeAuto}
+	if code := autoRun(ra); code != 2 {
+		t.Fatalf("autoRun dangling dep = %d, want 2", code)
+	}
+	if called {
+		t.Error("autorunRunFn must never be called when a dependency is dangling")
+	}
+}
+
+// ---- RunMain: depends_on wiring for the non-auto (interactive/assisted) path ----
+
+// TestRunMain_NonAuto_DanglingDep_Exit2 verifies the interactive dispatch also
+// gates on depends_on issues before ever opening the viewer.
+func TestRunMain_NonAuto_DanglingDep_Exit2(t *testing.T) {
+	dir := t.TempDir()
+	parentPath := writeDepPlaybook(t, dir, "parent", "depends_on:\n  - ghost\n")
+
+	defer swap(&storePathForFn, func(string) (string, bool) { return "", false })()
+
+	withArgs(t, []string{"ai-playbook", "run", "--file", parentPath})
+	called := false
+	withUIMainFn(t, func() int { called = true; return 0 })
+
+	if code := RunMain(); code != 2 {
+		t.Fatalf("RunMain dangling dep = %d, want 2", code)
+	}
+	if called {
+		t.Error("ui.Main must never be called when a dependency is dangling")
+	}
+}
+
+// TestRunMain_NonAuto_DepsRunHeadlessBeforeViewer verifies a non-auto
+// (interactive) parent with depends_on runs its dependency chain headless
+// FIRST (SuppressUndeclaredWarning true, no --with-env), then still dispatches
+// the parent itself to the viewer as always.
+func TestRunMain_NonAuto_DepsRunHeadlessBeforeViewer(t *testing.T) {
+	dir := t.TempDir()
+	depPath := writeDepPlaybook(t, dir, "dep", "")
+	parentPath := writeDepPlaybook(t, dir, "parent", "depends_on:\n  - dep\n")
+
+	defer swap(&storePathForFn, func(slug string) (string, bool) {
+		if slug == "dep" {
+			return depPath, true
+		}
+		return "", false
+	})()
+
+	depRan := false
+	restore := swap(&autorunRunFn, func(rc autorun.RunConfig) int {
+		if rc.Slug == "dep" {
+			depRan = true
+			if !rc.SuppressUndeclaredWarning {
+				t.Error("dep chain run must suppress its own undeclared warning")
+			}
+		}
+		return 0
+	})
+	defer restore()
+
+	withArgs(t, []string{"ai-playbook", "run", "--file", parentPath})
+	viewerRan := false
+	withUIMainFn(t, func() int { viewerRan = true; return 0 })
+
+	if code := RunMain(); code != 0 {
+		t.Fatalf("RunMain = %d, want 0", code)
+	}
+	if !depRan {
+		t.Error("the dependency must run headless before the viewer")
+	}
+	if !viewerRan {
+		t.Error("the parent must still dispatch to the viewer")
+	}
+}
+
+// TestRunMain_NonAuto_DepFailure_AbortsBeforeViewer verifies a failing
+// dependency aborts the whole run before the parent's viewer ever opens, and
+// RunMain returns the dependency's exit code.
+func TestRunMain_NonAuto_DepFailure_AbortsBeforeViewer(t *testing.T) {
+	dir := t.TempDir()
+	depPath := writeDepPlaybook(t, dir, "dep", "")
+	parentPath := writeDepPlaybook(t, dir, "parent", "depends_on:\n  - dep\n")
+
+	defer swap(&storePathForFn, func(slug string) (string, bool) {
+		if slug == "dep" {
+			return depPath, true
+		}
+		return "", false
+	})()
+
+	restore := swap(&autorunRunFn, func(autorun.RunConfig) int { return 3 })
+	defer restore()
+
+	withArgs(t, []string{"ai-playbook", "run", "--file", parentPath})
+	viewerRan := false
+	withUIMainFn(t, func() int { viewerRan = true; return 0 })
+
+	if code := RunMain(); code != 3 {
+		t.Fatalf("RunMain dep failure = %d, want 3", code)
+	}
+	if viewerRan {
+		t.Error("the parent's viewer must never open when a dependency fails")
 	}
 }
 
