@@ -63,6 +63,15 @@ func TestRedact(t *testing.T) {
 	}
 }
 
+func TestIsRedactedMask(t *testing.T) {
+	if !IsRedactedMask("<redacted>") {
+		t.Error("the mask must be recognized")
+	}
+	if IsRedactedMask("") || IsRedactedMask("real-value") || IsRedactedMask("<redacted> ") {
+		t.Error("only the exact mask string is the mask")
+	}
+}
+
 func TestBuildEnv(t *testing.T) {
 	env := map[string]string{
 		"ANDROID_HOME": "/Users/thiago/Library/Android/sdk",

@@ -78,6 +78,11 @@ func Redact(name, value string) (out string, redacted bool) {
 	return value, false
 }
 
+// IsRedactedMask reports whether s is exactly the placeholder Redact substitutes
+// for a sensitive value. Callers use it to detect a front-matter default that was
+// already redacted at build time.
+func IsRedactedMask(s string) bool { return s == redactedMask }
+
 // looksLikeSecret is a best-effort heuristic for opaque secret-like values: a
 // single whitespace-free token, reasonably long, drawing from a mix of
 // character classes (so it is not a plain path or a single-class id). Paths,
