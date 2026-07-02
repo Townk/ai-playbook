@@ -30,4 +30,4 @@ _(none — phase work lives in the roadmap)_
 - [ ] adapt-on-run leaves two temp files per run (`writeTempMarkdown` render+orig in /tmp, never reaped; orig written even when junk-guarded) — defer-cleanup after `ui.Main` returns (2026-06-27)
 - [ ] Cross-block output piping (runme parity; minor) (2026-06-26)
 - [ ] Optional rich output via the kitty graphics protocol — images/charts in the pager (2026-06-26)
-- [ ] A structured / JUnit-style report for `run --auto` (CI) (2026-06-26)
+- [ ] A JUnit/XML-style report for `run --auto` (CI ingestion) — a plain-text run summary + a JSON per-run log under `${data}/ai-playbook/runs/` shipped 2026-07-01; a JUnit/XML format for CI test-reporters is still open (2026-06-26)

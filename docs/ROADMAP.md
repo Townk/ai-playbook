@@ -3,7 +3,7 @@
 Durable single source of truth for the feature roadmap. Each phase lists its
 goal, status, settled decisions, and open questions. Per-phase, step-by-step
 implementation plans are written just-in-time when a phase starts (they're
-ephemeral; this doc is not). Last updated: 2026-06-26.
+ephemeral; this doc is not). Last updated: 2026-07-01.
 
 ## Vision
 
@@ -75,7 +75,7 @@ Front matter (playbook .md):
 Block tags (on the fenced ``` language line):
   {id=<id>}            a runnable step (auto-id when absent)
   {id=verify}          the final whole-setup verification (success detection keys on this)
-  {rollback=<id>}      [Phase 2]  the rollback for step <id>; run completed steps' rollbacks in REVERSE on failure
+  {rollback=<id>}      [shipped]  the rollback for step <id>; run completed steps' rollbacks in REVERSE on failure
   {static}             non-runnable (no run button)
 ````
 
@@ -176,9 +176,11 @@ only. Detailed spec:
 ## Phase 2 — Run engine
 
 **Goal:** `run` a store playbook (or file) with adaptation and three execution
-modes + rollback. **Status:** PARTIALLY SHIPPED — the run args + adapt-on-run
-(below) landed with Phase 1 (2026-06-27); the run modes, rollback, and execution
-log are NOT started (the remaining Phase 2 work).
+modes + rollback. **Status:** SHIPPED — the run args + adapt-on-run (below)
+landed with Phase 1 (2026-06-27); the run modes (`--auto`, `--assisted`),
+rollback, and execution log shipped 2026-07-01 (spec
+`docs/specifications/run-modes-assisted-auto.md`; plans
+`.../plans/2026-07-01-run-modes-p1-auto.md` + `...-p2-assisted.md`).
 
 **Features**
 
@@ -189,15 +191,18 @@ log are NOT started (the remaining Phase 2 work).
   pager with an "adapted from `<slug>`" banner + `d` to view the
   original→adapted diff → drive. Junk→original fallback (reuse
   `isValidPlaybook`). Raw `--file` w/o front matter runs as-is.
-- **Run modes:** default pager (free-form); `--assisted` (scroll to next un-run
-  step, "Proceed?", run, log); `--auto` (unattended).
-- **Rollback** via `{rollback=<id>}` blocks. assisted → confirm "Step X failed.
-  Roll back?"; `--auto` → roll back completed steps in reverse on first error;
-  `--auto --no-auto-rollback` → stop, leave state as-is. `--auto` with **no**
-  rollback blocks → behaves like `--no-auto-rollback` (nothing to undo → stop +
-  log). Never continue past a failure.
-- **Execution log:** per-step `{command, exit, output}` → a run summary surfaced
-  to the user + written to a log file under the data dir.
+- [DONE] **Run modes:** default pager (free-form); `--assisted` (guided — a
+  "ready" cursor auto-scrolls each next step into view, a focusable
+  `[ Run ][ Skip ][ Quit ]` footer confirms each step, a failure switches it to
+  `[ Roll back ][ Leave as-is ][ Quit ]`); `--auto` (headless, `needs=` order,
+  stop on first failure, non-zero exit; inline TTY / CI-friendly).
+- [DONE] **Rollback** via `{rollback=<id>}` blocks. assisted → the "Roll back?"
+  failure footer; `--auto` → roll back completed steps in reverse on first error;
+  `--auto --no-auto-rollback` → stop, leave state as-is; `--auto` with **no**
+  rollback blocks → stop + log. Never continue past a failure. (The undone
+  forward step reads "↺ rolled back"; its undo command reads as a success.)
+- [DONE] **Execution log:** per-step `{command, exit, output}` → a run summary +
+  a JSON log under `${XDG_DATA_HOME}/ai-playbook/runs/` (`internal/autorun`).
 
 **Settled decisions:** adapt uses the authoring model (default thinking).
 Per-mode rollback behavior as above.
@@ -210,7 +215,9 @@ location/ format.
 ## Phase 3 — Composition & validation
 
 **Goal:** compose playbooks via dependencies; lint playbooks with the model.
-**Status:** not started.
+**Status:** PARTIALLY SHIPPED — `validate` shipped 2026-07-01
+(`docs/specifications/validate-command.md`); `depends_on` composition is the
+one remaining piece.
 
 **Features**
 
@@ -219,11 +226,19 @@ location/ format.
   mode). A dependency failure aborts the chain (rollback per the active mode).
   **v1: always run** dependencies (lean on idempotency, which `validate`
   enforces); "skip if `{id=verify}` already passes" is a later optimization.
-- **Cycle detection:** hard error in the runner; advisory in `validate`.
-- **`validate [<slug>|--file]`** — combine **deterministic** checks (circular
-  deps, dangling dependency slugs, missing `{id=verify}`, a mutating block with
-  no `{rollback}`) + **model** checks on the authoring model (idempotency,
-  destructive/ non-reversible commands, unclear steps). Reports findings.
+  **[remaining — the next feature].**
+- **Cycle detection:** hard error in the runner **[remaining — comes with
+  `depends_on`]**; advisory in `validate` **[DONE]** (`needs=` cycles).
+- [DONE] **`validate [<slug>|--file]`** — **deterministic** checks (front-matter
+  required keys, `needs=` existence, `needs=` cycles, duplicate ids, fence
+  balance; + no-runnable / missing-lang warnings) + a **model** prose review on
+  the authoring model (inconsistencies, missing callouts, non-idempotent /
+  destructive / non-reversible steps), with live progress (TTY spinner / CI
+  stderr heartbeat) and `--no-ai` / `--plain` / `--quiet`. Exit non-zero on
+  structural errors only; the AI review is advisory. (Per the shipped scope,
+  "missing `{id=verify}`" and "mutating block without `{rollback}`" are routed to
+  the advisory AI pass, not treated as deterministic errors; the `depends_on`
+  checks — dangling dep slugs, dep cycles — arrive with `depends_on`.)
 
 **Settled decisions:** dependencies always run for v1. validate =
 deterministic + model (authoring model, no new knob).
@@ -237,15 +252,18 @@ deterministic + model (authoring model, no new knob).
 ## Phase 4 — Viewer affordances
 
 **Goal:** richer pager interaction for file-backed playbooks + in-process diff
-review. **Status:** not started.
+review. **Status:** SHIPPED — the `[edit]` button + on-save mtime file-watch and
+the in-process side-by-side diff view all landed (source-edit W2 + the FC1 diff
+view / drift work).
 
 **Features**
 
-- **"edit" tag-button** (like the cached badge): opens `$EDITOR <file>` in a new
-  mux tab; the viewer **watches the file** (fsnotify, poll fallback) → re-render
-  on save. Shows only for file-backed (committed/store) playbooks. Requires
-  threading the on-disk source path into the model first.
-- **In-process diff view ([ADR-0008](architecture/adrs/0008-in-process-diff-view.md)):**
+- [DONE] **"edit" tag-button** (like the cached badge): opens `$EDITOR <file>`
+  (no-mux: in-place suspend/resume; mux: a docked editor pane); the viewer
+  **watches the file** (1s mtime poll) → reload on save. Shows only for
+  file-backed (committed/store) playbooks; threads the on-disk source path into
+  the model.
+- [DONE] **In-process diff view ([ADR-0008](architecture/adrs/0008-in-process-diff-view.md)):**
   one pure-Go **side-by-side** (syntax-highlighted) renderer for both the
   `diff`-block "view diff" button AND the adapt-on-run `d` overlay, presented
   **mux-aware** — a floating pane when a mux is on, a viewer modal overlay when
@@ -260,33 +278,31 @@ review. **Status:** not started.
 
 ---
 
-## Viewer/runner — path to feature-complete (excluding run-assisted)
+## Viewer/runner — FEATURE-COMPLETE (2026-07-01)
 
-The viewer/runner is feature-complete when Phase 2 (run engine) and Phase 4
-(viewer affordances) land **minus the run-assisted feature** (the `--assisted`
-mode, its per-step "Proceed?" confirm, the assisted "Roll back?" confirm, and the
-assisted-run button). Crucially, **none of the items below are entangled with
-run-assisted** — they are the shared substrate run-assisted later sits on top of.
+The viewer/runner (Phase 2 run engine + Phase 4 viewer affordances) is
+**feature-complete, including run-assisted** — the `--assisted` mode (its
+focusable per-step footer, the failure "Roll back?" footer, the ready cursor)
+shipped alongside the rest.
 
-**Already shipped (baseline):** default-pager run + drive, value-passing,
+**Baseline (shipped earlier):** default-pager run + drive, value-passing,
 verify + native confirm + auto-follow-up, copy/play, apply/undo-diff,
 adapt-on-run + "adapted from" banner + `d` overlay, regenerate/followup/wrap-up/
 commit re-engagement, the no-mux inline input + ask overlay.
 
-**Remaining (recommended sequence):**
+**Landed 2026-07-01 (the recommended sequence, all done):**
 
-1. **Execution log** (Phase 2) — structured per-step `{command, exit, output}` →
-   a run summary + a log file under the data dir (today: ad-hoc `/tmp` per-block
-   logs). *Shared substrate — build first.*
-2. **`{rollback=<id>}` schema parse** (Phase 2) — add the field to the block parser.
-   *Unblocks rollback.*
-3. **`--auto` mode + `--no-auto-rollback`** (Phase 2) — headless run loop,
+1. [DONE] **Execution log** (Phase 2) — structured per-step `{command, exit,
+   output}` → a run summary + a JSON log under `${data}/ai-playbook/runs/`.
+2. [DONE] **`{rollback=<id>}` schema parse** (Phase 2) — in the block parser.
+3. [DONE] **`--auto` mode + `--no-auto-rollback`** (Phase 2) — headless run loop,
    stop-on-first-failure.
-4. **Auto rollback flow** (Phase 2) — reverse-order rollback of completed steps
-   on failure; no rollback blocks → stop + log.
-5. **Source-path threading → "edit" button → file-watching** (Phase 4).
-6. **In-process side-by-side diff view** (Phase 4, [ADR-0008](architecture/adrs/0008-in-process-diff-view.md))
-   — independent; can run in parallel from the start.
+4. [DONE] **Auto rollback flow** (Phase 2) — reverse-order rollback of completed
+   steps on failure; no rollback blocks → stop + log.
+5. [DONE] **Source-path threading → "edit" button → file-watching** (Phase 4).
+6. [DONE] **In-process side-by-side diff view** (Phase 4, [ADR-0008](architecture/adrs/0008-in-process-diff-view.md)).
+7. [DONE] **`--assisted` guided mode** (Phase 2) — the previously-carved-out
+   run-assisted feature.
 
 ---
 
