@@ -232,20 +232,22 @@ location/ format.
 ## Phase 3 — Composition & validation
 
 **Goal:** compose playbooks via dependencies; lint playbooks with the model.
-**Status:** PARTIALLY SHIPPED — `validate` shipped 2026-07-01
-(`docs/specifications/validate-command.md`); `depends_on` composition is the
-one remaining piece.
+**Status:** SHIPPED — `validate` shipped 2026-07-01
+(`docs/specifications/validate-command.md`); `depends_on` composition shipped
+2026-07-02.
 
 **Features**
 
-- **`depends_on: [slug, …]`** front-matter field. On `run`, resolve + run
-  dependencies **fully, in topological order, before** the parent (in auto
-  mode). A dependency failure aborts the chain (rollback per the active mode).
-  **v1: always run** dependencies (lean on idempotency, which `validate`
-  enforces); "skip if `{id=verify}` already passes" is a later optimization.
-  **[remaining — the next feature].**
-- **Cycle detection:** hard error in the runner **[remaining — comes with
-  `depends_on`]**; advisory in `validate` **[DONE]** (`needs=` cycles).
+- [DONE] **`depends_on: [slug, …]`** front-matter field. On `run`, resolve +
+  run dependencies **fully, in topological order, before** the parent —
+  headless, regardless of the parent's own run mode. A dependency failure
+  aborts the chain (nothing further runs; non-zero exit). **v1: always run**
+  dependencies (lean on idempotency, which `validate` enforces); "skip if
+  `{id=verify}` already passes" is a later optimization.
+- [DONE] **Cycle detection:** hard error in the runner (dep cycles and
+  dangling dep slugs both fail the run, exit 2); advisory in `validate` for
+  `needs=` cycles plus structural `depends_on` checks (dep cycles, dangling
+  slugs).
 - [DONE] **`validate [<slug>|--file]`** — **deterministic** checks (front-matter
   required keys, `needs=` existence, `needs=` cycles, duplicate ids, fence
   balance; + no-runnable / missing-lang warnings) + a **model** prose review on
@@ -258,11 +260,11 @@ one remaining piece.
   checks — dangling dep slugs, dep cycles — arrive with `depends_on`.)
 
 **Settled decisions:** dependencies always run for v1. validate =
-deterministic + model (authoring model, no new knob).
+deterministic + model (authoring model, no new knob). Dependency run mode when
+the parent is interactive: deps always run headless (`--auto`-equivalent)
+regardless of the parent's chosen mode, then the parent runs in its own mode.
 
-**Open:** dependency run mode when the parent is interactive (likely: deps run
-`--auto` regardless, then the parent in its chosen mode). validate output format
-(pager vs plain).
+**Open:** validate output format (pager vs plain).
 
 ---
 

@@ -118,6 +118,33 @@ To stop on failure *without* rolling back — leaving the completed steps in pla
 ai-playbook run --auto --no-auto-rollback --file examples/02-needs-verify-rollback.md
 ```
 
+## Composition with depends_on
+
+A stored playbook can name other store slugs it needs run first via `depends_on`
+in its front matter:
+
+```yaml {static}
+---
+name: Deploy shop
+depends_on: [setup-db]
+---
+```
+
+`run <parent>` resolves the full dependency graph and runs every dependency
+**headless, in topological order**, before the parent's own blocks start — so
+`setup-db` finishes before `deploy-shop` begins. A dependency failure aborts
+the whole chain right there: the parent (and any dependency still queued behind
+it) never runs, and the process exits non-zero.
+
+`--with-env` and `ai-playbook env <slug>` both span the entire chain: `env`
+prints the union of every variable declared anywhere in the graph, and
+`--with-env` feeds that same union back in for `run --auto`.
+
+Because `depends_on` points at store slugs rather than files, there's no
+live-runnable example to run here — but `validate <slug>` checks the graph
+structurally: a dependency cycle or a slug that doesn't resolve in the store is
+reported as an error.
+
 ## The stop button
 
 In the viewer, the **Run** button becomes **Stop** the moment a block starts executing. Click **Stop** any time to send SIGTERM to the running process; the block is marked as cancelled and no downstream `needs=` blocks will run.

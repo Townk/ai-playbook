@@ -12,10 +12,19 @@ done/stale entries. Phase work lives in the roadmap, not here.
 
 ## Bugs
 
-_(none — phase work lives in the roadmap)_
+- [x] FIXED (2026-07-02): `--auto` on a *stored* parent historically dropped
+  the playbook's `fm.Env` (declared env vars never reached the runner) —
+  resolved incidentally by routing `autoRun` through the shared `loadParent`
+  loader for the `depends_on` chain work.
 
 ## Tasks
 
+- [ ] The authoring regenerate/commit path drops `depends_on` on a re-author:
+  `orchestrator.buildFrontMatter` (internal/orchestrator/orchestrator.go)
+  assembles the committed `FrontMatter` from scratch and never carries forward
+  an existing `depends_on:` — regenerating or re-committing a playbook that
+  declared dependencies silently loses them. Thread the prior front matter's
+  `DependsOn` through `buildFrontMatter` (2026-07-02)
 - [ ] Dialog frame-background bleed: `choose.go` and the text-input box interior still render foreground-only styles inside the Mantle frame, so they bleed the terminal default (the same class fixed for the confirm dialog's prompt/buttons/hint). Apply the `promptStyle`/`hintKW` Mantle treatment there too (2026-07-02)
 - [ ] ESC-audit: ensure ESC consistently *cancels the current operation / dismisses a modal* (never exits the app — that's Ctrl+C). Known case: ESC during the in-box classify-wave currently proceeds/routes instead of cancelling. Note: the `--assisted`/`run` variable-confirm gate is a deliberate exception — ESC there ends the run (a mandatory pre-run gate) (2026-06-27)
 - [ ] internal/ui test suite is slow on CI (~10min+ under -race on 2-core runners) — parallelize / reduce per-test zsh-driver spawns (2026-06-27)

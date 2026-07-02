@@ -52,6 +52,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environment (sensitive values — token/key/secret/password-like names or
   high-entropy values — are emitted empty and listed on stderr). Scaffolds the
   round-trip `env > env.json` → edit → `run --auto --with-env env.json`.
+- **`depends_on: [slug, …]`** front-matter field — a playbook can declare other
+  store slugs it needs run first. `run <slug>` resolves the transitive
+  dependency graph and runs each dependency headless, in topological order,
+  before the parent; the first failure aborts the whole chain with a non-zero
+  exit. A dependency cycle or a dangling (unresolvable) slug is a hard error
+  (exit 2); `validate` flags the same issues as structural errors. `--with-env`
+  and `env <slug>` both span the entire chain — the union of every variable
+  declared anywhere in the graph.
 
 ### Changed
 
