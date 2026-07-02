@@ -7,6 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Townk/ai-playbook/internal/autorun"
+	"github.com/Townk/ai-playbook/internal/frontmatter"
 )
 
 func TestStartAssisted_SetsCursorToFirstRunnable(t *testing.T) {
@@ -252,7 +253,7 @@ func TestMaybeStartAssisted_FiresOnceWhenBlocksReady(t *testing.T) {
 	m.assisted = true
 	m.reflow()
 
-	m2 := m.maybeStartAssisted()
+	m2, _ := m.maybeStartAssisted()
 	if m2.readyID == "" {
 		t.Fatal("maybeStartAssisted: readyID must be set once blocks are ready")
 	}
@@ -265,7 +266,7 @@ func TestMaybeStartAssisted_FiresOnceWhenBlocksReady(t *testing.T) {
 
 	// Re-entry: calling it again must be a no-op (guarded by assistedStarted),
 	// even though the underlying playbook still has runnable blocks.
-	m3 := m2.maybeStartAssisted()
+	m3, _ := m2.maybeStartAssisted()
 	if m3.readyID != m2.readyID {
 		t.Errorf("maybeStartAssisted re-entry: readyID changed %q -> %q", m2.readyID, m3.readyID)
 	}
@@ -277,10 +278,70 @@ func TestMaybeStartAssisted_FiresOnceWhenBlocksReady(t *testing.T) {
 	m4 := newModel("T", "```bash {id=a}\ntrue\n```\n")
 	m4.width, m4.height = 80, 24
 	m4.reflow()
-	m5 := m4.maybeStartAssisted()
+	m5, _ := m4.maybeStartAssisted()
 	if m5.readyID != "" || m5.assistedFooter != "" || m5.assistedStarted {
 		t.Errorf("maybeStartAssisted on a non-assisted model must be a no-op; got readyID=%q footer=%q started=%v",
 			m5.readyID, m5.assistedFooter, m5.assistedStarted)
+	}
+}
+
+// assistedEnvModel builds a project-bound playbook body with a declared env
+// var, configured to run assisted — the fixture TestAssisted_EnvGateFiresAtStart,
+// TestAssisted_NoVars_NoGate_StraightToFooter, and TestAssisted_AfterGateConfirmed_ShowsFooter
+// share.
+func assistedEnvModel(t *testing.T) model {
+	t.Helper()
+	body := "```bash {id=a}\ntrue\n```\n\n```bash {id=b needs=a}\ntrue\n```\n"
+	m := newModel("T", body)
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.confirmEnv = map[string]frontmatter.EnvValue{"DATA_DIR": {Value: "/tmp/x", Why: "the data dir"}}
+	m.reflow()
+	return m
+}
+
+// TestAssisted_EnvGateFiresAtStart is the fix under test: a playbook that
+// declares env vars must confirm them at ASSISTED START — before the ready
+// cursor/footer ever appear — not on the first [Run] press.
+func TestAssisted_EnvGateFiresAtStart(t *testing.T) {
+	m := assistedEnvModel(t)
+	m2, _ := m.maybeStartAssisted()
+	// The gate is raised BEFORE the footer/cursor: an ask overlay is up, no step footer yet.
+	if m2.gate == nil || !m2.askMode {
+		t.Fatalf("declared vars → the env gate must be raised at start; gate=%v askMode=%v", m2.gate != nil, m2.askMode)
+	}
+	if m2.assistedFooter == "step" || m2.readyID != "" {
+		t.Fatalf("the step footer/cursor must NOT show until the vars are confirmed; footer=%q ready=%q", m2.assistedFooter, m2.readyID)
+	}
+}
+
+// TestAssisted_NoVars_NoGate_StraightToFooter verifies a playbook with no
+// declared env vars skips the gate entirely and lands straight on the ready
+// footer, with gateSatisfied set (so runOrGate never re-gates later).
+func TestAssisted_NoVars_NoGate_StraightToFooter(t *testing.T) {
+	m := assistedEnvModel(t)
+	m.confirmEnv = nil // no declared vars
+	m2, _ := m.maybeStartAssisted()
+	if m2.gate != nil {
+		t.Fatal("no vars → no gate")
+	}
+	if m2.assistedFooter != "step" || m2.readyID != "a" {
+		t.Fatalf("no vars → straight to the ready footer on step a; footer=%q ready=%q", m2.assistedFooter, m2.readyID)
+	}
+	if !m2.gateSatisfied {
+		t.Error("gateSatisfied should be set when there's nothing to confirm")
+	}
+}
+
+// TestAssisted_AfterGateConfirmed_ShowsFooter verifies the assistedStartMsg
+// (fired after the gate's export completes) enters the ready footer state.
+func TestAssisted_AfterGateConfirmed_ShowsFooter(t *testing.T) {
+	// After the assisted-start gate completes, the assistedStartMsg enters the ready state.
+	m := assistedEnvModel(t)
+	m.gateSatisfied = true // simulate post-confirm
+	m3 := mustModel(m.Update(assistedStartMsg{}))
+	if m3.assistedFooter != "step" || m3.readyID != "a" {
+		t.Fatalf("assistedStartMsg must enter the ready footer; footer=%q ready=%q", m3.assistedFooter, m3.readyID)
 	}
 }
 

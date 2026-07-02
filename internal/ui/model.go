@@ -1082,8 +1082,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Assisted (GUIDED) entry: m.md/m.blocks are now final for this EOF (the
 			// structured/finalDraft branches above have already rewritten m.md and
 			// reflowed if applicable) — safe to compute the first ready block now.
-			m = m.maybeStartAssisted()
-			return m, m.driftCheckCmds()
+			m, startCmd := m.maybeStartAssisted()
+			return m, tea.Batch(startCmd, m.driftCheckCmds())
 		}
 		cmds := []tea.Cmd{readStream(m.reader, m.parser)}
 		if startedThinking {
@@ -1105,6 +1105,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// gate's askCompletion). Drive the state machine: raise the next dialog, or
 		// finish (export the values + run the deferred block).
 		return m.advanceGate(msg.value, msg.submitted)
+	case assistedStartMsg:
+		// The assisted-start env gate's export completed — raise the ready
+		// cursor/footer now (never before the declared vars were confirmed).
+		m = m.startAssisted()
+		return m, nil
 	case orchReadyMsg:
 		// Async-startup: the background-opened orchestrator landed. Install it (and the
 		// asker, when supplied), clear the pending state, and reflow so the now-enabled
