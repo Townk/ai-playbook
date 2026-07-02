@@ -93,7 +93,13 @@ func ValidateMain() int {
 		})
 	}
 
-	findings := validate.Check(body, fm, ok, blocks)
+	// bodyLineOffset: body is a pure suffix of content (frontmatter.Parse
+	// strips only a leading --- block, if any), so the number of newlines in
+	// the stripped prefix is exactly the number of file lines consumed before
+	// body's line 1 — 0 when there's no front matter, since then body==content.
+	bodyLineOffset := strings.Count(content[:len(content)-len(body)], "\n")
+
+	findings := validate.Check(body, fm, ok, blocks, bodyLineOffset)
 
 	var aiText string
 	ranAI := !noAI

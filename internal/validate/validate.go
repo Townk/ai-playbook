@@ -45,7 +45,12 @@ type Block struct {
 // Check runs every deterministic check and returns findings (nil ⇔
 // structurally clean). rawBody is the front-matter-stripped markdown (Task
 // 2's fence scan uses it); fmOK is frontmatter.Parse's ok result.
-func Check(rawBody string, fm frontmatter.FrontMatter, fmOK bool, blocks []Block) []Finding {
+// bodyLineOffset is the number of lines consumed by front matter (and any
+// separator) before rawBody begins in the original file — the fence scan
+// adds it to the 1-based line it finds within rawBody so a reported line
+// number is FILE-relative, not body-relative. Callers with no front matter
+// pass 0.
+func Check(rawBody string, fm frontmatter.FrontMatter, fmOK bool, blocks []Block, bodyLineOffset int) []Finding {
 	var findings []Finding
 
 	// 1. front-matter
@@ -146,7 +151,7 @@ func Check(rawBody string, fm frontmatter.FrontMatter, fmOK bool, blocks []Block
 	}
 
 	// fence balance: added in Task 2
-	findings = append(findings, fenceFindings(rawBody)...)
+	findings = append(findings, fenceFindings(rawBody, bodyLineOffset)...)
 
 	return findings
 }
@@ -156,7 +161,9 @@ func Check(rawBody string, fm frontmatter.FrontMatter, fmOK bool, blocks []Block
 // closers, so this check is net-new: it reports (does not repair) a fence
 // that is opened but never closed by EOF. See internal/ui/render.go's
 // normalizeFences/openFence for the same fence-tracking pattern.
-func fenceFindings(rawBody string) []Finding {
+// bodyLineOffset shifts the reported line from body-relative to
+// file-relative (see Check's doc comment).
+func fenceFindings(rawBody string, bodyLineOffset int) []Finding {
 	lines := strings.Split(rawBody, "\n")
 
 	inFence := false
@@ -181,11 +188,12 @@ func fenceFindings(rawBody string) []Finding {
 	}
 
 	if inFence {
+		fileLine := openLine + bodyLineOffset
 		return []Finding{{
 			Severity: Error,
 			Check:    "fence",
-			Message:  fmt.Sprintf("unclosed code fence opened at line %d", openLine),
-			Where:    fmt.Sprintf("line %d", openLine),
+			Message:  fmt.Sprintf("unclosed code fence opened at line %d", fileLine),
+			Where:    fmt.Sprintf("line %d", fileLine),
 		}}
 	}
 	return nil
