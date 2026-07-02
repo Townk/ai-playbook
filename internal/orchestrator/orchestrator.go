@@ -444,6 +444,13 @@ func (o *Orchestrator) FinalPlaybook(base, change string) (io.ReadCloser, <-chan
 // erroring Metadata yields empty model fields, a missing EnvLookup yields no env
 // values — neither EVER fails the commit (the playbook must always persist).
 //
+// `depends_on:` is the one field with no regenerating seam: it is purely
+// human-authored, so a rebuild-from-scratch would otherwise silently drop it on
+// every re-commit. Before writing, if a file already exists at the resolved save
+// path (i.e. this is a re-commit of the same title, not a first-time save), its
+// `depends_on:` is read back and carried onto the freshly assembled front matter —
+// mirroring `finalizeDoc`'s old/new front-matter merge in cmd/ai-playbook/finalize.go.
+//
 // KB remember is DEFERRED (spec §E note): the final playbook + cache entry + saved
 // file are the durable assets; a KB fact is a later refinement and must not block the
 // commit. An empty body or a missing Reengage context is an error (nothing to commit).
@@ -461,21 +468,16 @@ func (o *Orchestrator) CommitPlaybook(body string) (string, error) {
 	// unchanged; a body with no H1 is left untouched.
 	body = stripPreamble(body)
 
-	// Assemble the §C/§E front matter and prepend it to the body. `full` is what we
-	// persist (file + cache) instead of the bare body.
-	full := frontmatter.Prepend(re.buildFrontMatter(body), body)
+	// Assemble the §C/§E front matter. `fm` is completed below with the ONE field
+	// that has no regenerating seam (DependsOn: purely human-authored) before it is
+	// prepended to the body.
+	fm := re.buildFrontMatter(body)
 
-	// (1) Cache-REPLACE — best-effort, skipped when keys/cache absent (no entry to
-	// replace). Mirrors Regenerate's restore: same keys + kind + request sidecar.
-	// The stored body now leads with the playbook FM; cache.Store wraps it in the
-	// cache's OWN technical FM, so the entry has two ---…--- layers (spec §F).
-	if re.Cache != nil && re.CtxHash != "" && re.ReqHash != "" {
-		_, _ = re.Cache.Store(re.CtxHash, re.ReqHash, "playbook", full, nil, re.RequestJSON)
-	}
-
-	// (2) Save the .md file under the resolved store dir / <slug>.md (FM + body).
+	// Resolve the .md save path under the resolved store dir / <slug>.md.
 	// StoreDir is injected by the launcher (cfg.GlobalStoreDir()); empty → back-compat
 	// fallback to <dataRoot>/playbooks so unmodified callers/tests are unaffected.
+	// The slug is derived from the (unchanged) title, so re-committing a playbook
+	// resolves to the SAME path as its prior save.
 	dir := re.StoreDir
 	if dir == "" {
 		dir = filepath.Join(re.dataRoot(), "playbooks")
@@ -485,6 +487,30 @@ func (o *Orchestrator) CommitPlaybook(body string) (string, error) {
 	}
 	slug := playbookSlug(body, re.CtxHash)
 	path := filepath.Join(dir, slug+".md")
+
+	// Carry forward `depends_on:` from the file this commit is about to overwrite,
+	// if one exists — it is the only purely human-authored front-matter field, and
+	// buildFrontMatter (rebuilding from scratch) has no way to know about it. A
+	// missing prior file is NOT an error: it just means this is a genuinely
+	// first-time commit, so DependsOn stays nil. Mirrors finalizeDoc's
+	// old, _, _ := frontmatter.Parse(raw); fm.DependsOn = old.DependsOn.
+	if raw, err := os.ReadFile(path); err == nil {
+		old, _, _ := frontmatter.Parse(string(raw))
+		fm.DependsOn = old.DependsOn
+	}
+
+	// `full` is what we persist (file + cache) instead of the bare body.
+	full := frontmatter.Prepend(fm, body)
+
+	// (1) Cache-REPLACE — best-effort, skipped when keys/cache absent (no entry to
+	// replace). Mirrors Regenerate's restore: same keys + kind + request sidecar.
+	// The stored body now leads with the playbook FM; cache.Store wraps it in the
+	// cache's OWN technical FM, so the entry has two ---…--- layers (spec §F).
+	if re.Cache != nil && re.CtxHash != "" && re.ReqHash != "" {
+		_, _ = re.Cache.Store(re.CtxHash, re.ReqHash, "playbook", full, nil, re.RequestJSON)
+	}
+
+	// (2) Save the .md file (FM + body) at the resolved path.
 	if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
 		return "", err
 	}

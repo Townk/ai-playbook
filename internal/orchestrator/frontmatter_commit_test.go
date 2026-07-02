@@ -23,9 +23,10 @@ type parsedFM struct {
 		Value string `yaml:"value"`
 		Why   string `yaml:"why"`
 	}
-	Created     string `yaml:"created"`
-	ProjectRoot string `yaml:"project_root"`
-	Request     string `yaml:"request"`
+	Created     string   `yaml:"created"`
+	ProjectRoot string   `yaml:"project_root"`
+	Request     string   `yaml:"request"`
+	DependsOn   []string `yaml:"depends_on"`
 }
 
 // splitFM splits a "---\n<yaml>---\n\n<body>" artifact into the parsed front matter
@@ -262,5 +263,54 @@ func TestCommitPlaybook_CacheBodyPreservesInnerFM(t *testing.T) {
 	}
 	if gotBody != body {
 		t.Errorf("round-trip body = %q, want %q", gotBody, body)
+	}
+}
+
+// TestCommitPlaybook_PreservesDependsOn verifies a human-authored `depends_on:`
+// front-matter field on an existing saved playbook survives a re-commit (e.g. a
+// regenerate) of the SAME title. buildFrontMatter rebuilds the front matter from
+// scratch and has no seam for DependsOn, so CommitPlaybook itself must read back
+// the file it's about to overwrite and carry the field forward — mirroring
+// finalizeDoc's old/new front-matter merge (cmd/ai-playbook/finalize.go).
+func TestCommitPlaybook_PreservesDependsOn(t *testing.T) {
+	storeDir := t.TempDir()
+	dataRoot := t.TempDir()
+
+	// Stage a pre-existing playbook file at the EXACT path CommitPlaybook will
+	// compute for this title ("Depends Test" -> slug "depends-test"), carrying a
+	// human-authored depends_on: that no regenerating seam can reproduce.
+	existing := "---\nname: Depends Test\ndepends_on:\n  - dep-a\n---\n\n" +
+		"# Playbook — Depends Test\n\noriginal body.\n"
+	existingPath := filepath.Join(storeDir, "depends-test.md")
+	if err := os.WriteFile(existingPath, []byte(existing), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	re := &Reengage{
+		StoreDir:  storeDir,
+		DataRoot:  dataRoot,
+		Req:       sampleReq(),
+		EnvLookup: func(string) (string, bool) { return "", false },
+	}
+	o := New(newTestDriver(t), &recMux{}).WithReengage(re)
+
+	// Re-commit a regenerated body of the SAME title (simulating a regenerate ->
+	// commit round trip); the resolved slug/path is unchanged.
+	body := "# Playbook — Depends Test\n\nregenerated body content.\n"
+	path, err := o.CommitPlaybook(body)
+	if err != nil {
+		t.Fatalf("CommitPlaybook: %v", err)
+	}
+	if path != existingPath {
+		t.Fatalf("CommitPlaybook path = %q, want %q (same slug)", path, existingPath)
+	}
+
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fm, _ := splitFM(t, string(saved))
+	if strings.Join(fm.DependsOn, ",") != "dep-a" {
+		t.Errorf("DependsOn = %v, want [dep-a]", fm.DependsOn)
 	}
 }
