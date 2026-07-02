@@ -3,6 +3,7 @@ package author
 import (
 	"os/exec"
 
+	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/config"
 )
 
@@ -51,4 +52,29 @@ func ReviewOnce(cfg *config.Config, systemPrompt, userMessage string) (string, e
 		Command:       reviewProcess,
 	}
 	return runMetadataOnce(systemPrompt, userMessage, opts)
+}
+
+// ReviewStream is ReviewOnce's streaming sibling — the `validate` command's
+// AI-review pass, driven so a caller can render live progress (model-activity
+// feed) while the review runs, instead of blocking silently until the harness
+// finishes. It builds the SAME AuthorOptions ReviewOnce does (Cfg, MCPConfigPath
+// = "", Bare = true, the reviewProcess test seam) with exactly ONE difference:
+// NoThinking is left false, so extended thinking stays enabled and the
+// model-activity feed has reasoning content to display as the review streams.
+//
+// Unlike ReviewOnce it does NOT drain the event stream, parse JSON, or retry: it
+// returns RunHarnessEvents' (events, closeFn, err) tuple directly. A start
+// error (e.g. a no-backend/unsupported-harness condition) is returned UNCHANGED
+// as the 3rd value; the caller drains events for the review text and calls
+// closeFn to reap the process and observe its exit error, exactly as
+// runMetadataOnce does for ReviewOnce.
+func ReviewStream(cfg *config.Config, systemPrompt, userMessage string) (<-chan agentstream.Event, func() error, error) {
+	opts := AuthorOptions{
+		Cfg:           cfg,
+		MCPConfigPath: "",
+		Bare:          true,
+		NoThinking:    false,
+		Command:       reviewProcess,
+	}
+	return RunHarnessEvents(systemPrompt, userMessage, opts)
 }
