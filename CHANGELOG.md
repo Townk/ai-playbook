@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Relative file paths (create-file, view/apply-diff targets, the diff float)
+  now resolve against the session's live working directory: a `cd` inside a run
+  block is tracked, instead of everything resolving against the stale
+  directory the session started in.
+- Quitting while a block is still running no longer hangs: tearing the session
+  down now interrupts the in-flight run promptly instead of waiting out its full
+  timeout, and it tears down the running command's process group so no orphaned
+  child processes are left behind.
 - Rapidly triggering create-file and its undo (two quick clicks) no longer risks
   a crash: the file-backup bookkeeping shared by those actions is now guarded
   against the concurrent access the UI's action goroutines could produce.

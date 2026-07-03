@@ -20,6 +20,12 @@ import (
 
 const sentinel = "__APB__" // wraps the exit code: __APB__<rc>__APB__
 
+// maxSentinelLen bounds a full sentinel token (__APB__<rc>__APB__) for the
+// scan-offset rewind in waitSentinel: the two 7-byte markers plus a generous
+// allowance for the signed exit-code digits. The scan rewinds by this much so a
+// sentinel split across two pty read chunks is never missed.
+const maxSentinelLen = 2*len(sentinel) + 24
+
 // Result is one command's outcome.
 type Result struct {
 	Out      string
@@ -42,27 +48,40 @@ type Options struct {
 // Driver is a live, drivable interactive shell session.
 type Driver struct {
 	ptmx     *os.File
+	ptmxFd   int // ptmx's raw fd, captured once at Open; used for TIOCGPGRP so Pgrp never calls os.File.Fd() (which would race the reader goroutine's fd teardown)
 	cmd      *exec.Cmd
 	re       *regexp.Regexp
 	shellPid int
 	a        shellAdapter // shell-specific spawn/job/source/cd tokens
 
-	cwd string // the cwd entered at Open (Options.Cwd), for callers that need it
-
 	shimDir string // temp ZDOTDIR shim dir (zsh history-leak fix); "" if no shim
 
 	mu       sync.Mutex
+	cwd      string // the session's LIVE cwd: Options.Cwd at Open, then updated after every block from the job's cwd temp-file (guarded by mu)
 	buf      []byte
+	scanOff  int // waitSentinel's scan cursor into buf (already-scanned prefix); reset with buf
 	lastSeen time.Time
 	stopped  bool // set by Stop, observed by waitSentinel to return promptly
 
 	runMu sync.Mutex // serializes Run (one foreground command at a time)
 }
 
-// Cwd returns the working directory the driver was opened in (Options.Cwd),
-// empty if none was given. Note: this is the INITIAL cwd; a subsequent `cd` in
-// the session is not tracked here.
-func (d *Driver) Cwd() string { return d.cwd }
+// Cwd returns the session's LIVE working directory: Options.Cwd at Open, then
+// the block's final directory after each Run (the job's EXIT-trap records it and
+// the main shell re-applies it, so a `cd` inside a block is tracked). Empty if no
+// Cwd was given and no block has cd'd yet.
+func (d *Driver) Cwd() string {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	return d.cwd
+}
+
+// setCwd updates the live session cwd under mu.
+func (d *Driver) setCwd(p string) {
+	d.mu.Lock()
+	d.cwd = p
+	d.mu.Unlock()
+}
 
 // Open resolves the configured shell (Options.Shell; default "auto" → zsh),
 // spawns it under a pty, and drives it ready. Returns an error if the shell
@@ -133,6 +152,7 @@ func Open(opts Options) (*Driver, error) {
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 50, Cols: 200})
 	d := &Driver{
 		ptmx:     ptmx,
+		ptmxFd:   int(ptmx.Fd()), // captured once, before the reader goroutine starts
 		cmd:      c,
 		re:       regexp.MustCompile(sentinel + `(-?\d+)` + sentinel),
 		shellPid: c.Process.Pid,
@@ -155,7 +175,7 @@ func Open(opts Options) (*Driver, error) {
 	}
 	d.run("stty -echo 2>/dev/null", 5*time.Second) // cosmetic: trim echo noise
 	if opts.Cwd != "" {
-		d.cwd = opts.Cwd
+		d.setCwd(opts.Cwd)
 		d.run(d.a.cdCmd(opts.Cwd), 10*time.Second)
 	}
 	return d, nil
@@ -260,25 +280,58 @@ func (d *Driver) setStopped(v bool) {
 // Pgrp returns the pty's foreground process group — the running command's group
 // (a real, monitorable, killable handle), or the shell's pgrp when idle.
 func (d *Driver) Pgrp() int {
-	p, err := unix.IoctlGetInt(int(d.ptmx.Fd()), unix.TIOCGPGRP)
+	// Uses the raw fd captured at Open (not d.ptmx.Fd()): calling os.File.Fd()
+	// concurrently with the reader goroutine's Read/close would be a data race,
+	// whereas a bare TIOCGPGRP ioctl on the fd number touches no os.File state.
+	p, err := unix.IoctlGetInt(d.ptmxFd, unix.TIOCGPGRP)
 	if err != nil {
 		return -1
 	}
 	return p
 }
 
-// Close tears down the session.
+// closeGrace is the pause between SIGTERM and SIGKILL when tearing a group down
+// in Close — long enough for a well-behaved process to exit on TERM, short enough
+// to keep quit responsive.
+const closeGrace = 150 * time.Millisecond
+
+// Close tears down the session. It (1) sets stopped so any in-flight Run's
+// waitSentinel returns promptly instead of blocking for its full timeout (the
+// killed shell will never print its sentinel); (2) TERM→grace→KILLs the running
+// block's foreground process group — a block runs in its OWN pgrp under job
+// control, so the shell-group signal below does not reach it — then the shell's
+// own process group, so no orphaned children survive; and (3) reaps the shell
+// with Wait so it does not linger as a zombie. Safe to call more than once (the
+// second call's signals/Wait are harmless no-ops).
 func (d *Driver) Close() error {
+	// Unblock any in-flight waitSentinel first.
+	d.setStopped(true)
+	// Tear down the running block's foreground group (distinct from the shell's),
+	// then the shell's own group.
+	if d.cmd != nil && d.cmd.Process != nil {
+		if pg := d.Pgrp(); pg > 0 && pg != d.shellPid {
+			killGroup(pg)
+		}
+		killGroup(d.shellPid)
+	}
 	if d.ptmx != nil {
 		_ = d.ptmx.Close()
 	}
 	if d.cmd != nil && d.cmd.Process != nil {
-		_ = d.cmd.Process.Kill()
+		_ = d.cmd.Wait() // reap the shell (no zombie)
 	}
 	if d.shimDir != "" {
 		_ = os.RemoveAll(d.shimDir)
 	}
 	return nil
+}
+
+// killGroup escalates a process group to termination: SIGTERM, a brief grace,
+// then SIGKILL — the same escalation Stop uses for a distinct foreground group.
+func killGroup(pgid int) {
+	_ = unix.Kill(-pgid, unix.SIGTERM)
+	time.Sleep(closeGrace)
+	_ = unix.Kill(-pgid, unix.SIGKILL)
 }
 
 // withEnv returns env with any existing `key=` entry removed and `key=val`
@@ -313,7 +366,7 @@ func (d *Driver) read() {
 }
 
 func (d *Driver) send(s string) { _, _ = d.ptmx.Write([]byte(s + "\r")) }
-func (d *Driver) clearBuf()     { d.mu.Lock(); d.buf = d.buf[:0]; d.mu.Unlock() }
+func (d *Driver) clearBuf()     { d.mu.Lock(); d.buf = d.buf[:0]; d.scanOff = 0; d.mu.Unlock() }
 func (d *Driver) idleFor() time.Duration {
 	d.mu.Lock()
 	defer d.mu.Unlock()
@@ -321,25 +374,46 @@ func (d *Driver) idleFor() time.Duration {
 }
 
 // waitSentinel scans the pty for the next __APB__<digits>__APB__; returns the
-// submatch, or nil on timeout. It also returns nil promptly when Stop has been
-// called: a ^C-interrupted job may never print its sentinel, so the stop flag
+// regexp submatch (as []byte slices into buf, valid until the next clearBuf), or
+// nil on timeout. It also returns nil promptly when Stop has been called: a
+// ^C-interrupted job may never print its sentinel, so the stop flag
 // short-circuits the wait instead of blocking for the full timeout.
-func (d *Driver) waitSentinel(timeout time.Duration) []string {
+func (d *Driver) waitSentinel(timeout time.Duration) [][]byte {
 	dl := time.Now().Add(timeout)
 	for time.Now().Before(dl) {
-		d.mu.Lock()
-		m := d.re.FindStringSubmatch(string(d.buf))
-		stopped := d.stopped
-		d.mu.Unlock()
-		if m != nil {
+		if m := d.scanNext(); m != nil {
 			return m
 		}
+		d.mu.Lock()
+		stopped := d.stopped
+		d.mu.Unlock()
 		if stopped {
 			return nil
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
 	return nil
+}
+
+// scanNext does one incremental sentinel scan of buf and advances the scan
+// cursor. It searches d.buf directly (no full-buffer string copy) starting a
+// little before the already-scanned prefix — rewound by maxSentinelLen so a
+// sentinel spanning the previous read-chunk boundary is still matched — then
+// advances scanOff past the current buffer length. Returns the submatch or nil.
+// Cheap by design: the poll only rescans bytes near the tail, so it does not
+// starve the reader goroutine under heavy tty output.
+func (d *Driver) scanNext() [][]byte {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	start := d.scanOff - maxSentinelLen
+	if start < 0 {
+		start = 0
+	}
+	m := d.re.FindSubmatch(d.buf[start:])
+	if n := len(d.buf); n > d.scanOff {
+		d.scanOff = n
+	}
+	return m
 }
 
 // ready waits for the shell to go idle (past startup/instant-prompt) then confirms
@@ -422,7 +496,15 @@ func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
 	res.Err = strings.TrimRight(string(eb), "\n")
 	if m != nil {
 		// Best-effort parse of the sentinel's exit field; res.Exit stays 0 on failure.
-		_, _ = fmt.Sscanf(m[1], "%d", &res.Exit)
+		_, _ = fmt.Sscanf(string(m[1]), "%d", &res.Exit)
+		// Track the block's final cwd so relative paths / floats resolve against the
+		// LIVE session dir. The EXIT-trap wrote it to cwdf and the main shell already
+		// re-applied it; an empty file means the block left cwd unchanged.
+		if cb, rerr := os.ReadFile(cwdf); rerr == nil {
+			if p := strings.TrimRight(string(cb), "\n"); p != "" {
+				d.setCwd(p)
+			}
+		}
 	}
 	return res
 }

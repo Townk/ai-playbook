@@ -3,6 +3,7 @@ package driver
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"testing"
 	"time"
 
@@ -183,6 +184,99 @@ func TestForegroundPgrpIsRealPID(t *testing.T) {
 	case <-done:
 	case <-time.After(8 * time.Second):
 		t.Fatal("killing the command by pgrp did not end the run")
+	}
+}
+
+// TestCwdTracksCdAcrossRuns: after a block cds into a subdir, Cwd() must reflect
+// the session's live cwd — not the stale Open-time dir. The job's EXIT-trap
+// writes the block's final pwd to the cwd temp file and the main shell re-applies
+// it, so the driver can read that back after the run. We compare Cwd() to the
+// shell's own pwd (robust to any symlink normalization the shell applies).
+func TestCwdTracksCdAcrossRuns(t *testing.T) {
+	d := newTestDriver(t)
+	sub := t.TempDir()
+	d.Run("builtin cd -- "+shquote(sub), 10*time.Second)
+	pwd := d.Run("pwd", 5*time.Second).Out
+	if pwd == "" {
+		t.Fatal("could not determine the shell's cwd after cd")
+	}
+	if got := d.Cwd(); got != pwd {
+		t.Errorf("Cwd() = %q, want it to track the live session cwd %q", got, pwd)
+	}
+}
+
+// TestCloseTerminatesRunningBlockPromptly: Close while a long block is in flight
+// must (a) unblock the in-flight Run promptly — not leave it waiting for the
+// sentinel until the run's whole timeout — and (b) tear down the running
+// command's process group so no orphan survives. RED today: Close never sets
+// stopped, so the in-flight RunID's waitSentinel blocks until its 120s timeout
+// (the quit-while-running hang) — the select below times out.
+func TestCloseTerminatesRunningBlockPromptly(t *testing.T) {
+	zdot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	d, err := Open(Options{Shell: "zsh", Env: append(os.Environ(), "ZDOTDIR="+zdot)})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	done := make(chan Result, 1)
+	go func() { done <- d.RunID("", "sleep 60", 120*time.Second) }()
+	pg := 0
+	for i := 0; i < 150 && pg == 0; i++ {
+		time.Sleep(40 * time.Millisecond)
+		if p := d.Pgrp(); p > 0 && p != d.shellPid {
+			pg = p
+		}
+	}
+	if pg == 0 {
+		t.Fatal("never observed the running block's foreground pgrp")
+	}
+	start := time.Now()
+	if err := d.Close(); err != nil {
+		t.Errorf("Close: %v", err)
+	}
+	if el := time.Since(start); el > 5*time.Second {
+		t.Errorf("Close took %v with a block in flight, want prompt (< 5s)", el)
+	}
+	select {
+	case <-done:
+		// The in-flight run returned promptly — no quit-while-running hang.
+	case <-time.After(8 * time.Second):
+		t.Fatal("in-flight run blocked after Close (quit-while-running hang: stopped not set)")
+	}
+	// The block's process group must be gone (kill -0 fails once it's reaped).
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if unix.Kill(pg, 0) != nil {
+			return // gone
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	t.Errorf("running block's pgrp %d survived Close (orphaned children)", pg)
+}
+
+// TestScanNextCatchesSplitSentinel is the B7 boundary case: the incremental scan
+// advances a cursor to len(buf) each poll, so a sentinel that arrives split
+// across two reads (opening __APB__ in chunk 1, the rest in chunk 2) would be
+// missed if the next scan started at the cursor. The maxSentinelLen rewind must
+// back the scan start up far enough to re-see the opening marker. No live shell —
+// this drives scanNext directly with hand-fed chunks.
+func TestScanNextCatchesSplitSentinel(t *testing.T) {
+	d := &Driver{re: regexp.MustCompile(sentinel + `(-?\d+)` + sentinel)}
+	// Chunk 1 ends mid-sentinel (opening marker present, exit+closing marker not).
+	d.buf = append(d.buf, []byte("noise output "+sentinel)...)
+	if m := d.scanNext(); m != nil {
+		t.Fatalf("scanNext matched a partial sentinel: %q", m)
+	}
+	// The cursor is now at len(buf); the opening marker sits BEFORE it.
+	d.buf = append(d.buf, []byte("0"+sentinel+" trailing")...)
+	m := d.scanNext()
+	if m == nil {
+		t.Fatal("scanNext missed a sentinel split across the read boundary (rewind too small)")
+	}
+	if string(m[1]) != "0" {
+		t.Errorf("captured exit field = %q, want \"0\"", m[1])
 	}
 }
 
