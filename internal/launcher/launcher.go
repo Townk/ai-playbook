@@ -196,6 +196,10 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 				dbg("launch: hit route=command pane=%q bodyLen=%d", req.PaneID, len(body))
 				if terr := m.TypeInto(req.PaneID, body); terr != nil {
 					dbg("launch: TypeInto origin pane failed: %v", terr)
+					// The command must never vanish silently just because staging it
+					// into the origin pane failed — surface it so the user can still
+					// run it themselves. The assist itself succeeded, so exit 0.
+					fmt.Fprintf(os.Stderr, "suggested command: %s\n", body)
 				}
 				return 0
 			case "answer":
@@ -252,6 +256,10 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 		dbg("launch: route=command pane=%q contentLen=%d", req.PaneID, len(cls.Content))
 		if terr := m.TypeInto(req.PaneID, cls.Content); terr != nil {
 			dbg("launch: TypeInto origin pane failed: %v", terr)
+			// The command must never vanish silently just because staging it into
+			// the origin pane failed — surface it so the user can still run it
+			// themselves. The assist itself succeeded, so exit 0.
+			fmt.Fprintf(os.Stderr, "suggested command: %s\n", cls.Content)
 		}
 		return 0
 	case author.KindAnswer:

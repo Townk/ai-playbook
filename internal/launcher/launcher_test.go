@@ -2,6 +2,7 @@ package launcher
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"os"
 	"path/filepath"
@@ -72,6 +73,7 @@ type launchMux struct {
 	typedPane    string // pane id passed to the last TypeInto (command route)
 	typedText    string // text passed to the last TypeInto (no CR)
 	typedCount   int    // number of TypeInto calls
+	typeIntoErr  error  // when non-nil, TypeInto returns this (simulates a write-chars failure)
 	answer       string
 	floatCancel  bool
 	noClose      bool // when true, the simulated float never writes <out>.closed
@@ -109,7 +111,7 @@ func (m *launchMux) TypeInto(pane, text string) error {
 	m.typedCount++
 	m.typedPane = pane
 	m.typedText = text
-	return nil
+	return m.typeIntoErr
 }
 
 // SpawnInputFloat is the launcher's request-float seam (Asker.Ask now spawns the
@@ -291,6 +293,55 @@ func TestLaunch_CommandRoute(t *testing.T) {
 	}
 	if !m.closedAtRoute {
 		t.Error("command route must wait for <out>.closed BEFORE typing into the origin")
+	}
+}
+
+// TestLaunch_CommandRoute_TypeIntoError verifies that when mux.TypeInto fails on
+// the fresh-classify command route, the suggested command is never silently lost:
+// it is printed to stderr so the user still sees it, while the exit code stays 0
+// (the assist itself succeeded — only staging it into the origin pane failed).
+// Regression coverage for A5d.
+func TestLaunch_CommandRoute_TypeIntoError(t *testing.T) {
+	fastFloatWait(t)
+	isolateCache(t)
+	m := &launchMux{answer: "list last week's commits", typeIntoErr: errors.New("write-chars failed")}
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj", PaneID: "terminal_7"}
+	classify := fakeClassify(author.Classification{Kind: author.KindCommand, Content: "git log --since='last week' -n 3"}, nil)
+
+	var code int
+	out := captureStderr(t, func() {
+		code = launch(m, "/bin/ai-playbook", req, classify)
+	})
+	if code != 0 {
+		t.Fatalf("launch exit = %d, want 0 (assist succeeded; only the type-into failed)", code)
+	}
+	if !strings.Contains(out, "suggested command: git log --since='last week' -n 3") {
+		t.Errorf("stderr must surface the suggested command on a TypeInto failure; got:\n%s", out)
+	}
+}
+
+// TestLaunch_CacheHitCommand_TypeIntoError mirrors TestLaunch_CommandRoute_TypeIntoError
+// for the cache-hit short-circuit command route (launch.go's other TypeInto call site).
+func TestLaunch_CacheHitCommand_TypeIntoError(t *testing.T) {
+	fastFloatWait(t)
+	c := isolateCache(t)
+	const submitted = "list last week's commits"
+	req := capture.Request{CWD: "/proj/dir", ProjectRoot: "/proj", PaneID: "terminal_7"}
+	ctx, rh := launchKeys(req, submitted)
+	if _, err := c.Store(ctx, rh, "command", "git log --since='last week' -n 3", nil, ""); err != nil {
+		t.Fatal(err)
+	}
+
+	m := &launchMux{answer: submitted, typeIntoErr: errors.New("write-chars failed")}
+	var code int
+	out := captureStderr(t, func() {
+		code = launch(m, "/bin/ai-playbook", req, failClassify(t))
+	})
+	if code != 0 {
+		t.Fatalf("launch exit = %d, want 0", code)
+	}
+	if !strings.Contains(out, "suggested command: git log --since='last week' -n 3") {
+		t.Errorf("stderr must surface the cached suggested command on a TypeInto failure; got:\n%s", out)
 	}
 }
 

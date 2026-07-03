@@ -17,6 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project-bound dependency's resolved root used to persist via a process-wide
   `os.Setenv` and bleed into a later non-bound dependency and the parent's own
   driver; it is now scoped to that dependency's run only.
+- A troubleshoot request classified as a `command` no longer vanishes silently
+  when staging it into the origin pane fails (e.g. the pane is gone); the
+  suggested command is now printed to stderr instead.
 - Assist summoned via `apb` no longer captures its own invocation as the last
   command.
 - Paste now works in form fields and the choose dialog's "other" entry.
