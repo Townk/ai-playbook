@@ -24,10 +24,20 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Extract release notes from CHANGELOG
+        # Pull the tag's own section out of CHANGELOG.md so the GitHub release
+        # shows the hand-curated notes rather than goreleaser's raw commit list.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          awk -v ver="## [$VERSION]" 'index($0,ver)==1{f=1;next} f&&/^## \[/{exit} f{print}' CHANGELOG.md \
+            | sed '/./,$!d' > "${{ runner.temp }}/release-notes.md"
+          echo "--- release notes for $VERSION ---"
+          cat "${{ runner.temp }}/release-notes.md"
+
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
           version: "~> v2"
-          args: release --clean
+          args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
