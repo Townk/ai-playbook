@@ -3,6 +3,7 @@ package ui
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 
 	"github.com/Townk/ai-playbook/internal/driver"
@@ -115,8 +116,32 @@ func TestInProcessCopyPlayNoResult(t *testing.T) {
 	if msg := m.emitAction(Button{Kind: "play", BlockID: "p", Payload: "echo hi"})(); msg != nil {
 		t.Errorf("play msg = %v, want nil", msg)
 	}
-	if len(mux.played) != 1 || mux.played[0] != "echo hi" {
-		t.Errorf("play not recorded → %v", mux.played)
+	if played := mux.Played(); len(played) != 1 || played[0] != "echo hi" {
+		t.Errorf("play not recorded → %v", played)
+	}
+}
+
+// TestCliMuxPlayConcurrent exercises cliMux.Play from two goroutines at once —
+// the orchestrator dispatches play through a tea.Cmd that runs off the event loop,
+// so two play buttons resolving concurrently append to the same slice. Run under
+// -race, an unguarded append trips the detector; the mutex makes it clean, and all
+// records survive. (A1b.)
+func TestCliMuxPlayConcurrent(t *testing.T) {
+	mux := &cliMux{}
+	const n = 100
+	var wg sync.WaitGroup
+	wg.Add(2)
+	for g := 0; g < 2; g++ {
+		go func() {
+			defer wg.Done()
+			for i := 0; i < n; i++ {
+				_ = mux.Play("echo hi")
+			}
+		}()
+	}
+	wg.Wait()
+	if got := len(mux.Played()); got != 2*n {
+		t.Errorf("recorded %d plays, want %d (a lost append means the mutex isn't holding)", got, 2*n)
 	}
 }
 

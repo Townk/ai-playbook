@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"sync"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -467,7 +468,8 @@ func sanitizeLogID(id string) string {
 // no-op Play. Full type-into-origin-pane is the later mux-adapter stage; for now
 // Play just records the command so the wiring is exercised without a real pane.
 type cliMux struct {
-	played []string // commands handed to Play (recorded; see note above)
+	mu     sync.Mutex // guards played: Play runs on concurrent tea.Cmd goroutines
+	played []string   // commands handed to Play (recorded; see note above)
 }
 
 // Copy places text on the system clipboard. On darwin it shells out to pbcopy;
@@ -494,6 +496,17 @@ func (c *cliMux) Copy(text string) error {
 // the mux-adapter stage; recording keeps the orchestrator's play path live and
 // inspectable without a real pane.
 func (c *cliMux) Play(cmd string) error {
+	c.mu.Lock()
 	c.played = append(c.played, cmd)
+	c.mu.Unlock()
 	return nil
+}
+
+// Played returns a snapshot of the recorded Play commands, taken under the lock —
+// the safe way for tests to read the slice that Play appends to from concurrent
+// tea.Cmd goroutines.
+func (c *cliMux) Played() []string {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]string(nil), c.played...)
 }
