@@ -1,12 +1,15 @@
-// Command docgen generates ai-playbook's man pages from the climeta
-// registry: docs/man/ai-playbook.1 (the overview page) plus one
-// docs/man/ai-playbook-<cmd>.1 per climeta.DocumentedCommands entry.
+// Command docgen generates ai-playbook's man pages and zsh completion from
+// the climeta registry: docs/man/ai-playbook.1 (the overview page) plus one
+// docs/man/ai-playbook-<cmd>.1 per climeta.DocumentedCommands entry, and
+// completions/_ai-playbook (the zsh completion script).
 //
-// It takes an optional output-directory argument (default: "docs/man",
-// relative to the current working directory — run it from the repo root, or
-// via `make docs` / `go generate ./internal/climeta`). Output is
-// deterministic: re-running docgen against an unchanged registry never
-// changes the generated files (see internal/climeta/man.go).
+// It takes an optional man-page output-directory argument (default:
+// "docs/man", relative to the current working directory — run it from the
+// repo root, or via `make docs` / `go generate ./internal/climeta`); the
+// completion script is always written to "completions/_ai-playbook",
+// relative to the current working directory. Output is deterministic:
+// re-running docgen against an unchanged registry never changes the
+// generated files (see internal/climeta/man.go and internal/climeta/zsh.go).
 package main
 
 import (
@@ -45,6 +48,24 @@ func run(outDir string) error {
 		}
 	}
 
+	if err := writeCompletion(); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// writeCompletion writes the zsh completion script to
+// completions/_ai-playbook (relative to the current working directory).
+func writeCompletion() error {
+	const compDir = "completions"
+	if err := os.MkdirAll(compDir, 0o755); err != nil {
+		return err
+	}
+	path := filepath.Join(compDir, "_ai-playbook")
+	if err := os.WriteFile(path, []byte(climeta.Zsh()), 0o644); err != nil {
+		return fmt.Errorf("write %s: %w", path, err)
+	}
 	return nil
 }
 

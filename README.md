@@ -39,6 +39,24 @@ Check your version:
 ai-playbook --version
 ```
 
+### Shell completion
+
+Every release archive also ships a zsh completion script, `_ai-playbook`
+(subcommands, flags, and dynamic completion of your saved playbook slugs for
+`run`/`show`/`edit`/`validate`/`env`). Copy it into a directory on your
+`fpath` and let `compinit` pick it up:
+
+```sh
+mkdir -p ~/.zsh/completions
+cp _ai-playbook ~/.zsh/completions/
+```
+
+```sh
+# ~/.zshrc
+fpath=(~/.zsh/completions $fpath)
+autoload -U compinit && compinit
+```
+
 ## Usage
 
 The target command surface (see [`docs/ROADMAP.md`](docs/ROADMAP.md) for status

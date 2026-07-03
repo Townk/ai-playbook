@@ -36,6 +36,7 @@ archives:
       {{- .Arch }}
     files:
       - docs/man/*.1
+      - completions/_ai-playbook
       - README.md
       - LICENSE
 

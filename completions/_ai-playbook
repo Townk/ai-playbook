@@ -1,0 +1,136 @@
+#compdef ai-playbook
+
+_ai-playbook_slugs() {
+  local -a slugs
+  slugs=(${(f)"$(ai-playbook list --format fuzzy-data-source 2>/dev/null | awk -F$'\x1f' '{print $2":"$1}')"})
+  _describe -t playbooks 'playbook' slugs
+}
+
+_ai-playbook_commands() {
+  local -a commands
+  commands=(
+    'assist:AI producer\: capture context, triage, and author or drive a playbook'
+    'troubleshoot:AI producer\: capture context, triage, and author or drive a playbook'
+    'create:Author a playbook directly from a prompt (no triage, no cache serve)'
+    'list:List every saved playbook'
+    'search:Search saved playbooks by substring'
+    'show:Render a saved playbook read-only'
+    'edit:Open a saved playbook in $EDITOR'
+    'run:Run a playbook (interactive, headless, or guided)'
+    'validate:Check a playbook'\''s structure and (optionally) get an AI review'
+    'env:Print a playbook'\''s declared env vars, resolved and redacted'
+    'finalize:Backfill front matter onto an existing playbook file (manual)'
+    'session:The persistent docked session pane (internal plumbing)'
+    'answer:The docked prose-answer pager (internal plumbing)'
+    'mcp:MCP stdio server adapter for the session'\''s tools backend (internal plumbing)'
+    'diff:Scrollable standalone diff viewer (internal plumbing)'
+    'input:The internal input widget (internal plumbing)'
+    'selftest:Drive the user'\''s real shell and report (validates the driver)'
+    'version:Print the binary'\''s version'
+  )
+  _describe -t commands 'command' commands
+}
+
+_ai-playbook_cmd_assist() {
+  _arguments
+}
+
+_ai-playbook_cmd_create() {
+  _arguments \
+    '--template[reserved (not yet implemented); parses but is a no-op]:t:'
+}
+
+_ai-playbook_cmd_list() {
+  _arguments \
+    '--format[output format\: human|fuzzy-data-source|json]:fmt:(human fuzzy-data-source json)'
+}
+
+_ai-playbook_cmd_search() {
+  _arguments \
+    '--format[output format\: human|fuzzy-data-source|json]:fmt:(human fuzzy-data-source json)'
+}
+
+_ai-playbook_cmd_show() {
+  _arguments \
+    '1:playbook:_ai-playbook_slugs'
+}
+
+_ai-playbook_cmd_edit() {
+  _arguments \
+    '1:playbook:_ai-playbook_slugs'
+}
+
+_ai-playbook_cmd_run() {
+  _arguments \
+    '1:playbook:_ai-playbook_slugs' \
+    '--playbook[slug of a saved playbook to run]:slug:_ai-playbook_slugs' \
+    '--file[path to a markdown file to run]:path:_files' \
+    '--auto-rollback[on a step failure, automatically roll back applied steps (else a manual button)]' \
+    '--auto[run headless\: execute every block in order with no viewer/driver pane]' \
+    '--no-auto-rollback[with --auto, do not roll back applied steps on a failure]' \
+    '--assisted[run GUIDED fullscreen\: step-by-step confirmation in the same viewer/driver pane]' \
+    '--with-env[with --auto, supply env var values as inline JSON or a JSON file path]:json:'
+}
+
+_ai-playbook_cmd_validate() {
+  _arguments \
+    '1:playbook:_ai-playbook_slugs' \
+    '--file[path to a markdown file to validate]:path:_files' \
+    '--no-ai[skip the AI review pass (structural check only)]' \
+    '--plain[use plain dot progress instead of the spinner (default when not attached to a terminal)]' \
+    '--quiet[suppress all output; report the result only via the exit code]'
+}
+
+_ai-playbook_cmd_env() {
+  _arguments \
+    '1:playbook:_ai-playbook_slugs' \
+    '--file[path to a markdown file]:path:_files'
+}
+
+_ai-playbook() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '1: :->cmd' \
+    '*::arg:->args'
+
+  case $state in
+    cmd)
+      _ai-playbook_commands
+      ;;
+    args)
+      case $words[1] in
+        assist|troubleshoot)
+          _ai-playbook_cmd_assist
+          ;;
+        create)
+          _ai-playbook_cmd_create
+          ;;
+        list)
+          _ai-playbook_cmd_list
+          ;;
+        search)
+          _ai-playbook_cmd_search
+          ;;
+        show)
+          _ai-playbook_cmd_show
+          ;;
+        edit)
+          _ai-playbook_cmd_edit
+          ;;
+        run)
+          _ai-playbook_cmd_run
+          ;;
+        validate)
+          _ai-playbook_cmd_validate
+          ;;
+        env)
+          _ai-playbook_cmd_env
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_ai-playbook "$@"
