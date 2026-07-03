@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -35,6 +36,29 @@ import (
 // builds; GoReleaser injects the real tag via -ldflags "-X
 // github.com/Townk/ai-playbook/internal/cli.Version=...".
 var Version = "dev"
+
+// resolveVersion picks the version to report. The GoReleaser ldflag wins when
+// present. Otherwise — e.g. `go install .../cmd/ai-playbook@v0.6.1`, which does
+// not run the ldflag — fall back to the module version Go embeds in the build
+// info, so proxy-installed binaries report their real tag instead of "dev".
+func resolveVersion(ldflag, buildVer string, buildOK bool) string {
+	if ldflag != "dev" {
+		return ldflag
+	}
+	if buildOK && buildVer != "" && buildVer != "(devel)" {
+		return buildVer
+	}
+	return ldflag
+}
+
+// version reports the running binary's version (ldflag, else build info).
+func version() string {
+	buildVer, ok := "", false
+	if info, iok := debug.ReadBuildInfo(); iok {
+		buildVer, ok = info.Main.Version, true
+	}
+	return resolveVersion(Version, buildVer, ok)
+}
 
 // Run is the entrypoint's dispatch: it interprets args (the process's
 // os.Args, so args[0] is the invoked binary name and the subcommand is
@@ -56,7 +80,7 @@ func Run(args []string) int {
 	}
 	switch args[1] {
 	case "version", "--version", "-v":
-		fmt.Printf("%s %s\n", prog, Version)
+		fmt.Printf("%s %s\n", prog, version())
 		return 0
 	case "selftest":
 		return selftest()

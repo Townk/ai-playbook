@@ -194,3 +194,26 @@ func TestRun_VersionUsesInvokedProgName(t *testing.T) {
 		t.Errorf("Run([apb version]) output does not start with \"apb \":\n%q", out)
 	}
 }
+
+func TestResolveVersion(t *testing.T) {
+	cases := []struct {
+		name     string
+		ldflag   string
+		buildVer string
+		buildOK  bool
+		want     string
+	}{
+		{"ldflag wins over build info", "0.6.1", "v0.6.0", true, "0.6.1"},
+		{"dev falls back to build info", "dev", "v0.6.1", true, "v0.6.1"},
+		{"dev stays dev when build info absent", "dev", "", false, "dev"},
+		{"dev stays dev on (devel) build", "dev", "(devel)", true, "dev"},
+		{"dev stays dev on empty build version", "dev", "", true, "dev"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := resolveVersion(tc.ldflag, tc.buildVer, tc.buildOK); got != tc.want {
+				t.Errorf("resolveVersion(%q, %q, %v) = %q, want %q", tc.ldflag, tc.buildVer, tc.buildOK, got, tc.want)
+			}
+		})
+	}
+}

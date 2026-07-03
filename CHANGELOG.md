@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-07-03
+
+### Fixed
+
+- `go install`-ed binaries now report their real module version (read from the
+  embedded build info) instead of `dev`. Release-archive builds are unchanged —
+  they still carry the version injected at build time.
+
 ## [0.6.0] - 2026-07-03
 
 ### Added
@@ -170,7 +178,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Original zsh shell-script implementation (ai-assist).
 
-[Unreleased]: https://github.com/Townk/ai-playbook/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Townk/ai-playbook/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/Townk/ai-playbook/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Townk/ai-playbook/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Townk/ai-playbook/compare/v0.3.0...v0.5.0
 [0.3.0]: https://github.com/Townk/ai-playbook/releases/tag/v0.3.0
