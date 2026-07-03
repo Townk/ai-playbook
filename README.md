@@ -39,6 +39,17 @@ Check your version:
 ai-playbook --version
 ```
 
+The tool also installs as **`apb`**, a short alias for everyday typing —
+same code, same commands/flags/help, just a shorter name:
+
+```sh
+go install github.com/Townk/ai-playbook/cmd/apb@latest
+```
+
+Every release archive ships the `apb` binary alongside `ai-playbook`, so you
+can grab it from [Releases](https://github.com/Townk/ai-playbook/releases)
+too. `apb --help` reads "apb" throughout.
+
 ### Shell completion & man pages
 
 Every release archive also ships a zsh completion script, `_ai-playbook`

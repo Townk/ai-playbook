@@ -26,7 +26,6 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 ## Ideas
 
 - [ ] (low priority) E2E/integration tests for the integration entry points (`launcher` entry points, `cmd` `selftest`/`mcpMain`) — spawn the real binary + drive a TUI/PTY. These render via live mux/model/TUI/driver so they're not unit-testable; coverage there is intentionally low. Would push total coverage 80%→~90% (2026-06-27)
-- [ ] (small, cheap) Make `cmd/ai-playbook` `main` dispatch unit-testable: extract `run(args []string, deps) int` (keep the lone `os.Exit` in `main`), inject the subcommand funcs behind a seam so dispatch can be spied. Also trivially testable today: `atomicWrite`/`dirExists`/`head`. Distinct from the integration-glue item above — this part is a fixable structural gap, not inherent (2026-06-27)
 - [ ] `inlineInput` (internal/launcher) opens `/dev/tty` unconditionally before the `inlineRunFn` seam, so the `assist` classify→route/cancel flow can't be exercised headless (its tests `t.Skip` without a TTY). Seam the TTY-open so the classify/cancel/route path gets real CI coverage (2026-07-02)
 - [ ] Portability / progressive enhancement: the driver needs a Unix PTY + signals (`x/sys/unix`), so it's Linux/macOS-only. Evaluate a degraded no-PTY "plain exec" mode for a portable core, and a ConPTY-based Windows driver (large) (2026-06-27)
 - [ ] `create`'s similar-playbooks banner uses a whole-string substring search (`store.Search(prompt)`), so multi-word prompts rarely match — make it per-word/token (2026-06-27)

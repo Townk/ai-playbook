@@ -3,7 +3,7 @@
 Durable single source of truth for the feature roadmap. Each phase lists its
 goal, status, settled decisions, and open questions. Per-phase, step-by-step
 implementation plans are written just-in-time when a phase starts (they're
-ephemeral; this doc is not). Last updated: 2026-07-02.
+ephemeral; this doc is not). Last updated: 2026-07-03.
 
 ## Vision
 
@@ -125,22 +125,35 @@ any wiring into a particular shell/dotfiles setup is separate and secondary.
   author, driver, orchestrator, triage, cache, capture, mux, tools, input,
   config), `pkg/` only for anything genuinely meant to be importable (candidate:
   `store`). Foundational — do this FIRST (before Phase 1 adds the `store`
-  package), since it rewrites every import path. **[near-term]**
+  package), since it rewrites every import path. **[near-term]** — largely
+  adopted (`cmd/` + `internal/`); the `internal/cli` entrypoint extraction
+  (2026-07-03) pushed this further, no `pkg/` yet.
 - **README.md** — overview, install, quick start, the command surface, with
-  badges: CI status, **test coverage**, Go Report Card, latest release, license.
+  badges: CI status, **test coverage**, Go Report Card, latest release,
+  license. — DONE: also now covers shell completion, man pages, and the
+  `apb` short binary (2026-07-03).
 - **CHANGELOG.md** — [Keep a Changelog](https://keepachangelog.com) format; one
-  entry per release, tied to tags.
+  entry per release, tied to tags. — DONE: in use since v0.5.0 (2026-07-03).
 - **CI (GitHub Actions)** — `go test` (+race) + `vet` + `golangci-lint` +
-  coverage upload, on push and PR.
+  coverage upload, on push and PR. — DONE: build/vet/test + golangci-lint +
+  coverage on a fast per-push lane, plus a nightly `-race` lane
+  (2026-07-03).
 - **Releases** — multi-platform binaries (linux/darwin × amd64/arm64; Unix-only tool)
   via [GoReleaser](https://goreleaser.com) on a version tag; checksums and an
-  optional Homebrew tap. CHANGELOG drives the release notes.
+  optional Homebrew tap. CHANGELOG drives the release notes. — DONE:
+  **v0.5.0 shipped 2026-07-03** via GoReleaser (multi-platform binaries +
+  checksums, curated CHANGELOG release notes); archives now ship both
+  `ai-playbook` and `apb`. Homebrew tap still deferred.
 - **zsh completion** — ship a full `_ai-playbook` completion: subcommands, all
   flags, and **dynamic slug completion from the store** for `run` / `show` /
   `edit` / `validate`. (This is the project's shell deliverable; a keybind/picker
-  on top is user config.)
+  on top is user config.) — DONE: `_ai-playbook` with dynamic store-slug
+  completion, `#compdef ai-playbook apb` so it also completes `apb`
+  (2026-07-03).
 - **man + info pages** — generate man pages (per command) and GNU
   texinfo/`info` files; include them in releases (and any Homebrew formula).
+  — man pages DONE: generated `docs/man/*.1` (per command), release-packaged
+  (2026-07-03). GNU info pages still open.
 
 ---
 

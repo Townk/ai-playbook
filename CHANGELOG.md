@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   help via `ai-playbook <command> --help` / `help <command>`, generated man
   pages, and a zsh completion script with dynamic completion of saved
   playbook slugs — all packaged in the release archives.
+- `apb`, a short-name binary built from the same code as `ai-playbook`:
+  install it directly (`go install .../cmd/apb`) or grab it from any release
+  archive, where it now ships alongside `ai-playbook`. Both binaries behave
+  identically; `--help`/`help` and `--version` are name-aware (`apb --help`
+  reads "apb").
 
 ## [0.5.0] - 2026-07-03
 
