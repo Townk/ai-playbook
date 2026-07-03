@@ -38,6 +38,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - A stalled model backend no longer doubles the `assist` triage wait: the
   classify pass skips its one-retry when the first attempt timed out (retrying
   a hung harness could only time out again, turning a 60s worst case into 120s).
+- A model-submitted playbook with a backtick in a block `id` or `file=` value is
+  now rejected at submit time (and the model asked to correct it): a backtick in
+  the rendered fence info string is CommonMark-invalid and would end the fence
+  early, corrupting the rendered document.
 - Keyboard hint-mode activation of an assisted-run footer button (Run / Skip /
   Roll back / Leave as-is / Quit) now works: selecting one via the Space-leader
   hint labels used to be a silent no-op — only a mouse click dispatched it. Both

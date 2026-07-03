@@ -12,8 +12,12 @@ import (
 // rollback=…} fence tag parseFenceInfo (internal/ui/block.go) expects: it
 // splits the tag on whitespace and "=", and the tag itself is delimited by
 // "{"/"}". Any of those characters inside an id or a file= value would
-// mis-split the tag and silently corrupt the rendered playbook.
-var idTokenRe = regexp.MustCompile(`[\s{}=]`)
+// mis-split the tag and silently corrupt the rendered playbook. A backtick is
+// rejected too: the tag is rendered into the fence INFO STRING, and CommonMark
+// forbids backticks in a backtick fence's info string — one in an id/file=
+// value would end the fence early and corrupt the document (a second
+// fence-corruption vector besides the payload runs fenceLen already handles).
+var idTokenRe = regexp.MustCompile("[\\s{}=`]")
 
 // needsRef captures one runnable code block's identity + cross-references for
 // Validate's second pass (needs/rollback existence + cycle detection), which
@@ -61,11 +65,11 @@ func Validate(pb Playbook, requireVerify bool) error {
 						}
 						seen[it.ID] = true
 						if idTokenRe.MatchString(it.ID) {
-							errs = append(errs, fmt.Sprintf("id %q must not contain whitespace, \"{\", \"}\", or \"=\"", it.ID))
+							errs = append(errs, fmt.Sprintf("id %q must not contain whitespace, \"{\", \"}\", \"=\", or a backtick", it.ID))
 						}
 					}
 					if it.File != "" && idTokenRe.MatchString(it.File) {
-						errs = append(errs, fmt.Sprintf("file %q must not contain whitespace, \"{\", \"}\", or \"=\"", it.File))
+						errs = append(errs, fmt.Sprintf("file %q must not contain whitespace, \"{\", \"}\", \"=\", or a backtick", it.File))
 					}
 					if len(it.Needs) > 0 || it.Rollback != "" {
 						refs = append(refs, needsRef{id: it.ID, needs: it.Needs, rollback: it.Rollback})

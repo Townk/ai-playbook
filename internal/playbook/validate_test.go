@@ -59,6 +59,15 @@ func TestValidate_Violations(t *testing.T) {
 		{"bad file syntax", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
 			{Kind: "code", Lang: "go", Code: "package main", ID: "new", File: "a b}.txt"},
 		}}}}, false, "file"},
+		// A backtick in the rendered fence info string is CommonMark-invalid (an
+		// info string on a backtick fence may not contain backticks) — a second
+		// fence-corruption vector, rejected at submit time like the {}= splitters.
+		{"backtick in id", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "bash", Code: "echo x", ID: "fix`x"},
+		}}}}, false, "id"},
+		{"backtick in file", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "go", Code: "package main", ID: "new", File: "a`b.txt"},
+		}}}}, false, "file"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
