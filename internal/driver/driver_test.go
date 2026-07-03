@@ -256,6 +256,40 @@ func TestCloseTerminatesRunningBlockPromptly(t *testing.T) {
 	t.Errorf("running block's pgrp %d survived Close (orphaned children)", pg)
 }
 
+// TestClose_DoubleCloseNoOp: Close is documented "safe to call more than once",
+// but a second Close used to re-run the whole teardown — re-signalling the
+// REAPED shell pid (whose pid/pgid the OS may have already handed to an
+// unrelated process) with a TERM→grace→KILL escalation. The second call must
+// be a fast no-op: the closeGrace sleep inside killGroup makes the old
+// behavior observable as >=150ms, so the timing bound below is discriminating.
+func TestClose_DoubleCloseNoOp(t *testing.T) {
+	d := newTestDriver(t)
+	if err := d.Close(); err != nil {
+		t.Fatalf("first Close: %v", err)
+	}
+	start := time.Now()
+	if err := d.Close(); err != nil {
+		t.Errorf("second Close: %v", err)
+	}
+	if el := time.Since(start); el > 100*time.Millisecond {
+		t.Errorf("second Close took %v, want a fast no-op (< 100ms; a re-run teardown pays killGroup's 150ms grace)", el)
+	}
+}
+
+// TestPgrp_ClosedDriverNeverIoctls: after Close the ptmx fd number may be
+// REUSED by an unrelated file — a TIOCGPGRP ioctl on it would read (or error
+// on) someone else's fd. Pgrp on a closed driver must return -1 from the
+// closed flag alone, never touching the fd. The probe driver borrows a LIVE
+// second driver's ptmx fd (standing in for "the fd number was reused"): if
+// Pgrp ioctl'd it, it would see that shell's real foreground pgrp (> 0).
+func TestPgrp_ClosedDriverNeverIoctls(t *testing.T) {
+	live := newTestDriver(t)
+	probe := &Driver{ptmxFd: live.ptmxFd, closed: true}
+	if pg := probe.Pgrp(); pg != -1 {
+		t.Errorf("Pgrp on a closed driver = %d, want -1 without ioctl'ing the (reused) fd", pg)
+	}
+}
+
 // TestScanNextCatchesSplitSentinel is the B7 boundary case: the incremental scan
 // advances a cursor to len(buf) each poll, so a sentinel that arrives split
 // across two reads (opening __APB__ in chunk 1, the rest in chunk 2) would be

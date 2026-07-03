@@ -42,6 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   now rejected at submit time (and the model asked to correct it): a backtick in
   the rendered fence info string is CommonMark-invalid and would end the fence
   early, corrupting the rendered document.
+- A duplicated session teardown is now a true no-op: closing the shell session
+  twice used to re-signal the already-reaped shell's process group (a pid the OS
+  may have handed to an unrelated process by then) and re-probe its released
+  terminal descriptor (whose number may likewise be reused).
 - Keyboard hint-mode activation of an assisted-run footer button (Run / Skip /
   Roll back / Leave as-is / Quit) now works: selecting one via the Space-leader
   hint labels used to be a silent no-op — only a mouse click dispatched it. Both

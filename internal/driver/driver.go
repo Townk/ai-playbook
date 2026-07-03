@@ -62,6 +62,7 @@ type Driver struct {
 	scanOff  int // waitSentinel's scan cursor into buf (already-scanned prefix); reset with buf
 	lastSeen time.Time
 	stopped  bool // set by Stop, observed by waitSentinel to return promptly
+	closed   bool // set ONCE by Close (under mu) before any teardown: makes double-Close a no-op (never re-signal a reaped — possibly reused — pid) and gates Pgrp off the closed (possibly reused) fd
 
 	runMu sync.Mutex // serializes Run (one foreground command at a time)
 }
@@ -278,8 +279,23 @@ func (d *Driver) setStopped(v bool) {
 }
 
 // Pgrp returns the pty's foreground process group — the running command's group
-// (a real, monitorable, killable handle), or the shell's pgrp when idle.
+// (a real, monitorable, killable handle), or the shell's pgrp when idle. Returns
+// -1 once the driver is closed WITHOUT touching the fd: after Close the fd
+// number may have been reused by an unrelated file, and an ioctl on it would
+// probe someone else's descriptor.
 func (d *Driver) Pgrp() int {
+	d.mu.Lock()
+	closed := d.closed
+	d.mu.Unlock()
+	if closed {
+		return -1
+	}
+	return d.pgrp()
+}
+
+// pgrp is the raw foreground-group probe (no closed gate). Callers must know the
+// fd is still valid: Close uses it during teardown, BEFORE ptmx.Close.
+func (d *Driver) pgrp() int {
 	// Uses the raw fd captured at Open (not d.ptmx.Fd()): calling os.File.Fd()
 	// concurrently with the reader goroutine's Read/close would be a data race,
 	// whereas a bare TIOCGPGRP ioctl on the fd number touches no os.File state.
@@ -301,15 +317,28 @@ const closeGrace = 150 * time.Millisecond
 // block's foreground process group — a block runs in its OWN pgrp under job
 // control, so the shell-group signal below does not reach it — then the shell's
 // own process group, so no orphaned children survive; and (3) reaps the shell
-// with Wait so it does not linger as a zombie. Safe to call more than once (the
-// second call's signals/Wait are harmless no-ops).
+// with Wait so it does not linger as a zombie. Safe to call more than once: the
+// closed flag makes a second Close a true no-op — it must never re-signal the
+// reaped shell's pid/pgid (the OS may have handed it to an unrelated process by
+// then) nor re-close/re-probe the released fd.
 func (d *Driver) Close() error {
-	// Unblock any in-flight waitSentinel first.
-	d.setStopped(true)
+	// Claim the close ONCE, before any teardown. Setting closed here also gates
+	// Pgrp off the fd for concurrent/late callers (the fd number is invalid the
+	// moment ptmx.Close below returns, and may be reused).
+	d.mu.Lock()
+	if d.closed {
+		d.mu.Unlock()
+		return nil
+	}
+	d.closed = true
+	// Unblock any in-flight waitSentinel (inlined setStopped; same mu).
+	d.stopped = true
+	d.mu.Unlock()
 	// Tear down the running block's foreground group (distinct from the shell's),
-	// then the shell's own group.
+	// then the shell's own group. Uses the raw pgrp probe: the public Pgrp is
+	// already gated by closed, and the fd is still valid until ptmx.Close below.
 	if d.cmd != nil && d.cmd.Process != nil {
-		if pg := d.Pgrp(); pg > 0 && pg != d.shellPid {
+		if pg := d.pgrp(); pg > 0 && pg != d.shellPid {
 			killGroup(pg)
 		}
 		killGroup(d.shellPid)
