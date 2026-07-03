@@ -234,6 +234,31 @@ func TestParseAtuinRows_CommandEqualsExitGuard(t *testing.T) {
 	}
 }
 
+// ── isOwnTrigger ─────────────────────────────────────────────────────────────
+
+func TestIsOwnTrigger(t *testing.T) {
+	tests := []struct {
+		name string
+		cmd  string
+		want bool
+	}{
+		{"bare ai-playbook", "ai-playbook troubleshoot", true},
+		{"path ai-playbook", "/usr/local/bin/ai-playbook session", true},
+		{"bare apb", "apb assist \"why did this fail\"", true},
+		{"path apb", "/usr/local/bin/apb create foo", true},
+		{"apb suffix but not own trigger", "apbx foo", false},
+		{"apb suffix in longer word", "some-apb foo", false},
+		{"unrelated command", "make build", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := isOwnTrigger(tc.cmd); got != tc.want {
+				t.Errorf("isOwnTrigger(%q) = %v, want %v", tc.cmd, got, tc.want)
+			}
+		})
+	}
+}
+
 // ── Capture extras ───────────────────────────────────────────────────────────
 
 func TestCapture_NilMuxNoScrollback(t *testing.T) {

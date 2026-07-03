@@ -317,11 +317,25 @@ func parseAtuinRows(out string) LastCommand {
 	return LastCommand{}
 }
 
+// triggerBinaries lists the binary names (bare or as the final path segment)
+// that constitute this tool's own invocation. Both ai-playbook and its apb
+// short-name alias (cmd/apb) dispatch through the same cli.Run, so both must
+// be recognized here — a future rename has one edit site.
+var triggerBinaries = []string{"ai-playbook", "apb"}
+
 // isOwnTrigger reports whether a command line is one of ai-playbook's own
 // invocations (the trigger), which must be skipped when finding the failed command.
 func isOwnTrigger(cmd string) bool {
 	f := strings.Fields(strings.TrimSpace(cmd))
-	return len(f) > 0 && (f[0] == "ai-playbook" || strings.HasSuffix(f[0], "/ai-playbook"))
+	if len(f) == 0 {
+		return false
+	}
+	for _, bin := range triggerBinaries {
+		if f[0] == bin || strings.HasSuffix(f[0], "/"+bin) {
+			return true
+		}
+	}
+	return false
 }
 
 // ExitInt returns the request's exit as an int (and ok=false if not numeric).
