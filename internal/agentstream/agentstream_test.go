@@ -17,6 +17,19 @@ func collect(t *testing.T, a Adapter, r io.Reader) []Event {
 	return got
 }
 
+// collectFragment parses a stream FRAGMENT — envelope lines without the terminal
+// result the strict claude contract demands (A5b) — by appending a benign empty
+// result envelope and stripping its trailing Final event, so the single-envelope
+// mapping tests keep asserting exactly their envelope's events.
+func collectFragment(t *testing.T, a Adapter, in string) []Event {
+	t.Helper()
+	got := collect(t, a, strings.NewReader(in+`{"type":"result","result":""}`+"\n"))
+	if len(got) == 0 || got[len(got)-1] != (Event{Kind: Final, Text: ""}) {
+		t.Fatalf("fragment parse: expected the appended terminal result event last, got %+v", got)
+	}
+	return got[:len(got)-1]
+}
+
 func assertEvents(t *testing.T, got, want []Event) {
 	t.Helper()
 	if len(got) != len(want) {
@@ -160,7 +173,7 @@ func TestClaudeAdapter_DedupReplayedCapture(t *testing.T) {
 func TestClaudeAdapter_AssistantToolUseOnly(t *testing.T) {
 	a, _ := Get("claude")
 	in := `{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"deciding"},{"type":"text","text":"Running it."},{"type":"tool_use","name":"run","input":{"command":"make build"}}]}}` + "\n"
-	got := collect(t, a, strings.NewReader(in))
+	got := collectFragment(t, a, in)
 	want := []Event{{Kind: ToolActivity, Text: "❯ make build"}}
 	assertEvents(t, got, want)
 }
@@ -177,7 +190,7 @@ func TestClaudeAdapter_RedactedThinkingNoEmptyReasoning(t *testing.T) {
 		`{"type":"assistant","message":{"content":[{"type":"thinking","thinking":"","signature":"abc123"}]}}`,
 		`{"type":"stream_event","event":{"type":"content_block_delta","index":1,"delta":{"type":"thinking_delta","thinking":"   "}}}`,
 	}, "\n") + "\n"
-	got := collect(t, a, strings.NewReader(in))
+	got := collectFragment(t, a, in)
 	if len(got) != 0 {
 		t.Fatalf("redacted/empty thinking should emit nothing, got %+v", got)
 	}
@@ -188,20 +201,22 @@ func TestClaudeAdapter_RedactedThinkingNoEmptyReasoning(t *testing.T) {
 func TestClaudeAdapter_ThinkingDeltaNonEmpty(t *testing.T) {
 	a, _ := Get("claude")
 	in := `{"type":"stream_event","event":{"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"weighing the options"}}}` + "\n"
-	got := collect(t, a, strings.NewReader(in))
+	got := collectFragment(t, a, in)
 	want := []Event{{Kind: Reasoning, Text: "weighing the options"}}
 	assertEvents(t, got, want)
 }
 
-// TestClaudeAdapter_MalformedAndBlankLinesSkipped: garbage and blank lines are
-// skipped, valid lines around them still parse.
-func TestClaudeAdapter_MalformedAndBlankLinesSkipped(t *testing.T) {
+// TestClaudeAdapter_BlankAndUnknownLinesTolerated: blank lines and valid-JSON
+// envelopes of unknown type (forward compat: system/init and whatever claude
+// adds later) are skipped; valid lines around them still parse and a clean,
+// result-terminated stream returns nil.
+func TestClaudeAdapter_BlankAndUnknownLinesTolerated(t *testing.T) {
 	a, _ := Get("claude")
 	in := strings.Join([]string{
 		``,
-		`not json at all`,
+		`{"type":"system","subtype":"init"}`,
+		`{"type":"future_envelope","payload":{"x":1}}`,
 		`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}}`,
-		`{"type":"assistant",`, // truncated/malformed JSON
 		``,
 		`{"type":"result","result":"final"}`,
 	}, "\n") + "\n"
@@ -211,6 +226,64 @@ func TestClaudeAdapter_MalformedAndBlankLinesSkipped(t *testing.T) {
 		{Kind: Final, Text: "final"},
 	}
 	assertEvents(t, got, want)
+}
+
+// TestClaudeAdapter_MalformedLineIsFatal is A5b-strict: a non-blank line that is
+// not valid JSON violates the stream-json contract (NDJSON, one object per line)
+// — most commonly a stream truncated MID-LINE — and must surface as a Parse
+// error instead of being silently skipped (which made a corrupted stream on a
+// clean exit 0 indistinguishable from success).
+func TestClaudeAdapter_MalformedLineIsFatal(t *testing.T) {
+	a, _ := Get("claude")
+	in := strings.Join([]string{
+		`{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}}`,
+		`{"type":"assistant",`, // truncated mid-line
+	}, "\n") + "\n"
+	var got []Event
+	err := a.Parse(strings.NewReader(in), func(e Event) { got = append(got, e) })
+	if err == nil {
+		t.Fatal("Parse = nil on a malformed stream-json line, want a stream-contract error (A5b)")
+	}
+	if !strings.Contains(err.Error(), "stream-json") {
+		t.Errorf("error = %q, want it to name the stream-json contract violation", err)
+	}
+	// Events before the violation were already emitted (streaming), that's fine.
+	assertEvents(t, got, []Event{{Kind: TextDelta, Text: "ok"}})
+}
+
+// TestClaudeAdapter_MalformedErrorSnippetCapped: the offending line is quoted in
+// the error but capped — a 200KB corrupted line must not dump itself whole into
+// the error chain.
+func TestClaudeAdapter_MalformedErrorSnippetCapped(t *testing.T) {
+	a, _ := Get("claude")
+	in := "x" + strings.Repeat("y", 200*1024) + "\n"
+	err := a.Parse(strings.NewReader(in), func(Event) {})
+	if err == nil {
+		t.Fatal("Parse = nil on a giant malformed line, want an error")
+	}
+	if len(err.Error()) > 512 {
+		t.Errorf("error length = %d, want the quoted line capped (<= 512 total)", len(err.Error()))
+	}
+}
+
+// TestClaudeAdapter_TruncatedStreamNoResultIsFatal is the other A5b-strict half:
+// claude --print stream-json ALWAYS terminates a successful run with a `result`
+// envelope, so a clean EOF without one means the stream was truncated at a line
+// boundary (or the configured bin isn't actually claude) — an error, not a
+// silent empty/partial playbook.
+func TestClaudeAdapter_TruncatedStreamNoResultIsFatal(t *testing.T) {
+	a, _ := Get("claude")
+	cases := map[string]string{
+		"empty stream":         "",
+		"deltas but no result": `{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"partial"}}}` + "\n",
+	}
+	for name, in := range cases {
+		if err := a.Parse(strings.NewReader(in), func(Event) {}); err == nil {
+			t.Errorf("%s: Parse = nil, want a truncated-stream error (no result envelope)", name)
+		} else if !strings.Contains(err.Error(), "result") {
+			t.Errorf("%s: error = %q, want it to name the missing result envelope", name, err)
+		}
+	}
 }
 
 // TestClaudeAdapter_BigLine: a single very long line (larger than the default
@@ -232,7 +305,7 @@ func TestClaudeAdapter_BigLine(t *testing.T) {
 func TestClaudeAdapter_ToolSummaryTruncated(t *testing.T) {
 	a, _ := Get("claude")
 	in := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"run","input":{"command":"echo this is a very long command that should certainly be truncated well past sixty columns"}}]}}` + "\n"
-	got := collect(t, a, strings.NewReader(in))
+	got := collectFragment(t, a, in)
 	if len(got) != 1 || got[0].Kind != ToolActivity {
 		t.Fatalf("want one ToolActivity, got %+v", got)
 	}
@@ -253,7 +326,7 @@ func TestClaudeAdapter_ToolSummaryTruncated(t *testing.T) {
 func TestClaudeAdapter_ToolSummaryMCPPrefixStripped(t *testing.T) {
 	a, _ := Get("claude")
 	in := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"mcp__ai-playbook__run","input":{"command":"cd /x/y"}}]}}` + "\n"
-	got := collect(t, a, strings.NewReader(in))
+	got := collectFragment(t, a, in)
 	if len(got) != 1 || got[0].Kind != ToolActivity {
 		t.Fatalf("want one ToolActivity, got %+v", got)
 	}
@@ -280,7 +353,7 @@ func TestClaudeAdapter_ToolGlyphs(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := collect(t, a, strings.NewReader(c.line+"\n"))
+			got := collectFragment(t, a, c.line+"\n")
 			if len(got) != 1 || got[0].Kind != ToolActivity {
 				t.Fatalf("want one ToolActivity, got %+v", got)
 			}
@@ -296,7 +369,7 @@ func TestClaudeAdapter_ToolGlyphs(t *testing.T) {
 func TestClaudeAdapter_ToolSummaryNonRun(t *testing.T) {
 	a, _ := Get("claude")
 	in := `{"type":"assistant","message":{"content":[{"type":"tool_use","name":"read","input":{"path":"/tmp/x"}}]}}` + "\n"
-	got := collect(t, a, strings.NewReader(in))
+	got := collectFragment(t, a, in)
 	if len(got) != 1 || got[0].Kind != ToolActivity {
 		t.Fatalf("want one ToolActivity, got %+v", got)
 	}

@@ -265,8 +265,10 @@ func TestClassifyRequest_BareArgv(t *testing.T) {
 }
 
 // fakeStreamHarness writes a fake claude emitting each string in deltas as a
-// stream-json text_delta event (and NO result line → the deltas fallback supplies
-// the body), so the OnText live-tap can be exercised end to end.
+// stream-json text_delta event, terminated by the result envelope a real run
+// always ends with (the strict adapter, A5b, treats a missing result as a
+// truncated stream). The result text is the concatenated deltas, so the OnText
+// live-tap AND the final classification can both be exercised end to end.
 func fakeStreamHarness(t *testing.T, deltas []string) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -288,6 +290,12 @@ func fakeStreamHarness(t *testing.T, deltas []string) string {
 		b.Write(line)
 		b.WriteByte('\n')
 	}
+	resultLine, err := json.Marshal(map[string]any{"type": "result", "result": strings.Join(deltas, "")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b.Write(resultLine)
+	b.WriteByte('\n')
 	b.WriteString("NDJSON\n")
 	dir := t.TempDir()
 	p := filepath.Join(dir, "fake-claude-stream")

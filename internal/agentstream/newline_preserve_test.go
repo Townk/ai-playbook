@@ -49,12 +49,20 @@ func TestNewlinePreservation_AdapterThenFanOut(t *testing.T) {
 		"at /Users/x/sdk.\n",
 	}
 
-	// Build a stream-json session of text_delta lines, one per delta.
+	// Build a stream-json session of text_delta lines, one per delta, terminated
+	// by the result envelope a real claude run always ends with (the strict
+	// adapter treats a missing result as a truncated stream).
 	var sb strings.Builder
 	for _, d := range deltas {
 		sb.WriteString(jsonTextDeltaLine(t, d))
 		sb.WriteByte('\n') // NDJSON line terminator (NOT part of the payload)
 	}
+	resultLine, err := jsonResultLine(want)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sb.WriteString(resultLine)
+	sb.WriteByte('\n')
 
 	a, _ := Get("claude")
 

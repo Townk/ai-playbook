@@ -166,10 +166,10 @@ type AuthorOptions struct {
 	// kill its process must build via exec.CommandContext(ctx, ...); a seam that
 	// ignores ctx runs unbounded. nil → exec.CommandContext(ctx, bin, args...).
 	Command func(ctx context.Context, bin string, args []string) *exec.Cmd
-	// Adapter overrides the resolved agentstream.Adapter for tests (e.g. one that
-	// treats malformed stream-json as fatal, unlike the shipped claudeAdapter,
-	// which tolerates a malformed line — see agentstream.Adapter's doc). nil →
-	// the harness's normal registered adapter (agentstream.Get(adapterName)).
+	// Adapter overrides the resolved agentstream.Adapter for tests (e.g. one with
+	// a deterministic, test-shaped failure mode) without touching the shipped
+	// agentstream registry. nil → the harness's normal registered adapter
+	// (agentstream.Get(adapterName)).
 	Adapter agentstream.Adapter
 }
 

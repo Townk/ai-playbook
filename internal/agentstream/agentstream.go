@@ -66,8 +66,13 @@ type Event struct {
 
 // Adapter normalizes one harness's stdout into the Event model. Parse reads r to
 // EOF, calling emit once per normalized event in stream order, and returns nil on
-// clean EOF. A malformed/garbage line is skipped (not fatal); Parse returns a
-// non-nil error only on an unrecoverable read failure.
+// a clean, contract-conforming stream. Parse returns a non-nil error on an
+// unrecoverable read failure OR on a violation of the harness's stream contract
+// (A5b): each adapter enforces its own wire format strictly enough that a
+// truncated/corrupted stream paired with a clean process exit is not mistaken
+// for success — e.g. the claude adapter errors on a non-JSON line and on EOF
+// without the terminal result envelope. The unstructured text adapter has no
+// contract to violate and never returns a parse error.
 type Adapter interface {
 	Parse(r io.Reader, emit func(Event)) error
 }

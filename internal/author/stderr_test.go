@@ -33,10 +33,13 @@ func harnessCfg(bin string) *config.Config {
 // no-mux inline UI. Regression guard for the live "ton of warnings in the inline
 // box" report, now enforced on the events-backed Agent (HarnessAgent).
 func TestHarnessAgent_StderrNotLeakedOnSuccess(t *testing.T) {
-	// Emit one stream-json text_delta ("ok") + a stderr warning, exit 0.
+	// Emit one stream-json text_delta ("ok") + the terminal result envelope (the
+	// strict adapter, A5b, errors without one) + a stderr warning, exit 0. The
+	// text Agent streams the deltas and drops the Final, so stdout is just "ok".
 	bin := writeFakeClaude(t, "#!/bin/sh\n"+
 		"echo 'WARN untrusted workspace, ignoring 10 entries' >&2\n"+
 		`printf '%s\n' '{"type":"stream_event","event":{"type":"content_block_delta","delta":{"type":"text_delta","text":"ok"}}}'`+"\n"+
+		`printf '%s\n' '{"type":"result","result":"ok"}'`+"\n"+
 		"exit 0\n")
 
 	// Redirect os.Stderr to prove the harness chatter never reaches it.

@@ -3,6 +3,8 @@ package agentstream
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"io"
 	"strings"
 )
@@ -39,8 +41,16 @@ import (
 // back to the assistant message's text — out of scope here, since the owned
 // invocation guarantees partials.
 //
-// Robustness: blank and malformed lines are skipped, not fatal; very long lines
-// are handled (bufio.Reader, not a fixed-size Scanner buffer).
+// Strictness (A5b): the wire format is NDJSON — one JSON object per line — and
+// a successful `claude --print` run ALWAYS terminates with a `result` envelope.
+// Parse therefore returns an error for a non-blank line that is not valid JSON
+// (a stream truncated MID-LINE, or a bin that isn't speaking stream-json at
+// all) and for a clean EOF with no `result` seen (a stream truncated at a line
+// boundary, including a completely empty stream). Before this, both were
+// silently skipped, so a corrupted/truncated stream on a clean exit (0) was
+// indistinguishable from success. Blank lines and valid-JSON envelopes of
+// UNKNOWN type stay tolerated (forward compat with new claude envelope types).
+// Very long lines are handled (bufio.Reader, not a fixed-size Scanner buffer).
 //
 // Empty-activity drop: Reasoning and ToolActivity events whose Text is
 // empty/whitespace are never emitted. Claude --print REDACTS thinking — the
@@ -94,15 +104,29 @@ type claudeDelta struct {
 	Thinking string `json:"thinking,omitempty"`
 }
 
+// malformedSnippetMax caps how much of an offending line is quoted in a
+// stream-contract error (a corrupted line can be hundreds of KB).
+const malformedSnippetMax = 120
+
 func (claudeAdapter) Parse(r io.Reader, emit func(Event)) error {
 	br := bufio.NewReader(r)
+	sawResult := false
 	for {
 		line, err := br.ReadString('\n')
 		if len(line) > 0 {
-			parseClaudeLine(line, emit)
+			gotResult, perr := parseClaudeLine(line, emit)
+			if perr != nil {
+				return perr
+			}
+			sawResult = sawResult || gotResult
 		}
 		if err != nil {
 			if err == io.EOF {
+				if !sawResult {
+					// A successful claude --print run always terminates with a result
+					// envelope; a clean EOF without one is a TRUNCATED stream (A5b).
+					return errors.New("claude stream-json ended without a result envelope (truncated stream)")
+				}
 				return nil
 			}
 			return err
@@ -110,21 +134,24 @@ func (claudeAdapter) Parse(r io.Reader, emit func(Event)) error {
 	}
 }
 
-// parseClaudeLine decodes one NDJSON line and emits its normalized events. A
-// blank or malformed line is silently skipped (no emit, no error).
-func parseClaudeLine(line string, emit func(Event)) {
+// parseClaudeLine decodes one NDJSON line and emits its normalized events,
+// reporting whether the line was the terminal `result` envelope. A blank line is
+// skipped; a non-blank line that is not valid JSON is a stream-contract
+// violation and returns an error (A5b — see the strictness note on
+// claudeAdapter). Valid JSON of an unknown envelope type stays tolerated.
+func parseClaudeLine(line string, emit func(Event)) (sawResult bool, err error) {
 	trimmed := strings.TrimSpace(line)
 	if trimmed == "" {
-		return
+		return false, nil
 	}
 	var l claudeLine
-	if err := json.Unmarshal([]byte(trimmed), &l); err != nil {
-		return // malformed → skip, not fatal
+	if uerr := json.Unmarshal([]byte(trimmed), &l); uerr != nil {
+		return false, fmt.Errorf("invalid stream-json line: %q", truncateCols(trimmed, malformedSnippetMax))
 	}
 	switch l.Type {
 	case "assistant":
 		if l.Message == nil {
-			return
+			return false, nil
 		}
 		// ONLY tool_use is taken from the assembled assistant message; its text and
 		// thinking blocks DUPLICATE the stream_event deltas and are dropped (see the
@@ -137,7 +164,7 @@ func parseClaudeLine(line string, emit func(Event)) {
 		}
 	case "stream_event":
 		if l.Event == nil || l.Event.Delta == nil {
-			return
+			return false, nil
 		}
 		switch l.Event.Delta.Type {
 		case "text_delta":
@@ -152,8 +179,10 @@ func parseClaudeLine(line string, emit func(Event)) {
 		}
 	case "result":
 		emit(Event{Kind: Final, Text: l.Result})
+		return true, nil
 	}
-	// "system" and any unknown type fall through → ignored.
+	// "system" and any unknown type fall through → ignored (forward compat).
+	return false, nil
 }
 
 // emitActivity emits a Reasoning/ToolActivity event only when text has

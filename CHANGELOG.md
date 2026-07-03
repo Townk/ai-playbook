@@ -46,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   twice used to re-signal the already-reaped shell's process group (a pid the OS
   may have handed to an unrelated process by then) and re-probe its released
   terminal descriptor (whose number may likewise be reused).
+- A corrupted or truncated Claude output stream is now reported as an error
+  instead of silently passing for success: the stream parser rejects a non-JSON
+  line (a stream cut mid-line, or a configured `[agent] bin` that is not
+  actually Claude) and a stream that ends without Claude's terminal result
+  record — previously both were skipped, so a clean process exit could deliver
+  an empty or partial playbook with no indication anything went wrong.
 - Keyboard hint-mode activation of an assisted-run footer button (Run / Skip /
   Roll back / Leave as-is / Quit) now works: selecting one via the Space-leader
   hint labels used to be a silent no-op — only a mouse click dispatched it. Both

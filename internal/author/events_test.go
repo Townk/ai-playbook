@@ -286,13 +286,11 @@ func TestAuthorEvents_CommandSeam(t *testing.T) {
 }
 
 // fakeStrictAdapter is a minimal agentstream.Adapter used ONLY to exercise A5b's
-// error-join plumbing. Unlike the shipped claudeAdapter — which, by design,
-// tolerates a malformed/truncated line (see agentstream.Adapter's doc: "a
-// malformed/garbage line is skipped, not fatal") — this adapter treats ANY
-// non-JSON line as a fatal parse error, standing in for "the stream-json
-// contract was violated." It lets the RED test force a deterministic Parse()
-// error from a real fake-harness process without touching agentstream (out of
-// scope for this task).
+// error-join plumbing through the Adapter override seam: it treats ANY non-JSON
+// line as a fatal parse error, standing in for "the stream-json contract was
+// violated". (The shipped claudeAdapter now enforces the same strictness itself
+// — A5b-strict — but this test keeps its own adapter so it pins the SEAM's
+// plumbing independent of the shipped adapter's rules.)
 type fakeStrictAdapter struct{}
 
 func (fakeStrictAdapter) Parse(r io.Reader, emit func(agentstream.Event)) error {
