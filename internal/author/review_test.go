@@ -1,6 +1,7 @@
 package author
 
 import (
+	"context"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -24,7 +25,7 @@ func runReviewStream(t *testing.T, systemPrompt, userMessage, resultText string)
 	var gotArgs []string
 	var gotCmd *exec.Cmd
 	old := reviewProcess
-	reviewProcess = func(b string, args []string) *exec.Cmd {
+	reviewProcess = func(_ context.Context, b string, args []string) *exec.Cmd {
 		gotArgs = args
 		gotCmd = exec.Command(bin, args...)
 		return gotCmd
@@ -135,7 +136,7 @@ func TestReviewStream_PropagatesNoBackendError(t *testing.T) {
 	missingBin := filepath.Join(t.TempDir(), "no-such-claude-binary")
 
 	old := reviewProcess
-	reviewProcess = func(b string, args []string) *exec.Cmd {
+	reviewProcess = func(_ context.Context, b string, args []string) *exec.Cmd {
 		return exec.Command(missingBin, args...)
 	}
 	t.Cleanup(func() { reviewProcess = old })

@@ -1,6 +1,11 @@
 package author
 
 import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -130,7 +135,7 @@ func TestRunHarnessEvents_ThinkingEnvWired(t *testing.T) {
 		events, wait, err := RunHarnessEvents("SYS", "USER", AuthorOptions{
 			Cfg:        cfg,
 			NoThinking: noThinking,
-			Command: func(b string, args []string) *exec.Cmd {
+			Command: func(_ context.Context, b string, args []string) *exec.Cmd {
 				cmd = exec.Command(bin, args...) // captured; Env set by RunHarnessEvents after this returns
 				return cmd
 			},
@@ -251,7 +256,7 @@ func TestAuthorEvents_CommandSeam(t *testing.T) {
 	var gotArgs []string
 	events, wait, err := AuthorEvents(sampleFailure(), AuthorOptions{
 		Cfg: cfg,
-		Command: func(b string, args []string) *exec.Cmd {
+		Command: func(_ context.Context, b string, args []string) *exec.Cmd {
 			gotBin = b
 			gotArgs = args
 			// Run the real fake script regardless of the resolved bin.
@@ -277,5 +282,78 @@ func TestAuthorEvents_CommandSeam(t *testing.T) {
 	}
 	if !strings.Contains(joined, "--model\x00sonnet") {
 		t.Errorf("config model not threaded into argv: %v", gotArgs)
+	}
+}
+
+// fakeStrictAdapter is a minimal agentstream.Adapter used ONLY to exercise A5b's
+// error-join plumbing. Unlike the shipped claudeAdapter — which, by design,
+// tolerates a malformed/truncated line (see agentstream.Adapter's doc: "a
+// malformed/garbage line is skipped, not fatal") — this adapter treats ANY
+// non-JSON line as a fatal parse error, standing in for "the stream-json
+// contract was violated." It lets the RED test force a deterministic Parse()
+// error from a real fake-harness process without touching agentstream (out of
+// scope for this task).
+type fakeStrictAdapter struct{}
+
+func (fakeStrictAdapter) Parse(r io.Reader, emit func(agentstream.Event)) error {
+	sc := bufio.NewScanner(r)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line == "" {
+			continue
+		}
+		if !json.Valid([]byte(line)) {
+			return fmt.Errorf("invalid stream-json line: %q", line)
+		}
+		emit(agentstream.Event{Kind: agentstream.TextDelta, Text: line})
+	}
+	return sc.Err()
+}
+
+// invalidStreamHarnessScript exits 0 while emitting one line that is NOT valid
+// JSON — a stream-contract violation a real (non-tolerant) adapter would flag,
+// paired with a "successful" exit code.
+const invalidStreamHarnessScript = `#!/bin/sh
+cat <<'NDJSON'
+{"type":"system","subtype":"init"}
+this is not valid stream-json at all
+NDJSON
+`
+
+// TestRunHarnessEvents_SurfacesParseError is the A5b RED/GREEN case: a fake
+// harness emits invalid stream-json and exits 0 (cmd.Wait() alone reports
+// success). Before the fix, the goroutine's `_ = adapter.Parse(...)` discarded
+// the parse error entirely, so wait() returned nil — a truncated/malformed
+// stream on a clean exit was indistinguishable from success. After the fix,
+// wait() joins the parse error with cmd.Wait()'s and returns non-nil.
+func TestRunHarnessEvents_SurfacesParseError(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-harness shell script requires a POSIX shell")
+	}
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "fake-claude-invalid")
+	if err := os.WriteFile(bin, []byte(invalidStreamHarnessScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	cfg.Agent.Harness = "claude"
+
+	events, wait, err := RunHarnessEvents("SYS", "USER", AuthorOptions{
+		Cfg:     cfg,
+		Adapter: fakeStrictAdapter{},
+		Command: func(ctx context.Context, b string, args []string) *exec.Cmd {
+			return exec.CommandContext(ctx, bin, args...)
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunHarnessEvents: %v", err)
+	}
+	for range events {
+	}
+	if werr := wait(); werr == nil {
+		t.Fatal("wait() = nil, want a non-nil error surfacing the invalid stream-json (A5b)")
+	} else if !strings.Contains(werr.Error(), "invalid stream-json") {
+		t.Errorf("wait() error = %q, want it to mention the parse failure", werr)
 	}
 }

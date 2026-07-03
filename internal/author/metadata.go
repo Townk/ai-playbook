@@ -85,6 +85,13 @@ func MetadataPrompt(doc string) string {
 func PlaybookMetadata(doc string, opts AuthorOptions) (Metadata, error) {
 	// A classification call needs no tools backend; never attach --mcp-config.
 	opts.MCPConfigPath = ""
+	// Bound the call (A5a): like classify, metadata gates the finish of every
+	// authoring run and is meant to complete in a few seconds, so a stalled
+	// harness must not hang the caller forever. A caller that already set a
+	// Timeout (e.g. a test forcing a short deadline) keeps it.
+	if opts.Timeout <= 0 {
+		opts.Timeout = defaultCallTimeout
+	}
 	// Structured one-shot JSON — no reasoning needed; disable thinking (cuts ~4-6s).
 	opts.NoThinking = true
 	sys := MetadataPrompt(doc)

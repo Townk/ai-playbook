@@ -157,6 +157,12 @@ const classifyTrigger = "Classify the request above. Respond with the JSON objec
 func ClassifyRequest(req capture.Request, opts AuthorOptions) (Classification, error) {
 	// A classify call needs no tools backend; never attach --mcp-config.
 	opts.MCPConfigPath = ""
+	// Bound the call (A5a): classify gates every request and is meant to finish
+	// in ~2-3s, so a stalled harness must not hang the caller forever. A caller
+	// that already set a Timeout (e.g. a test forcing a short deadline) keeps it.
+	if opts.Timeout <= 0 {
+		opts.Timeout = defaultCallTimeout
+	}
 	// Run on the triage model, not the authoring model.
 	opts.ModelOverride = triageModel(opts.Cfg)
 	// BARE quick-model call: REPLACE the system prompt (--system-prompt) + strict

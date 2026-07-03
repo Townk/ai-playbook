@@ -2,10 +2,13 @@ package author
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
+	"time"
 
 	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/capture"
@@ -13,6 +16,19 @@ import (
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/kb"
 )
+
+// defaultCallTimeout bounds a quick STRUCTURED call (classify, metadata) to the
+// owned harness: those two calls gate every request and are meant to complete in
+// a few seconds, so a hung/stalled harness process must not block the caller
+// indefinitely (A5a). 60s is generous headroom over the ~2-3s these calls
+// normally take. The full streaming authoring path (AuthorEvents /
+// RunHarnessEvents for the capable session) intentionally leaves
+// AuthorOptions.Timeout at its zero value (no bound) — long author sessions are
+// expected, and full agentstream/interactive-session cancellation is a separate,
+// backlogged item (A5a-full: see docs/BACKLOG.md). A caller may override this
+// per call via AuthorOptions.Timeout (the classify/metadata call sites do; tests
+// use it to force a short deadline).
+const defaultCallTimeout = 60 * time.Second
 
 // ClaudeArgs builds the OWNED claude argv for the streaming event path. The
 // invocation flags and the stream adapter are a single matched contract — these
@@ -136,9 +152,25 @@ type AuthorOptions struct {
 	// classify pass to surface its reasoning on the float's thinking line). nil →
 	// no-op; behavior unchanged.
 	OnText func(accumulated string)
+	// Timeout bounds THIS invocation's owned harness process via
+	// exec.CommandContext: when the process has not exited within Timeout, it is
+	// killed and wait() returns an error joining context.DeadlineExceeded. Zero
+	// (the default) means no bound — used by the streaming authoring path.
+	// ClassifyRequest/PlaybookMetadata set this to defaultCallTimeout when unset
+	// (A5a); a caller (or a test) may set it explicitly to override, including to
+	// a short deadline for deterministic timeout tests.
+	Timeout time.Duration
 	// Command overrides process construction for tests. It receives the resolved
-	// bin and owned argv and returns the *exec.Cmd to run. nil → exec.Command.
-	Command func(bin string, args []string) *exec.Cmd
+	// ctx (carrying the Timeout deadline, if any), bin, and owned argv, and
+	// returns the *exec.Cmd to run. A seam that wants the timeout to actually
+	// kill its process must build via exec.CommandContext(ctx, ...); a seam that
+	// ignores ctx runs unbounded. nil → exec.CommandContext(ctx, bin, args...).
+	Command func(ctx context.Context, bin string, args []string) *exec.Cmd
+	// Adapter overrides the resolved agentstream.Adapter for tests (e.g. one that
+	// treats malformed stream-json as fatal, unlike the shipped claudeAdapter,
+	// which tolerates a malformed line — see agentstream.Adapter's doc). nil →
+	// the harness's normal registered adapter (agentstream.Get(adapterName)).
+	Adapter agentstream.Adapter
 }
 
 // AuthorEvents runs the configured harness on req and returns a channel of
@@ -237,13 +269,24 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 		// Should not happen for a shipped harness; fall back to passthrough.
 		adapter, _ = agentstream.Get("text")
 	}
+	if opts.Adapter != nil {
+		// Test seam: substitute a fake Adapter (e.g. one that treats malformed
+		// stream-json as fatal) without touching the shipped agentstream registry.
+		adapter = opts.Adapter
+	}
 
 	bin := cfg.Agent.Bin
 	if bin == "" {
 		bin = harness
 	}
 
-	cmd := buildCommand(opts.Command, bin, args)
+	ctx := context.Background()
+	cancel := func() {}
+	if opts.Timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, opts.Timeout)
+	}
+
+	cmd := buildCommand(ctx, opts.Command, bin, args)
 	if len(extraEnv) > 0 {
 		// Inherit the parent env (nil Env == os.Environ at exec time) and append
 		// our extras. Set explicitly only when adding, to avoid disturbing a
@@ -259,31 +302,51 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 	cmd.Stderr = &stderr
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		cancel()
 		return nil, nil, err
 	}
 	if err := cmd.Start(); err != nil {
+		cancel()
 		return nil, nil, err
 	}
 
+	// parseErr captures adapter.Parse's return (a fatal read failure, or — for a
+	// test-injected Adapter — a detected stream-contract violation). It is set
+	// exactly once by the goroutine below, then read from wait() AFTER the
+	// draining caller has observed the events channel close; the close
+	// happens-after this assignment (deferred close runs after Parse returns),
+	// so there is no data race despite the cross-goroutine access (A5b: this
+	// used to be silently discarded via `_ = adapter.Parse(...)`, so a
+	// truncated/malformed stream on a clean exit (0) was indistinguishable from
+	// success).
+	var parseErr error
 	events := make(chan agentstream.Event)
 	go func() {
 		defer close(events)
-		// Parse forwards normalized events; its error (a fatal read failure) is
-		// not surfaced here — the close/wait func reports the process exit, which
-		// is the authoritative signal for the caller.
-		_ = adapter.Parse(stdout, func(e agentstream.Event) { events <- e })
+		parseErr = adapter.Parse(stdout, func(e agentstream.Event) { events <- e })
 	}()
 
 	wait := func() error {
-		return withStderr(cmd.Wait(), &stderr)
+		defer cancel()
+		joined := errors.Join(parseErr, cmd.Wait())
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			// cmd.Wait() alone reports the killed process ("signal: killed"), not
+			// WHY it was killed — join in the context error (A5a) so a caller can
+			// distinguish "the harness stalled past its timeout" from an ordinary
+			// process failure (e.g. via errors.Is(err, context.DeadlineExceeded)).
+			joined = errors.Join(joined, ctxErr)
+		}
+		return withStderr(joined, &stderr)
 	}
 	return events, wait, nil
 }
 
-// buildCommand applies the test seam if present, else exec.Command.
-func buildCommand(override func(string, []string) *exec.Cmd, bin string, args []string) *exec.Cmd {
+// buildCommand applies the test seam if present, else exec.CommandContext(ctx,
+// ...) — so the default (production) path is always bounded by ctx's deadline
+// (A5a). See AuthorOptions.Command for the seam's ctx-propagation contract.
+func buildCommand(ctx context.Context, override func(context.Context, string, []string) *exec.Cmd, bin string, args []string) *exec.Cmd {
 	if override != nil {
-		return override(bin, args)
+		return override(ctx, bin, args)
 	}
-	return exec.Command(bin, args...)
+	return exec.CommandContext(ctx, bin, args...)
 }

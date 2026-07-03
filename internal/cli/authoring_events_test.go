@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"io"
 	"os"
 	"os/exec"
@@ -69,7 +70,7 @@ func TestAuthorEventsFanOut_Integration(t *testing.T) {
 	req := capture.Request{Kind: "error", Command: "make test", Exit: "1"}
 	events, closeFn, err := author.AuthorEvents(req, author.AuthorOptions{
 		Cfg: cfg,
-		Command: func(_ string, args []string) *exec.Cmd {
+		Command: func(_ context.Context, _ string, args []string) *exec.Cmd {
 			return exec.Command(bin, args...)
 		},
 	})

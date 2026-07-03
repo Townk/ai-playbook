@@ -1,6 +1,7 @@
 package author
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -74,7 +75,7 @@ func runMeta(t *testing.T, resultText string) (Metadata, []string, error) {
 	meta, err := PlaybookMetadata("# Playbook — x\n\nbody\n", AuthorOptions{
 		Cfg:           cfg,
 		MCPConfigPath: "/tmp/should-be-ignored.json", // PlaybookMetadata must drop this
-		Command: func(b string, args []string) *exec.Cmd {
+		Command: func(_ context.Context, b string, args []string) *exec.Cmd {
 			gotArgs = args
 			return exec.Command(bin, args...)
 		},

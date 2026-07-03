@@ -1,13 +1,16 @@
 package author
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/Townk/ai-playbook/internal/capture"
@@ -148,7 +151,7 @@ func runClassify(t *testing.T, req capture.Request, resultText, triageModel stri
 	cls, err := ClassifyRequest(req, AuthorOptions{
 		Cfg:           cfg,
 		MCPConfigPath: "/tmp/should-be-ignored.json", // classify must drop this
-		Command: func(b string, args []string) *exec.Cmd {
+		Command: func(_ context.Context, b string, args []string) *exec.Cmd {
 			gotArgs = args
 			return exec.Command(bin, args...)
 		},
@@ -305,7 +308,7 @@ func TestClassifyRequest_OnTextAccumulates(t *testing.T) {
 	cls, err := ClassifyRequest(sampleClassifyRequest(), AuthorOptions{
 		Cfg:    cfg,
 		OnText: func(acc string) { got = append(got, acc) },
-		Command: func(b string, args []string) *exec.Cmd {
+		Command: func(_ context.Context, b string, args []string) *exec.Cmd {
 			return exec.Command(bin, args...)
 		},
 	})
@@ -341,5 +344,69 @@ func TestClassifyRequest_NonJSONEscalatesWithError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "classification failed after retry") {
 		t.Errorf("error = %q, want a classification-failed-after-retry message", err)
+	}
+}
+
+// stalledHarnessScript never exits on its own — it stands in for a hung/stalled
+// harness process (A5a). `exec` REPLACES the shell with sleep (same PID, no
+// child process left holding stdout open): killing cmd.Process then closes the
+// stdout pipe immediately, so the reader sees a clean EOF instead of hanging on
+// an orphaned grandchild that inherited (and kept open) the same fd.
+const stalledHarnessScript = `#!/bin/sh
+exec sleep 3600
+`
+
+// writeStalledHarness writes a script that sleeps indefinitely and returns its
+// path. Skips on Windows (POSIX sh not available).
+func writeStalledHarness(t *testing.T) string {
+	t.Helper()
+	if runtime.GOOS == "windows" {
+		t.Skip("fake-harness shell script requires a POSIX shell")
+	}
+	dir := t.TempDir()
+	p := filepath.Join(dir, "fake-claude-stalled")
+	if err := os.WriteFile(p, []byte(stalledHarnessScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+// TestClassifyRequest_TimesOutOnStalledHarness is the A5a RED/GREEN case: the
+// owned harness process never exits. Before the fix, ClassifyRequest (via
+// exec.Command, no deadline) would block forever waiting on cmd.Wait(). After
+// the fix, a short AuthorOptions.Timeout (the seam classify/metadata thread
+// through to exec.CommandContext) bounds the call: it returns well within the
+// test's own budget, carrying a context.DeadlineExceeded error.
+func TestClassifyRequest_TimesOutOnStalledHarness(t *testing.T) {
+	bin := writeStalledHarness(t)
+	cfg := config.Default()
+	cfg.Agent.Harness = "claude"
+
+	start := time.Now()
+	cls, err := ClassifyRequest(sampleClassifyRequest(), AuthorOptions{
+		Cfg: cfg,
+		// A short deadline, via the seam RunHarnessEvents/buildCommand thread into
+		// exec.CommandContext, so the stalled process is killed promptly instead of
+		// hanging the test for real (the package default is 60s).
+		Timeout: 100 * time.Millisecond,
+		Command: func(ctx context.Context, b string, args []string) *exec.Cmd {
+			return exec.CommandContext(ctx, bin, args...)
+		},
+	})
+	elapsed := time.Since(start)
+
+	if err == nil {
+		t.Fatal("expected a timeout error, got nil")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("error = %v, want it to wrap context.DeadlineExceeded", err)
+	}
+	if cls.Kind != KindEscalate {
+		t.Errorf("kind = %q, want escalate (the caller never blocks, always routes)", cls.Kind)
+	}
+	// The retry loop runs at most twice, each bounded by the 100ms Timeout; this
+	// generously bounds the whole call well under the stalled process's 3600s sleep.
+	if elapsed > 5*time.Second {
+		t.Errorf("ClassifyRequest took %v, want well under 5s (the timeout must actually bound it)", elapsed)
 	}
 }

@@ -1,6 +1,7 @@
 package author
 
 import (
+	"context"
 	"os/exec"
 
 	"github.com/Townk/ai-playbook/internal/agentstream"
@@ -13,8 +14,8 @@ import (
 // signature carries no AuthorOptions (the `validate` AI-review pass calls it
 // as a plain systemPrompt/userMessage function), so there is no per-call
 // Command to inject — tests swap this package var directly instead. nil in
-// production → RunHarnessEvents' default (exec.Command).
-var reviewProcess func(bin string, args []string) *exec.Cmd
+// production → RunHarnessEvents' default (exec.CommandContext).
+var reviewProcess func(ctx context.Context, bin string, args []string) *exec.Cmd
 
 // ReviewStream runs a streaming text→text call on the authoring model — the
 // `validate` command's AI-review pass (spec: a finished playbook is handed to

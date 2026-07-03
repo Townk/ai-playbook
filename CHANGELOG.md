@@ -55,6 +55,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `${BAZ%.*}`, `${BAZ#prefix}`, `${VAR/a/b}`) are now captured into the
   saved playbook's `env:` front matter; previously only the bare `${VAR}`
   form was recognized and these were silently omitted.
+- A malformed or truncated stream from the AI harness is no longer mistaken
+  for success: a parse failure on the harness's stdout is now surfaced (joined
+  with the process's exit error) instead of being silently discarded.
+- The classify and metadata calls (the quick triage/JSON decisions that gate
+  every request) no longer hang indefinitely against a stalled harness
+  process — they are now bounded by a generous default timeout, after which
+  the process is killed and a clear timeout error is returned.
 
 ## [0.6.1] - 2026-07-03
 
