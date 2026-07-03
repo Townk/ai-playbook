@@ -137,12 +137,18 @@ func (f *confirmField) button(label string, focused bool) string {
 	return st.Background(lipgloss.Color(f.theme.ButtonBg)).Foreground(lipgloss.Color(f.theme.ButtonFg)).Render(label)
 }
 
-// view renders the button row. When focused is false, all buttons are
-// rendered unfocused. The inter-button gap is painted on the theme's Mantle
-// background so it doesn't fall back to the terminal default after each
-// button's own background + SGR reset.
+// view renders the button row, horizontally centered within innerW. When
+// focused is false, all buttons are rendered unfocused. The inter-button gap and
+// the centering pad are painted on the theme's Mantle background so they don't
+// fall back to the terminal default after each button's own background + SGR
+// reset.
 func (f *confirmField) view(innerW int, focused bool) string {
-	gap := lipgloss.NewStyle().Background(lipgloss.Color(theme.Mantle)).Render("    ")
+	mantle := func(n int) string {
+		if n <= 0 {
+			return ""
+		}
+		return lipgloss.NewStyle().Background(lipgloss.Color(theme.Mantle)).Render(strings.Repeat(" ", n))
+	}
 	btns := []string{
 		f.button(f.affirmative, focused && f.focus == 0),
 		f.button(f.negative, focused && f.focus == 1),
@@ -150,7 +156,13 @@ func (f *confirmField) view(innerW int, focused bool) string {
 	if f.tertiary != "" {
 		btns = append(btns, f.button(f.tertiary, focused && f.focus == 2))
 	}
-	return strings.Join(btns, gap)
+	row := strings.Join(btns, mantle(4))
+	// Center the row within the dialog's inner width.
+	if pad := innerW - lipgloss.Width(row); pad > 0 {
+		left := pad / 2
+		row = mantle(left) + row + mantle(pad-left)
+	}
+	return row
 }
 
 // value returns "yes", "no", or "quit". Before submission, it returns the

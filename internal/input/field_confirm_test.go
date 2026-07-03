@@ -43,6 +43,23 @@ func TestConfirmField_GapPaintedOnMantle(t *testing.T) {
 	}
 }
 
+func TestConfirmField_ButtonsCentered(t *testing.T) {
+	f := newConfirmField(defaultTheme(), "default", "Confirm", "Customize", false)
+	const innerW = 51
+	out := strip(f.view(innerW, true))
+	if w := lipgloss.Width(out); w != innerW {
+		t.Fatalf("centered button row should span innerW=%d, got %d:\n%q", innerW, w, out)
+	}
+	lead := len(out) - len(strings.TrimLeft(out, " "))
+	trail := len(out) - len(strings.TrimRight(out, " "))
+	if lead == 0 {
+		t.Errorf("buttons should be centered (nonzero left pad), got left-aligned:\n%q", out)
+	}
+	if diff := lead - trail; diff > 1 || diff < -1 {
+		t.Errorf("centering unbalanced: left=%d right=%d\n%q", lead, trail, out)
+	}
+}
+
 func TestConfirmField_TertiaryButtonAndValue(t *testing.T) {
 	f := newConfirmField(defaultTheme(), "default", "Confirm", "Customize", false)
 	// Two-button by default:
