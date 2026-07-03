@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-07-03
+
 ### Added
 
 - Comprehensive `--help`: a grouped top-level overview and real per-command
@@ -18,6 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   archive, where it now ships alongside `ai-playbook`. Both binaries behave
   identically; `--help`/`help` and `--version` are name-aware (`apb --help`
   reads "apb").
+
+### Changed
+
+- The confirm dialog's button row is now horizontally centered within the pane
+  (previously left-aligned).
 
 ## [0.5.0] - 2026-07-03
 
@@ -163,7 +170,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Original zsh shell-script implementation (ai-assist).
 
-[Unreleased]: https://github.com/Townk/ai-playbook/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Townk/ai-playbook/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Townk/ai-playbook/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Townk/ai-playbook/compare/v0.3.0...v0.5.0
 [0.3.0]: https://github.com/Townk/ai-playbook/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Townk/ai-playbook/releases/tag/v0.2.0
