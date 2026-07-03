@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Authoring prompts send the request context once: the failed command,
+  captured scrollback, and the user's request used to be interpolated into
+  both the standing system prompt and the per-request user message, paying
+  their token cost twice on every authoring/followup/final call. That
+  context now travels only in the user message.
+
 ### Fixed
 
 - Relative file paths (create-file, view/apply-diff targets, the diff float)

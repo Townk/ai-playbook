@@ -68,6 +68,15 @@ type KnowledgeBase string
 // "verify re-runs the original failed command in a SEPARATE block" instruction
 // are all preserved.
 //
+// B8: the failed command, scrollback, and the user's request are NOT
+// interpolated here — they live ONLY in BuildUserMessage's output. Every
+// authoring/followup/final call sends both SystemPrompt and BuildUserMessage
+// (as --append-system-prompt + the positional prompt), so duplicating that
+// context in both paid its token cost twice for no benefit. SystemPrompt keeps
+// the standing rules/format sections (the block schema, verify-fold-in rule,
+// shell guidance, etc.) plus the small project/kind/KB context; the per-request
+// content is a one-line pointer to "read it in the user message" instead.
+//
 // shell is the resolved executing-shell name ("zsh", "bash", or "sh") — pass the
 // result of driver.ResolveShellName(cfg.Driver.Shell). When shell is "sh" the
 // prompt adds POSIX-only restrictions so the model avoids bash/zsh extensions.
@@ -104,14 +113,8 @@ func SystemPrompt(req capture.Request, kb KnowledgeBase, shell string) string {
 	// general request as troubleshooting or invent an error from the last command.
 	isFailure := req.Exit != "" && req.Exit != "0"
 
-	var cmdBlock, outputBlock, taskLine, structure string
+	var taskLine, structure string
 	if isFailure {
-		cmdBlock = "\nFailed command: `" + req.Command + "` (exit " + req.Exit + ")"
-		scroll := req.Scrollback
-		if scroll == "" {
-			scroll = "(none captured)"
-		}
-		outputBlock = "\n\nRelevant terminal output (the failure):\n" + scroll
 		taskLine = "Diagnose the failure: explain what is going on and how to fix it."
 		structure = "BEGIN the document with a single H1 title line — exactly `# Playbook — <short task>` — " +
 			"as the VERY FIRST line. Do NOT write any conversational preamble before it (no \"Here's the picture…\", " +
@@ -124,9 +127,9 @@ func SystemPrompt(req capture.Request, kb KnowledgeBase, shell string) string {
 			"   as fenced code blocks. Do NOT just dump a list of commands.\n\n" +
 			"VERIFY (outcome-check): after the fix block, ALWAYS add a SEPARATE final block\n" +
 			"tagged {id=verify needs=<fix-id>} whose only job is to re-run the original failed\n" +
-			"command exactly: `" + req.Command + "` — a clean exit (0) is the proof the fix\n" +
-			"worked. Use the literal id `verify` so the runner can detect a failed verification\n" +
-			"and offer to try another fix. Do NOT fold the re-run into the fix block or prose."
+			"command exactly as given in the accompanying user message — a clean exit (0) is\n" +
+			"the proof the fix worked. Use the literal id `verify` so the runner can detect a\n" +
+			"failed verification and offer to try another fix. Do NOT fold the re-run into the fix block or prose."
 	} else {
 		taskLine = "Answer the user's request directly. This is a general request, NOT a troubleshooting case: there is no failure here — do NOT invent or diagnose an error, and do NOT treat the last command as a problem."
 		structure = "BEGIN the document with a single H1 title line — exactly `# Playbook — <short task>` — " +
@@ -139,10 +142,6 @@ func SystemPrompt(req capture.Request, kb KnowledgeBase, shell string) string {
 			"   code blocks. Do NOT just dump a list of commands."
 	}
 
-	userRequest := req.UserRequest
-	if userRequest == "" {
-		userRequest = "(no description given)"
-	}
 	kind := req.Kind
 	if kind == "" {
 		kind = "question"
@@ -155,10 +154,11 @@ focused look at the project — do not crawl the whole repository or restate
 history. The goal is one fresh, tightly-scoped pass that ends in a clear answer.
 
 Project: %s (%s)%s
-Request kind: %s%s
+Request kind: %s
 
-What the user is trying to do:
-%s%s%s
+The user's request — and, for a failure, the failed command and the captured
+terminal output — are given in the ACCOMPANYING USER MESSAGE, not here; read
+them there. This system prompt carries only the standing rules below.%s
 
 %s
 
@@ -201,8 +201,8 @@ fact or into your answer.
 Finish with a short summary and the recommended next step.
 `,
 		projectName, projectRoot, branchSuffix,
-		kind, cmdBlock,
-		userRequest, outputBlock, kbBlock,
+		kind,
+		kbBlock,
 		taskLine,
 		structure,
 		shellGuidance(shell),

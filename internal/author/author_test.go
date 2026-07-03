@@ -186,6 +186,28 @@ func TestSystemPrompt_GeneralBranch(t *testing.T) {
 	}
 }
 
+// TestSystemPrompt_OmitsPerRequestContext is the B8 RED/GREEN case: the failed
+// command, the scrollback, and the user's request text must live ONLY in
+// BuildUserMessage's output — SystemPrompt must not duplicate them (every
+// authoring/followup/final call sends both, so duplicating this content paid
+// its token cost twice for no benefit).
+func TestSystemPrompt_OmitsPerRequestContext(t *testing.T) {
+	req := sampleFailure()
+	sys := SystemPrompt(req, "", "zsh")
+	for _, dup := range []string{req.Command, req.UserRequest, "no input files"} {
+		if strings.Contains(sys, dup) {
+			t.Errorf("SystemPrompt must not duplicate per-request context %q\n--- prompt ---\n%s", dup, sys)
+		}
+	}
+	// BuildUserMessage must still carry all of it — no information may be lost.
+	user := BuildUserMessage(req)
+	for _, want := range []string{req.Command, req.UserRequest, "no input files"} {
+		if !strings.Contains(user, want) {
+			t.Errorf("BuildUserMessage missing per-request context %q\n--- message ---\n%s", want, user)
+		}
+	}
+}
+
 func TestSystemPrompt_KBFoldedIn(t *testing.T) {
 	sys := SystemPrompt(sampleFailure(), "uses bazel, not make", "zsh")
 	if !strings.Contains(sys, "## What we already know about this project") {
