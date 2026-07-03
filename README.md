@@ -39,7 +39,7 @@ Check your version:
 ai-playbook --version
 ```
 
-### Shell completion
+### Shell completion & man pages
 
 Every release archive also ships a zsh completion script, `_ai-playbook`
 (subcommands, flags, and dynamic completion of your saved playbook slugs for
@@ -56,6 +56,19 @@ cp _ai-playbook ~/.zsh/completions/
 fpath=(~/.zsh/completions $fpath)
 autoload -U compinit && compinit
 ```
+
+The same archive ships generated man pages under `docs/man/ai-playbook*.1`
+(one per command). Copy them into a `man1` directory on your `MANPATH`:
+
+```sh
+mkdir -p ~/.local/share/man/man1
+cp docs/man/ai-playbook*.1 ~/.local/share/man/man1/
+man ai-playbook
+man ai-playbook-run
+```
+
+For quick reference without leaving the terminal, every command also has
+inline help: `ai-playbook <command> --help`.
 
 ## Usage
 

@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Comprehensive `--help`: a grouped top-level overview and real per-command
+  help via `ai-playbook <command> --help` / `help <command>`, generated man
+  pages, and a zsh completion script with dynamic completion of saved
+  playbook slugs — all packaged in the release archives.
+
 ## [0.5.0] - 2026-07-03
 
 ### Added
