@@ -1,4 +1,4 @@
-package main
+package cli
 
 import (
 	"context"
@@ -45,8 +45,11 @@ func TestE2E_MCPForwardsToBackend(t *testing.T) {
 	}
 	defer srv.Close()
 
+	// The CLI dispatch (this package) is built from cmd/ai-playbook — "." here
+	// would be internal/cli itself, a non-main package, so the binary under
+	// test is built by import path rather than by directory.
 	bin := filepath.Join(t.TempDir(), "ai-playbook")
-	if out, berr := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); berr != nil {
+	if out, berr := exec.Command("go", "build", "-o", bin, "github.com/Townk/ai-playbook/cmd/ai-playbook").CombinedOutput(); berr != nil {
 		t.Skipf("build: %v\n%s", berr, out)
 	}
 

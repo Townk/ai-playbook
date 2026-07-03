@@ -1,8 +1,8 @@
 // main_test.go — TDD tests for the top-level --help/help dispatch (see
-// .superpowers/sdd/task-2-brief.md). main() calls os.Exit, so the help
-// decision lives in the pure helpFor function tested directly here; main
-// itself stays a thin wrapper (print + os.Exit) that is not unit-tested.
-package main
+// .superpowers/sdd/task-2-brief.md). Run() returns an exit code (rather than
+// calling os.Exit) precisely so this dispatch is unit-testable; the help
+// decision itself lives in the pure helpFor function, tested directly here.
+package cli
 
 import (
 	"strings"
