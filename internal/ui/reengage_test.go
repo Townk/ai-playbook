@@ -3,8 +3,6 @@ package ui
 import (
 	"fmt"
 	"io"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 
@@ -13,7 +11,6 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/capture"
-	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
 
@@ -32,18 +29,9 @@ func (f *fakeAgent) agent(systemPrompt, userMessage string) (io.ReadCloser, erro
 // a fake agent, so regenerate/followup/wrapup re-author deterministically.
 func newReengageModel(t *testing.T, canned string) (model, *fakeAgent) {
 	t.Helper()
-	zdot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	d, err := driver.Open(driver.Options{Shell: "zsh", Env: append(os.Environ(), "ZDOTDIR="+zdot)})
-	if err != nil {
-		t.Fatalf("driver.Open: %v", err)
-	}
-	t.Cleanup(func() { d.Close() })
 	fa := &fakeAgent{canned: canned}
 	m := newModel("agent", "old playbook content")
-	m.orch = orchestrator.New(d, &cliMux{}).WithReengage(&orchestrator.Reengage{
+	m.orch = orchestrator.New(sharedDriver, &cliMux{}).WithReengage(&orchestrator.Reengage{
 		Req: capture.Request{
 			Command:     "make build",
 			Exit:        "2",
@@ -60,16 +48,7 @@ func newReengageModel(t *testing.T, canned string) (model, *fakeAgent) {
 // for testing re-engagement functions that need orch.Reengage to be non-nil.
 func orchWithReengage(t *testing.T) *orchestrator.Orchestrator {
 	t.Helper()
-	zdot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	d, err := driver.Open(driver.Options{Shell: "zsh", Env: append(os.Environ(), "ZDOTDIR="+zdot)})
-	if err != nil {
-		t.Fatalf("driver.Open: %v", err)
-	}
-	t.Cleanup(func() { d.Close() })
-	return orchestrator.New(d, &cliMux{}).WithReengage(&orchestrator.Reengage{
+	return orchestrator.New(sharedDriver, &cliMux{}).WithReengage(&orchestrator.Reengage{
 		Req: capture.Request{
 			Command:     "make build",
 			Exit:        "2",
@@ -403,19 +382,10 @@ func TestVerifyFailureRepeatsUntilCapInProc(t *testing.T) {
 // orchestrator fans into a playbook reader + a live activity feed.
 func newReengageEventsModel(t *testing.T, delta, final string) (model, *fakeEventsProducer) {
 	t.Helper()
-	zdot := t.TempDir()
-	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("\n"), 0644); err != nil {
-		t.Fatal(err)
-	}
-	d, err := driver.Open(driver.Options{Shell: "zsh", Env: append(os.Environ(), "ZDOTDIR="+zdot)})
-	if err != nil {
-		t.Fatalf("driver.Open: %v", err)
-	}
-	t.Cleanup(func() { d.Close() })
 	fe := &fakeEventsProducer{delta: delta, final: final}
 	m := newModel("agent", "old playbook content")
 	m.width, m.height = 80, 24
-	m.orch = orchestrator.New(d, &cliMux{}).WithReengage(&orchestrator.Reengage{
+	m.orch = orchestrator.New(sharedDriver, &cliMux{}).WithReengage(&orchestrator.Reengage{
 		Req: capture.Request{
 			Command:     "make build",
 			Exit:        "2",
