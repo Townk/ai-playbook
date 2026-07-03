@@ -60,11 +60,55 @@ func version() string {
 	return resolveVersion(Version, buildVer, ok)
 }
 
+// dispatch maps each subcommand token to its handler. It is the single
+// dispatch surface Run() consults; every entry's call is preserved EXACTLY
+// as it read before the switch→map refactor (see git history), just wrapped
+// in a func(prog string) int so the one case that needs prog — version —
+// fits the same shape as the rest, which ignore it.
+//
+// dispatch is two-way synced against climeta.Commands (every dispatch key is
+// a registered command name or alias, and vice versa) by
+// TestDispatchRegistrySync in main_test.go, modulo the documented exception
+// list below (dispatchOnlyKeys) — so a new case here without a climeta entry,
+// or a new climeta entry without a case here, fails the build.
+var dispatch = map[string]func(prog string) int{
+	"version":   versionCmd,
+	"--version": versionCmd,
+	"-v":        versionCmd,
+	"selftest":  func(string) int { return selftest() },
+	"assist":    func(string) int { return launcher.Assist() },
+	// troubleshoot is a deprecated alias → assist (the ZLE trigger is repointed).
+	"troubleshoot": func(string) int { return launcher.Assist() },
+	"create":       func(string) int { return launcher.CreateMain() },
+	"list":         func(string) int { return launcher.ListMain() },
+	"search":       func(string) int { return launcher.SearchMain() },
+	"show":         func(string) int { return launcher.ShowMain() },
+	"edit":         func(string) int { return launcher.EditMain() },
+	"session":      func(string) int { return launcher.SessionMain() },
+	// RunMain owns config loading + the configured-shell hand-off and resolves
+	// the --playbook/--file/bare argument before rendering via ui.Main.
+	"run":      func(string) int { return launcher.RunMain() },
+	"validate": func(string) int { return launcher.ValidateMain() },
+	"env":      func(string) int { return launcher.EnvMain() },
+	"answer":   func(string) int { return launcher.AnswerMain() },
+	"finalize": func(string) int { return finalize() },
+	"mcp":      func(string) int { return mcpMain() },
+	"diff":     func(string) int { return diffpkg.Main() },
+	"input":    func(string) int { return input.Main() },
+}
+
+// versionCmd is the dispatch handler for "version"/"--version"/"-v".
+func versionCmd(prog string) int {
+	fmt.Printf("%s %s\n", prog, version())
+	return 0
+}
+
 // Run is the entrypoint's dispatch: it interprets args (the process's
 // os.Args, so args[0] is the invoked binary name and the subcommand is
-// args[1]), handles top-level help, dispatches to the matching subcommand,
-// and returns the process exit code. Callers (cmd/ai-playbook, cmd/apb) are
-// thin wrappers: func main() { os.Exit(cli.Run(os.Args)) }.
+// args[1]), handles top-level help, dispatches to the matching subcommand via
+// the dispatch table, and returns the process exit code. Callers
+// (cmd/ai-playbook, cmd/apb) are thin wrappers:
+// func main() { os.Exit(cli.Run(os.Args)) }.
 func Run(args []string) int {
 	prog := "ai-playbook"
 	if len(args) > 0 {
@@ -78,51 +122,12 @@ func Run(args []string) int {
 		fmt.Println(text)
 		return 0
 	}
-	switch args[1] {
-	case "version", "--version", "-v":
-		fmt.Printf("%s %s\n", prog, version())
-		return 0
-	case "selftest":
-		return selftest()
-	case "assist":
-		return launcher.Assist()
-	case "troubleshoot": // deprecated alias → assist (the ZLE trigger is repointed)
-		return launcher.Assist()
-	case "create":
-		return launcher.CreateMain()
-	case "list":
-		return launcher.ListMain()
-	case "search":
-		return launcher.SearchMain()
-	case "show":
-		return launcher.ShowMain()
-	case "edit":
-		return launcher.EditMain()
-	case "session":
-		return launcher.SessionMain()
-	case "run":
-		// RunMain owns config loading + the configured-shell hand-off and resolves
-		// the --playbook/--file/bare argument before rendering via ui.Main.
-		return launcher.RunMain()
-	case "validate":
-		return launcher.ValidateMain()
-	case "env":
-		return launcher.EnvMain()
-	case "answer":
-		return launcher.AnswerMain()
-	case "finalize":
-		return finalize()
-	case "mcp":
-		return mcpMain()
-	case "diff":
-		return diffpkg.Main()
-	case "input":
-		return input.Main()
-	default:
-		fmt.Fprintf(os.Stderr, "%s: unknown subcommand %q\n", prog, args[1])
-		usage(prog)
-		return 2
+	if fn, ok := dispatch[args[1]]; ok {
+		return fn(prog)
 	}
+	fmt.Fprintf(os.Stderr, "%s: unknown subcommand %q\n", prog, args[1])
+	usage(prog)
+	return 2
 }
 
 // helpFor is the pure top-level help-dispatch decision, factored out of

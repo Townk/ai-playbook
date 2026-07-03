@@ -195,6 +195,57 @@ func TestRun_VersionUsesInvokedProgName(t *testing.T) {
 	}
 }
 
+// dispatchOnlyKeys lists dispatch keys that are deliberately NOT in the
+// climeta registry: "--version"/"-v" are flag-shaped synonyms for the
+// "version" command, kept in dispatch for user convenience (`ai-playbook
+// --version` is a common idiom) but not worth documenting as their own
+// registry entries since "version" already covers them in help/man/
+// completion.
+var dispatchOnlyKeys = map[string]bool{
+	"--version": true,
+	"-v":        true,
+}
+
+// registryNames returns every name and alias climeta.Commands registers,
+// mirroring climeta's own (unexported) commandIndex construction.
+func registryNames() map[string]bool {
+	names := make(map[string]bool)
+	for _, cmd := range climeta.Commands {
+		names[cmd.Name] = true
+		for _, alias := range cmd.Aliases {
+			names[alias] = true
+		}
+	}
+	return names
+}
+
+// TestDispatchRegistrySync is the two-way sync check between cli.dispatch
+// and climeta.Commands: every dispatch key must resolve to a registered
+// command name/alias (else it tab-completes to nothing / gets no --help/man
+// page), and every registered name/alias must have a dispatch entry (else it
+// tab-completes but dies at runtime with "unknown subcommand") — modulo the
+// documented dispatchOnlyKeys exception list above. This is the guardrail
+// that motivated the switch→map refactor: a plain switch could silently
+// drift from the registry in either direction.
+func TestDispatchRegistrySync(t *testing.T) {
+	registry := registryNames()
+
+	for key := range dispatch {
+		if dispatchOnlyKeys[key] {
+			continue
+		}
+		if !registry[key] {
+			t.Errorf("dispatch key %q has no climeta.Commands entry (name or alias) — add one, or add %q to dispatchOnlyKeys if it is deliberately dispatch-only", key, key)
+		}
+	}
+
+	for name := range registry {
+		if _, ok := dispatch[name]; !ok {
+			t.Errorf("climeta command/alias %q has no dispatch entry — it tab-completes and shows help but dies at runtime", name)
+		}
+	}
+}
+
 func TestResolveVersion(t *testing.T) {
 	cases := []struct {
 		name     string
