@@ -125,6 +125,38 @@ func TestChooseOtherFilledWithActiveBuffer(t *testing.T) {
 	}
 }
 
+// A3b: chooseField.handle started with a KeyPressMsg type-assert that dropped
+// any other message, so paste never reached the embedded "other" textField.
+// Highlighting the other row and sending a PasteMsg must land the content.
+func TestChooseOtherPasteDelivered(t *testing.T) {
+	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…"))
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown})
+	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyDown}) // now on the other row
+	f2, _, _ := f.handle(tea.PasteMsg{Content: "pasted-value"})
+	if got := f2.value(); got != "pasted-value" {
+		t.Fatalf("paste on the highlighted other row must land in its value, got %q", got)
+	}
+}
+
+// A3b: chooseField.initCmd unconditionally returned nil, so the embedded
+// "other" textField never got its cursor-blink command wired up. When an
+// other field exists, initCmd must delegate to it.
+func TestChooseInitCmdBlinksWhenOtherFieldExists(t *testing.T) {
+	f := newChooseField(defaultTheme(), "default", []string{"a"}, false, "Other…")
+	if cmd := f.initCmd(); cmd == nil {
+		t.Fatal("chooseField.initCmd must return the other field's blink cmd when an other field exists")
+	}
+}
+
+// Guards the existing no-other-field contract: initCmd must stay nil when
+// there is no embedded "other" textField.
+func TestChooseInitCmdNilWithoutOtherField(t *testing.T) {
+	f := newChooseField(defaultTheme(), "default", []string{"a"}, false, "")
+	if cmd := f.initCmd(); cmd != nil {
+		t.Fatal("chooseField.initCmd must stay nil when there is no other field")
+	}
+}
+
 func TestChooseRowSpacingAndFullWidthHighlight(t *testing.T) {
 	f := newChooseField(defaultTheme(), "default", []string{"alpha", "beta"}, false, "")
 	// highlight is row 0 by default

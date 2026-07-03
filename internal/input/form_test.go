@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/bubbles/v2/textarea"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Townk/ai-playbook/internal/theme"
@@ -161,6 +162,35 @@ func TestFormTextField_BoxHasMantleBackground(t *testing.T) {
 	}
 	if got := tf.view(m.innerW(), true); !strings.Contains(got, mantleBG) {
 		t.Fatalf("form text field box must paint the Mantle background; got %q", got)
+	}
+}
+
+// A3b: formModel.Update only forwarded KeyPressMsg/WindowSizeMsg to the
+// focused field, silently dropping tea.PasteMsg (which textField.handle
+// supports) in forms. Pasting into a focused line field must land the
+// content in the field's value.
+func TestFormPasteDeliveredToFocusedField(t *testing.T) {
+	m := newFormModel(defaultTheme(), "Setup", []formField{
+		{"a", "line", "First", ""}, {"b", "line", "Second", ""},
+	}, 1, 1)
+	m2, _ := m.Update(tea.PasteMsg{Content: "pasted-text"})
+	got := m2.(formModel).fields[0].value()
+	if got != "pasted-text" {
+		t.Fatalf("paste must land in the focused field's value, got %q", got)
+	}
+}
+
+// A3b: cursor-blink commands/messages returned by initCmd must reach the
+// focused field's Update via the same delegation path as paste, instead of
+// being silently dropped by formModel.Update's narrowed switch.
+func TestFormDeliversNonKeyMsgToFocusedField(t *testing.T) {
+	m := newFormModel(defaultTheme(), "Setup", []formField{
+		{"a", "line", "First", ""},
+	}, 1, 1)
+	blink := textarea.Blink()
+	_, cmd := m.Update(blink)
+	if cmd == nil {
+		t.Fatal("a blink message delivered to the focused (blinking) field must yield a re-arm cmd, not be dropped")
 	}
 }
 

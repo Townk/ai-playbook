@@ -236,8 +236,16 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 		return m, cmd
+
+	default:
+		// Non-key, non-resize messages (paste, cursor-blink commands from
+		// initCmd, etc.) — delegate to the focused field like the standalone
+		// model.Update does. Field actions (cancel/done) don't apply to these
+		// message types, so the returned action is discarded.
+		f, _, cmd := m.fields[m.focus].handle(msg)
+		m.fields[m.focus] = f
+		return m, cmd
 	}
-	return m, nil
 }
 
 // tabRow renders the tab labels: done=✓ (muted), active=◆ (accent), pending=(muted).

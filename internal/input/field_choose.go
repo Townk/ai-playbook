@@ -89,6 +89,15 @@ func (f *chooseField) isOtherRow(idx int) bool {
 func (f *chooseField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
 	kp, ok := msg.(tea.KeyPressMsg)
 	if !ok {
+		// Non-key messages (paste, cursor-blink commands, etc.) only mean
+		// anything to the embedded "other" textField, and only while it's
+		// the highlighted row.
+		if f.isOtherRow(f.highlight) {
+			c := *f
+			f2, _, cmd := c.otherField.handle(msg)
+			c.otherField = f2.(*textField)
+			return &c, fieldNone, cmd
+		}
 		return f, fieldNone, nil
 	}
 
@@ -470,8 +479,15 @@ func (f *chooseField) filled() bool {
 	return f.selected >= 0
 }
 
-// initCmd returns nil — the choose field needs no cursor blink.
-func (f *chooseField) initCmd() tea.Cmd { return nil }
+// initCmd returns nil unless an embedded "other" textField exists, in which
+// case it delegates to that field's initCmd so its cursor blink keeps ticking
+// (the choose list itself needs no blink of its own).
+func (f *chooseField) initCmd() tea.Cmd {
+	if f.otherField != nil {
+		return f.otherField.initCmd()
+	}
+	return nil
+}
 
 // hint returns the accelerator hint string for this field. It lets the generic
 // model frame (used by the embeddable Ask) render the choose-specific hint without

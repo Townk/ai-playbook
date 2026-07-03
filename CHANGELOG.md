@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Assist summoned via `apb` no longer captures its own invocation as the last
   command.
+- Paste now works in form fields and the choose dialog's "other" entry.
 
 ## [0.6.1] - 2026-07-03
 
