@@ -32,3 +32,40 @@ func TestBgANSI(t *testing.T) {
 		t.Errorf("BgANSI = %q", got)
 	}
 }
+
+// TestParseHexShortInputDoesNotPanic pins the A1c fix: ParseHex must not
+// panic on inputs shorter than 6 hex digits (with or without a leading '#'),
+// and must fall back to (0, 0, 0) instead.
+func TestParseHexShortInputDoesNotPanic(t *testing.T) {
+	cases := []string{"#fff", "", "#", "12345"}
+	for _, hex := range cases {
+		r, g, b := ParseHex(hex)
+		if r != 0 || g != 0 || b != 0 {
+			t.Errorf("ParseHex(%q) = (%d,%d,%d), want (0,0,0) fallback", hex, r, g, b)
+		}
+	}
+}
+
+// TestParseHexMalformedInputReturnsZero pins the fallback for well-sized but
+// non-hex-digit input — ParseHex must not panic and must not silently return
+// a garbage partial parse.
+func TestParseHexMalformedInputReturnsZero(t *testing.T) {
+	r, g, b := ParseHex("#zzzzzz")
+	if r != 0 || g != 0 || b != 0 {
+		t.Errorf("ParseHex(%q) = (%d,%d,%d), want (0,0,0) fallback", "#zzzzzz", r, g, b)
+	}
+}
+
+// TestParseHexValidInputStillWorks guards against an overzealous fix
+// rejecting well-formed input.
+func TestParseHexValidInputStillWorks(t *testing.T) {
+	r, g, b := ParseHex("#89b4fa")
+	if r != 0x89 || g != 0xb4 || b != 0xfa {
+		t.Errorf("ParseHex(#89b4fa) = (%d,%d,%d), want (137,180,250)", r, g, b)
+	}
+	// Leading '#' is optional.
+	r, g, b = ParseHex("89b4fa")
+	if r != 0x89 || g != 0xb4 || b != 0xfa {
+		t.Errorf("ParseHex(89b4fa) (no #) = (%d,%d,%d), want (137,180,250)", r, g, b)
+	}
+}

@@ -22,15 +22,30 @@ const (
 	CodeBg   = "#282C41"
 )
 
-// ParseHex returns the r,g,b components of a "#RRGGBB" hex string.
+// ParseHex returns the r,g,b components of a "#RRGGBB" (leading '#' optional)
+// hex string. Input that isn't exactly 6 hex digits — too short, too long, or
+// containing non-hex characters — returns (0, 0, 0) rather than panicking or
+// silently parsing a partial value.
 func ParseHex(hex string) (int, int, int) {
 	h := hex
 	if len(h) > 0 && h[0] == '#' {
 		h = h[1:]
 	}
-	rv, _ := strconv.ParseInt(h[0:2], 16, 32)
-	gv, _ := strconv.ParseInt(h[2:4], 16, 32)
-	bv, _ := strconv.ParseInt(h[4:6], 16, 32)
+	if len(h) != 6 {
+		return 0, 0, 0
+	}
+	rv, err := strconv.ParseInt(h[0:2], 16, 32)
+	if err != nil {
+		return 0, 0, 0
+	}
+	gv, err := strconv.ParseInt(h[2:4], 16, 32)
+	if err != nil {
+		return 0, 0, 0
+	}
+	bv, err := strconv.ParseInt(h[4:6], 16, 32)
+	if err != nil {
+		return 0, 0, 0
+	}
 	return int(rv), int(gv), int(bv)
 }
 

@@ -11,6 +11,8 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
+
+	"github.com/Townk/ai-playbook/internal/theme"
 )
 
 // brailleBitMap maps a [row][col] dot position (4 rows × 2 cols) to its bit
@@ -159,17 +161,20 @@ func lerpHexColor(a, b string, t float64) string {
 }
 
 // parseHexRGB parses "#rrggbb" (case-insensitive, leading '#' optional) into its
-// 0..255 channels. ok is false for any malformed input.
+// 0..255 channels. ok is false for any malformed input. Validation stays local
+// (theme.ParseHex's zero-value fallback can't be told apart from a legitimate
+// "#000000"); the actual channel extraction delegates to theme.ParseHex to
+// avoid duplicating the hex-decode logic.
 func parseHexRGB(s string) (r, g, b int, ok bool) {
 	s = strings.TrimPrefix(strings.TrimSpace(s), "#")
 	if len(s) != 6 {
 		return 0, 0, 0, false
 	}
-	v, err := strconv.ParseUint(s, 16, 32)
-	if err != nil {
+	if _, err := strconv.ParseUint(s, 16, 32); err != nil {
 		return 0, 0, 0, false
 	}
-	return int(v>>16) & 0xff, int(v>>8) & 0xff, int(v) & 0xff, true
+	r, g, b = theme.ParseHex(s)
+	return r, g, b, true
 }
 
 // waveTickMsg advances the wave animation one frame.
