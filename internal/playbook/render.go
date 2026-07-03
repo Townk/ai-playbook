@@ -80,7 +80,34 @@ func fence(lang, id, file string, needs []string, rollback string, static bool, 
 		}
 		tag += "}"
 	}
-	return "```" + lang + " " + tag + "\n" + strings.TrimRight(code, "\n") + "\n```\n"
+	body := strings.TrimRight(code, "\n")
+	f := strings.Repeat("`", fenceLen(body))
+	return f + lang + " " + tag + "\n" + body + "\n" + f + "\n"
+}
+
+// fenceLen returns the backtick-fence length safe to wrap code in: at least
+// 3, and always one longer than the longest run of backticks appearing
+// anywhere in code. CommonMark closes a fence at the first line consisting
+// solely of a run of the fence char >= the OPENING run's length, so a payload
+// containing its own 3+ backtick run (e.g. an embedded markdown/shell
+// example) would otherwise close the block early — a fence one longer than
+// the payload's longest run can never be matched by anything inside it.
+func fenceLen(code string) int {
+	longest, run := 0, 0
+	for _, r := range code {
+		if r == '`' {
+			run++
+			if run > longest {
+				longest = run
+			}
+		} else {
+			run = 0
+		}
+	}
+	if n := longest + 1; n > 3 {
+		return n
+	}
+	return 3
 }
 
 // blockquote prefixes each line of a callout with "> ".

@@ -21,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Drift conflict markup no longer silently drops a hunk whose leading context
   also occurs earlier in the file above a prior hunk's region — each hunk now
   anchors in file order instead of always searching from the top.
+- A submitted code block whose payload contains its own run of 3+ backticks
+  (e.g. an embedded markdown/shell example) no longer closes the rendered
+  fence early — the fence now widens to stay longer than the longest
+  backtick run in the payload.
+- Submit-time playbook validation now catches a dangling `needs=`/`rollback=`
+  reference, a `needs=` cycle, and an id or `file=` value containing
+  whitespace/`{`/`}`/`=` (any of which would corrupt the rendered fence tag)
+  — previously these only surfaced later, on the post-hoc `validate` pass.
 
 ## [0.6.1] - 2026-07-03
 

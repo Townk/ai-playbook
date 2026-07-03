@@ -79,6 +79,24 @@ func TestRender_FileBlock(t *testing.T) {
 	}
 }
 
+// Finding A7a: when the code payload itself contains a run of backticks as
+// long as (or longer than) a plain ``` fence, that fence must widen so the
+// embedded run cannot close the block early. CommonMark's rule is that a
+// fence closes only at a run >= the OPENING run's length, so widening to
+// longest-run-in-payload + 1 guarantees the payload can never close it.
+func TestFence_GuardsAgainstBacktickPayload(t *testing.T) {
+	pb := Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+		{Kind: "code", Lang: "markdown", Code: "before\n````\nnested fence\n````\nafter", ID: "a"},
+	}}}}
+	out := Render(pb)
+	if !strings.Contains(out, "`````markdown {id=a}\n") {
+		t.Errorf("fence should widen to 5 backticks (longest run 4 + 1):\n%s", out)
+	}
+	if !ui.ValidatePlaybook(out) {
+		t.Fatalf("rendered playbook with backtick payload failed ui.ValidatePlaybook (fence closed early):\n%s", out)
+	}
+}
+
 // Code items with no id get a deterministic auto id; static items get no id.
 func TestRender_AutoIDsAndStatic(t *testing.T) {
 	pb := Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
