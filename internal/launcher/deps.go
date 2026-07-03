@@ -194,13 +194,23 @@ func resolveChain(rootDeps []string) (order []depNode, issues []DepIssue) {
 func runDeps(nodes []depNode, overrides map[string]string, autoRollback bool, shell string, out io.Writer) int {
 	for _, node := range nodes {
 		fmt.Fprintf(out, "\n→ dependency: %s\n", node.Slug)
+		// PROJECT_ROOT is passed as DATA (RunConfig.Env), not a process-wide
+		// os.Setenv: a save/restore around each node would work too, but every
+		// node here has a DIFFERENT root, so mutating the shared process env — even
+		// carefully restored — briefly makes one node's root visible to whatever
+		// else reads os.Environ() concurrently, and a bug in the restore (or a
+		// panic mid-loop) leaves it leaked for good. Scoping it to THIS RunConfig
+		// means a later non-bound node's env, and the interactive parent's own
+		// driver, never inherit a previous node's root.
+		var env map[string]string
 		if node.FM.ProjectBound {
-			os.Setenv("PROJECT_ROOT", node.Cwd)
+			env = map[string]string{"PROJECT_ROOT": node.Cwd}
 		}
 		code := autorunRunFn(autorun.RunConfig{
 			Blocks:                    blocksFor(node.Body),
 			EnvVars:                   node.FM.Env,
 			EnvOverrides:              overrides,
+			Env:                       env,
 			Cwd:                       node.Cwd,
 			Shell:                     shell,
 			Slug:                      node.Slug,

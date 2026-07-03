@@ -35,8 +35,16 @@ type RunConfig struct {
 	Shell                     string // driver.Options.Shell selector
 	Slug                      string
 	AutoRollback              bool
-	Out                       io.Writer     // default os.Stdout when nil
-	Now                       func() string // timestamp source; default UTC "20060102T150405Z"
+	// Env carries extra name→value pairs exported to the driver's env, appended
+	// after the declared/overridden EnvVars so they win by the same last-wins
+	// semantics resolveEnv relies on for an override. Distinct from EnvVars: no
+	// required/missing check, no undeclared-override warning — just data. Callers
+	// use it for runtime-computed values (e.g. a project_bound run's PROJECT_ROOT)
+	// that must reach THIS run only, never leaking into a sibling run via a
+	// process-wide os.Setenv.
+	Env map[string]string
+	Out io.Writer     // default os.Stdout when nil
+	Now func() string // timestamp source; default UTC "20060102T150405Z"
 }
 
 // noopMux is a package-local orchestrator.Mux for headless runs — there is no
@@ -246,6 +254,18 @@ func Run(rc RunConfig) int {
 			fmt.Fprintf(out, "missing required env: %s — %s\n", m.name, m.why)
 		}
 		return 1
+	}
+	if len(rc.Env) > 0 {
+		// Sorted for deterministic output; appended LAST so a name also present in
+		// EnvVars/os.Environ() is overridden by last-wins os/exec semantics.
+		names := make([]string, 0, len(rc.Env))
+		for name := range rc.Env {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		for _, name := range names {
+			env = append(env, name+"="+rc.Env[name])
+		}
 	}
 
 	runner, cleanup, err := newOrchRunner(rc, out, env)

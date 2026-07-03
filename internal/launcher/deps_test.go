@@ -227,6 +227,44 @@ func TestRunDeps_OrderAndAbort(t *testing.T) {
 	}
 }
 
+// TestRunDeps_ProjectRootDoesNotLeak verifies a project_bound dependency's
+// PROJECT_ROOT reaches the runner as DATA (autorun.RunConfig.Env), never via a
+// process-wide os.Setenv — so a LATER non-bound dependency in the same chain
+// (and, by the caller never mutating the process, the interactive parent's own
+// driver) never inherits a previous node's root. Regression coverage for A2c.
+func TestRunDeps_ProjectRootDoesNotLeak(t *testing.T) {
+	os.Unsetenv("PROJECT_ROOT") // known-clean baseline regardless of test order
+	t.Cleanup(func() { os.Unsetenv("PROJECT_ROOT") })
+
+	nodes := []depNode{
+		{Slug: "bound", FM: frontmatter.FrontMatter{ProjectBound: true}, Body: "# bound\n", Cwd: "/proj/a"},
+		{Slug: "unbound", FM: frontmatter.FrontMatter{}, Body: "# unbound\n"},
+	}
+	var configs []autorun.RunConfig
+	restore := swap(&autorunRunFn, func(rc autorun.RunConfig) int {
+		configs = append(configs, rc)
+		return 0
+	})
+	defer restore()
+
+	var buf bytes.Buffer
+	if code := runDeps(nodes, nil, true, "", &buf); code != 0 {
+		t.Fatalf("runDeps = %d, want 0", code)
+	}
+	if len(configs) != 2 {
+		t.Fatalf("want 2 chain runs, got %d: %+v", len(configs), configs)
+	}
+	if configs[0].Env["PROJECT_ROOT"] != "/proj/a" {
+		t.Errorf("bound dep RunConfig.Env[PROJECT_ROOT] = %q, want /proj/a (passed as DATA, not os.Setenv)", configs[0].Env["PROJECT_ROOT"])
+	}
+	if v, ok := configs[1].Env["PROJECT_ROOT"]; ok {
+		t.Errorf("unbound dep RunConfig.Env must have NO PROJECT_ROOT, got %q", v)
+	}
+	if v, ok := os.LookupEnv("PROJECT_ROOT"); ok {
+		t.Errorf("runDeps must never mutate the process env; PROJECT_ROOT leaked to %q", v)
+	}
+}
+
 func TestUnionDeclared(t *testing.T) {
 	parentFM := frontmatter.FrontMatter{Env: map[string]frontmatter.EnvValue{"P": {Value: "1"}}}
 	deps := []depNode{
