@@ -24,7 +24,24 @@ builds:
       - arm64
     mod_timestamp: "{{ .CommitTimestamp }}"
     ldflags:
-      - -s -w -X main.version={{ .Version }}
+      - -s -w -X github.com/Townk/ai-playbook/internal/cli.Version={{ .Version }}
+
+  - id: apb
+    main: ./cmd/apb
+    binary: apb
+    env:
+      - CGO_ENABLED=0
+    # Unix-only: the shell driver uses x/sys/unix (PTY, signals, TIOCGPGRP),
+    # which does not build on Windows. This is a terminal/zsh-native tool.
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w -X github.com/Townk/ai-playbook/internal/cli.Version={{ .Version }}
 
 archives:
   - id: ai-playbook
