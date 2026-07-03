@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   reference, a `needs=` cycle, and an id or `file=` value containing
   whitespace/`{`/`}`/`=` (any of which would corrupt the rendered fence tag)
   — previously these only surfaced later, on the post-hoc `validate` pass.
+- Env-var references written as parameter expansions (`${FOO:-default}`,
+  `${BAZ%.*}`, `${BAZ#prefix}`, `${VAR/a/b}`) are now captured into the
+  saved playbook's `env:` front matter; previously only the bare `${VAR}`
+  form was recognized and these were silently omitted.
 
 ## [0.6.1] - 2026-07-03
 

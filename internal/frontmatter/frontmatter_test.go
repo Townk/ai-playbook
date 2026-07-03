@@ -27,6 +27,21 @@ Set $ANDROID_HOME and confirm ${JAVA_HOME}.
 	}
 }
 
+// Finding A7c: the braced alternative must also match parameter-expansion
+// forms (${VAR:-default}, ${VAR%.*}, ${VAR#prefix}, ${VAR/a/b}), not just the
+// bare ${VAR} form — otherwise those vars are silently omitted from env:.
+func TestScanEnvRefs_ParameterExpansionForms(t *testing.T) {
+	body := "```sh\n" +
+		"echo ${FOO:-bar}\n" +
+		"echo ${BAZ%.*}\n" +
+		"```\n"
+	got := ScanEnvRefs(body)
+	want := []string{"BAZ", "FOO"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ScanEnvRefs = %v, want %v", got, want)
+	}
+}
+
 func TestScanEnvRefs_IgnoresProseAndLowercase(t *testing.T) {
 	body := "We set HOME, USER and LANG by hand. Use the home directory. $path stays."
 	if got := ScanEnvRefs(body); len(got) != 0 {

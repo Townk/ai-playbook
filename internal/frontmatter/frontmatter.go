@@ -20,16 +20,18 @@ import (
 // envRefRe matches env-var references in a playbook body. It captures an
 // env-var-style name (uppercase convention) appearing in any of these forms:
 //
-//	$VAR          plain expansion
-//	${VAR}        braced expansion
-//	export VAR=   export assignment
-//	VAR=          bare assignment
+//	$VAR             plain expansion
+//	${VAR}           braced expansion
+//	${VAR:-default}  braced expansion with a parameter-expansion operator
+//	                 (:-, %, #, /, etc. — anything up to the closing brace)
+//	export VAR=      export assignment
+//	VAR=             bare assignment
 //
 // This is reference-matching, not bare-name substring matching: a name only
 // counts when it is sigil-prefixed or in assignment position, so prose words
 // (HOME, USER, LANG written as plain text) do not false-positive.
 var envRefRe = regexp.MustCompile(
-	`\$\{([A-Z_][A-Z0-9_]*)\}` + // ${VAR}
+	`\$\{([A-Z_][A-Z0-9_]*)[^}]*\}` + // ${VAR} / ${VAR:-default} / ${VAR%.*} / …
 		`|\$([A-Z_][A-Z0-9_]*)` + // $VAR
 		`|(?m)(?:^|[;&|]|\bexport\s+)\s*([A-Z_][A-Z0-9_]*)=`, // [export] VAR=
 )
