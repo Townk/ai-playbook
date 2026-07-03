@@ -21,6 +21,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Townk/ai-playbook/internal/climeta"
 	diffpkg "github.com/Townk/ai-playbook/internal/diff"
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/input"
@@ -36,6 +37,10 @@ func main() {
 	if len(os.Args) < 2 {
 		usage()
 		os.Exit(2)
+	}
+	if text, handled := helpFor(os.Args[1:]); handled {
+		fmt.Println(text)
+		os.Exit(0)
 	}
 	switch os.Args[1] {
 	case "version", "--version", "-v":
@@ -77,8 +82,6 @@ func main() {
 		os.Exit(diffpkg.Main())
 	case "input":
 		os.Exit(input.Main())
-	case "-h", "--help", "help":
-		usage()
 	default:
 		fmt.Fprintf(os.Stderr, "ai-playbook: unknown subcommand %q\n", os.Args[1])
 		usage()
@@ -86,8 +89,62 @@ func main() {
 	}
 }
 
+// helpFor is the pure top-level help-dispatch decision, factored out of
+// main() (which calls os.Exit and so cannot itself be unit-tested) so it can
+// be tested directly. args is os.Args[1:]. It returns the help text to print
+// and whether help was requested at all — callers print text to stdout and
+// exit 0 when handled is true, and otherwise proceed with normal dispatch.
+//
+// Dispatch rules:
+//   - no args: handled=false — the true no-args case is main()'s own
+//     pre-existing error path (usage to stderr, exit 2), not this function's
+//     concern.
+//   - a bare "-h"/"--help"/"help": climeta.Overview().
+//   - "help <cmd>" or "--help <cmd>": climeta.Help(<cmd>) if <cmd> is known;
+//     if unknown, still handled (falls back to Overview()) so it never falls
+//     through to normal dispatch.
+//   - "<cmd> ...args..." where a bare -h/--help token appears anywhere in
+//     args: climeta.Help(<cmd>) — so <cmd>'s own flag.FlagSet never sees it.
+//   - anything else: handled=false, normal dispatch proceeds.
+func helpFor(args []string) (text string, handled bool) {
+	if len(args) == 0 {
+		return "", false
+	}
+
+	switch args[0] {
+	case "-h", "--help", "help":
+		if len(args) < 2 {
+			return climeta.Overview(), true
+		}
+		if help, ok := climeta.Help(args[1]); ok {
+			return help, true
+		}
+		return climeta.Overview(), true
+	default:
+		if wantsHelp(args[1:]) {
+			if help, ok := climeta.Help(args[0]); ok {
+				return help, true
+			}
+			return climeta.Overview(), true
+		}
+		return "", false
+	}
+}
+
+// wantsHelp reports whether a bare "-h" or "--help" token appears anywhere in
+// args. It matches only exact tokens, never a substring of a flag's own name
+// or value (e.g. "--help-me-please" does not match).
+func wantsHelp(args []string) bool {
+	for _, a := range args {
+		if a == "-h" || a == "--help" {
+			return true
+		}
+	}
+	return false
+}
+
 func usage() {
-	fmt.Fprintln(os.Stderr, "usage: ai-playbook {assist [<prompt>]|create <prompt> [--template <t>]|list [--format human|fuzzy-data-source|json]|search <query> [--format ...]|show <slug>|edit <slug>|session [--request <json>]|run <file.md>|validate [<slug>|--file <path>]|env [<slug>|--file <path>]|answer --request <json> --content <file> [--cached <iso>] [--title <t>] [--cwd <dir>]|finalize [--dry-run] <file.md>|diff <patchfile>|mcp --socket <path>|input|selftest}")
+	fmt.Fprintln(os.Stderr, climeta.Overview())
 }
 
 // mcpMain is the `ai-playbook mcp --socket <path>` subcommand: an MCP stdio
