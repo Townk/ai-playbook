@@ -5,6 +5,8 @@
 // doc comment on Commands for the exact source of each entry) — never
 // paraphrased, so this package can never drift silently from the code it
 // documents.
+//
+//go:generate go run ../../cmd/docgen
 package climeta
 
 import (

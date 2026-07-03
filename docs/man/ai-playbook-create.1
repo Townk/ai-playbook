@@ -1,0 +1,19 @@
+.TH AI-PLAYBOOK-CREATE 1 "" "ai-playbook" "User Commands"
+.SH NAME
+ai\-playbook\-create \- Author a playbook directly from a prompt (no triage, no cache serve)
+.SH SYNOPSIS
+\fBai\-playbook\fR create <prompt> [\-\-template <t>]
+.SH DESCRIPTION
+create force\-authors a fresh playbook from <prompt>, bypassing triage entirely —
+unlike assist, it never serves a cache hit. It persists the result to the store
+(and a cache entry) so a later assist for the same context can hit it.
+.SH OPTIONS
+.TP
+\fB\-\-template\fR \fI<t>\fR
+reserved (not yet implemented); parses but is a no\-op
+.SH EXAMPLES
+.nf
+ai\-playbook create "set up a new Go module with golangci\-lint"
+.fi
+.SH "SEE ALSO"
+\fBai\-playbook\fR(1)

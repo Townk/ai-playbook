@@ -1,0 +1,53 @@
+.TH AI-PLAYBOOK-RUN 1 "" "ai-playbook" "User Commands"
+.SH NAME
+ai\-playbook\-run \- Run a playbook (interactive, headless, or guided)
+.SH SYNOPSIS
+\fBai\-playbook\fR run [<slug>] [\-\-playbook <slug>] [\-\-file <path>] [\-\-assisted] [\-\-auto] [\-\-auto\-rollback] [\-\-with\-env <json>]
+.SH DESCRIPTION
+run accepts a single playbook source, expressed one of three ways: a bare
+positional <slug> (implied \-\-playbook), \-\-playbook <slug> (resolved through
+the store), or \-\-file <path> (a raw markdown file rendered as\-is). Exactly
+one source must be given; zero or more than one is an error.
+.PP
+Mode mutual\-exclusion: \-\-auto (headless) and \-\-assisted (GUIDED fullscreen)
+are mutually exclusive with each other. \-\-auto\-rollback is the default\-viewer
+opt\-in and is mutually exclusive with \-\-auto (auto mode rolls back by default;
+use \-\-no\-auto\-rollback to opt out) and with \-\-assisted (assisted mode owns
+post\-failure flow via its own manual "Roll back" button). \-\-no\-auto\-rollback
+and \-\-with\-env are only valid with \-\-auto.
+.SH OPTIONS
+.TP
+\fB\-\-playbook\fR \fI<slug>\fR
+slug of a saved playbook to run
+.TP
+\fB\-\-file\fR \fI<path>\fR
+path to a markdown file to run
+.TP
+\fB\-\-auto\-rollback\fR
+on a step failure, automatically roll back applied steps (else a manual button)
+.TP
+\fB\-\-auto\fR
+run headless: execute every block in order with no viewer/driver pane
+.TP
+\fB\-\-no\-auto\-rollback\fR
+with \-\-auto, do not roll back applied steps on a failure
+.TP
+\fB\-\-assisted\fR
+run GUIDED fullscreen: step\-by\-step confirmation in the same viewer/driver pane
+.TP
+\fB\-\-with\-env\fR \fI<json>\fR
+with \-\-auto, supply env var values as inline JSON or a JSON file path
+.SH EXAMPLES
+.nf
+ai\-playbook run deploy\-staging
+.fi
+.PP
+.nf
+ai\-playbook run \-\-file ./scratch.md \-\-assisted
+.fi
+.PP
+.nf
+ai\-playbook run deploy\-staging \-\-auto \-\-with\-env '{"REGION":"us\-east\-1"}'
+.fi
+.SH "SEE ALSO"
+\fBai\-playbook\fR(1)

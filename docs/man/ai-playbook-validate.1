@@ -1,0 +1,35 @@
+.TH AI-PLAYBOOK-VALIDATE 1 "" "ai-playbook" "User Commands"
+.SH NAME
+ai\-playbook\-validate \- Check a playbook's structure and (optionally) get an AI review
+.SH SYNOPSIS
+\fBai\-playbook\fR validate [<slug>] [\-\-file <path>] [\-\-no\-ai] [\-\-plain] [\-\-quiet]
+.SH DESCRIPTION
+validate accepts a single playbook source, expressed one of two ways: a bare
+positional <slug> (a saved playbook, resolved through the store) or \-\-file
+<path> (a raw markdown file, validated as\-is). Exactly one source must be
+given; zero or more than one is a usage error. The exit code reflects ONLY
+the deterministic structural check; the AI review pass is advisory and never
+affects it.
+.SH OPTIONS
+.TP
+\fB\-\-file\fR \fI<path>\fR
+path to a markdown file to validate
+.TP
+\fB\-\-no\-ai\fR
+skip the AI review pass (structural check only)
+.TP
+\fB\-\-plain\fR
+use plain dot progress instead of the spinner (default when not attached to a terminal)
+.TP
+\fB\-\-quiet\fR
+suppress all output; report the result only via the exit code
+.SH EXAMPLES
+.nf
+ai\-playbook validate deploy\-staging
+.fi
+.PP
+.nf
+ai\-playbook validate \-\-file ./scratch.md \-\-no\-ai
+.fi
+.SH "SEE ALSO"
+\fBai\-playbook\fR(1)

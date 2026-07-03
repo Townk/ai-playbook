@@ -4,10 +4,13 @@
 
 GOLANGCI := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
 
-.PHONY: build vet test lint fmt-check check
+.PHONY: build vet test lint fmt-check check docs
 
 build:
 	go build ./...
+
+docs:
+	go run ./cmd/docgen
 
 vet:
 	go vet ./...

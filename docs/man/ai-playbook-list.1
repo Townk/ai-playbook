@@ -1,0 +1,21 @@
+.TH AI-PLAYBOOK-LIST 1 "" "ai-playbook" "User Commands"
+.SH NAME
+ai\-playbook\-list \- List every saved playbook
+.SH SYNOPSIS
+\fBai\-playbook\fR list [\-\-format human|fuzzy\-data\-source|json]
+.SH DESCRIPTION
+list enumerates the full store index in the requested format.
+.SH OPTIONS
+.TP
+\fB\-\-format\fR \fI<fmt>\fR
+output format: human|fuzzy\-data\-source|json
+.SH EXAMPLES
+.nf
+ai\-playbook list
+.fi
+.PP
+.nf
+ai\-playbook list \-\-format json
+.fi
+.SH "SEE ALSO"
+\fBai\-playbook\fR(1)

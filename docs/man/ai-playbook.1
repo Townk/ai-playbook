@@ -1,0 +1,42 @@
+.TH AI-PLAYBOOK 1 "" "ai-playbook" "User Commands"
+.SH NAME
+ai\-playbook \- capture, author, and run terminal playbooks
+.SH SYNOPSIS
+\fBai\-playbook\fR \fICOMMAND\fR [\fIARGS\fR ...]
+.SH DESCRIPTION
+ai\-playbook captures, authors, and runs terminal playbooks. Each
+command below has its own manual page; run 'ai\-playbook <command>
+\-\-help' or see ai\-playbook\-<command>(1) for full details.
+.SH COMMANDS
+.TP
+\fBassist\fR
+AI producer: capture context, triage, and author or drive a playbook
+.TP
+\fBcreate\fR
+Author a playbook directly from a prompt (no triage, no cache serve)
+.TP
+\fBlist\fR
+List every saved playbook
+.TP
+\fBsearch\fR
+Search saved playbooks by substring
+.TP
+\fBshow\fR
+Render a saved playbook read\-only
+.TP
+\fBedit\fR
+Open a saved playbook in $EDITOR
+.TP
+\fBrun\fR
+Run a playbook (interactive, headless, or guided)
+.TP
+\fBvalidate\fR
+Check a playbook's structure and (optionally) get an AI review
+.TP
+\fBenv\fR
+Print a playbook's declared env vars, resolved and redacted
+.TP
+\fBfinalize\fR
+Backfill front matter onto an existing playbook file (manual)
+.SH "SEE ALSO"
+\fBai\-playbook\-assist\fR(1), \fBai\-playbook\-create\fR(1), \fBai\-playbook\-list\fR(1), \fBai\-playbook\-search\fR(1), \fBai\-playbook\-show\fR(1), \fBai\-playbook\-edit\fR(1), \fBai\-playbook\-run\fR(1), \fBai\-playbook\-validate\fR(1), \fBai\-playbook\-env\fR(1), \fBai\-playbook\-finalize\fR(1)

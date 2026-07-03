@@ -34,6 +34,10 @@ archives:
       {{- .Version }}_
       {{- .Os }}_
       {{- .Arch }}
+    files:
+      - docs/man/*.1
+      - README.md
+      - LICENSE
 
 checksum:
   name_template: "checksums.txt"

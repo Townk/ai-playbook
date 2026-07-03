@@ -1,0 +1,23 @@
+.TH AI-PLAYBOOK-ASSIST 1 "" "ai-playbook" "User Commands"
+.SH NAME
+ai\-playbook\-assist \- AI producer: capture context, triage, and author or drive a playbook
+.SH SYNOPSIS
+\fBai\-playbook\fR assist [<prompt>]
+.SH DESCRIPTION
+assist captures the bounded origin context (last command, exit code, scrollback,
+cwd/project root), triages the request, and either types a suggested command
+back into your shell, renders a short prose answer, or authors and drives a
+full playbook. With no <prompt>, it prompts interactively (a float under a
+multiplexer, an inline box otherwise). troubleshoot is a deprecated alias.
+.SH OPTIONS
+This command takes no flags.
+.SH EXAMPLES
+.nf
+ai\-playbook assist
+.fi
+.PP
+.nf
+ai\-playbook assist "why did this build fail?"
+.fi
+.SH "SEE ALSO"
+\fBai\-playbook\fR(1)

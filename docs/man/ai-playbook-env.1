@@ -1,0 +1,23 @@
+.TH AI-PLAYBOOK-ENV 1 "" "ai-playbook" "User Commands"
+.SH NAME
+ai\-playbook\-env \- Print a playbook's declared env vars, resolved and redacted
+.SH SYNOPSIS
+\fBai\-playbook\fR env [<slug>] [\-\-file <path>]
+.SH DESCRIPTION
+env accepts a single playbook source, expressed one of two ways: a bare
+positional <slug> (a saved playbook, resolved through the store) or \-\-file
+<path> (a raw markdown file, read as\-is). Exactly one source must be given;
+zero or more than one is a usage error. It prints the declared env: map as a
+\-\-with\-env\-compatible JSON object, resolving each value against the current
+process environment (falling back to the declared default) and redacting
+sensitive values.
+.SH OPTIONS
+.TP
+\fB\-\-file\fR \fI<path>\fR
+path to a markdown file
+.SH EXAMPLES
+.nf
+ai\-playbook env deploy\-staging
+.fi
+.SH "SEE ALSO"
+\fBai\-playbook\fR(1)

@@ -1,0 +1,17 @@
+.TH AI-PLAYBOOK-SEARCH 1 "" "ai-playbook" "User Commands"
+.SH NAME
+ai\-playbook\-search \- Search saved playbooks by substring
+.SH SYNOPSIS
+\fBai\-playbook\fR search <query> [\-\-format human|fuzzy\-data\-source|json]
+.SH DESCRIPTION
+search filters the store by substring match against <query> and prints the matches.
+.SH OPTIONS
+.TP
+\fB\-\-format\fR \fI<fmt>\fR
+output format: human|fuzzy\-data\-source|json
+.SH EXAMPLES
+.nf
+ai\-playbook search deploy
+.fi
+.SH "SEE ALSO"
+\fBai\-playbook\fR(1)
