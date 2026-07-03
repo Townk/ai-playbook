@@ -61,7 +61,7 @@ func TestAnalyzeDeps_DiamondDedup(t *testing.T) {
 	for i, s := range got {
 		pos[s] = i
 	}
-	if !(pos["d"] < pos["b"] && pos["d"] < pos["c"] && pos["b"] < pos["a"] && pos["c"] < pos["a"]) {
+	if pos["d"] >= pos["b"] || pos["d"] >= pos["c"] || pos["b"] >= pos["a"] || pos["c"] >= pos["a"] {
 		t.Fatalf("bad topo order: %v", got)
 	}
 }
