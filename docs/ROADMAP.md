@@ -343,6 +343,20 @@ adds storage/browse/search + recall of relevant facts during
 
 ---
 
+## Phase 6 — Cross-block output piping
+
+**Goal:** let a runnable block consume a prior block's output — pipe the
+`{command, exit, output}` a step produced into a downstream step (beyond the
+existing `APB_OUT_<id>`/`APB_ERR_<id>`/`APB_EXIT_<id>` value-passing env vars),
+so a playbook can chain data between steps the way a shell pipeline does. This is
+the single largest remaining feature on the table (runme-parity and then some);
+**Status:** to be designed (own brainstorm → spec). Promoted from the backlog
+2026-07-03. Consider: named block outputs, an explicit `from=<id>` reference on
+the consuming block, streaming vs whole-capture semantics, and how it interacts
+with `needs=`/`depends_on` ordering and `--auto` execution.
+
+---
+
 ## Parked / deferred (intentionally, until the phases above land)
 
 - **Harness adapters (pi / cursor)** — explicitly deferred until the whole

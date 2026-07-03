@@ -62,16 +62,27 @@ show   <slug>                          render a playbook (read-only)
 run    [[--playbook] <slug>            execute a playbook
        | --file <path>]
        [--assisted
-       | --auto [--no-auto-rollback]]
+       | --auto [--no-auto-rollback]
+                [--with-env <json|file>]]
 
 edit   <slug>                          open the playbook in $EDITOR
 
 validate [<slug> | --file <path>]      AI + structural review of a playbook
+
+env    [<slug> | --file <path>]        print declared env as --with-env JSON
+                                       (resolved from the environment; secrets
+                                       redacted)
 ```
 
 Run modes (mutually exclusive): the default is an interactive pager (free-form),
 `--assisted` is a guided confirm-each-step run, and `--auto` is unattended;
 `--no-auto-rollback` is valid only with `--auto`.
+
+For project-bound playbooks, `--auto --with-env '{…}'` (or a path to a JSON file)
+supplies declared `env:` values on the CLI, and `env <slug>` scaffolds that JSON
+from a playbook's declaration — resolving current values and leaving secrets
+empty. A playbook may also declare `depends_on: [slug, …]`: its transitive
+dependencies run headless, in topological order, before it.
 
 ## Documentation
 
