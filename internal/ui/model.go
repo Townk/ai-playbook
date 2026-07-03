@@ -156,12 +156,17 @@ type model struct {
 	height      int
 	xOff        int
 	yOff        int
-	hintMode    bool
-	hintLabels  map[string]Button
-	helpMode    bool
-	helpLines   []Line
-	helpYOff    int
-	helpXOff    int
+	// maxWide caches MaxWideWidth(m.lines) — the widest Wide line's display width —
+	// computed once in reflow() where m.lines is assigned. clampScroll and the
+	// horizontal home/end ($) handler read it instead of re-walking every rendered
+	// line (an ANSI-aware width scan) on every keypress/wheel/reflow.
+	maxWide    int
+	hintMode   bool
+	hintLabels map[string]Button
+	helpMode   bool
+	helpLines  []Line
+	helpYOff   int
+	helpXOff   int
 
 	// no-mux in-viewer diff overlay: when diffMode is true the pager overlays a
 	// bordered scrollable side-by-side diff box (rendered by internal/diff) over the
@@ -172,6 +177,22 @@ type model struct {
 	diffRows  []idiff.Row      // structured side-by-side rows, rendered (windowed) per frame
 	diffYOff  int
 	diffXOff  int
+	// diff-overlay geometry cache: derived quantities that depend only on diffRows /
+	// diffFiles and the terminal width, so they change at exactly two events — the
+	// overlay opening (activateDiffButton) and a resize (WindowSizeMsg). Both call
+	// recomputeDiffGeometry, which repopulates these and sets diffGeomValid. Without
+	// it, narrow mode re-rendered the whole patch through chroma up to three times
+	// per keypress and wide mode re-walked every row per frame. When diffGeomValid is
+	// false (e.g. a test that assigns diffRows directly, never opening the overlay)
+	// the accessors fall back to a live computation, so behavior is identical.
+	diffGeomValid   bool
+	diffUnifiedC    []string // cached unified lines (narrow mode)
+	diffUnifiedMaxW int      // widest unified line (narrow horizontal max)
+	diffGutterC     int      // cached gutter width (wide mode)
+	diffTextColC    int      // cached per-pane text column (wide mode)
+	diffPaneLeftC   int      // cached left-pane max horizontal offset (wide mode)
+	diffPaneRightC  int      // cached right-pane max horizontal offset (wide mode)
+	diffLangsC      []string // cached per-row highlight language (wide mode)
 
 	// no-mux ask overlay: when askBridge is set, a tea.Cmd drains pending agent
 	// asks (recvAskCmd); askMode raises the embedded ask dialog over the document
@@ -632,6 +653,7 @@ func (m model) activateDiffButton(b Button) (model, tea.Cmd) {
 		m.diffMode = true
 		m.diffYOff = 0
 		m.diffXOff = 0
+		m.recomputeDiffGeometry()
 		return m, nil
 	}
 	ac := m.emitAction(b)
@@ -957,6 +979,9 @@ func (m *model) reflow() {
 		readyID = m.readyID
 	}
 	m.lines, m.buttons, m.blocks = renderCursor(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey, readyID, m.driverPending, m.canReengageInProc(), m.anyRollbackable(), m.asker != nil)
+	// Cache the widest Wide-line width now that m.lines is final (the append*Button
+	// helpers below only add buttons, never lines) so clampScroll / $ can read it.
+	m.maxWide = MaxWideWidth(m.lines)
 	m.appendCachedButton()
 	m.appendEditButton()
 	m.appendConfirmButtons()
@@ -1031,7 +1056,7 @@ func (m *model) clampScroll() {
 	if m.yOff < 0 {
 		m.yOff = 0
 	}
-	maxX := MaxWideWidth(m.lines) - m.contentWidth()
+	maxX := m.maxWide - m.contentWidth()
 	if maxX < 0 {
 		maxX = 0
 	}
@@ -1283,6 +1308,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		m.reflow()
 		m.clampHelpScroll()
+		m.recomputeDiffGeometry() // width changed → diff geometry (gutter/panes/unified) is stale
 		m.clampDiffScroll()
 		return m, nil
 	case tea.MouseClickMsg:
@@ -1712,7 +1738,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "0", "^":
 			m.xOff = 0
 		case "$":
-			m.xOff = MaxWideWidth(m.lines) // clampScroll will cap it
+			m.xOff = m.maxWide // clampScroll will cap it
 		}
 		m.clampScroll()
 		return m, nil

@@ -62,8 +62,57 @@ func diffPaneMax(rows []idiff.Row, textCol int) (leftMax, rightMax int) {
 }
 
 // diffNarrow reports whether the dialog is too narrow for the two-column gutter
-// layout, so the overlay falls back to a unified (single-column) render.
+// layout, so the overlay falls back to a unified (single-column) render. This is
+// a cheap width comparison, so it is always computed live (it agrees with the
+// cache because both derive from diffContentWidth(m)).
 func (m model) diffNarrow() bool { return idiff.Narrow(diffContentWidth(m)) }
+
+// recomputeDiffGeometry (re)populates the diff-overlay geometry cache from the
+// current diffRows / diffFiles and terminal width. It is called at the only two
+// events that change any input: the overlay opening (activateDiffButton) and a
+// resize (WindowSizeMsg). It sets diffGeomValid so the read-side accessors use the
+// cache; with an empty diff it invalidates instead (an unopened/closed overlay).
+func (m *model) recomputeDiffGeometry() {
+	if len(m.diffRows) == 0 {
+		m.diffGeomValid = false
+		m.diffUnifiedC = nil
+		m.diffUnifiedMaxW = 0
+		m.diffGutterC = 0
+		m.diffTextColC = 0
+		m.diffPaneLeftC = 0
+		m.diffPaneRightC = 0
+		m.diffLangsC = nil
+		return
+	}
+	visW := diffContentWidth(*m)
+	if idiff.Narrow(visW) {
+		m.diffUnifiedC = strings.Split(strings.TrimRight(idiff.Render(m.diffFiles, visW, highlight), "\n"), "\n")
+		maxW := 0
+		for _, l := range m.diffUnifiedC {
+			if w := lipgloss.Width(l); w > maxW {
+				maxW = w
+			}
+		}
+		m.diffUnifiedMaxW = maxW
+		m.diffGutterC, m.diffTextColC, m.diffPaneLeftC, m.diffPaneRightC, m.diffLangsC = 0, 0, 0, 0, nil
+	} else {
+		m.diffGutterC = diffGutterW(m.diffRows)
+		m.diffTextColC = diffTextCol(visW, m.diffGutterC)
+		m.diffPaneLeftC, m.diffPaneRightC = diffPaneMax(m.diffRows, m.diffTextColC)
+		m.diffLangsC = diffLangs(m.diffRows)
+		m.diffUnifiedC, m.diffUnifiedMaxW = nil, 0
+	}
+	m.diffGeomValid = true
+}
+
+// diffUnified returns the cached unified lines when the geometry cache is valid,
+// else a live render (the narrow-path fallback for direct-state tests).
+func (m model) diffUnified() []string {
+	if m.diffGeomValid {
+		return m.diffUnifiedC
+	}
+	return m.diffUnifiedLines()
+}
 
 // diffUnifiedLines renders the parsed diff as flat unified lines (narrow path).
 func (m model) diffUnifiedLines() []string {
@@ -71,11 +120,48 @@ func (m model) diffUnifiedLines() []string {
 	return strings.Split(strings.TrimRight(rendered, "\n"), "\n")
 }
 
+// diffUnifiedMaxWidth returns the widest unified line's display width (narrow
+// horizontal max), from the cache when valid else computed live.
+func (m model) diffUnifiedMaxWidth() int {
+	if m.diffGeomValid {
+		return m.diffUnifiedMaxW
+	}
+	maxW := 0
+	for _, l := range m.diffUnifiedLines() {
+		if w := lipgloss.Width(l); w > maxW {
+			maxW = w
+		}
+	}
+	return maxW
+}
+
+// diffWideGeom returns the side-by-side geometry (gutter width, per-pane text
+// column, and each pane's max horizontal offset) from the cache when valid, else
+// computed live for the current width.
+func (m model) diffWideGeom() (gutterW, textCol, leftMax, rightMax int) {
+	if m.diffGeomValid {
+		return m.diffGutterC, m.diffTextColC, m.diffPaneLeftC, m.diffPaneRightC
+	}
+	gutterW = diffGutterW(m.diffRows)
+	textCol = diffTextCol(diffContentWidth(m), gutterW)
+	leftMax, rightMax = diffPaneMax(m.diffRows, textCol)
+	return gutterW, textCol, leftMax, rightMax
+}
+
+// diffRowLangs returns the per-row highlight languages from the cache when valid,
+// else computed live.
+func (m model) diffRowLangs() []string {
+	if m.diffGeomValid {
+		return m.diffLangsC
+	}
+	return diffLangs(m.diffRows)
+}
+
 // diffRowCount is the total scrollable row count for the current layout: the
 // structured rows in side-by-side mode, or the unified line count when narrow.
 func (m model) diffRowCount() int {
 	if m.diffNarrow() {
-		return len(m.diffUnifiedLines())
+		return len(m.diffUnified())
 	}
 	return len(m.diffRows)
 }
@@ -142,7 +228,7 @@ func (m model) diffModal() string {
 	// Narrow terminals fall back to the flat unified render (no gutters/panes),
 	// windowed vertically then horizontally like the pre-gutter overlay did.
 	if m.diffNarrow() {
-		lines := m.diffUnifiedLines()
+		lines := m.diffUnified()
 		blankRow := padRow(idiff.DividerRow(visW))
 		start, end := m.diffWindow(len(lines), visH)
 		rows := make([]string, 0, visH)
@@ -155,10 +241,8 @@ func (m model) diffModal() string {
 		return box(strings.Join(rows, "\n"))
 	}
 
-	// Side-by-side gutter layout.
-	gutterW := diffGutterW(m.diffRows)
-	textCol := diffTextCol(visW, gutterW)
-	leftMax, rightMax := diffPaneMax(m.diffRows, textCol)
+	// Side-by-side gutter layout (geometry from the cache when the overlay is open).
+	gutterW, textCol, leftMax, rightMax := m.diffWideGeom()
 	// ONE shared offset, clamped per pane: the short side stops at its own end
 	// while the long side keeps revealing.
 	leftXOff := min(m.diffXOff, leftMax)
@@ -168,7 +252,7 @@ func (m model) diffModal() string {
 	// panes carrying the divider, so it runs unbroken to the bottom border.
 	blankRow := padRow(idiff.RenderRow(idiff.Row{}, 0, 0, textCol, gutterW, "", highlight))
 
-	langs := diffLangs(m.diffRows)
+	langs := m.diffRowLangs()
 	start, end := m.diffWindow(len(m.diffRows), visH)
 	rows := make([]string, 0, visH)
 	for i := start; i < end; i++ {
@@ -226,17 +310,9 @@ func (m *model) clampDiffScroll() {
 	visW := diffContentWidth(*m)
 	var maxX int
 	if m.diffNarrow() {
-		maxW := 0
-		for _, l := range m.diffUnifiedLines() {
-			if w := lipgloss.Width(l); w > maxW {
-				maxW = w
-			}
-		}
-		maxX = maxW - visW
+		maxX = m.diffUnifiedMaxWidth() - visW
 	} else {
-		gutterW := diffGutterW(m.diffRows)
-		textCol := diffTextCol(visW, gutterW)
-		leftMax, rightMax := diffPaneMax(m.diffRows, textCol)
+		_, _, leftMax, rightMax := m.diffWideGeom()
 		maxX = max(leftMax, rightMax)
 	}
 	if maxX < 0 {

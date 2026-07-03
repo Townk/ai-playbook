@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Large playbooks and diffs render smoothly during runs and scrolling: the
+  render pipeline now reuses a single markdown parser, memoizes syntax
+  highlighting of unchanged code blocks, and caches the scroll width and diff
+  overlay geometry, so spinner/stream ticks and keypresses no longer re-run the
+  whole pipeline.
 - Authoring prompts send the request context once: the failed command,
   captured scrollback, and the user's request used to be interpolated into
   both the standing system prompt and the per-request user message, paying

@@ -7,6 +7,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
@@ -29,6 +30,13 @@ type admon struct {
 	icon  string // nerd-font glyph; swap codepoint here if it renders as tofu
 	color string // Catppuccin hex constant
 }
+
+// goldmarkMD is the shared markdown parser. goldmark.New builds a stateless,
+// reusable Markdown value (its Parser holds no per-call mutable state), so we
+// construct it ONCE at package init rather than allocating a fresh instance on
+// every render — reflow fires on every spinner/stream/flash tick. The only
+// configuration is the GFM extension bundle, which is call-state independent.
+var goldmarkMD = goldmark.New(goldmark.WithExtensions(extension.GFM))
 
 var admonitions = map[string]admon{
 	"note":      {"Note", "󰋽", colBlue},
@@ -179,8 +187,7 @@ func renderCursor(md string, width int, states map[string]blockRunState, flashKe
 		muxActive = flags[3]
 	}
 	src := []byte(normalizeFences(md))
-	gm := goldmark.New(goldmark.WithExtensions(extension.GFM))
-	doc := gm.Parser().Parse(text.NewReader(src))
+	doc := goldmarkMD.Parser().Parse(text.NewReader(src))
 	r := &renderer{src: src, width: width, states: states, flashKey: flashKey, shellDisabled: disabled, reengageAvail: reengageAvail, rollbackAvail: rollbackAvail, muxActive: muxActive, rollbackTargets: collectRollbackTargets(doc, src), rollbackForNum: map[string]int{}, readyID: readyID}
 	r.block(doc, 0)
 	r.blocks = assignIDs(r.blocks)
@@ -1319,11 +1326,59 @@ func splitNeeds(s string) []string {
 	return out
 }
 
+// highlightCache memoizes highlight(src, lang) so a reflow (fired on every
+// spinner/stream/flash tick) doesn't re-tokenize immutable code-block payloads
+// through chroma. The key is lang + NUL + src — a direct composite (not a hash)
+// so there is no collision risk to reason about; the payloads are short.
+//
+// Concurrency: render runs solely on the bubbletea Update/View goroutine (and the
+// single-threaded headless staticRender drain in RunStream) — there is no
+// concurrent entry into highlight. The mutex is nonetheless kept because it is
+// negligible (one map lookup per code block, not per line) and removes any doubt
+// about the global cache if a future caller renders off-thread.
+var (
+	highlightMu    sync.Mutex
+	highlightCache = map[string]string{}
+)
+
+// highlightCacheCap bounds the cache; on overflow we drop everything (a plain
+// reallocation) rather than track LRU. A playbook has far fewer than 512 distinct
+// code blocks, so the cap is effectively never hit within a session.
+const highlightCacheCap = 512
+
 // highlight runs chroma over src; on any failure it returns src unchanged.
+// Results are memoized (see highlightCache).
 func highlight(src, lang string) string {
+	key := lang + "\x00" + src
+	highlightMu.Lock()
+	if v, ok := highlightCache[key]; ok {
+		highlightMu.Unlock()
+		return v
+	}
+	highlightMu.Unlock()
+
+	out := highlightUncached(src, lang)
+
+	highlightMu.Lock()
+	if len(highlightCache) >= highlightCacheCap {
+		highlightCache = make(map[string]string, highlightCacheCap)
+	}
+	highlightCache[key] = out
+	highlightMu.Unlock()
+	return out
+}
+
+// highlightUncached is the actual chroma pass, split out so highlight can wrap it
+// with memoization.
+func highlightUncached(src, lang string) string {
 	lexer := lexers.Get(lang)
 	if lexer == nil {
-		lexer = lexers.Analyse(src)
+		// lexers.Analyse runs EVERY registered lexer over src to guess the language.
+		// For a single-line input that per-lexer sweep isn't worth it (and unknown
+		// single-line snippets are common), so skip straight to the fallback lexer.
+		if strings.IndexByte(src, '\n') >= 0 {
+			lexer = lexers.Analyse(src)
+		}
 	}
 	if lexer == nil {
 		lexer = lexers.Fallback
