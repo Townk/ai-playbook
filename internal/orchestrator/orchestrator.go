@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Townk/ai-playbook/internal/agentstream"
@@ -120,6 +121,13 @@ type Orchestrator struct {
 	// createBackups records the prior content of files touched by createFile so
 	// undoCreate can restore them symmetrically. A nil *[]byte means the file was
 	// new (undo deletes it); a non-nil *[]byte holds the overwritten content.
+	//
+	// backupMu guards createBackups only — not the file I/O and not the rest of
+	// Do. Do is invoked from concurrent Bubble Tea tea.Cmd goroutines, so two
+	// quick create/undo clicks race on this map; a scoped mutex prevents the
+	// concurrent-map panic without needlessly serializing unrelated actions
+	// (Run/Stop/Copy) that touch neither the map nor each other's state.
+	backupMu      sync.Mutex
 	createBackups map[string]*[]byte
 
 	// Reengage carries everything the regenerate / followup / wrapup kinds need to
@@ -859,18 +867,20 @@ func (o *Orchestrator) createFile(payload string) driver.Result {
 		}
 		abs = filepath.Join(root, relPath)
 	}
-	// Lazily initialise the backup map.
-	if o.createBackups == nil {
-		o.createBackups = make(map[string]*[]byte)
-	}
-	// Capture prior content if the file exists.
+	// Capture prior content if the file exists (a nil entry records a new file).
+	// The read is outside the lock; only the map write is guarded.
+	var entry *[]byte
 	if existing, rerr := os.ReadFile(abs); rerr == nil {
 		cp := make([]byte, len(existing))
 		copy(cp, existing)
-		o.createBackups[abs] = &cp
-	} else {
-		o.createBackups[abs] = nil // file was new
+		entry = &cp
 	}
+	o.backupMu.Lock()
+	if o.createBackups == nil {
+		o.createBackups = make(map[string]*[]byte)
+	}
+	o.createBackups[abs] = entry
+	o.backupMu.Unlock()
 	if err := os.MkdirAll(filepath.Dir(abs), 0o755); err != nil {
 		return driver.Result{Exit: -1, Err: err.Error()}
 	}
@@ -904,12 +914,11 @@ func (o *Orchestrator) undoCreate(payload string) driver.Result {
 		}
 		abs = filepath.Join(root, relPath)
 	}
-	if o.createBackups == nil {
-		return driver.Result{Exit: 0} // no backup recorded — nothing to undo
-	}
+	o.backupMu.Lock()
 	backup, found := o.createBackups[abs]
+	o.backupMu.Unlock()
 	if !found {
-		return driver.Result{Exit: 0} // no backup for this path — nothing to undo
+		return driver.Result{Exit: 0} // no backup recorded — nothing to undo
 	}
 	if backup != nil {
 		// File existed before; restore it.
@@ -926,7 +935,9 @@ func (o *Orchestrator) undoCreate(payload string) driver.Result {
 	}
 	// Only remove the backup entry after a successful restore/delete, so a
 	// failed undo can be retried (the entry is still present on an error path).
+	o.backupMu.Lock()
 	delete(o.createBackups, abs)
+	o.backupMu.Unlock()
 	return driver.Result{Exit: 0}
 }
 

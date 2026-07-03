@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Rapidly triggering create-file and its undo (two quick clicks) no longer risks
+  a crash: the file-backup bookkeeping shared by those actions is now guarded
+  against the concurrent access the UI's action goroutines could produce.
 - `run <slug>` (a stored playbook) now renders through the same code path as
   `run --file <path>`: its declared `env:` map (the confirmation gate),
   description subtitle, and `project_root` are no longer silently dropped, and

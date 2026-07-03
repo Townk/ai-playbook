@@ -2,10 +2,12 @@ package orchestrator
 
 import (
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -499,6 +501,25 @@ func TestCreateFile_TrailingNewline(t *testing.T) {
 	if string(got) != "package main\n" {
 		t.Fatalf("createFile must add a trailing newline to a trimmed body, got %q", string(got))
 	}
+}
+
+// TestCreateBackupsConcurrent exercises the createBackups map from concurrent
+// Do goroutines — exactly what two quick create/undo button clicks trigger via
+// the UI's tea.Cmd goroutines. Without a lock this is a concurrent map
+// read/write (a data race under -race, and a runtime panic in practice). Uses
+// absolute paths so no live driver is needed (the race is on the map, not the
+// shell). RED today; GREEN once createBackups is mutex-guarded.
+func TestCreateBackupsConcurrent(t *testing.T) {
+	dir := t.TempDir()
+	o := &Orchestrator{}
+	var wg sync.WaitGroup
+	for i := 0; i < 50; i++ {
+		payload := EncodeFileAction(filepath.Join(dir, fmt.Sprintf("f%d.txt", i)), "x")
+		wg.Add(2)
+		go func() { defer wg.Done(); _, _ = o.Do(Action{Kind: KindCreateFile, Payload: payload}) }()
+		go func() { defer wg.Done(); _, _ = o.Do(Action{Kind: KindUndoCreate, Payload: payload}) }()
+	}
+	wg.Wait()
 }
 
 // TestCommitPlaybook_NoStoreDir_FallsBackToDataRoot asserts the back-compat
