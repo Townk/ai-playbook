@@ -63,6 +63,66 @@ func TestParse_MultiFileMultiHunk(t *testing.T) {
 	}
 }
 
+func TestParse_HeaderLookingLinesInsideHunk(t *testing.T) {
+	// A6a: a deleted line whose CONTENT starts with "-- " (e.g. an SQL comment)
+	// arrives, diff-prefixed, as "--- SQL comment" — indistinguishable by prefix
+	// alone from a file header. Inside an open hunk it must be read as a del
+	// line, not misparsed as a new file header (which would truncate/misattribute
+	// the rest of the hunk). Symmetrically for an added "++ " line → "+++ text".
+	patch := "--- a/query.sql\n+++ b/query.sql\n@@ -1,3 +1,3 @@\n context\n" +
+		"--- SQL comment\n++ added op\n more\n"
+	got := Parse(patch)
+	if len(got) != 1 {
+		t.Fatalf("expected one file, got %d: %#v", len(got), got)
+	}
+	f := got[0]
+	if f.NewPath != "b/query.sql" {
+		t.Fatalf("NewPath clobbered by in-hunk '+++'-looking line: got %q, want %q", f.NewPath, "b/query.sql")
+	}
+	if len(f.Hunks) != 1 {
+		t.Fatalf("expected one hunk, got %d: %#v", len(f.Hunks), f.Hunks)
+	}
+	want := []Line{
+		{OpContext, "context"},
+		{OpDel, "-- SQL comment"},
+		{OpAdd, "+ added op"},
+		{OpContext, "more"},
+	}
+	if !reflect.DeepEqual(f.Hunks[0].Lines, want) {
+		t.Fatalf("Lines =\n%#v\nwant\n%#v", f.Hunks[0].Lines, want)
+	}
+}
+
+func TestParse_AdjacentDelAddHeaderLookalikes(t *testing.T) {
+	// A6a, paired-line hole: a deleted "-- " line IMMEDIATELY followed by an
+	// added "++ " line arrives as "--- x" then "+++ y" — the same shape as a
+	// file-header pair. A real header pair is always followed by an "@@" hunk
+	// header; a body del/add pair is followed by more body lines. The pair
+	// below must parse as del+add, not as a phantom mid-hunk file header.
+	patch := "--- a/query.sql\n+++ b/query.sql\n@@ -1,3 +1,3 @@\n context\n" +
+		"--- old comment\n+++ new comment\n more\n"
+	got := Parse(patch)
+	if len(got) != 1 {
+		t.Fatalf("expected one file, got %d: %#v", len(got), got)
+	}
+	f := got[0]
+	if f.NewPath != "b/query.sql" {
+		t.Fatalf("NewPath clobbered by in-hunk del/add header-lookalike pair: got %q, want %q", f.NewPath, "b/query.sql")
+	}
+	if len(f.Hunks) != 1 {
+		t.Fatalf("expected one hunk, got %d: %#v", len(f.Hunks), f.Hunks)
+	}
+	want := []Line{
+		{OpContext, "context"},
+		{OpDel, "-- old comment"},
+		{OpAdd, "++ new comment"},
+		{OpContext, "more"},
+	}
+	if !reflect.DeepEqual(f.Hunks[0].Lines, want) {
+		t.Fatalf("Lines =\n%#v\nwant\n%#v", f.Hunks[0].Lines, want)
+	}
+}
+
 func TestParse_BareBlankContextLine(t *testing.T) {
 	// A blank context line emitted WITHOUT a leading space (bare \n) must be
 	// preserved as Line{OpContext, ""} rather than dropped.

@@ -51,6 +51,16 @@ func ConflictMarkup(fileContent string, files []FileDiff) (marked string, ok boo
 	}
 	var regions []region
 
+	// A6c: hunks are ORDERED in the patch, but each hunk's leading context
+	// (`pre`) was searched from the top of the file on every call. With a
+	// repeated context block, a later hunk's `pre` can match an EARLIER
+	// occurrence than its true (later) location — one that collides with a
+	// region already emitted by a prior hunk — and the overlap check below
+	// silently drops it. `from` threads the end of the previous hunk's located
+	// region through as the search floor for the next one, so hunks anchor in
+	// file order instead of each restarting from index 0.
+	from := 0
+
 	for _, f := range files {
 		for _, h := range f.Hunks {
 			pre, post, oldChange, newChange, hasChange := splitHunk(h)
@@ -60,15 +70,16 @@ func ConflictMarkup(fileContent string, files []FileDiff) (marked string, ok boo
 
 			p, q := -1, -1
 			if len(pre) > 0 {
-				if idx := indexOfSeq(fileLines, pre, 0); idx >= 0 {
+				if idx := indexOfSeq(fileLines, pre, from); idx >= 0 {
 					p = idx + len(pre)
 				}
 			} else {
 				// Empty pre → anchor at the hunk's declared old start (1-based),
-				// falling back to the file head.
+				// falling back to `from` (the previous hunk's end) when it's out
+				// of range or would anchor before it.
 				p = h.OldStart - 1
-				if p < 0 || p > len(fileLines) {
-					p = 0
+				if p < from || p > len(fileLines) {
+					p = from
 				}
 			}
 
@@ -86,10 +97,10 @@ func ConflictMarkup(fileContent string, files []FileDiff) (marked string, ok boo
 			}
 			// pre unfound but post found → anchor backwards from post.
 			if p < 0 && len(post) > 0 {
-				if idx := indexOfSeq(fileLines, post, 0); idx >= 0 {
+				if idx := indexOfSeq(fileLines, post, from); idx >= 0 {
 					q = idx
 					p = q - len(oldChange)
-					if p < 0 {
+					if p < from {
 						p = idx
 					}
 				}
@@ -99,6 +110,7 @@ func ConflictMarkup(fileContent string, files []FileDiff) (marked string, ok boo
 				continue // unlocatable — contributes to ok=false
 			}
 			regions = append(regions, region{p: p, q: q, block: conflictBlock(fileLines[p:q], oldChange, newChange)})
+			from = q
 		}
 	}
 

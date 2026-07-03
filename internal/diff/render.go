@@ -118,14 +118,16 @@ func renderSideBySide(files []FileDiff, width int, highlightFn func(string, stri
 			}
 
 			for _, ln := range hunk.Lines {
+				// Tabs are expanded here, at row-build time (A6b, see expandTabs).
+				text := expandTabs(ln.Text)
 				switch ln.Op {
 				case OpContext:
 					flushRun()
-					rows = append(rows, row{ln.Text, ln.Text, OpContext, OpContext})
+					rows = append(rows, row{text, text, OpContext, OpContext})
 				case OpDel:
-					dels = append(dels, ln.Text)
+					dels = append(dels, text)
 				case OpAdd:
-					adds = append(adds, ln.Text)
+					adds = append(adds, text)
 				}
 			}
 			flushRun()
@@ -187,8 +189,9 @@ func DividerRow(width int) string {
 	return blank + dialogBgANSI + " │ " + blank + "\x1b[0m"
 }
 
-// Row is one structured side-by-side line: the raw (un-highlighted) left/right
-// text plus each side's op and gutter number. It is built once (Rows) and
+// Row is one structured side-by-side line: the un-highlighted (but
+// tab-expanded — see expandTabs) left/right text plus each side's op and
+// gutter number. It is built once (Rows) and
 // rendered per frame (RenderRow) so horizontal scroll and gutters can be applied
 // at display time. A number of 0 means "no gutter number" (blank cell); Header
 // marks the per-file "--- old" / "+++ new" row (rendered bold, no numbers).
@@ -240,20 +243,24 @@ func Rows(files []FileDiff) []Row {
 			}
 
 			for _, ln := range hunk.Lines {
+				// Tabs are expanded here, at row-build time, so every Row
+				// consumer — width measurement included — sees no '\t' (A6b,
+				// see expandTabs).
+				text := expandTabs(ln.Text)
 				switch ln.Op {
 				case OpContext:
 					flushRun()
 					rows = append(rows, Row{
 						LeftNo: oldNo, RightNo: newNo,
-						Left: ln.Text, Right: ln.Text,
+						Left: text, Right: text,
 						LeftOp: OpContext, RightOp: OpContext,
 					})
 					oldNo++
 					newNo++
 				case OpDel:
-					dels = append(dels, ln.Text)
+					dels = append(dels, text)
 				case OpAdd:
-					adds = append(adds, ln.Text)
+					adds = append(adds, text)
 				}
 			}
 			flushRun()
@@ -331,7 +338,9 @@ func gutterCell(no, gutterW int, bg string) string {
 
 // dropCols drops the first n display columns from a plain (un-highlighted)
 // string, keeping every rune whose starting column is ≥ n — this windows a long
-// line so its tail is revealed. n≤0 returns the string unchanged.
+// line so its tail is revealed. n≤0 returns the string unchanged. Its input is
+// tab-free (Rows expanded tabs at build time), so a rune's display column here
+// is exactly its terminal column.
 func dropCols(s string, n int) string {
 	if n <= 0 {
 		return s
@@ -344,6 +353,49 @@ func dropCols(s string, n int) string {
 		col += runewidth.RuneWidth(r)
 	}
 	return ""
+}
+
+// tabStop is the fixed column width tabs expand to (A6b). `runewidth.Truncate`/
+// `RuneWidth` and `lipgloss.Width` all count '\t' as zero-width, but a real
+// terminal advances the cursor to the next tab-stop column — left unexpanded, a
+// tab-indented (e.g. Go) patch overflows its cell (the "│" divider drifts
+// off-column) and dropCols mis-windows on horizontal scroll (its column count
+// disagrees with what the terminal actually draws). 8 is the near-universal
+// terminal default tab-stop width, so expanding to it reproduces what the
+// user's terminal would render natively — a fixed 4- (or N-)space replacement
+// would be simpler but would only coincidentally match real rendering.
+const tabStop = 8
+
+// expandTabs replaces every '\t' in s with spaces out to the next tabStop
+// column, measured in display columns from the START of s (column 0) — i.e.
+// relative to the actual line content, not any horizontal-scroll window, which
+// matches how a terminal computes tab stops for the line. It is applied ONCE,
+// at display BUILD time — Rows (the structured path: the UI overlay measures
+// lipgloss.Width(Row.Left/Right) for its horizontal-scroll bound, then
+// RenderRow windows/paints), renderSideBySide's row build, and renderUnified —
+// so every downstream display consumer sees plain spaces, never '\t'.
+// Deliberately NOT applied in Parse: ConflictMarkup matches parsed hunk text
+// byte-for-byte against the raw (tab-containing) file and splices the patch's
+// lines into it, so Parse-level expansion would break anchoring on
+// tab-indented files and swap the user's tabs for spaces in the spliced
+// conflict block.
+func expandTabs(s string) string {
+	if !strings.ContainsRune(s, '\t') {
+		return s
+	}
+	var sb strings.Builder
+	col := 0
+	for _, r := range s {
+		if r == '\t' {
+			n := tabStop - col%tabStop
+			sb.WriteString(strings.Repeat(" ", n))
+			col += n
+			continue
+		}
+		sb.WriteRune(r)
+		col += runewidth.RuneWidth(r)
+	}
+	return sb.String()
 }
 
 // renderUnified emits a single column: a file header, then `-`/`+`/` ` prefixed,
@@ -364,7 +416,8 @@ func renderUnified(files []FileDiff, highlightFn func(string, string) string) st
 
 		for _, hunk := range f.Hunks {
 			for _, ln := range hunk.Lines {
-				hl := highlightFn(ln.Text, lang)
+				// Tabs expanded at build time here too (A6b, see expandTabs).
+				hl := highlightFn(expandTabs(ln.Text), lang)
 				switch ln.Op {
 				case OpDel:
 					sb.WriteString(delSty.Render("-" + hl))

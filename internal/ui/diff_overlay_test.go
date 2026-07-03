@@ -201,6 +201,32 @@ func TestDiff_PerPaneClampCouples(t *testing.T) {
 	}
 }
 
+// TestDiff_HScrollBound_TabIndented verifies diffPaneMax accounts for tab
+// expansion: a raw '\t' in a Row is width-0 to lipgloss, so unexpanded rows
+// undercount the pane's true display width and a tab-indented long line can
+// never be fully h-scrolled. Rows must deliver tab-expanded text (8-col stops)
+// so the scroll bound matches what the terminal actually draws.
+func TestDiff_HScrollBound_TabIndented(t *testing.T) {
+	m := newModel("T", "# hi\n")
+	m.width, m.height = 100, 30
+	m.diffMode = true
+	long := strings.Repeat("x", 200)
+	patch := "--- a/x.go\n+++ b/x.go\n@@ -1,2 +1,2 @@\n \t\t" + long + "\n-old\n+new\n"
+	m.diffRows = idiff.Rows(idiff.Parse(patch))
+
+	visW := diffContentWidth(m)
+	gutterW := diffGutterW(m.diffRows)
+	textCol := diffTextCol(visW, gutterW)
+	leftMax, _ := diffPaneMax(m.diffRows, textCol)
+
+	// Two leading tabs at 8-col stops expand to 16 columns, so the context
+	// line's true display width is 16+len(long).
+	want := 16 + len(long) - textCol
+	if leftMax != want {
+		t.Fatalf("h-scroll bound must count expanded tabs: leftMax = %d, want %d", leftMax, want)
+	}
+}
+
 // TestViewDiff_ScrollDown verifies that pressing down increments diffYOff.
 func TestViewDiff_ScrollDown(t *testing.T) {
 	m := newModel("T", "# hi\n")

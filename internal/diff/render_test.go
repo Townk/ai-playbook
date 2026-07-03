@@ -187,6 +187,91 @@ func TestRenderRow_HeaderPinnedAndColored(t *testing.T) {
 	}
 }
 
+func TestRender_SideBySide_TabsExpanded(t *testing.T) {
+	// A6b: runewidth/lipgloss both count '\t' as width 0, but terminals advance
+	// to the next tab stop — left unexpanded, tab-indented (e.g. Go) patches
+	// overflow their cell and the "│" divider drifts off-column. Tabs must be
+	// expanded to spaces before any width math, so every rendered row's divider
+	// lands in the same display column and no raw '\t' reaches the terminal.
+	files := []FileDiff{{NewPath: "b/x.go", Hunks: []Hunk{{Lines: []Line{
+		{OpContext, "\tif true {"},
+		{OpDel, "\t\told()"},
+		{OpAdd, "\t\tnew()"},
+	}}}}}
+	out := Render(files, 120, id)
+
+	if strings.Contains(out, "\t") {
+		t.Fatalf("rendered output must contain no raw tabs:\n%q", out)
+	}
+
+	rows := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	if len(rows) < 3 {
+		t.Fatalf("expected header + content rows, got %d:\n%q", len(rows), out)
+	}
+	colOf := func(s string) int {
+		i := strings.Index(s, "│")
+		if i < 0 {
+			return -1
+		}
+		return lipgloss.Width(s[:i])
+	}
+	want := colOf(rows[0])
+	for i, r := range rows {
+		if c := colOf(r); c != want {
+			t.Fatalf("divider column drifted on row %d: got %d, want %d (row %q)", i, c, want, r)
+		}
+	}
+}
+
+func TestRows_TabsExpanded(t *testing.T) {
+	// A6b: expansion must happen at Rows BUILD time — not at render time — so
+	// every downstream consumer of the structured rows (the UI overlay measures
+	// lipgloss.Width(Row.Left/Right) for its horizontal-scroll bound; RenderRow
+	// windows with dropCols) sees plain spaces, never '\t'. A raw tab in a Row
+	// is invisible to lipgloss (width 0), which undercounts the scroll bound.
+	files := []FileDiff{{OldPath: "a/x.go", NewPath: "b/x.go", Hunks: []Hunk{{
+		OldStart: 1, NewStart: 1,
+		Lines: []Line{
+			{OpContext, "\tif true {"},
+			{OpDel, "\t\told()"},
+			{OpAdd, "\t\tnew()"},
+		},
+	}}}}
+	rows := Rows(files)
+	for i, r := range rows {
+		if strings.Contains(r.Left, "\t") || strings.Contains(r.Right, "\t") {
+			t.Fatalf("Rows row %d carries raw tabs: %#v", i, r)
+		}
+	}
+	// "\tif true {" at 8-col stops → 8 spaces + text.
+	if want := strings.Repeat(" ", 8) + "if true {"; rows[1].Left != want {
+		t.Fatalf("context row not tab-expanded: got %q, want %q", rows[1].Left, want)
+	}
+	// And the rendered row stays tab-free end to end.
+	out := RenderRow(rows[2], 0, 0, 20, 2, "go", id)
+	if strings.Contains(out, "\t") {
+		t.Fatalf("RenderRow output must contain no raw tabs:\n%q", out)
+	}
+}
+
+func TestRender_Unified_TabsExpanded(t *testing.T) {
+	// A6b, narrow path: the unified (single-column) render must emit no raw
+	// tabs either — it writes hunk text straight through, so it depends on the
+	// same build-time expansion as the side-by-side path.
+	files := []FileDiff{{NewPath: "b/x.go", Hunks: []Hunk{{Lines: []Line{
+		{OpContext, "\tif true {"},
+		{OpDel, "\t\told()"},
+		{OpAdd, "\t\tnew()"},
+	}}}}}
+	out := Render(files, 30, id) // below minSideBySide → unified
+	if strings.Contains(out, "\t") {
+		t.Fatalf("unified render must contain no raw tabs:\n%q", out)
+	}
+	if !strings.Contains(out, strings.Repeat(" ", 8)+"if true {") {
+		t.Fatalf("unified render must tab-expand to 8-col stops:\n%q", out)
+	}
+}
+
 func TestRender_SideBySide_CellTruncationPreventsWrap(t *testing.T) {
 	// A line far wider than the column must not cause any output line to exceed
 	// the requested terminal width (lipgloss .Width would word-wrap without truncation).

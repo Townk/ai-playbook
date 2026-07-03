@@ -46,15 +46,36 @@ func Parse(patch string) []FileDiff {
 	var files []FileDiff
 	var cur *FileDiff
 	var hunk *Hunk
-	for _, ln := range strings.Split(strings.TrimSuffix(patch, "\n"), "\n") {
+	lines := strings.Split(strings.TrimSuffix(patch, "\n"), "\n")
+	for i, ln := range lines {
+		// A6a: `--- `/`+++ ` are file-header prefixes, but a DELETED/ADDED line
+		// whose own content starts with "-- "/"++ " (e.g. an SQL comment "--
+		// note") arrives here, diff-prefixed, as "--- note"/"+++ note" —
+		// byte-for-byte indistinguishable from a real header. Once a hunk is
+		// open (hunk != nil) we prefer the del/add reading; a real header only
+		// ever appears with hunk == nil (the "--- " case below resets it, and a
+		// `diff --git` lead-in forces it too). The one case a legitimate "--- "
+		// header follows mid-hunk without a `diff --git` separator — a bare
+		// multi-file patch where one file's hunk is immediately followed by the
+		// next file's header — is disambiguated by looking TWO lines ahead: a
+		// real header pair is always "--- old" / "+++ new" / "@@ …", whereas a
+		// del/add body pair that merely LOOKS like one (deleted "-- x" next to
+		// added "++ y") is followed by more body lines, never by "@@".
+		isFileHeaderDash := strings.HasPrefix(ln, "--- ") &&
+			(hunk == nil || (i+2 < len(lines) &&
+				strings.HasPrefix(lines[i+1], "+++ ") &&
+				strings.HasPrefix(lines[i+2], "@@")))
 		switch {
-		case strings.HasPrefix(ln, "--- "):
+		case isFileHeaderDash:
 			files = append(files, FileDiff{OldPath: strings.TrimSpace(ln[4:])})
 			cur, hunk = &files[len(files)-1], nil
-		case strings.HasPrefix(ln, "+++ ") && cur != nil:
+		case strings.HasPrefix(ln, "+++ ") && cur != nil && hunk == nil:
 			cur.NewPath = strings.TrimSpace(ln[4:])
 		case strings.HasPrefix(ln, "diff --git"):
-			// tolerate a `diff --git` lead-in before ---/+++; ignore.
+			// tolerate a `diff --git` lead-in before ---/+++; it also
+			// unambiguously closes any hunk still open from the previous file,
+			// so the "--- "/"+++ " that follow are read as headers.
+			hunk = nil
 		case strings.HasPrefix(ln, "@@"):
 			if cur == nil { // a hunk with no file header — synthesize one
 				files = append(files, FileDiff{})

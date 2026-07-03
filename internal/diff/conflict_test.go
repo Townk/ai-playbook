@@ -75,6 +75,55 @@ func TestConflictMarkup_UnlocatableReturnsFalse(t *testing.T) {
 	}
 }
 
+// A6c: hunks are ordered, but indexOfSeq anchors every hunk's leading context
+// from the top of the file. With a repeated context block, hunk 2's "pre" also
+// matches ABOVE hunk 1's already-located region; the overlap check at
+// conflict.go:114 then silently drops hunk 2. A running `from` offset (the end
+// of the previous hunk's region) must be threaded through the per-hunk
+// searches so hunk 2 anchors on its own (later) occurrence instead.
+func TestConflictMarkup_SecondHunkAnchoredAfterFirst(t *testing.T) {
+	file := "common\nA\ncommon\nB\ncommon\n"
+	patch := "--- a/f\n+++ b/f\n" +
+		"@@ -1,3 +1,3 @@\n common\n-A\n+A2\n common\n" +
+		"@@ -3,3 +3,3 @@\n common\n-B\n+B2\n common\n"
+
+	marked, ok := ConflictMarkup(file, Parse(patch))
+	if !ok {
+		t.Fatal("ConflictMarkup must locate at least one hunk")
+	}
+	if n := strings.Count(marked, markerCurrent); n != 2 {
+		t.Fatalf("both hunks must produce a conflict region, got %d marked region(s):\n%s", n, marked)
+	}
+	for _, want := range []string{"A", "A2", "B", "B2"} {
+		if !strings.Contains(marked, want) {
+			t.Fatalf("marked output missing %q:\n%s", want, marked)
+		}
+	}
+}
+
+// Guard for the A6b design choice: tab expansion happens at DISPLAY build time
+// (Rows/Render), NOT in Parse — ConflictMarkup matches parsed hunk text
+// byte-for-byte against the raw file (indexOfSeq) and splices the patch's
+// proposed lines into it, so Parse-level expansion would make every
+// tab-indented hunk unlocatable and would swap the user's tabs for spaces in
+// the spliced [expected]/[proposed] sections. This test pins both: a
+// tab-indented file still anchors, and the spliced lines keep their tabs.
+func TestConflictMarkup_TabIndentedFilePreservesTabs(t *testing.T) {
+	file := "func f() {\n\tif ok {\n\t\told()\n\t}\n}\n"
+	patch := "--- a/f.go\n+++ b/f.go\n@@ -2,3 +2,3 @@\n" +
+		" \tif ok {\n-\t\tdrifted()\n+\t\tnew()\n \t}\n"
+
+	marked, ok := ConflictMarkup(file, Parse(patch))
+	if !ok {
+		t.Fatal("a tab-indented hunk must still anchor (tabs must NOT be expanded in Parse)")
+	}
+	for _, want := range []string{"\t\told()", "\t\tdrifted()", "\t\tnew()"} {
+		if !strings.Contains(marked, want) {
+			t.Fatalf("marked output must keep tab indentation, missing %q:\n%s", want, marked)
+		}
+	}
+}
+
 // HasConflictMarkers: true while an opener survives, false once the user deletes them.
 func TestHasConflictMarkers(t *testing.T) {
 	marked, ok := ConflictMarkup(ch05File, Parse(ch05Patch))

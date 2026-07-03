@@ -12,6 +12,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Assist summoned via `apb` no longer captures its own invocation as the last
   command.
 - Paste now works in form fields and the choose dialog's "other" entry.
+- `diff` parsing no longer mistakes a deleted/added line whose own content
+  starts with `-- `/`++ ` (e.g. an SQL comment) for a new file header, which
+  previously truncated or misattributed the rest of the hunk.
+- Tab-indented diffs no longer overflow their side-by-side cell or drift the
+  `│` divider off-column; tabs are expanded to spaces before any width
+  calculation, in both the `diff` CLI view and the in-UI diff overlay.
+- Drift conflict markup no longer silently drops a hunk whose leading context
+  also occurs earlier in the file above a prior hunk's region — each hunk now
+  anchors in file order instead of always searching from the top.
 
 ## [0.6.1] - 2026-07-03
 
