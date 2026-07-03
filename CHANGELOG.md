@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-07-03
+
 ### Added
 
 - Live playbook store (Phase 1): saved playbooks are now a browsable, searchable,
@@ -149,7 +151,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Original zsh shell-script implementation (ai-assist).
 
-[Unreleased]: https://github.com/Townk/ai-playbook/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Townk/ai-playbook/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/Townk/ai-playbook/compare/v0.3.0...v0.5.0
 [0.3.0]: https://github.com/Townk/ai-playbook/releases/tag/v0.3.0
 [0.2.0]: https://github.com/Townk/ai-playbook/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Townk/ai-playbook/releases/tag/v0.1.0
