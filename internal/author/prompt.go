@@ -9,13 +9,13 @@
 //     ported here as BuildUserMessage (in claude.go we pass the system prompt and
 //     the user message as two arguments rather than concatenating, matching the
 //     `claude --print … "<prompt>"` invocation shape).
-//   - assist_build_cmd / ASSIST_PANE_CMD (ai-assist-claude) → ClaudeAgent
+//   - assist_build_cmd / ASSIST_PANE_CMD (ai-assist-claude) → the harness invocation
 //
 // Fidelity note: the shell builds ONE prompt string (system instructions WITH the
 // request context interpolated) and passes it as claude's positional prompt arg.
 // Here the standing authoring instructions are SystemPrompt and the request
-// context is BuildUserMessage; ClaudeAgent passes them as --append-system-prompt
-// + positional prompt so claude sees the same total information.
+// context is BuildUserMessage; the owned harness invocation passes them as
+// --append-system-prompt + positional prompt so claude sees the same total information.
 package author
 
 import (

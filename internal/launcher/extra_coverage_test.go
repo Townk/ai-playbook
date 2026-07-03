@@ -11,6 +11,7 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/mux"
 )
@@ -219,14 +220,15 @@ func TestBuildEnvLookup_LiveDriver(t *testing.T) {
 // ── authoringAgent fallback (session.go) ───────────────────────────────────────
 
 // TestAuthoringAgent_Fallback: a nil session and a session without a resolvable
-// selfExe both fall back to the plain (non-MCP) claude agent — a usable, non-nil
+// selfExe both fall back to the plain (non-MCP) harness agent — a usable, non-nil
 // Agent (authoring still works without the tools backend).
 func TestAuthoringAgent_Fallback(t *testing.T) {
+	cfg := config.Default()
 	var nilSess *session
-	if nilSess.authoringAgent() == nil {
+	if nilSess.authoringAgent(cfg) == nil {
 		t.Error("nil session must fall back to a non-nil plain agent")
 	}
-	if (&session{selfExe: ""}).authoringAgent() == nil {
+	if (&session{selfExe: ""}).authoringAgent(cfg) == nil {
 		t.Error("empty selfExe must fall back to a non-nil plain agent")
 	}
 }

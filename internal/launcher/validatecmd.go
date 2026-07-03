@@ -54,7 +54,7 @@ const reviewSystemPrompt = "You are reviewing a playbook (a runnable markdown do
 
 // aiSkipNote is printed in place of the AI review's text when no model backend
 // is available (F24-style degrade, never an abort).
-const aiSkipNote = "AI review skipped — no model backend (install + authenticate the Claude CLI, or set AI_PLAYBOOK_MODEL)"
+const aiSkipNote = "AI review skipped — no model backend (install + authenticate the Claude CLI, or configure [agent] in ai-playbook config)"
 
 // ValidateMain is the `ai-playbook validate` subcommand: it resolves the single
 // playbook source (a slug via the store, or --file), runs the deterministic

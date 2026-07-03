@@ -9,7 +9,7 @@ created: 2026-06-30
 # Fix it — authoring a playbook
 
 > [!IMPORTANT]
-> **This chapter requires a configured model backend.** Chapters 01–08 are fully offline — no model needed. Chapter 09 calls a language model to author, triage, and regenerate. Ensure `$AI_PLAYBOOK_MODEL` is set before continuing (`echo "$AI_PLAYBOOK_MODEL"` to verify).
+> **This chapter requires a configured model backend.** Chapters 01–08 are fully offline — no model needed. Chapter 09 calls a language model to author, triage, and regenerate. Ensure the Claude CLI is installed and authenticated before continuing (`claude --version` to verify); optionally pick a model via `[agent] model` in the config file.
 
 Chapters 01–08 worked with pre-authored playbooks. This chapter flips the authoring seat to you — but you do not write the playbook by hand. Instead, you point ai-playbook at a broken project, let it read the failure, and watch it draft the fix.
 

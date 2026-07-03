@@ -89,13 +89,17 @@ All ai-playbook env vars are prefixed `AI_PLAYBOOK_`.
 | Variable                  | Default              | Purpose |
 |---------------------------|----------------------|---------|
 | `AI_PLAYBOOK_DATA_DIR`    | `${XDG_DATA_HOME:-~/.local/share}/ai-playbook` | The data dir: the playbook store + the response cache (see [storage](specifications/storage.md)). Highest-priority override. |
-| `AI_PLAYBOOK_MODEL`       | harness default      | Override the authoring model id (same role as `[agent] model`). |
-| `AI_PLAYBOOK_CLAUDE_BIN`  | `claude` on `PATH`   | Path to the Claude CLI executable. |
 | `AI_PLAYBOOK_NO_CACHE`    | unset (cache on)     | When set (non-empty), disable cache serving (always escalate/author). |
 | `AI_PLAYBOOK_PROJECT_ROOT`| git-root / cwd       | The project root used for context hashing and the project-local store. |
 | `AI_PLAYBOOK_SCROLLBACK_LINES` | `200`           | How many scrollback lines to capture for request context. |
 | `AI_PLAYBOOK_RUN_TIMEOUT` | `120` (seconds)      | Timeout for a single run-block execution. |
 | `AI_PLAYBOOK_MAX_FOLLOWUPS` | `3`                | Max auto-follow-ups on a failed verify (positive integer; non-positive/unparseable → the default). |
+
+The harness itself — which one, its model, and its executable path — is configured
+**only** via `[agent]` (`harness` / `model` / `bin` above). The former
+`AI_PLAYBOOK_MODEL` / `ASSIST_MODEL` and `AI_PLAYBOOK_CLAUDE_BIN` env overrides
+(and `AI_PLAYBOOK_CLAUDE_PERMISSION_MODE`) were retired with the legacy Claude
+invocation path and are ignored.
 
 ### Internal / advanced
 
@@ -103,4 +107,3 @@ All ai-playbook env vars are prefixed `AI_PLAYBOOK_`.
 |-------------------------------------|--------------------|---------|
 | `AI_PLAYBOOK_DEBUG_LOG`             | unset (off)        | Path to a debug log file; when set, diagnostics are written there. |
 | `AI_PLAYBOOK_USER_REQUEST`          | —                  | Internal: passes the request text between in-process stages. |
-| `AI_PLAYBOOK_CLAUDE_PERMISSION_MODE`| `bypassPermissions`| The headless permission posture for the Claude invocation, so the agent never blocks on an interactive prompt. |

@@ -49,7 +49,8 @@ Plain-text output (not the pager), so it drops into shell scripts and CI.
   drains `RunHarnessEvents`), with `ClassifyRequest` (`author/classify.go:157`) as a complete
   working example (sets `opts.Bare=true`, `MCPConfigPath=""` — no tools backend, `NoThinking=true`).
   Model resolution: `claudeModel()` (`author/author.go:81-89`) = `$ASSIST_MODEL` → `$AI_PLAYBOOK_MODEL`
-  → `"sonnet"`. `config.Load()` never nil. Launcher already imports `internal/author`.
+  → `"sonnet"` *(historical; superseded by the harness seam — model is `[agent].model`, 2026-07-03)*.
+  `config.Load()` never nil. Launcher already imports `internal/author`.
 - **Graceful "no AI backend" pattern:** `looksLikeNoBackend(err)` (`internal/ui/results.go:14`,
   unexported) matches "executable file not found"/"no backend"/etc.; validate replicates it to
   skip the AI pass when the Claude CLI is absent/unauthenticated.
@@ -126,7 +127,8 @@ The launcher builds `blocks` by `ui.Render(body, 80, nil, "")` then converting e
   `func ReviewOnce(systemPrompt, userMessage string) (string, error)` — a thin wrapper over
   `runMetadataOnce` with the `ClassifyRequest` option shape (`Bare=true`, `MCPConfigPath=""`,
   `NoThinking=true`) so it needs no MCP/tools backend. Model = `claudeModel()`
-  (`$ASSIST_MODEL`→`$AI_PLAYBOOK_MODEL`→`sonnet`).
+  (`$ASSIST_MODEL`→`$AI_PLAYBOOK_MODEL`→`sonnet`) *(historical; superseded by the
+  harness seam — model is `[agent].model`, 2026-07-03)*.
 - **Prompt.** System prompt: a concise playbook reviewer — "review this ai-playbook for prose
   inconsistencies, missing/needed callouts, and steps that look non-idempotent, destructive, or
   non-reversible; be brief; if it looks good, say so." User message: the playbook body.
@@ -165,6 +167,8 @@ Plain text to stdout. Group in order: **errors**, **warnings**, **AI review**.
   `AI_PLAYBOOK_MODEL` to be set", but the model resolves to `sonnet` by default, so reword to
   "runs when the Claude CLI backend is available (skipped with a note otherwise); set
   `AI_PLAYBOOK_MODEL` to pick the model". Mention `--no-ai` for a purely deterministic check.
+  *(The env-var wording here is historical; the env overrides were retired with the harness
+  seam on 2026-07-03 — the model is picked via `[agent].model`.)*
 - `docs/guides/tutorial.md`: drop the `validate ⏳` markers (features line `:187`, the "Read"
   line `:212`, coverage row `:269`) and the ch.08 "documented as if shipped" note `:190`.
 

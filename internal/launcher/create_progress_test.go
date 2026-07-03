@@ -184,7 +184,6 @@ func TestCreateAuthorWithProgress_DrainsCollectsAndViews(t *testing.T) {
 // degrades to the text author path (which here fails fast with no live harness).
 func TestCreateAuthorWithProgress_StreamErrorFallsBack(t *testing.T) {
 	c := isolateCache(t)
-	t.Setenv("AI_PLAYBOOK_CLAUDE_BIN", "/nonexistent/claude-binary")
 
 	origStream, origView := createStreamFn, createViewFn
 	t.Cleanup(func() { createStreamFn, createViewFn = origStream, origView })
@@ -198,10 +197,14 @@ func TestCreateAuthorWithProgress_StreamErrorFallsBack(t *testing.T) {
 		return 0
 	}
 
+	// Pin the harness bin to a nonexistent path (cfg is the single source now) so the
+	// text fallback's Agent fails fast to start rather than launching a real claude.
+	cfg := config.Default()
+	cfg.Agent.Bin = "/nonexistent/claude-binary"
 	req := capture.Request{UserRequest: "x", CWD: "/p"}
 	d := createDecision(req)
 	_ = captureStderr(t, func() {
-		createAuthorWithProgress(req, d, c, false, nil, config.Default())
+		createAuthorWithProgress(req, d, c, false, nil, cfg)
 	})
 
 	if viewCalled {

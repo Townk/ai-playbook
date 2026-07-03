@@ -34,8 +34,8 @@ const defaultCallTimeout = 60 * time.Second
 // invocation flags and the stream adapter are a single matched contract — these
 // flags are NOT user-configurable; the user only selects the harness + value
 // prefs (model, bin) via config [agent]. The flags mirror the existing
-// ClaudeAgentWithMCP wiring (mcp-config + append-system-prompt + positional user
-// message), swapped to stream-json so agentstream's claude adapter can parse it:
+// tools-backend wiring (mcp-config + append-system-prompt + positional user
+// message), in stream-json so agentstream's claude adapter can parse it:
 //
 //	claude -p --output-format stream-json --verbose --include-partial-messages
 //	       [--model <model>] [--mcp-config <path>]
@@ -216,53 +216,46 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 		cfg = config.Default()
 	}
 
-	harness := cfg.Agent.Harness
-	if harness == "" {
-		harness = config.Default().Agent.Harness
+	harnessName := cfg.Agent.Harness
+	if harnessName == "" {
+		harnessName = config.Default().Agent.Harness
+	}
+	h, ok := harnessFor(harnessName)
+	if !ok {
+		return nil, nil, fmt.Errorf("harness %q not yet supported", harnessName)
 	}
 
-	// Per-harness {owned argv + stream adapter} pair. Only claude ships today.
-	var (
-		args        []string
-		adapterName string
-		extraEnv    []string // appended to the harness process env (e.g. thinking)
-	)
-	switch harness {
-	case "claude":
-		sys := systemPrompt
-		if opts.MCPConfigPath != "" {
-			if opts.Structured {
-				sys += StructuredToolInstruction()
-			} else {
-				sys += ToolInstruction
-			}
-		}
-		// Per-invocation model override (the classify pass selects the triage model)
-		// falls back to the configured authoring model when unset.
-		model := cfg.Agent.Model
-		if opts.ModelOverride != "" {
-			model = opts.ModelOverride
-		}
-		args = ClaudeArgs(model, opts.MCPConfigPath, sys, userMessage, opts.Bare)
-		adapterName = "claude"
-		// MAX_THINKING_TOKENS must be set EXPLICITLY both ways. A budget (>0) enables
-		// thinking so the claude adapter's Reasoning mapping has blocks to emit; 0
-		// DISABLES it. Crucially, OMITTING the var does NOT disable thinking — Claude
-		// Code defaults thinking ON — so "off" (and opts.NoThinking) must emit
-		// MAX_THINKING_TOKENS=0, not skip the var. Disabling thinking cuts a quick
-		// classify/metadata call from ~7s to ~2.6s (haiku thinks by default).
-		thinking := cfg.Agent.Thinking
-		if opts.NoThinking {
-			thinking = "off"
-		}
-		if tok := claudeThinkingTokens(thinking); tok > 0 {
-			extraEnv = append(extraEnv, "MAX_THINKING_TOKENS="+strconv.Itoa(tok))
+	// Prompt assembly stays HERE (harness-free): fold the tool instruction into the
+	// system prompt when the tools backend is wired, then resolve the per-call knobs.
+	// The Harness only turns those into its owned argv/adapter/env.
+	sys := systemPrompt
+	if opts.MCPConfigPath != "" {
+		if opts.Structured {
+			sys += StructuredToolInstruction()
 		} else {
-			extraEnv = append(extraEnv, "MAX_THINKING_TOKENS=0")
+			sys += ToolInstruction
 		}
-	default:
-		return nil, nil, fmt.Errorf("harness %q not yet supported", harness)
 	}
+	// Per-invocation model override (the classify pass selects the triage model)
+	// falls back to the configured authoring model when unset.
+	model := cfg.Agent.Model
+	if opts.ModelOverride != "" {
+		model = opts.ModelOverride
+	}
+	// NoThinking forces thinking off for THIS call regardless of cfg.Thinking.
+	thinking := cfg.Agent.Thinking
+	if opts.NoThinking {
+		thinking = "off"
+	}
+	inv := Invocation{
+		Model:         model,
+		MCPConfigPath: opts.MCPConfigPath,
+		Bare:          opts.Bare,
+		Thinking:      thinking,
+	}
+	args := h.Argv(sys, userMessage, inv)
+	adapterName := h.AdapterName()
+	extraEnv := h.Env(inv)
 
 	adapter, ok := agentstream.Get(adapterName)
 	if !ok {
@@ -277,7 +270,7 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 
 	bin := cfg.Agent.Bin
 	if bin == "" {
-		bin = harness
+		bin = harnessName
 	}
 
 	ctx := context.Background()

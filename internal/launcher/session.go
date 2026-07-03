@@ -339,15 +339,17 @@ func (s *session) close() {
 }
 
 // authoringAgent returns the agent the producer should use: the MCP-tools-wired
-// claude agent when the session is up (so the agent diagnoses via the `run` tool
-// in the user's real shell), else the plain claude agent (author-as-before). A
-// missing selfExe also falls back (we can't point claude's --mcp-config at
-// ourselves). The fallback keeps the no-agent-tools path working.
-func (s *session) authoringAgent() author.Agent {
+// harness agent when the session is up (so the agent diagnoses via the `run` tool
+// in the user's real shell), else the plain harness agent (author-as-before). A
+// missing selfExe also falls back (we can't point the harness's --mcp-config at
+// ourselves). The fallback keeps the no-agent-tools path working. cfg selects the
+// harness ([agent].harness) so re-engagement/fallback honor it just like the events
+// path (finding A5c).
+func (s *session) authoringAgent(cfg *config.Config) author.Agent {
 	if s == nil || s.selfExe == "" {
-		return author.ClaudeAgent
+		return author.HarnessAgent(author.AuthorOptions{Cfg: cfg})
 	}
-	return author.ClaudeAgentWithMCP(s.selfExe, s.socket)
+	return author.HarnessAgentWithMCP(cfg, s.selfExe, s.socket)
 }
 
 // asker builds the ui.AskFunc that backs the pager's `f` keybind (spec §D): it
@@ -424,7 +426,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 	cfg, _ := config.Load() // always non-nil (Default on error)
 	reengage := &orchestrator.Reengage{
 		Req:         req,
-		Agent:       sess.authoringAgent(),
+		Agent:       sess.authoringAgent(cfg),
 		Events:      buildReengageEvents(req, sess),
 		Cache:       c,
 		RequestJSON: requestJSON(req),
@@ -782,16 +784,18 @@ func reengageReady(d triage.Decision, req capture.Request, sess *session, cwd st
 		return ui.OrchReady{}
 	}
 	// Resolve the global store dir so the cached-replay's CommitPlaybook (w key /
-	// wrap-up) writes to the same directory store.Index reads from. cfg may be nil
-	// on a config-file error; in that case storeDir stays "" and CommitPlaybook
-	// falls back to its dataRoot/playbooks default (back-compat).
+	// wrap-up) writes to the same directory store.Index reads from. config.Load never
+	// returns nil (Default on error); on a config-file error storeDir stays "" and
+	// CommitPlaybook falls back to its dataRoot/playbooks default (back-compat). cfg
+	// also selects the harness for the text-fallback Agent (finding A5c).
+	cfg, _ := config.Load()
 	var storeDir string
-	if cfg, _ := config.Load(); cfg != nil {
+	if cfg != nil {
 		storeDir = cfg.GlobalStoreDir()
 	}
 	re := &orchestrator.Reengage{
 		Req:         req,
-		Agent:       sess.authoringAgent(),
+		Agent:       sess.authoringAgent(cfg),
 		Events:      buildReengageEvents(req, sess),
 		Cache:       cache.Open(),
 		CtxHash:     d.CtxHash,

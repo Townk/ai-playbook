@@ -290,7 +290,7 @@ func newCreateReengage(req capture.Request, d triage.Decision, c *cache.Cache, n
 	}
 	re := &orchestrator.Reengage{
 		Req:         req,
-		Agent:       sess.authoringAgent(),
+		Agent:       sess.authoringAgent(cfg),
 		Events:      buildReengageEvents(req, sess),
 		Cache:       c,
 		RequestJSON: requestJSON(req),

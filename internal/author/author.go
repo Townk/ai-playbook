@@ -4,10 +4,9 @@ import (
 	"bytes"
 	"fmt"
 	"io"
-	"os"
-	"os/exec"
 	"strings"
 
+	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/kb"
@@ -48,12 +47,14 @@ func withStderr(err error, b *bytes.Buffer) error {
 // Agent runs the capable agent with the given system prompt and user message and
 // returns its stdout as a STREAM (io.ReadCloser) so the ui can render the produced
 // playbook incrementally as the model emits it. It is injectable so tests can
-// substitute a deterministic fake (no live claude).
+// substitute a deterministic fake (no live harness). The production implementation
+// is HarnessAgent (plain) / HarnessAgentWithMCP (tools-wired), both adapters over
+// the config-driven RunHarnessEvents path.
 type Agent func(systemPrompt, userMessage string) (io.ReadCloser, error)
 
 // Author is the producer's LLM half: it assembles the standing system prompt and
 // the per-request user message from req, then runs the agent and returns its
-// stdout stream. The agent is injected (ClaudeAgent in production; a fake in
+// stdout stream. The agent is injected (HarnessAgent in production; a fake in
 // tests) so this function is deterministic to unit-test.
 //
 // The per-project knowledge base is loaded from disk (kb.Load) keyed on
@@ -66,105 +67,74 @@ func Author(req capture.Request, agent Agent) (io.ReadCloser, error) {
 	return agent(sys, user)
 }
 
-// claudeBin resolves the claude executable, mirroring ai-assist-claude's
-// $AI_PLAYBOOK_CLAUDE_BIN (default "claude").
-func claudeBin() string {
-	if v := os.Getenv("AI_PLAYBOOK_CLAUDE_BIN"); v != "" {
-		return v
+// HarnessAgent is the production Agent: it runs the CONFIGURED harness via
+// RunHarnessEvents and drains the model's text output into the streaming
+// io.ReadCloser the callers render. opts carries the harness selection (Cfg); the
+// plain (no-tools) invocation leaves MCPConfigPath empty. It replaces the removed
+// claude-only ClaudeAgent so the harness is honored on every path — the legacy
+// path ignored [agent].harness and always ran claude (finding A5c). The retired
+// $ASSIST_MODEL/$AI_PLAYBOOK_MODEL model overrides and the bypassPermissions flag
+// died with it: config ([agent].model) is now the single source.
+func HarnessAgent(opts AuthorOptions) Agent {
+	return func(systemPrompt, userMessage string) (io.ReadCloser, error) {
+		return runHarnessText(systemPrompt, userMessage, opts)
 	}
-	return "claude"
 }
 
-// claudeModel resolves the capable model, mirroring ai-assist-claude:
-// $ASSIST_MODEL, else $AI_PLAYBOOK_MODEL, else "sonnet". Capable by design — never
-// a cheap one (the cheap haiku pass was the triage classify step, not authoring).
-func claudeModel() string {
-	if v := os.Getenv("ASSIST_MODEL"); v != "" {
-		return v
-	}
-	if v := os.Getenv("AI_PLAYBOOK_MODEL"); v != "" {
-		return v
-	}
-	return "sonnet"
-}
-
-// claudePermissionMode resolves the headless permission posture, mirroring
-// $AI_PLAYBOOK_CLAUDE_PERMISSION_MODE (default bypassPermissions) so the headless
-// agent never blocks on an interactive permission prompt.
-func claudePermissionMode() string {
-	if v := os.Getenv("AI_PLAYBOOK_CLAUDE_PERMISSION_MODE"); v != "" {
-		return v
-	}
-	return "bypassPermissions"
-}
-
-// ClaudeAgent is the real Agent: it runs claude headless and streams stdout.
-//
-// Ported from ai-assist-claude's assist_build_cmd / ASSIST_PANE_CMD:
-//
-//	claude --print --output-format text \
-//	       --permission-mode <bypassPermissions> \
-//	       --model <sonnet> \
-//	       "<prompt>"
-//
-// In the shell the single prompt arg carried BOTH the standing instructions and
-// the request context (assist::system_prompt interpolated REQ_*). Here we keep
-// them separate: the standing authoring instructions go on
-// --append-system-prompt and the request context is the positional prompt (the
-// user message) — claude sees the same total information, and the split lets the
-// ui render exactly the model's reply.
-//
-// Stdout is returned as a streaming pipe (cmd.StdoutPipe) so the ui renders
-// incrementally; closing the returned ReadCloser waits for the process to exit.
-func ClaudeAgent(systemPrompt, userMessage string) (io.ReadCloser, error) {
-	return runClaude(systemPrompt, userMessage, nil)
-}
-
-// runClaude builds and starts the claude headless invocation with the base flags,
-// optionally appending extraArgs (e.g. --mcp-config for the tools backend). Stdout
-// is returned as a streaming pipe (Close waits for the process).
-func runClaude(systemPrompt, userMessage string, extraArgs []string) (io.ReadCloser, error) {
-	args := []string{
-		"--print", "--output-format", "text",
-		"--permission-mode", claudePermissionMode(),
-		"--model", claudeModel(),
-		// Only the MCP servers we pass (via extraArgs' --mcp-config), never the
-		// user's global ones — same time-to-first-token win as the stream path
-		// (ClaudeArgs). See its comment.
-		"--strict-mcp-config",
-	}
-	args = append(args, extraArgs...)
-	args = append(args, "--append-system-prompt", systemPrompt, userMessage)
-
-	cmd := exec.Command(claudeBin(), args...)
-	// Capture stderr (don't pipe to the terminal); surface it only on failure.
-	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
-
-	stdout, err := cmd.StdoutPipe()
+// runHarnessText runs RunHarnessEvents and wraps its Event channel in the streaming
+// io.ReadCloser the text Agent contract promises (the model's text + a process
+// error on Close). It is the shared core of HarnessAgent and HarnessAgentWithMCP.
+func runHarnessText(systemPrompt, userMessage string, opts AuthorOptions) (io.ReadCloser, error) {
+	events, wait, err := RunHarnessEvents(systemPrompt, userMessage, opts)
 	if err != nil {
 		return nil, err
 	}
-	if err := cmd.Start(); err != nil {
-		return nil, err
-	}
-	return &procStream{ReadCloser: stdout, cmd: cmd, stderr: &stderr}, nil
+	return newTextStream(events, wait), nil
 }
 
-// procStream wraps the command's stdout pipe so Close also reaps the process
-// (Wait), preventing a zombie and surfacing a non-zero exit to the caller. The
-// captured stderr is attached to a non-zero-exit error and dropped on success.
-type procStream struct {
-	io.ReadCloser
-	cmd    *exec.Cmd
-	stderr *bytes.Buffer
+// textStream adapts a normalized agentstream.Event channel to the streaming
+// io.ReadCloser the text Agent callers consume. It writes each TextDelta to a pipe
+// as the model emits it (the streamed playbook), dropping Reasoning/ToolActivity
+// (live-activity events the text path does not render) and Final (which DUPLICATES
+// the accumulated TextDeltas for claude — see agentstream.claudeAdapter). Mirroring
+// the retired procStream, Read sees a clean EOF and Close surfaces the reaped
+// process error (stderr-annotated by RunHarnessEvents' wait()).
+type textStream struct {
+	pr      *io.PipeReader
+	waitErr chan error // buffered(1): the process error, sent once the pump reaps.
 }
 
-func (p *procStream) Close() error {
-	cerr := p.ReadCloser.Close()
-	werr := p.cmd.Wait()
-	if cerr != nil {
-		return cerr
-	}
-	return withStderr(werr, p.stderr)
+// newTextStream starts the pump goroutine and returns the reader half.
+func newTextStream(events <-chan agentstream.Event, wait func() error) *textStream {
+	pr, pw := io.Pipe()
+	ts := &textStream{pr: pr, waitErr: make(chan error, 1)}
+	go func() {
+		for ev := range events {
+			if ev.Kind != agentstream.TextDelta {
+				continue
+			}
+			if _, werr := io.WriteString(pw, ev.Text); werr != nil {
+				// Reader closed early (Close before EOF). Stop writing, but keep
+				// ranging so RunHarnessEvents' parse goroutine is never blocked on an
+				// unread channel and wait() can still reap the process.
+				for range events {
+				}
+				break
+			}
+		}
+		werr := wait()
+		_ = pw.Close() // EOF to the reader regardless of werr.
+		ts.waitErr <- werr
+	}()
+	return ts
+}
+
+func (t *textStream) Read(p []byte) (int, error) { return t.pr.Read(p) }
+
+// Close reaps the harness and returns its process error (nil on a clean exit). It
+// first closes the read half so a pump blocked on a pipe write (caller closing
+// before draining to EOF) unblocks and proceeds to reap.
+func (t *textStream) Close() error {
+	_ = t.pr.Close()
+	return <-t.waitErr
 }

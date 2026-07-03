@@ -176,7 +176,7 @@ const (
 type EventsFunc func(kind ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error)
 
 // Reengage bundles the re-engagement context. Req is the original captured
-// request; Agent is the injected author.Agent (author.ClaudeAgent in production,
+// request; Agent is the injected author.Agent (author.HarnessAgent in production,
 // a fake in tests) used as the TEXT-path FALLBACK. Events, when set, is the
 // normalized event producer (author.RunHarnessEvents) that streams the model's
 // live reasoning + tool activity during the re-engagement wait, exactly like the

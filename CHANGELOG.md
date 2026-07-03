@@ -15,8 +15,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   their token cost twice on every authoring/followup/final call. That
   context now travels only in the user message.
 
+### Removed
+
+- The environment overrides read only by the retired legacy Claude invocation
+  path: `$ASSIST_MODEL` / `$AI_PLAYBOOK_MODEL` (authoring model — now solely
+  `[agent].model`), `$AI_PLAYBOOK_CLAUDE_BIN` (harness executable — now solely
+  `[agent].bin`), and `$AI_PLAYBOOK_CLAUDE_PERMISSION_MODE`. Its
+  `--permission-mode bypassPermissions` flag is dropped with it — the unified
+  invocation passes no permission mode.
+
 ### Fixed
 
+- The configured harness (`[agent].harness`) is now honored on the re-engagement
+  and fallback authoring paths: those used to run Claude unconditionally, ignoring
+  a non-Claude harness selection. All agent calls now route through the single,
+  config-driven harness invocation path.
 - Relative file paths (create-file, view/apply-diff targets, the diff float)
   now resolve against the session's live working directory: a `cd` inside a run
   block is tracked, instead of everything resolving against the stale

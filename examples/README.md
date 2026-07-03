@@ -10,7 +10,7 @@ playbook from a broken project.
 ## Prerequisites
 
 - `ai-playbook` installed and on your `$PATH`
-- (ch.09 only) a configured model backend — ensure `$AI_PLAYBOOK_MODEL` is set (`echo "$AI_PLAYBOOK_MODEL"` to verify)
+- (ch.09 only) a configured model backend — the Claude CLI installed and authenticated (`claude --version` to verify); optionally pick a model via `[agent] model` in the config file
 
 ## Safety note
 

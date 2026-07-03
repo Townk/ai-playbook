@@ -309,8 +309,7 @@ func TestOpenSession_SharedDriverAndToolsBackend(t *testing.T) {
 
 // fakeClaude builds a fake claude executable that writes its full argv (one arg
 // per line) to argvFile and prints a canned playbook, so the test can assert the
-// real authoring invocation (runClaude) includes --mcp-config without launching
-// claude.
+// owned events-path invocation includes --mcp-config without launching claude.
 func fakeClaude(t *testing.T, argvFile string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -326,13 +325,15 @@ func fakeClaude(t *testing.T, argvFile string) string {
 func shq(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // TestAuthoringAgent_InvokesClaudeWithMCPConfig asserts that, with a live session,
-// the authoring agent's claude invocation includes --mcp-config (the MCP adapter
-// wiring) and that the system prompt carries the run-tool instruction. It uses a
-// fake claude (AI_PLAYBOOK_CLAUDE_BIN) to capture the argv.
+// the authoring agent's harness invocation includes --mcp-config (the MCP adapter
+// wiring) and that the system prompt carries the run-tool instruction. It pins the
+// harness bin via cfg [agent].bin (the events path resolves the process from
+// config, not env) to capture the argv.
 func TestAuthoringAgent_InvokesClaudeWithMCPConfig(t *testing.T) {
 	minimalZDOTDIR(t)
 	argvFile := filepath.Join(t.TempDir(), "argv")
-	t.Setenv("AI_PLAYBOOK_CLAUDE_BIN", fakeClaude(t, argvFile))
+	cfg := config.Default()
+	cfg.Agent.Bin = fakeClaude(t, argvFile)
 
 	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
 	if sess == nil {
@@ -345,7 +346,7 @@ func TestAuthoringAgent_InvokesClaudeWithMCPConfig(t *testing.T) {
 		t.Skip("os.Executable unavailable; cannot assert MCP wiring")
 	}
 
-	agent := sess.authoringAgent()
+	agent := sess.authoringAgent(cfg)
 	stream, err := agent("BASE SYS", "user message")
 	if err != nil {
 		t.Fatalf("authoring agent: %v", err)

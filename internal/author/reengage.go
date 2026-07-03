@@ -18,7 +18,7 @@ import (
 // The whole follow-up prompt is the system prompt (it carries both the standing
 // instructions and the request context, like the shell's --prompt-file pass); the
 // user message is the assembled request context so the agent sees the same total
-// information ClaudeAgent passes for Author. The agent is injected (fake in tests).
+// information the agent passes for Author. The agent is injected (fake in tests).
 //
 // failedOutput is the captured output of the failed command (the shell read it
 // from the run log's logpath, capped to 4000 bytes; the ui caps it the same way
