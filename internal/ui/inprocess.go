@@ -418,7 +418,7 @@ func (m *model) commitPlaybookCmd(body string) tea.Cmd {
 	// stream-EOF guard already prevents an invalid draft from being displayed, so this
 	// is defense-in-depth for any `w`-commit path. Count runnable blocks the same way
 	// the renderer does so the predicate matches what the pager would show.
-	_, _, blocks := Render(body, m.contentWidth(), m.blockStates, m.flashKey)
+	_, _, blocks := Render(body, m.contentWidth(), RenderOpts{States: m.blockStates, FlashKey: m.flashKey})
 	if !isValidPlaybook(body, len(blocks)) {
 		return func() tea.Msg {
 			return statusMsg{text: "Not a playbook — nothing saved (no title or no runnable steps)."}

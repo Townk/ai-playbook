@@ -978,7 +978,15 @@ func (m *model) reflow() {
 	if m.assisted {
 		readyID = m.readyID
 	}
-	m.lines, m.buttons, m.blocks = renderCursor(m.renderBody(), m.contentWidth(), m.blockStates, m.flashKey, readyID, m.driverPending, m.canReengageInProc(), m.anyRollbackable(), m.asker != nil)
+	m.lines, m.buttons, m.blocks = Render(m.renderBody(), m.contentWidth(), RenderOpts{
+		States:        m.blockStates,
+		FlashKey:      m.flashKey,
+		ShellDisabled: m.driverPending,
+		NoReengage:    !m.canReengageInProc(),
+		RollbackAvail: m.anyRollbackable(),
+		MuxActive:     m.asker != nil,
+		ReadyID:       readyID,
+	})
 	// Cache the widest Wide-line width now that m.lines is final (the append*Button
 	// helpers below only add buttons, never lines) so clampScroll / $ can read it.
 	m.maxWide = MaxWideWidth(m.lines)
@@ -3529,7 +3537,7 @@ func (m model) View() tea.View {
 // the interactive View().
 func (m model) staticRender() string {
 	cw := m.contentWidth()
-	lines, _, _ := Render(m.renderBody(), cw, m.blockStates, "")
+	lines, _, _ := Render(m.renderBody(), cw, RenderOpts{States: m.blockStates})
 	var sb strings.Builder
 	sb.WriteString(m.titleLine(m.width) + "\n")
 	if m.subtitle != "" {

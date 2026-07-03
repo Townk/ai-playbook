@@ -28,7 +28,7 @@ func joinText(lines []Line) string {
 }
 
 func TestRenderHeadingHasBlockPrefix(t *testing.T) {
-	lines, _, _ := Render("# Title", 40, nil, "")
+	lines, _, _ := Render("# Title", 40, RenderOpts{})
 	if !strings.Contains(joinText(lines), "▓▓▓ Title") {
 		t.Fatalf("heading missing ▓▓▓ prefix:\n%s", joinText(lines))
 	}
@@ -41,7 +41,7 @@ func TestRenderHeadingHasBlockPrefix(t *testing.T) {
 
 func TestRenderParagraphWraps(t *testing.T) {
 	md := "alpha beta gamma delta epsilon zeta eta theta iota kappa"
-	lines, _, _ := Render(md, 20, nil, "")
+	lines, _, _ := Render(md, 20, RenderOpts{})
 	for _, l := range lines {
 		if l.Wide {
 			t.Fatalf("paragraph line should not be Wide")
@@ -56,7 +56,7 @@ func TestRenderParagraphWraps(t *testing.T) {
 }
 
 func TestRenderListItems(t *testing.T) {
-	lines, _, _ := Render("- one\n- two", 40, nil, "")
+	lines, _, _ := Render("- one\n- two", 40, RenderOpts{})
 	got := joinText(lines)
 	if !strings.Contains(got, "one") || !strings.Contains(got, "two") {
 		t.Fatalf("list items missing:\n%s", got)
@@ -67,7 +67,7 @@ func TestRenderListItems(t *testing.T) {
 }
 
 func TestRenderOrderedList(t *testing.T) {
-	lines, _, _ := Render("1. first\n2. second", 40, nil, "")
+	lines, _, _ := Render("1. first\n2. second", 40, RenderOpts{})
 	got := joinText(lines)
 	if !strings.Contains(got, "1. first") {
 		t.Fatalf("ordered list item 1 missing:\n%s", got)
@@ -78,7 +78,7 @@ func TestRenderOrderedList(t *testing.T) {
 }
 
 func TestRenderNestedList(t *testing.T) {
-	lines, _, _ := Render("- a\n    - b", 40, nil, "")
+	lines, _, _ := Render("- a\n    - b", 40, RenderOpts{})
 	got := joinText(lines)
 	if !strings.Contains(got, "a") || !strings.Contains(got, "b") {
 		t.Fatalf("nested list items missing:\n%s", got)
@@ -106,7 +106,7 @@ func TestRenderNestedList(t *testing.T) {
 
 func TestRenderInlineStrongText(t *testing.T) {
 	// The bold word's text survives (styling is stripped in the assertion).
-	lines, _, _ := Render("a **bold** word", 40, nil, "")
+	lines, _, _ := Render("a **bold** word", 40, RenderOpts{})
 	got := joinText(lines)
 	if !strings.Contains(got, "bold") {
 		t.Fatalf("strong text missing:\n%s", got)
@@ -116,7 +116,7 @@ func TestRenderInlineStrongText(t *testing.T) {
 func TestRenderCodeBlockIsWideAndUnwrapped(t *testing.T) {
 	long := "x := aaaaaaaaaa + bbbbbbbbbb + cccccccccc + dddddddddd // long line"
 	md := "```go\n" + long + "\n```"
-	lines, _, _ := Render(md, 20, nil, "") // pane narrower than the code line
+	lines, _, _ := Render(md, 20, RenderOpts{}) // pane narrower than the code line
 	var codeLine *Line
 	for i := range lines {
 		if lines[i].Wide {
@@ -136,7 +136,7 @@ func TestRenderCodeBlockIsWideAndUnwrapped(t *testing.T) {
 }
 
 func TestRenderBlockQuote(t *testing.T) {
-	lines, _, _ := Render("> hello quote", 40, nil, "")
+	lines, _, _ := Render("> hello quote", 40, RenderOpts{})
 	got := joinText(lines)
 	if !strings.Contains(got, "hello quote") {
 		t.Fatalf("quote text missing:\n%s", got)
@@ -148,7 +148,7 @@ func TestRenderBlockQuote(t *testing.T) {
 }
 
 func TestRenderQuoteDefaultAdmonition(t *testing.T) {
-	lines, _, _ := Render("> hello there friend", 40, nil, "")
+	lines, _, _ := Render("> hello there friend", 40, RenderOpts{})
 	// bordered frame: lines[0] is the top border (🬞🬭…), lines[1] is the body row.
 	first := strip(lines[0].Text)
 	if !strings.HasPrefix(first, "🬞") {
@@ -174,7 +174,7 @@ func TestRenderQuoteDefaultAdmonition(t *testing.T) {
 }
 
 func TestRenderQuoteAdmonitionType(t *testing.T) {
-	lines, _, _ := Render("> [!note]\n> be careful here", 40, nil, "")
+	lines, _, _ := Render("> [!note]\n> be careful here", 40, RenderOpts{})
 	// bordered frame: lines[0] is the top border; lines[1] is the header row.
 	topBorder := strip(lines[0].Text)
 	if !strings.HasPrefix(topBorder, "🬞") {
@@ -194,7 +194,7 @@ func TestRenderQuoteAdmonitionType(t *testing.T) {
 }
 
 func TestRenderQuoteExplicitQuoteType(t *testing.T) {
-	lines, _, _ := Render("> [!quote]\n> some quoted body", 40, nil, "")
+	lines, _, _ := Render("> [!quote]\n> some quoted body", 40, RenderOpts{})
 	// bordered frame: lines[0] is the top border; lines[1] is the header row.
 	topBorder := strip(lines[0].Text)
 	if !strings.HasPrefix(topBorder, "🬞") {
@@ -242,7 +242,7 @@ func TestBandFillsWidthWithBg(t *testing.T) {
 }
 
 func TestQuote_BorderedFrame(t *testing.T) {
-	lines, _, _ := Render("> [!NOTE]\n> Hello world\n", 30, nil, "")
+	lines, _, _ := Render("> [!NOTE]\n> Hello world\n", 30, RenderOpts{})
 	joined := joinText(lines)
 	for _, want := range []string{"🬞", "🬭", "▐", "🬁", "🬂"} {
 		if !strings.Contains(joined, want) {
@@ -264,7 +264,7 @@ func TestQuote_BorderedFrame(t *testing.T) {
 // plain floating text). hintCalloutRow must keep the frame glyphs and lay a muted-surface
 // background fill for the interior — reading as a dimmed framed block, like a code row.
 func TestCalloutRowsTaggedAndDimPreservesFrame(t *testing.T) {
-	lines, _, _ := Render("> [!NOTE]\n> Hello world\n", 30, nil, "")
+	lines, _, _ := Render("> [!NOTE]\n> Hello world\n", 30, RenderOpts{})
 	var calloutRow string
 	sawCallout := false
 	for _, l := range lines {
@@ -303,7 +303,7 @@ func TestCalloutRowsTaggedAndDimPreservesFrame(t *testing.T) {
 }
 
 func TestQuote_BareBlockquoteFallback(t *testing.T) {
-	lines, _, _ := Render("> just a quote\n", 30, nil, "")
+	lines, _, _ := Render("> just a quote\n", 30, RenderOpts{})
 	joined := joinText(lines)
 	// bare blockquote is framed with the fallback accent — ▐ left bar present, no header title
 	if !strings.Contains(joined, "▐") {
@@ -320,7 +320,7 @@ func TestQuote_BareBlockquoteFallback(t *testing.T) {
 
 func TestRenderQuoteReflowsToWidth(t *testing.T) {
 	long := "> " + strings.Repeat("word ", 40)
-	reflowed, _, _ := Render(long, 30, nil, "")
+	reflowed, _, _ := Render(long, 30, RenderOpts{})
 	for _, l := range reflowed {
 		if w := lipgloss.Width(l.Text); w > 30 {
 			t.Fatalf("quote line exceeds content width 30 (got %d): %q", w, strip(l.Text))
@@ -330,7 +330,7 @@ func TestRenderQuoteReflowsToWidth(t *testing.T) {
 
 func TestRenderCodeBlockNamedLanguageHighlights(t *testing.T) {
 	md := "```go\npackage main\n```"
-	lines, _, _ := Render(md, 80, nil, "")
+	lines, _, _ := Render(md, 80, RenderOpts{})
 	var codeLine *Line
 	for i := range lines {
 		if lines[i].Wide {
@@ -348,7 +348,7 @@ func TestRenderCodeBlockNamedLanguageHighlights(t *testing.T) {
 
 func TestRenderCodeBlockUnknownLanguageNoPanic(t *testing.T) {
 	md := "```unknown_xyz\nhello world\n```"
-	lines, _, _ := Render(md, 80, nil, "")
+	lines, _, _ := Render(md, 80, RenderOpts{})
 	var codeLine *Line
 	for i := range lines {
 		if lines[i].Wide {
@@ -366,7 +366,7 @@ func TestRenderCodeBlockUnknownLanguageNoPanic(t *testing.T) {
 
 func TestRenderTableIsWide(t *testing.T) {
 	md := "| Col A | Col B |\n|---|---|\n| one | two |\n| three | four |"
-	lines, _, _ := Render(md, 12, nil, "")
+	lines, _, _ := Render(md, 12, RenderOpts{})
 	wide := false
 	for _, l := range lines {
 		if l.Wide {
@@ -392,7 +392,7 @@ func TestStripRemovesFullSGR(t *testing.T) {
 }
 
 func TestRenderCodeBlockBackgroundStretchesAndSurvives(t *testing.T) {
-	lines, _, _ := Render("```go\nx := 1\n```", 40, nil, "")
+	lines, _, _ := Render("```go\nx := 1\n```", 40, RenderOpts{})
 	var code *Line
 	for i := range lines {
 		if lines[i].Wide {
@@ -429,7 +429,7 @@ func TestRenderCodeBlockBackgroundStretchesAndSurvives(t *testing.T) {
 func TestRenderCodeBlockLanguageLabel(t *testing.T) {
 	// Use a language not in the icon map — the default devicon (U+F07E2) will appear
 	// alongside the label to exercise the fallback path.
-	lines, _, _ := Render("```brainfuck\nx := 1\n```", 40, nil, "")
+	lines, _, _ := Render("```brainfuck\nx := 1\n```", 40, RenderOpts{})
 	// first line is the top-label bar, Wide=false.
 	if lines[0].Wide {
 		t.Fatal("label line should not be Wide")
@@ -451,7 +451,7 @@ func TestRenderCodeBlockLanguageLabel(t *testing.T) {
 
 func TestRenderCodeBlockIconLabel(t *testing.T) {
 	// Use 'go' which has an icon — verify the tab shows the glyph and ▂ fill.
-	lines, _, _ := Render("```go\nx := 1\n```", 40, nil, "")
+	lines, _, _ := Render("```go\nx := 1\n```", 40, RenderOpts{})
 	if lines[0].Wide {
 		t.Fatal("icon label line should not be Wide")
 	}
@@ -472,7 +472,7 @@ func TestRenderCodeBlockIconLabel(t *testing.T) {
 }
 
 func TestRenderCodeTabIconAndLabel(t *testing.T) {
-	lines, _, _ := Render("```rust\nx\n```", 60, nil, "")
+	lines, _, _ := Render("```rust\nx\n```", 60, RenderOpts{})
 	var tab string
 	for _, l := range lines {
 		if strings.Contains(strip(l.Text), "❘") { // the tab line has the separator
@@ -505,7 +505,7 @@ func tabLine(lines []Line) string {
 
 func TestRenderCodeTabDiffGlyph(t *testing.T) {
 	// diff block: tab must contain the mini.icons diff glyph.
-	lines, _, _ := Render("```diff\n--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n```", 80, nil, "")
+	lines, _, _ := Render("```diff\n--- a\n+++ b\n@@ -1 +1 @@\n-old\n+new\n```", 80, RenderOpts{})
 	tab := tabLine(lines)
 	if tab == "" {
 		t.Fatal("no tab line found for diff block")
@@ -518,7 +518,7 @@ func TestRenderCodeTabDiffGlyph(t *testing.T) {
 
 func TestRenderCodeTabPythonGlyph(t *testing.T) {
 	// python block: tab must contain the mini.icons python glyph.
-	lines, _, _ := Render("```python\nprint(1)\n```", 80, nil, "")
+	lines, _, _ := Render("```python\nprint(1)\n```", 80, RenderOpts{})
 	tab := tabLine(lines)
 	if tab == "" {
 		t.Fatal("no tab line found for python block")
@@ -533,7 +533,7 @@ func TestRenderCodeTabUnknownLangNoGlyph(t *testing.T) {
 	// Unknown lang: tab must NOT contain the null/default glyph (U+F07E2); only
 	// the label should appear.
 	const nullGlyph = "\U000F07E2"
-	lines, _, _ := Render("```brainfuck\n++++\n```", 80, nil, "")
+	lines, _, _ := Render("```brainfuck\n++++\n```", 80, RenderOpts{})
 	tab := tabLine(lines)
 	if tab == "" {
 		t.Fatal("no tab line found for brainfuck block")
@@ -549,7 +549,7 @@ func TestRenderCodeTabUnknownLangNoGlyph(t *testing.T) {
 }
 
 func TestRenderCodeBlockBottomBar(t *testing.T) {
-	lines, _, _ := Render("```go\nx := 1\n```", 40, nil, "")
+	lines, _, _ := Render("```go\nx := 1\n```", 40, RenderOpts{})
 	// last line is the bottom edge bar, Wide=false, filled with 🮂, width == 40.
 	last := lines[len(lines)-1]
 	if last.Wide {
@@ -566,7 +566,7 @@ func TestRenderCodeBlockBottomBar(t *testing.T) {
 
 func TestCodeBlockButtonsShell(t *testing.T) {
 	// muxActive=true so the Play button renders (it needs an origin pane).
-	_, btns, _ := Render("```sh\nmake all\n```", 40, nil, "", false, true, false, true)
+	_, btns, _ := Render("```sh\nmake all\n```", 40, RenderOpts{MuxActive: true})
 	var runB, play, copyB *Button
 	for i := range btns {
 		switch btns[i].Kind {
@@ -597,7 +597,7 @@ func TestCodeBlockButtonsShell(t *testing.T) {
 
 func TestCodeBlockButtonsNonShell(t *testing.T) {
 	// muxActive=true so the "no play" assertion is meaningful (python never gets play).
-	_, btns, _ := Render("```python\nx=1\n```", 40, nil, "", false, true, false, true)
+	_, btns, _ := Render("```python\nx=1\n```", 40, RenderOpts{MuxActive: true})
 	kinds := map[string]int{}
 	for _, b := range btns {
 		kinds[b.Kind]++
@@ -610,8 +610,8 @@ func TestCodeBlockButtonsNonShell(t *testing.T) {
 
 func TestRunButtonShellAndScript(t *testing.T) {
 	// muxActive=true so the Play button renders for the shell block.
-	_, b1, _ := Render("```bash {id=a}\nls\n```\n", 80, nil, "", false, true, false, true)
-	_, b2, _ := Render("```python {id=p}\nprint(1)\n```\n", 80, nil, "", false, true, false, true)
+	_, b1, _ := Render("```bash {id=a}\nls\n```\n", 80, RenderOpts{MuxActive: true})
+	_, b2, _ := Render("```python {id=p}\nprint(1)\n```\n", 80, RenderOpts{MuxActive: true})
 	if buttonForBlock(b1, "a", "run") == nil || buttonForBlock(b1, "a", "play") == nil {
 		t.Fatal("shell needs run+play")
 	}
@@ -635,7 +635,7 @@ func TestRunPayloadWrapsInterpreter(t *testing.T) {
 
 func TestCodeBlockLineMarkers(t *testing.T) {
 	// Narrow content: no horizontal overflow → no HBar row.
-	lines, _, _ := Render("```go\nx := 1\n```", 40, nil, "")
+	lines, _, _ := Render("```go\nx := 1\n```", 40, RenderOpts{})
 	codeCount, hbar := 0, 0
 	for _, l := range lines {
 		if l.Code {
@@ -665,7 +665,7 @@ func TestCodeBlockLineMarkers(t *testing.T) {
 
 func TestStaticBlockHasNoPlay(t *testing.T) {
 	// muxActive=true so the absence is meaningful (a shell block would get Play here).
-	_, buttons, _ := Render("```console {static}\nboom: error\n```\n", 80, nil, "", false, true, false, true)
+	_, buttons, _ := Render("```console {static}\nboom: error\n```\n", 80, RenderOpts{MuxActive: true})
 	for _, b := range buttons {
 		if b.Kind == "play" {
 			t.Fatalf("static block must not get a play button: %+v", b)
@@ -675,7 +675,7 @@ func TestStaticBlockHasNoPlay(t *testing.T) {
 
 func TestShellBlockKeepsPlayAndCarriesID(t *testing.T) {
 	// muxActive=true so the Play button renders (it needs an origin pane).
-	_, buttons, blocks := Render("```bash {id=fix}\nls\n```\n", 80, nil, "", false, true, false, true)
+	_, buttons, blocks := Render("```bash {id=fix}\nls\n```\n", 80, RenderOpts{MuxActive: true})
 	var sawPlay bool
 	for _, b := range buttons {
 		if b.Kind == "play" {
@@ -700,7 +700,7 @@ func TestPlayButtonGatedByMux(t *testing.T) {
 	md := "```bash {id=go}\nls\n```\n"
 
 	// muxActive=false (default 4-arg call) → no Play, but Run stays.
-	_, noMux, _ := Render(md, 80, map[string]blockRunState{}, "")
+	_, noMux, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{}})
 	if buttonForBlock(noMux, "go", "play") != nil {
 		t.Error("Play button must be absent without a multiplexer")
 	}
@@ -709,7 +709,7 @@ func TestPlayButtonGatedByMux(t *testing.T) {
 	}
 
 	// muxActive=true → Play appears alongside Run.
-	_, mux, _ := Render(md, 80, map[string]blockRunState{}, "", false, true, false, true)
+	_, mux, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{}, MuxActive: true})
 	if buttonForBlock(mux, "go", "play") == nil {
 		t.Error("Play button must render when a multiplexer is active")
 	}
@@ -720,7 +720,7 @@ func TestPlayButtonGatedByMux(t *testing.T) {
 
 func TestCodeBlockHBarOnOverflow(t *testing.T) {
 	long := "xy " + strings.Repeat("z", 200)
-	lines, _, _ := Render("```go\n"+long+"\n```", 40, nil, "")
+	lines, _, _ := Render("```go\n"+long+"\n```", 40, RenderOpts{})
 	hbarIdx := -1
 	for i, l := range lines {
 		if l.HBar > 0 {
@@ -781,7 +781,7 @@ func spinnerFramesStrings() []string {
 
 func TestRunRegionRunningShowsSpinner(t *testing.T) {
 	st := map[string]blockRunState{"a": {Status: "running", SpinFrame: 0}}
-	lines, _, _ := Render("```bash {id=a}\nls\n```\n", 80, st, "")
+	lines, _, _ := Render("```bash {id=a}\nls\n```\n", 80, RenderOpts{States: st})
 	if !linesContain(lines, "ls") {
 		t.Fatal("code still rendered")
 	}
@@ -792,7 +792,7 @@ func TestRunRegionRunningShowsSpinner(t *testing.T) {
 
 func TestRunRegionRunningShowsElapsedSeconds(t *testing.T) {
 	st := map[string]blockRunState{"a": {Status: "running", SpinFrame: 30}}
-	lines, _, _ := Render("```bash {id=a}\nls\n```\n", 80, st, "")
+	lines, _, _ := Render("```bash {id=a}\nls\n```\n", 80, RenderOpts{States: st})
 	if !linesContain(lines, "3s") {
 		t.Fatalf("running block with SpinFrame=30 must show '3s' (30 ticks / 10 = 3 seconds)")
 	}
@@ -812,23 +812,23 @@ func TestNeedsGatingHidesRunUntilDepOk(t *testing.T) {
 	md := "```bash {id=diag}\nls\n```\n\n```bash {id=fix needs=diag}\nrm x\n```\n"
 	// muxActive=true throughout so the run/play gating (not the mux gate) is what's tested.
 	// diag not yet run → fix is blocked: no run/play for fix; blocked indicator shown.
-	_, btns, _ := Render(md, 80, map[string]blockRunState{}, "", false, true, false, true)
+	_, btns, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{}, MuxActive: true})
 	if buttonForBlock(btns, "fix", "run") != nil || buttonForBlock(btns, "fix", "play") != nil {
 		t.Fatalf("blocked block must have no run/play")
 	}
-	lines, _, _ := Render(md, 80, map[string]blockRunState{}, "", false, true, false, true)
+	lines, _, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{}, MuxActive: true})
 	if !linesContain(lines, "needs: diag") {
 		t.Fatalf("blocked block must show a needs indicator")
 	}
 	// diag ok → fix is unblocked.
-	_, btns2, _ := Render(md, 80, map[string]blockRunState{"diag": {Status: "ok"}}, "", false, true, false, true)
+	_, btns2, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{"diag": {Status: "ok"}}, MuxActive: true})
 	if buttonForBlock(btns2, "fix", "run") == nil || buttonForBlock(btns2, "fix", "play") == nil {
 		t.Fatalf("satisfied block must regain run+play")
 	}
 }
 
 func TestDiffBlockButtons(t *testing.T) {
-	_, b, _ := Render("```diff {id=d}\n--- a\n+++ b\n```\n", 80, nil, "")
+	_, b, _ := Render("```diff {id=d}\n--- a\n+++ b\n```\n", 80, RenderOpts{})
 	if buttonForBlock(b, "d", "diff") == nil {
 		t.Fatal("diff block needs a single 'diff' button")
 	}
@@ -851,7 +851,7 @@ func TestDiffBlockButtons(t *testing.T) {
 
 func TestDiffApplyGatedByNeeds(t *testing.T) {
 	md := "```bash {id=p}\nls\n```\n\n```diff {id=d needs=p}\n--- a\n+++ b\n```\n"
-	_, b, _ := Render(md, 80, map[string]blockRunState{}, "") // p not ok
+	_, b, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{}}) // p not ok
 	if buttonForBlock(b, "d", "apply-diff") != nil {
 		t.Fatal("apply-diff must be gated")
 	}
@@ -867,7 +867,7 @@ func TestRunRegionCompletedShowsSummaryAndTail(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := map[string]blockRunState{"a": {Status: "ok", Exit: 0, Logpath: lp, Expanded: true}}
-	lines, _, _ := Render("```bash {id=a}\nls\n```\n", 80, st, "")
+	lines, _, _ := Render("```bash {id=a}\nls\n```\n", 80, RenderOpts{States: st})
 	if !linesContain(lines, "exit 0") {
 		t.Fatalf("summary line missing")
 	}
@@ -883,7 +883,7 @@ func TestRunRegionOutputTailLinesAreWide(t *testing.T) {
 		t.Fatal(err)
 	}
 	st := map[string]blockRunState{"a": {Status: "ok", Exit: 0, Logpath: lp, Expanded: true}}
-	lines, _, _ := Render("```bash {id=a}\nls\n```\n", 80, st, "")
+	lines, _, _ := Render("```bash {id=a}\nls\n```\n", 80, RenderOpts{States: st})
 	// The summary line (✓ ran … ▸/▾) must be Wide=false (carries the toggle button).
 	// The output/tail lines must be Wide=true (side-scrollable like a code block body).
 	summaryFound := false
@@ -943,7 +943,7 @@ func TestDiffLineStyle(t *testing.T) {
 // Wide body lines colored by their diff role (add/del/context/hunk-header).
 func TestDiffBlockBodyLinesHaveHunkColors(t *testing.T) {
 	md := "```diff\n--- a/foo.go\n+++ b/foo.go\n@@ -1,2 +1,2 @@\n-old\n+new\n context\n```"
-	lines, _, _ := Render(md, 80, nil, "")
+	lines, _, _ := Render(md, 80, RenderOpts{})
 
 	// Collect wide body lines (the diff content lines) by their stripped text.
 	byContent := map[string]Line{}
@@ -1003,7 +1003,7 @@ func TestRunButtonBecomesStopWhileRunning(t *testing.T) {
 	md := "```bash {id=blk}\nls\n```\n"
 
 	// Non-running → run button present, stop absent.
-	_, btns, _ := Render(md, 80, map[string]blockRunState{}, "")
+	_, btns, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{}})
 	if buttonForBlock(btns, "blk", "run") == nil {
 		t.Fatal("non-running block must have a run button")
 	}
@@ -1013,7 +1013,7 @@ func TestRunButtonBecomesStopWhileRunning(t *testing.T) {
 
 	// Running → stop button present, run absent.
 	st := map[string]blockRunState{"blk": {Status: "running"}}
-	_, btnsRunning, _ := Render(md, 80, st, "")
+	_, btnsRunning, _ := Render(md, 80, RenderOpts{States: st})
 	if buttonForBlock(btnsRunning, "blk", "stop") == nil {
 		t.Fatal("running block must have a stop button")
 	}
@@ -1027,7 +1027,7 @@ func TestRunButtonBecomesStopWhileRunning(t *testing.T) {
 // downstream consumers (buttons, states lookup, flash key) always see a real id.
 func TestSynthesizedIDForBlockWithNoExplicitID(t *testing.T) {
 	// Single block with no id: must get a non-empty synthesised id.
-	_, _, blocks := Render("```bash\nls\n```\n", 80, nil, "")
+	_, _, blocks := Render("```bash\nls\n```\n", 80, RenderOpts{})
 	if len(blocks) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(blocks))
 	}
@@ -1036,7 +1036,7 @@ func TestSynthesizedIDForBlockWithNoExplicitID(t *testing.T) {
 	}
 
 	// Two id-less blocks: must get distinct synthesised ids.
-	_, _, blocks2 := Render("```bash\nls\n```\n\n```bash\npwd\n```\n", 80, nil, "")
+	_, _, blocks2 := Render("```bash\nls\n```\n\n```bash\npwd\n```\n", 80, RenderOpts{})
 	if len(blocks2) != 2 {
 		t.Fatalf("expected 2 blocks, got %d", len(blocks2))
 	}
@@ -1048,7 +1048,7 @@ func TestSynthesizedIDForBlockWithNoExplicitID(t *testing.T) {
 	}
 
 	// Explicit {id=x} is preserved unchanged.
-	_, _, blocks3 := Render("```bash {id=x}\nls\n```\n", 80, nil, "")
+	_, _, blocks3 := Render("```bash {id=x}\nls\n```\n", 80, RenderOpts{})
 	if len(blocks3) != 1 {
 		t.Fatalf("expected 1 block, got %d", len(blocks3))
 	}
@@ -1061,8 +1061,8 @@ func TestSynthesizedIDForBlockWithNoExplicitID(t *testing.T) {
 // document yields the same synthesised ids (deterministic, position-based).
 func TestSynthesizedIDStableAcrossRerenders(t *testing.T) {
 	md := "```bash\nls\n```\n\n```diff\n--- a\n+++ b\n```\n"
-	_, _, blocks1 := Render(md, 80, nil, "")
-	_, _, blocks2 := Render(md, 80, nil, "")
+	_, _, blocks1 := Render(md, 80, RenderOpts{})
+	_, _, blocks2 := Render(md, 80, RenderOpts{})
 	if len(blocks1) != 2 || len(blocks2) != 2 {
 		t.Fatalf("expected 2 blocks per render, got %d and %d", len(blocks1), len(blocks2))
 	}
@@ -1075,7 +1075,7 @@ func TestSynthesizedIDStableAcrossRerenders(t *testing.T) {
 // TestSynthesizedIDButtonsHaveNonEmptyBlockID verifies that buttons for
 // id-less blocks carry the synthesised id (not an empty string).
 func TestSynthesizedIDButtonsHaveNonEmptyBlockID(t *testing.T) {
-	_, btns, _ := Render("```bash\nls\n```\n", 80, nil, "")
+	_, btns, _ := Render("```bash\nls\n```\n", 80, RenderOpts{})
 	for _, b := range btns {
 		if b.BlockID == "" {
 			t.Fatalf("button %q for id-less block has empty BlockID", b.Kind)
@@ -1497,7 +1497,7 @@ func TestDiffApplyUndoToggleButtons(t *testing.T) {
 	md := "```diff {id=fix}\n--- a/f.go\n+++ b/f.go\n@@ -1 +1 @@\n-old\n+new\n```\n"
 
 	// Not yet applied: apply-diff shown, no undo-diff.
-	_, btns, _ := Render(md, 80, map[string]blockRunState{}, "")
+	_, btns, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{}})
 	if buttonForBlock(btns, "fix", "apply-diff") == nil {
 		t.Fatal("unapplied diff must have apply-diff button")
 	}
@@ -1510,7 +1510,7 @@ func TestDiffApplyUndoToggleButtons(t *testing.T) {
 
 	// Applied (Status=="ok"): undo-diff shown, no apply-diff.
 	st := map[string]blockRunState{"fix": {Status: "ok"}}
-	_, btnsOk, _ := Render(md, 80, st, "")
+	_, btnsOk, _ := Render(md, 80, RenderOpts{States: st})
 	if buttonForBlock(btnsOk, "fix", "undo-diff") == nil {
 		t.Fatal("applied diff must have undo-diff button")
 	}
@@ -1528,7 +1528,7 @@ func TestDiffUndoNotNeedsGated(t *testing.T) {
 	md := "```bash {id=p}\nls\n```\n\n```diff {id=d needs=p}\n--- a\n+++ b\n```\n"
 	// p not ok but d is applied (Status=="ok").
 	st := map[string]blockRunState{"d": {Status: "ok"}}
-	_, btns, _ := Render(md, 80, st, "")
+	_, btns, _ := Render(md, 80, RenderOpts{States: st})
 	if buttonForBlock(btns, "d", "undo-diff") == nil {
 		t.Fatal("undo-diff must be present regardless of unmet needs (always allowed when applied)")
 	}
@@ -1544,22 +1544,22 @@ func TestDiffNeedsReGatingAfterUndo(t *testing.T) {
 
 	// fix applied → cmd is ungated.
 	stOk := map[string]blockRunState{"fix": {Status: "ok"}}
-	_, btnsOk, _ := Render(md, 80, stOk, "")
+	_, btnsOk, _ := Render(md, 80, RenderOpts{States: stOk})
 	if buttonForBlock(btnsOk, "cmd", "run") == nil {
 		t.Fatal("cmd must be ungated (run button present) when fix is applied")
 	}
-	linesOk, _, _ := Render(md, 80, stOk, "")
+	linesOk, _, _ := Render(md, 80, RenderOpts{States: stOk})
 	if linesContain(linesOk, "needs: fix") {
 		t.Fatal("needs indicator must not appear when fix is applied")
 	}
 
 	// fix undone (Status cleared to "") → cmd re-locks.
 	stUndone := map[string]blockRunState{"fix": {Status: ""}}
-	_, btnsUndone, _ := Render(md, 80, stUndone, "")
+	_, btnsUndone, _ := Render(md, 80, RenderOpts{States: stUndone})
 	if buttonForBlock(btnsUndone, "cmd", "run") != nil {
 		t.Fatal("cmd must be re-gated (no run button) after fix is undone")
 	}
-	linesUndone, _, _ := Render(md, 80, stUndone, "")
+	linesUndone, _, _ := Render(md, 80, RenderOpts{States: stUndone})
 	if !linesContain(linesUndone, "needs: fix") {
 		t.Fatal("needs indicator must reappear after fix is undone")
 	}
@@ -1571,7 +1571,7 @@ func TestDiffNeedsReGatingAfterUndo(t *testing.T) {
 func TestFollowupButtonOnFailedRunBlock(t *testing.T) {
 	md := "```bash {id=fix}\nmake build\n```\n"
 	st := map[string]blockRunState{"fix": {Status: "failed", Exit: 1}}
-	lines, btns, _ := Render(md, 80, st, "")
+	lines, btns, _ := Render(md, 80, RenderOpts{States: st})
 	if !linesContain(lines, "try another fix") {
 		t.Fatal("failed run block must show a 'try another fix' label")
 	}
@@ -1589,7 +1589,7 @@ func TestFollowupButtonOnFailedRunBlock(t *testing.T) {
 func TestNoFollowupButtonOnVerifyBlock(t *testing.T) {
 	md := "```bash {id=verify}\nmake build\n```\n"
 	st := map[string]blockRunState{"verify": {Status: "failed", Exit: 1}}
-	_, btns, _ := Render(md, 80, st, "")
+	_, btns, _ := Render(md, 80, RenderOpts{States: st})
 	if buttonForBlock(btns, "verify", "followup") != nil {
 		t.Fatal("verify block must NOT render a followup button (it auto-fires)")
 	}
@@ -1599,7 +1599,7 @@ func TestNoFollowupButtonOnVerifyBlock(t *testing.T) {
 func TestNoFollowupButtonOnOkBlock(t *testing.T) {
 	md := "```bash {id=fix}\nmake build\n```\n"
 	st := map[string]blockRunState{"fix": {Status: "ok", Exit: 0}}
-	_, btns, _ := Render(md, 80, st, "")
+	_, btns, _ := Render(md, 80, RenderOpts{States: st})
 	if buttonForBlock(btns, "fix", "followup") != nil {
 		t.Fatal("an ok block must not render a followup button")
 	}
@@ -1610,7 +1610,7 @@ func TestNoFollowupButtonOnOkBlock(t *testing.T) {
 func TestStoppedBlockNeutralNoFollowupButton(t *testing.T) {
 	md := "```bash {id=fix}\nmake build\n```\n"
 	st := map[string]blockRunState{"fix": {Status: "stopped", Exit: 143}}
-	lines, btns, _ := Render(md, 80, st, "")
+	lines, btns, _ := Render(md, 80, RenderOpts{States: st})
 	if buttonForBlock(btns, "fix", "followup") != nil {
 		t.Fatal("a stopped block must not render a followup button")
 	}
@@ -1649,7 +1649,7 @@ func TestMalformedClosingFenceDoesNotNukeRender(t *testing.T) {
 		"## Next steps\n\n" +
 		"Run the tool again.\n"
 
-	lines, _, blocks := Render(md, 80, nil, "")
+	lines, _, blocks := Render(md, 80, RenderOpts{})
 
 	// Exactly ONE code block (the bash block), carrying only "gg build".
 	if len(blocks) != 1 {
@@ -1715,7 +1715,7 @@ func TestNormalizeFences_Repairs(t *testing.T) {
 // renderMarkdownLines renders md at the given width and returns the lines.
 func renderMarkdownLines(t *testing.T, md string, width int) []Line {
 	t.Helper()
-	lines, _, _ := Render(md, width, nil, "")
+	lines, _, _ := Render(md, width, RenderOpts{})
 	return lines
 }
 
@@ -1779,7 +1779,7 @@ func TestList_HangingIndent_NoOverflow(t *testing.T) {
 }
 
 func TestCreateBlock_TabAndButton(t *testing.T) {
-	_, buttons, _ := Render("```go {id=new file=cmd/x/main.go}\npackage main\n```\n", 100, nil, "")
+	_, buttons, _ := Render("```go {id=new file=cmd/x/main.go}\npackage main\n```\n", 100, RenderOpts{})
 	var has bool
 	for _, b := range buttons {
 		if b.BlockID == "new" && b.Kind == "create" {
@@ -1790,8 +1790,7 @@ func TestCreateBlock_TabAndButton(t *testing.T) {
 		t.Fatal("create block has no create button")
 	}
 	// applied → undo button
-	_, buttons2, _ := Render("```go {id=new file=cmd/x/main.go}\npackage main\n```\n", 100,
-		map[string]blockRunState{"new": {Status: "ok"}}, "")
+	_, buttons2, _ := Render("```go {id=new file=cmd/x/main.go}\npackage main\n```\n", 100, RenderOpts{States: map[string]blockRunState{"new": {Status: "ok"}}})
 	var undo bool
 	for _, b := range buttons2 {
 		if b.BlockID == "new" && b.Kind == "undo-create" {
@@ -1802,7 +1801,7 @@ func TestCreateBlock_TabAndButton(t *testing.T) {
 		t.Fatal("applied create block must show undo-create")
 	}
 	// tab must show the file path
-	lines, _, _ := Render("```go {id=new file=cmd/x/main.go}\npackage main\n```\n", 100, nil, "")
+	lines, _, _ := Render("```go {id=new file=cmd/x/main.go}\npackage main\n```\n", 100, RenderOpts{})
 	text := joinText(lines)
 	if !strings.Contains(text, "cmd/x/main.go") {
 		t.Fatalf("create tab must contain file path, got:\n%s", text)
@@ -1846,7 +1845,7 @@ func TestDriftedDiff_RegenFailedNote(t *testing.T) {
 
 	// Generic failure → the "resolve manually" alternate.
 	states := map[string]blockRunState{"fix": {Drifted: true, RegenFailed: true}}
-	lines, _, _ := Render(src, 100, states, "")
+	lines, _, _ := Render(src, 100, RenderOpts{States: states})
 	if !strings.Contains(joinText(lines), "regenerate didn't resolve it") {
 		t.Fatalf("RegenFailed must show the generic alternate note:\n%s", joinText(lines))
 	}
@@ -1854,7 +1853,7 @@ func TestDriftedDiff_RegenFailedNote(t *testing.T) {
 	// Specific note (no backend) → surfaced verbatim, overriding the generic line.
 	note := "no AI backend available — set AI_PLAYBOOK_MODEL or install the harness, or resolve manually"
 	states2 := map[string]blockRunState{"fix": {Drifted: true, RegenFailed: true, RegenNote: note}}
-	lines2, _, _ := Render(src, 100, states2, "")
+	lines2, _, _ := Render(src, 100, RenderOpts{States: states2})
 	if !strings.Contains(joinText(lines2), "no AI backend available") {
 		t.Fatalf("RegenNote must override the generic alternate note:\n%s", joinText(lines2))
 	}
@@ -1862,7 +1861,7 @@ func TestDriftedDiff_RegenFailedNote(t *testing.T) {
 
 func TestDriftedDiff_HasRegenerateButton(t *testing.T) {
 	states := map[string]blockRunState{"fix": {Drifted: true}}
-	_, buttons, _ := Render("```diff {id=fix}\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n```\n", 100, states, "")
+	_, buttons, _ := Render("```diff {id=fix}\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n```\n", 100, RenderOpts{States: states})
 	var resolve, regen bool
 	for _, b := range buttons {
 		if b.BlockID == "fix" && b.Kind == "drift-resolve" {
@@ -1880,7 +1879,7 @@ func TestDriftedDiff_HasRegenerateButton(t *testing.T) {
 func TestDriftedDiff_RegionAndResolveButton(t *testing.T) {
 	states := map[string]blockRunState{"fix": {Drifted: true}}
 	src := "```diff {id=fix}\n--- a/cmd/x.go\n+++ b/cmd/x.go\n@@ -1 +1 @@\n-a\n+b\n```\n"
-	lines, buttons, _ := Render(src, 100, states, "")
+	lines, buttons, _ := Render(src, 100, RenderOpts{States: states})
 	if !strings.Contains(joinText(lines), "no longer applies") {
 		t.Fatalf("missing drift message:\n%s", joinText(lines))
 	}
@@ -1950,7 +1949,7 @@ func TestAssisted_NoInlineRunButtonInAssisted(t *testing.T) {
 
 	// Regression: the SAME markdown rendered without the assisted cursor
 	// (readyID="") must still show the plain run button, unchanged.
-	_, btns, _ := renderCursor(md, 80, map[string]blockRunState{}, "", "")
+	_, btns, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{}})
 	if buttonForBlock(btns, "a", "run") == nil {
 		t.Error("non-assisted render must still register the inline run button")
 	}
@@ -1973,8 +1972,8 @@ func TestAssisted_NoInlineRunButtonInAssisted(t *testing.T) {
 func TestAssisted_RunSlotCollapses(t *testing.T) {
 	md := "```bash {id=a}\ntrue\n```\n"
 
-	_, nonAssistedBtns, _ := renderCursor(md, 80, map[string]blockRunState{}, "", "")
-	_, assistedBtns, _ := renderCursor(md, 80, map[string]blockRunState{}, "", "a")
+	_, nonAssistedBtns, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{}})
+	_, assistedBtns, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{}, ReadyID: "a"})
 
 	nonAssistedCopy := buttonForBlock(nonAssistedBtns, "a", "copy")
 	assistedCopy := buttonForBlock(assistedBtns, "a", "copy")
@@ -2004,7 +2003,7 @@ func TestAssisted_OkStatusBlockNoOverflowWhenCursorElsewhere(t *testing.T) {
 	md := "```bash {id=a}\ntrue\n```\n\n```bash {id=b needs=a}\ntrue\n```\n"
 	states := map[string]blockRunState{"a": {Status: "ok"}}
 
-	lines, btns, _ := renderCursor(md, width, states, "", "b")
+	lines, btns, _ := Render(md, width, RenderOpts{States: states, ReadyID: "b"})
 	for i, l := range lines {
 		if w := lipgloss.Width(strip(l.Text)); w > width {
 			t.Errorf("line %d is %d cols wide, want <= %d (overflow): %q", i, w, width, strip(l.Text))

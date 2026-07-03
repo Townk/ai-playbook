@@ -96,7 +96,7 @@ func TestDriftMsg_PendingResolveBecomesResolved(t *testing.T) {
 // undo-resolve button (not apply/undo-diff), keeps view-diff, and renders the note.
 func TestResolvedDiffBlock_Render(t *testing.T) {
 	md := "```diff {id=fix}\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n```\n"
-	lines, buttons, _ := Render(md, 80, map[string]blockRunState{"fix": {Resolved: true}}, "")
+	lines, buttons, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{"fix": {Resolved: true}}})
 	if buttonForBlock(buttons, "fix", "apply-diff") != nil || buttonForBlock(buttons, "fix", "undo-diff") != nil {
 		t.Error("a resolved diff block must show neither apply-diff nor undo-diff")
 	}

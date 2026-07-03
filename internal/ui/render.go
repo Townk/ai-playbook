@@ -142,53 +142,72 @@ func rollbackRef(n int) string {
 	return "(" + itoa(n) + ")"
 }
 
-// Render parses markdown and returns tagged, laid-out lines, a button
-// registry, and the typed block list for a given pane width. states maps
-// block IDs to their current run state; pass nil when not needed. flashKey
-// is the identity of the button currently being flash-highlighted
-// ("<blockID>:<kind>"); pass "" when no flash is active. Callers that don't
-// need blocks can discard the third value with _.
-// The optional trailing bool flags are, in order: shellDisabled (used by model.reflow
-// on the async-startup path — dims the shell-action button glyphs while the background
-// shell is still opening), reengageAvail (whether the "try another fix" affordance
-// should render), rollbackAvail (whether the "Rollback playbook" affordance should
-// render on a failed step), and muxActive (whether the green "Play" button renders — it
-// needs an origin pane, so only under a terminal multiplexer). Existing 4-arg callers
-// (tests, the static block-count path) leave shellDisabled false, reengageAvail true
-// (prior always-show), rollbackAvail false, and muxActive false (no Play button).
-func Render(md string, width int, states map[string]blockRunState, flashKey string, flags ...bool) ([]Line, []Button, []Block) {
-	return renderCursor(md, width, states, flashKey, "", flags...)
+// RenderOpts carries Render's per-call state and flags. The zero value
+// RenderOpts{} reproduces the defaults of the pre-refactor 4-argument call
+// (`Render(md, width, nil, "")`): no run states, no flash, shell-action
+// buttons live (ShellDisabled false), the "try another fix" affordance
+// available (NoReengage false — see its doc comment for why this one field
+// is inverted), no "Rollback playbook" button (RollbackAvail false), no
+// inline "Play" button (MuxActive false), and no assisted-mode cursor
+// (ReadyID "").
+type RenderOpts struct {
+	// States maps block IDs to their current run state; nil (the zero value)
+	// when not needed.
+	States map[string]blockRunState
+	// FlashKey is the identity of the button currently being flash-highlighted
+	// ("<blockID>:<kind>"); "" (the zero value) when no flash is active.
+	FlashKey string
+	// ShellDisabled dims the shell-action button glyphs (run/play/stop/diff/apply/undo)
+	// to the muted overlay color during the async-startup window (model.driverPending),
+	// when the background shell isn't open yet. Copy is never dimmed. The buttons keep
+	// their positions/width (only the color changes), so nothing jumps when they enable.
+	ShellDisabled bool
+	// NoReengage suppresses the "try another fix" (followup) affordance on a
+	// failed run/shell block. Its zero value (false) leaves the affordance
+	// available — before this refactor the equivalent variadic bool
+	// (reengageAvail) defaulted to true for every caller that didn't pass it,
+	// so this field is inverted from that name specifically so RenderOpts{}
+	// keeps matching that default instead of silently flipping it.
+	NoReengage bool
+	// RollbackAvail gates the "Rollback playbook" affordance on a failed step: it renders
+	// only when at least one already-run block declares a rollback= target (so there is
+	// something to undo). Zero value (false): no rollback button — matches the prior default.
+	RollbackAvail bool
+	// MuxActive gates the green "Play" button (run a shell block in the ORIGIN pane): it
+	// types the command into the origin split, which only exists under a terminal
+	// multiplexer. Zero value (false): no Play button — matches the prior default.
+	MuxActive bool
+	// ReadyID is the assisted-mode (--assisted/GUIDED) cursor: the block id the run wants
+	// the user to act on next (model.readyID, threaded only while model.assisted is true).
+	// Empty (its zero value) for every non-assisted render, which keeps their output
+	// byte-for-byte unchanged. When set, the matching block's tab gets a ▶ caret and its
+	// Run button renders in the ready/highlighted style instead of the plain run color.
+	ReadyID string
 }
 
-// renderCursor is Render's actual implementation, extended with readyID: the
-// assisted-mode (--assisted/GUIDED) ready-cursor block id (model.readyID when
-// model.assisted; "" otherwise). It's kept as a separate, unexported entry
-// point specifically so Render's public arity — and every existing caller and
-// test across the package — is untouched; model.reflow is the only caller that
-// needs the cursor and calls renderCursor directly with m.readyID.
-func renderCursor(md string, width int, states map[string]blockRunState, flashKey string, readyID string, flags ...bool) ([]Line, []Button, []Block) {
+// Render parses markdown and returns tagged, laid-out lines, a button
+// registry, and the typed block list for a given pane width. opts carries
+// the run states, flash key, and render flags — see RenderOpts for defaults.
+// Callers that don't need blocks can discard the third value with _.
+func Render(md string, width int, opts RenderOpts) ([]Line, []Button, []Block) {
 	if width < 1 {
 		width = 1
 	}
-	disabled := false
-	if len(flags) >= 1 {
-		disabled = flags[0]
-	}
-	reengageAvail := true
-	if len(flags) >= 2 {
-		reengageAvail = flags[1]
-	}
-	rollbackAvail := false
-	if len(flags) >= 3 {
-		rollbackAvail = flags[2]
-	}
-	muxActive := false
-	if len(flags) >= 4 {
-		muxActive = flags[3]
-	}
 	src := []byte(normalizeFences(md))
 	doc := goldmarkMD.Parser().Parse(text.NewReader(src))
-	r := &renderer{src: src, width: width, states: states, flashKey: flashKey, shellDisabled: disabled, reengageAvail: reengageAvail, rollbackAvail: rollbackAvail, muxActive: muxActive, rollbackTargets: collectRollbackTargets(doc, src), rollbackForNum: map[string]int{}, readyID: readyID}
+	r := &renderer{
+		src:             src,
+		width:           width,
+		states:          opts.States,
+		flashKey:        opts.FlashKey,
+		shellDisabled:   opts.ShellDisabled,
+		reengageAvail:   !opts.NoReengage,
+		rollbackAvail:   opts.RollbackAvail,
+		muxActive:       opts.MuxActive,
+		rollbackTargets: collectRollbackTargets(doc, src),
+		rollbackForNum:  map[string]int{},
+		readyID:         opts.ReadyID,
+	}
 	r.block(doc, 0)
 	r.blocks = assignIDs(r.blocks)
 	return r.lines, r.buttons, r.blocks

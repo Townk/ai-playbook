@@ -12,7 +12,7 @@ func TestRunActionDisabledWhenOk(t *testing.T) {
 	md := "```bash {id=go}\necho hi\n```\n"
 
 	// muxActive=true so the Play action is in scope (it needs an origin pane).
-	_, okButtons, _ := Render(md, 80, map[string]blockRunState{"go": {Status: "ok"}}, "", false, true, false, true)
+	_, okButtons, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{"go": {Status: "ok"}}, MuxActive: true})
 	if b := buttonForBlock(okButtons, "go", "run"); b != nil {
 		t.Errorf("run action must be disabled (no button) once the block ran ok; got %+v", b)
 	}
@@ -20,7 +20,7 @@ func TestRunActionDisabledWhenOk(t *testing.T) {
 		t.Errorf("play action must be disabled (no button) once the block ran ok; got %+v", b)
 	}
 
-	_, idleButtons, _ := Render(md, 80, map[string]blockRunState{}, "", false, true, false, true)
+	_, idleButtons, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{}, MuxActive: true})
 	if b := buttonForBlock(idleButtons, "go", "run"); b == nil {
 		t.Error("run action must be present when the block is idle")
 	}
@@ -37,7 +37,7 @@ func TestFollowupGatedOnReengage(t *testing.T) {
 	states := map[string]blockRunState{"go": {Status: "failed", Exit: 1}}
 
 	// reengage unavailable → no button, no text.
-	lines, buttons, _ := Render(md, 80, states, "", false, false)
+	lines, buttons, _ := Render(md, 80, RenderOpts{States: states, NoReengage: true})
 	if b := buttonForBlock(buttons, "go", "followup"); b != nil {
 		t.Error("followup button must be hidden when re-engagement is unavailable")
 	}
@@ -46,7 +46,7 @@ func TestFollowupGatedOnReengage(t *testing.T) {
 	}
 
 	// reengage available → button shows.
-	_, buttons2, _ := Render(md, 80, states, "", false, true)
+	_, buttons2, _ := Render(md, 80, RenderOpts{States: states})
 	if b := buttonForBlock(buttons2, "go", "followup"); b == nil {
 		t.Error("followup button should appear when re-engagement is available")
 	}

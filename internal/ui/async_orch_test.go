@@ -46,8 +46,8 @@ func clickButton(m model, b *Button) (model, tea.Cmd) {
 func TestAsyncShellGlyphsDimmedCopyNormal(t *testing.T) {
 	md := "```bash {id=sb}\nls\n```\n"
 
-	enabledLines, _, _ := Render(md, 80, nil, "")        // shellDisabled defaults false
-	disabledLines, _, _ := Render(md, 80, nil, "", true) // shellDisabled = true
+	enabledLines, _, _ := Render(md, 80, RenderOpts{})                     // shellDisabled defaults false
+	disabledLines, _, _ := Render(md, 80, RenderOpts{ShellDisabled: true}) // shellDisabled = true
 
 	rawEnabled, _ := tabLineOf(enabledLines)
 	rawDisabled, _ := tabLineOf(disabledLines)

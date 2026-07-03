@@ -329,7 +329,7 @@ func parentSlug(ra runArgs) string {
 // blocksFor renders a playbook body and converts it to autorun.Block, the
 // headless-run representation (shared by --auto and the depends_on runner).
 func blocksFor(body string) []autorun.Block {
-	_, _, uiBlocks := ui.Render(body, 80, nil, "")
+	_, _, uiBlocks := ui.Render(body, 80, ui.RenderOpts{})
 	blocks := make([]autorun.Block, 0, len(uiBlocks))
 	for _, b := range uiBlocks {
 		blocks = append(blocks, autorun.Block{

@@ -11,8 +11,8 @@ func TestRenderSameDocTwiceIdentical(t *testing.T) {
 		"```go {id=a}\nfunc main() { println(\"a fairly wide line of code goes here\") }\n```\n\n" +
 		"```python {id=b}\nprint('hello world')\n```\n\n" +
 		"```\nplain fenced block, no language\n```\n"
-	l1, b1, blk1 := Render(md, 80, nil, "")
-	l2, b2, blk2 := Render(md, 80, nil, "")
+	l1, b1, blk1 := Render(md, 80, RenderOpts{})
+	l2, b2, blk2 := Render(md, 80, RenderOpts{})
 	if len(l1) != len(l2) {
 		t.Fatalf("line count differs across renders: %d vs %d", len(l1), len(l2))
 	}

@@ -13,7 +13,7 @@ func TestBlockVisualNumbers(t *testing.T) {
 	md := "```bash {id=a}\ntrue\n```\n\n" +
 		"```text {static}\nreference\n```\n\n" +
 		"```bash {id=b}\ntrue\n```\n"
-	lines, _, _ := Render(md, 60, nil, "")
+	lines, _, _ := Render(md, 60, RenderOpts{})
 	txt := joinText(lines)
 	if !strings.Contains(txt, "1") {
 		t.Error("first actionable block should be numbered 1")
@@ -32,7 +32,7 @@ func TestBlockVisualNumbers(t *testing.T) {
 func TestRollbackIndicatorOnBottomBorder(t *testing.T) {
 	md := "```bash {id=stage rollback=undo-stage}\ntrue\n```\n\n" +
 		"```bash {id=undo-stage}\ntrue\n```\n"
-	lines, _, _ := Render(md, 60, nil, "")
+	lines, _, _ := Render(md, 60, RenderOpts{})
 	txt := joinText(lines)
 	if !strings.Contains(txt, "rollback (1)") {
 		t.Errorf("undo-stage's bottom border should read 'rollback (1)' (stage is 1); got:\n%s", txt)
@@ -46,7 +46,7 @@ func TestRollbackIndicatorOnBottomBorder(t *testing.T) {
 // TestRollbackAttrParsed verifies rollback=<id> parses into Block.Rollback.
 func TestRollbackAttrParsed(t *testing.T) {
 	md := "```bash {id=stage rollback=undo-stage}\ntouch x\n```\n"
-	_, _, blocks := Render(md, 80, nil, "")
+	_, _, blocks := Render(md, 80, RenderOpts{})
 	var got string
 	for _, b := range blocks {
 		if b.ID == "stage" {
@@ -65,7 +65,7 @@ func TestRollbackTargetNotIndependentlyRunnable(t *testing.T) {
 	md := "```bash {id=stage rollback=undo-stage}\ntrue\n```\n\n" +
 		"```bash {id=undo-stage}\ntrue\n```\n"
 	// muxActive=true so the "no play" assertion on the rollback target is meaningful.
-	_, buttons, _ := Render(md, 80, map[string]blockRunState{}, "", false, true, false, true)
+	_, buttons, _ := Render(md, 80, RenderOpts{States: map[string]blockRunState{}, MuxActive: true})
 
 	if buttonForBlock(buttons, "undo-stage", "run") != nil {
 		t.Error("a rollback-target block must not have an independent run button")
@@ -218,19 +218,19 @@ func TestRollbackButtonGating(t *testing.T) {
 	}
 
 	// run context (no reengage) + something rollbackable → rollback button shows.
-	_, btns, _ := Render(md, 80, states, "", false, false, true)
+	_, btns, _ := Render(md, 80, RenderOpts{States: states, NoReengage: true, RollbackAvail: true})
 	if buttonForBlock(btns, "boom", "rollback") == nil {
 		t.Error("failed block must show a Rollback button when a run step is rollbackable")
 	}
 
 	// nothing rollbackable → no rollback button.
-	_, btns2, _ := Render(md, 80, states, "", false, false, false)
+	_, btns2, _ := Render(md, 80, RenderOpts{States: states, NoReengage: true})
 	if buttonForBlock(btns2, "boom", "rollback") != nil {
 		t.Error("no Rollback button when nothing is rollbackable")
 	}
 
 	// reengage available → followup wins, rollback suppressed.
-	_, btns3, _ := Render(md, 80, states, "", false, true, true)
+	_, btns3, _ := Render(md, 80, RenderOpts{States: states, RollbackAvail: true})
 	if buttonForBlock(btns3, "boom", "followup") == nil {
 		t.Error("re-engagement should take precedence (followup shows when both available)")
 	}

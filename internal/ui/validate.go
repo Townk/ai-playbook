@@ -14,6 +14,6 @@ package ui
 // The width passed to Render only affects layout, never the block COUNT, so a
 // fixed nominal width is used.
 func ValidatePlaybook(md string) bool {
-	_, _, blocks := Render(md, 80, nil, "")
+	_, _, blocks := Render(md, 80, RenderOpts{})
 	return isValidPlaybook(md, len(blocks))
 }

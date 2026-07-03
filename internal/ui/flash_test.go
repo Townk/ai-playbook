@@ -164,14 +164,14 @@ func TestFlashRenderCopyGlyph(t *testing.T) {
 	md := "```bash {id=fb}\necho hi\n```\n"
 
 	// Without flash: no flash background.
-	linesNormal, _, _ := Render(md, 80, nil, "")
+	linesNormal, _, _ := Render(md, 80, RenderOpts{})
 	rawNormal, _ := tabLineOf(linesNormal)
 	if strings.Contains(rawNormal, flashMarker) {
 		t.Error("without flashKey, tab line must NOT contain flash background")
 	}
 
 	// With flash on copy: flash background must appear.
-	linesFlash, _, _ := Render(md, 80, nil, "fb:copy")
+	linesFlash, _, _ := Render(md, 80, RenderOpts{FlashKey: "fb:copy"})
 	rawFlash, _ := tabLineOf(linesFlash)
 	if !strings.Contains(rawFlash, flashMarker) {
 		t.Errorf("with flashKey=fb:copy, tab line must contain flash bg seq %q\ngot: %q", flashMarker, rawFlash)
@@ -179,7 +179,7 @@ func TestFlashRenderCopyGlyph(t *testing.T) {
 
 	// Flash on a different button kind (run) must NOT affect copy glyph area
 	// (though it will appear somewhere on the same tab line for the run glyph).
-	linesRunFlash, _, _ := Render(md, 80, nil, "fb:run")
+	linesRunFlash, _, _ := Render(md, 80, RenderOpts{FlashKey: "fb:run"})
 	rawRunFlash, _ := tabLineOf(linesRunFlash)
 	// The line contains flash bg (for run), but the copy glyph's color is normal.
 	// We can't trivially separate them here; just verify flash is present.
@@ -191,13 +191,13 @@ func TestFlashRenderCopyGlyph(t *testing.T) {
 func TestFlashRenderRunGlyph(t *testing.T) {
 	md := "```bash {id=rb}\nls\n```\n"
 
-	linesNormal, _, _ := Render(md, 80, nil, "")
+	linesNormal, _, _ := Render(md, 80, RenderOpts{})
 	rawNormal, _ := tabLineOf(linesNormal)
 	if strings.Contains(rawNormal, flashMarker) {
 		t.Error("without flashKey, tab line must NOT contain flash background")
 	}
 
-	linesFlash, _, _ := Render(md, 80, nil, "rb:run")
+	linesFlash, _, _ := Render(md, 80, RenderOpts{FlashKey: "rb:run"})
 	rawFlash, _ := tabLineOf(linesFlash)
 	if !strings.Contains(rawFlash, flashMarker) {
 		t.Errorf("with flashKey=rb:run, tab line must contain flash bg seq %q\ngot: %q", flashMarker, rawFlash)
@@ -211,7 +211,7 @@ func TestFlashRenderToggleGlyph(t *testing.T) {
 	st := map[string]blockRunState{"tb": {Status: "ok", Exit: 0}}
 
 	// Without flash: no flash bg in any line.
-	linesNormal, _, _ := Render(md, 80, st, "")
+	linesNormal, _, _ := Render(md, 80, RenderOpts{States: st})
 	for _, l := range linesNormal {
 		if strings.Contains(l.Text, flashMarker) {
 			t.Error("without flashKey, no line must contain flash background")
@@ -219,7 +219,7 @@ func TestFlashRenderToggleGlyph(t *testing.T) {
 	}
 
 	// With flash on toggle: the summary line must contain flash bg.
-	linesFlash, _, _ := Render(md, 80, st, "tb:toggle")
+	linesFlash, _, _ := Render(md, 80, RenderOpts{States: st, FlashKey: "tb:toggle"})
 	found := false
 	for _, l := range linesFlash {
 		if strings.Contains(l.Text, flashMarker) {
@@ -241,7 +241,7 @@ func TestFlashKeyNotAffectOtherButtons(t *testing.T) {
 	// Flash only on "copy": the run/play glyphs must use their normal colors,
 	// not the flash bg. We verify by checking that there is exactly ONE
 	// occurrence of flashMarker per tab line (only the copy glyph).
-	linesFlash, btns, _ := Render(md, 80, nil, "sel:copy")
+	linesFlash, btns, _ := Render(md, 80, RenderOpts{FlashKey: "sel:copy"})
 	rawFlash, _ := tabLineOf(linesFlash)
 
 	// Find the column positions of each button.
@@ -305,7 +305,7 @@ func TestFlashClearedOnKeyPress(t *testing.T) {
 func TestUnknownLangTabNoIcon(t *testing.T) {
 	const nullGlyph = "\U000F07E2"
 	md := "```brainfuck\n++++\n```\n"
-	lines, _, _ := Render(md, 80, nil, "")
+	lines, _, _ := Render(md, 80, RenderOpts{})
 	raw, plain := tabLineOf(lines)
 	if raw == "" {
 		t.Fatal("no tab line found for unknown-lang block")

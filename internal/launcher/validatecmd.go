@@ -101,7 +101,7 @@ func ValidateMain() int {
 
 	fm, body, ok := frontmatter.Parse(content)
 
-	_, _, uiBlocks := ui.Render(body, 80, nil, "")
+	_, _, uiBlocks := ui.Render(body, 80, ui.RenderOpts{})
 	blocks := make([]validate.Block, 0, len(uiBlocks))
 	for _, b := range uiBlocks {
 		blocks = append(blocks, validate.Block{
