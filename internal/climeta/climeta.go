@@ -409,11 +409,23 @@ func Help(prog, name string) (string, bool) {
 	if len(cmd.Examples) > 0 {
 		b.WriteString("\nEXAMPLES\n")
 		for _, ex := range cmd.Examples {
-			fmt.Fprintf(&b, "  %s\n", ex)
+			fmt.Fprintf(&b, "  %s\n", exampleWithProg(prog, ex))
 		}
 	}
 
 	return b.String(), true
+}
+
+// exampleWithProg rewrites a leading canonical "ai-playbook " in an example to
+// the invocation name, so `apb <cmd> --help` shows copy-pasteable `apb …`
+// examples. The registry keeps examples canonical; only the leading command
+// token is swapped (a mid-string "ai-playbook" is left intact).
+func exampleWithProg(prog, ex string) string {
+	const canonical = "ai-playbook "
+	if prog == "ai-playbook" || !strings.HasPrefix(ex, canonical) {
+		return ex
+	}
+	return prog + " " + ex[len(canonical):]
 }
 
 // flagLabel returns a flag's "--name <placeholder>" label sans the leading

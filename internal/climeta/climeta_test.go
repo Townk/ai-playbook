@@ -115,6 +115,14 @@ func TestHelp_UsesProg(t *testing.T) {
 	if !strings.Contains(out, "apb run") {
 		t.Errorf(`Help("apb", "run") does not contain "apb run":`+"\n%s", out)
 	}
+	// EXAMPLES are name-aware too: a leading "ai-playbook " is rewritten to prog.
+	if strings.Contains(out, "ai-playbook run") {
+		t.Errorf(`Help("apb", "run") leaks canonical "ai-playbook run" in examples:`+"\n%s", out)
+	}
+	// The canonical name is preserved when invoked as ai-playbook.
+	if canon, _ := Help("ai-playbook", "run"); !strings.Contains(canon, "ai-playbook run deploy-staging") {
+		t.Errorf(`Help("ai-playbook","run") should keep canonical examples:`+"\n%s", canon)
+	}
 }
 
 // TestRegistry_NoEmptySummaries asserts every registered command has a
