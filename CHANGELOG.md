@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   both the standing system prompt and the per-request user message, paying
   their token cost twice on every authoring/followup/final call. That
   context now travels only in the user message.
+- Running a stored playbook by slug now resolves its working directory by
+  the same rule as `run --file`: a non-project_bound stored playbook opens
+  in its own file's directory (the store's content dir) instead of the
+  invocation cwd; `workdir:` front matter still overrides either way.
 
 ### Removed
 

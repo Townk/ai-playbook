@@ -21,6 +21,13 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 - [ ] Prompt/hint-line bleed tests are non-discriminating: the SGR-containment tests for the confirm/choose prompt and hint lines pass even with the `promptStyle`/`hintKW` fix reverted — `renderFrame`'s per-line `Background(Mantle)` wrap carries the bg through a foreground-only span. Devise a discriminating assertion (the text-box-interior bg tests are the working model) (2026-07-02)
 - [ ] Coverage pass toward ~90% — unit-testable packages first: mcpserver 42%, input 66%, capture 70%, triage 73%, tools/floatinput 77%; launcher/cmd orchestration needs integration tests (harder) (2026-06-27)
 - [ ] 2-tier integration config — residual: the named-preset selectors are DONE and uniform (`[mux] backend`, `[driver] shell`, `[agent] harness`) and mux has per-command overrides; consider whether shell/AI want per-command/per-aspect overrides too (likely not needed — revisit if a use case appears) (2026-06-27)
+- [ ] A5b-strict: the claude stream adapter (internal/agentstream) still returns nil on a truncated/malformed stream with exit 0 — only read failures surface through the new parse-error join (internal/author/events.go); needs adapter-side strictness (stream-contract violation → error) (2026-07-03)
+- [ ] A5a-full: interactive/streaming AI calls (agentstream fan-out, DriftRegen) still have no cancellation/timeout plumbing — only classify/metadata are bounded (60s, internal/author/events.go:28) (2026-07-03)
+- [ ] B11 residual: `run <slug>` still parses the playbook twice (loadParent + runFile); EnvMain/ValidateMain each double-load — thread the parsed node through dispatch (2026-07-03)
+- [ ] Driver Close lifecycle hardening: add a closed flag under d.mu set before ptmx.Close so Pgrp can't ioctl a reused fd, and make double-Close a no-op (currently re-signals a reaped pid) (2026-07-03)
+- [ ] Classify retry: skip the one-retry when errors.Is(err, context.DeadlineExceeded) — retrying a stalled harness doubles the worst case to 2×60s for nothing (2026-07-03)
+- [ ] Reject backticks in playbook id/file= at submit time (idTokenRe is `[\s{}=]`) — a backtick in the fence info string is CommonMark-invalid, a second fence-corruption vector (2026-07-03)
+- [ ] Consolidate the five fake-harness script writers in internal/author tests (writeFakeHarness/fakeStreamHarness/fakeMetadataHarness/writeStalledHarness/fakeArgvHarness) into one parameterized helper (2026-07-03)
 
 ## Ideas
 
@@ -31,3 +38,4 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 - [ ] adapt-on-run leaves two temp files per run (`writeTempMarkdown` render+orig in /tmp, never reaped; orig written even when junk-guarded) — defer-cleanup after `ui.Main` returns (2026-06-27)
 - [ ] Optional rich output via the kitty graphics protocol — images/charts in the pager (2026-06-26)
 - [ ] A JUnit/XML-style report for `run --auto` (CI ingestion) — a plain-text run summary + a JSON per-run log under `${data}/ai-playbook/runs/` shipped 2026-07-01; a JUnit/XML format for CI test-reporters is still open (2026-06-26)
+- [ ] Revisit the cwd rule for non-project_bound STORED playbooks: `run <slug>` now opens in the store content dir (runFile F4 rule, one-code-path fix 2026-07-03); decide whether stored playbooks deserve a stored-vs-file distinction (invocation cwd) or whether `workdir:` front matter suffices (2026-07-03)

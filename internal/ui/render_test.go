@@ -1851,7 +1851,7 @@ func TestDriftedDiff_RegenFailedNote(t *testing.T) {
 	}
 
 	// Specific note (no backend) → surfaced verbatim, overriding the generic line.
-	note := "no AI backend available — set AI_PLAYBOOK_MODEL or install the harness, or resolve manually"
+	note := "no AI backend available — configure [agent] or install the harness, or resolve manually"
 	states2 := map[string]blockRunState{"fix": {Drifted: true, RegenFailed: true, RegenNote: note}}
 	lines2, _, _ := Render(src, 100, RenderOpts{States: states2})
 	if !strings.Contains(joinText(lines2), "no AI backend available") {
