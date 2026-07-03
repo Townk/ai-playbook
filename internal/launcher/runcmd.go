@@ -132,22 +132,23 @@ func RunMain() int {
 	return 0
 }
 
-// runPlaybook resolves a slug through the store and renders its stored body as-is.
-// A project_bound playbook resolves the heuristic project root, exports it as the
-// run driver's PROJECT_ROOT (setProjectRootFn), and opens the driver there.
+// runPlaybook resolves slug to its stored file path and delegates to runFile — the
+// SAME `run --file` viewer path a raw file takes, so `run <slug>` and
+// `run --file <that file>` are provably one code path. This matters because
+// store.Load's returned body is front-matter-stripped (for the store's own
+// listing/display use); rendering THAT (as an earlier version of this function
+// did, via a since-removed temp-file round-trip) silently dropped the env: map
+// (disabling the confirmation gate and description subtitle) and the declared
+// project_root for every stored run. runFile re-reads + re-parses meta.Path
+// itself, so store.Meta.ProjectBound is not consulted here — the file's OWN
+// front matter decides, exactly like `run --file` would.
 func runPlaybook(slug string) int {
-	meta, body, lerr := storeLoadFn(slug)
+	meta, _, lerr := storeLoadFn(slug)
 	if lerr != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", lerr)
 		return 1
 	}
-	cwd := ""
-	if meta.ProjectBound {
-		root := projectRootFn()
-		setProjectRootFn(root) // the run driver exports PROJECT_ROOT=<root>
-		cwd = root
-	}
-	return renderStored(body, cwd)
+	return runFile(meta.Path)
 }
 
 // runFile renders a markdown file through the `run --file` viewer. The ORIGINAL file
@@ -387,46 +388,6 @@ func runViewer(file, cwd string) int {
 	code := uiMainFn()
 	os.Args = saved
 	return code
-}
-
-// renderStored writes body to a temp file and runs it via the `run --file` viewer
-// (no adapt, no banner). cwd (the project root for a project_bound run, else "")
-// is passed as --cwd so the driver opens there.
-func renderStored(body, cwd string) int {
-	f, err := writeTempMarkdown("playbook", body)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", err)
-		return 1
-	}
-	saved := os.Args
-	args := []string{os.Args[0], "run", "--file", f}
-	if cwd != "" {
-		args = append(args, "--cwd", cwd)
-	}
-	os.Args = args
-	code := uiMainFn()
-	os.Args = saved
-	return code
-}
-
-// writeTempMarkdown writes content to a temp *.md file and returns its path. The
-// file is left for the OS /tmp reap — ui.Main reads it after this returns.
-func writeTempMarkdown(tag, content string) (string, error) {
-	f, err := os.CreateTemp("", "ai-playbook-"+tag+"-*.md")
-	if err != nil {
-		return "", err
-	}
-	name := f.Name()
-	if _, werr := f.WriteString(content); werr != nil {
-		f.Close()
-		os.Remove(name)
-		return "", werr
-	}
-	if cerr := f.Close(); cerr != nil {
-		os.Remove(name)
-		return "", cerr
-	}
-	return name, nil
 }
 
 // runMode selects between the default (interactive viewer), headless (--auto),

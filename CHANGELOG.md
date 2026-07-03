@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `run <slug>` (a stored playbook) now renders through the same code path as
+  `run --file <path>`: its declared `env:` map (the confirmation gate),
+  description subtitle, and `project_root` are no longer silently dropped, and
+  the run no longer leaks a temp file per invocation.
 - Assist summoned via `apb` no longer captures its own invocation as the last
   command.
 - Paste now works in form fields and the choose dialog's "other" entry.

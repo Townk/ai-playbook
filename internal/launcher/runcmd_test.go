@@ -105,12 +105,21 @@ func withStoreLoadFn(t *testing.T, fn func(string) (store.Meta, string, error)) 
 
 // TestRunPlaybook_ProjectBoundSetsProjectRoot verifies a project_bound playbook
 // resolves the heuristic project root, sets it on the run driver via the
-// setProjectRootFn seam, and renders the stored body as-is (no model adapt).
+// setProjectRootFn seam, and renders the ORIGINAL stored file as-is (no model
+// adapt). runPlaybook delegates to runFile(meta.Path), so project_bound is
+// decided by the FILE's own front matter (re-parsed by runFile) — the storeLoadFn
+// stub's Meta.ProjectBound is irrelevant here and deliberately left false.
 func TestRunPlaybook_ProjectBoundSetsProjectRoot(t *testing.T) {
 	origLoad, origPR, origUI, origSPR := storeLoadFn, projectRootFn, uiMainFn, setProjectRootFn
 	t.Cleanup(func() { storeLoadFn, projectRootFn, uiMainFn, setProjectRootFn = origLoad, origPR, origUI, origSPR })
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pb.md")
+	content := "---\nname: pb\nproject_bound: true\n---\n# Playbook — T\n\n```bash {id=fix}\ncd $PROJECT_ROOT\n```\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	storeLoadFn = func(string) (store.Meta, string, error) {
-		return store.Meta{Slug: "pb", ProjectBound: true}, "# Playbook — T\n\n```bash {id=fix}\ncd $PROJECT_ROOT\n```\n", nil
+		return store.Meta{Slug: "pb", Path: path}, "", nil
 	}
 	projectRootFn = func() string { return "/new/proj" }
 	var gotPR string
@@ -124,19 +133,29 @@ func TestRunPlaybook_ProjectBoundSetsProjectRoot(t *testing.T) {
 	}
 }
 
-// ---- runPlaybook: non-project_bound renders as-is, no PROJECT_ROOT ----
+// ---- runPlaybook: non-project_bound renders as-is (runFile semantics), no PROJECT_ROOT ----
 
 const storedBody = "# Build\n\n```bash {id=verify}\nmake\n```\n"
 
-// TestRunPlaybook_NonProjectBoundRendersAsIs verifies a non-project_bound playbook
-// is rendered verbatim via `run --file <tmp>` with NO --cwd and NO PROJECT_ROOT set
-// (no model adapt, no banner flags).
+// TestRunPlaybook_NonProjectBoundRendersAsIs verifies a non-project_bound stored
+// playbook renders via `run --file <original path> --cwd <dir-of-file>` — runFile's
+// own rule for a non-project_bound front-matter file (F4: opens in the file's own
+// directory so its relative paths resolve) — with NO PROJECT_ROOT set. This used to
+// render a front-matter-stripped temp copy with NO --cwd at all (A2b); runFile
+// semantics now win uniformly for a stored run, exactly like `run --file` on the
+// identical path would.
 func TestRunPlaybook_NonProjectBoundRendersAsIs(t *testing.T) {
 	origLoad, origUI, origSPR := storeLoadFn, uiMainFn, setProjectRootFn
 	t.Cleanup(func() { storeLoadFn, uiMainFn, setProjectRootFn = origLoad, origUI, origSPR })
+	dir := t.TempDir()
+	path := filepath.Join(dir, "build.md")
+	content := "---\nname: build\n---\n" + storedBody
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	withArgs(t, []string{"ai-playbook", "run", "build"})
 	storeLoadFn = func(slug string) (store.Meta, string, error) {
-		return store.Meta{Slug: "build", ProjectBound: false}, storedBody, nil
+		return store.Meta{Slug: "build", Path: path}, "", nil
 	}
 	setProjectRootFn = func(string) { t.Fatal("non-project_bound run must NOT set PROJECT_ROOT") }
 	var captured []string
@@ -145,15 +164,54 @@ func TestRunPlaybook_NonProjectBoundRendersAsIs(t *testing.T) {
 	if code := runPlaybook("build"); code != 0 {
 		t.Fatalf("runPlaybook = %d", code)
 	}
-	// {bin, run, --file, <tmp>} — no --cwd, no banner flags.
-	if len(captured) != 4 || captured[1] != "run" || captured[2] != "--file" {
-		t.Fatalf("non-project_bound run: args = %v, want [bin run --file <tmp>]", captured)
+	// {bin, run, --file, <original path>, --cwd, <dir-of-file>}.
+	if len(captured) != 6 || captured[1] != "run" || captured[2] != "--file" || captured[4] != "--cwd" {
+		t.Fatalf("non-project_bound run: args = %v, want [bin run --file %s --cwd %s]", captured, path, dir)
 	}
-	got, _ := os.ReadFile(captured[3])
-	if string(got) != storedBody {
-		t.Errorf("non-project_bound run: render file = %q, want the stored body verbatim", got)
+	if captured[3] != path {
+		t.Errorf("non-project_bound run: file = %q, want the ORIGINAL stored path %q (not a temp copy)", captured[3], path)
 	}
-	os.Remove(captured[3])
+	if captured[5] != dir {
+		t.Errorf("non-project_bound run: --cwd = %q, want %q (dir of the stored file)", captured[5], dir)
+	}
+}
+
+// TestRunPlaybook_EnvFrontMatterReachesViewer verifies a stored playbook run via the
+// slug path reaches the viewer with its front matter INTACT — runPlaybook delegates
+// to runFile(meta.Path), the SAME code path `run --file` uses, so the confirmation
+// gate's env: map and the description subtitle are not silently dropped. Regression
+// coverage for A2b: the old renderStored round-trip wrote store.Load's
+// front-matter-STRIPPED body to a temp file, so ui.Main's loadPlaybookSource found no
+// env: map for a stored run even though `run --file` on the identical file kept it.
+func TestRunPlaybook_EnvFrontMatterReachesViewer(t *testing.T) {
+	origLoad, origUI, origSPR := storeLoadFn, uiMainFn, setProjectRootFn
+	t.Cleanup(func() { storeLoadFn, uiMainFn, setProjectRootFn = origLoad, origUI, origSPR })
+	dir := t.TempDir()
+	path := filepath.Join(dir, "chapter.md")
+	content := "---\nname: Chapter\nenv:\n  DATA_DIR:\n    value: /tmp/x\n    why: test\n---\n# Chapter\n\n```bash {id=go}\necho hi\n```\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	storeLoadFn = func(slug string) (store.Meta, string, error) {
+		return store.Meta{Slug: "chapter", Path: path}, "", nil
+	}
+	setProjectRootFn = func(string) { t.Fatal("non-project_bound run must NOT set PROJECT_ROOT") }
+	var captured []string
+	uiMainFn = func() int { captured = append([]string{}, os.Args...); return 0 }
+
+	if code := runPlaybook("chapter"); code != 0 {
+		t.Fatalf("runPlaybook = %d", code)
+	}
+	if len(captured) < 4 || captured[2] != "--file" || captured[3] != path {
+		t.Fatalf("runPlaybook: args = %v, want [bin run --file %s ...] (the ORIGINAL file, not a temp copy)", captured, path)
+	}
+	got, err := os.ReadFile(captured[3])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(got), "env:") || !strings.Contains(string(got), "DATA_DIR") {
+		t.Errorf("stored-run file must retain front matter (env: DATA_DIR); got:\n%s", got)
+	}
 }
 
 // TestRunMain_UnknownSlug_Exit1 verifies an unknown slug (store.Load error) is a
