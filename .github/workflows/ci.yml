@@ -32,10 +32,13 @@ jobs:
       - name: Vet
         run: go vet ./...
 
-      - name: Test (race + coverage)
-        # -timeout 25m: the internal/ui suite is subprocess-heavy and exceeds go
-        # test's default 10-min per-package timeout on the 2-core CI runner.
-        run: go test -race -timeout 25m -coverprofile=coverage.out ./...
+      - name: Test (coverage)
+        # Fast lane: no -race here — the subprocess-heavy internal/ui suite under
+        # the race detector on 2-core runners takes ~15m, too slow for per-push
+        # feedback. The race detector runs on a nightly schedule instead
+        # (.github/workflows/race.yml). -timeout 15m keeps headroom for the
+        # ui suite, which still exceeds go test's 10-min default per-package.
+        run: go test -timeout 15m -coverprofile=coverage.out ./...
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
