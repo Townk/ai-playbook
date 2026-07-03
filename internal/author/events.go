@@ -303,8 +303,9 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 		return nil, nil, err
 	}
 
-	// parseErr captures adapter.Parse's return (a fatal read failure, or — for a
-	// test-injected Adapter — a detected stream-contract violation). It is set
+	// parseErr captures adapter.Parse's return (a fatal read failure or a
+	// detected stream-contract violation — the claude adapter is strict since
+	// A5b-strict: non-JSON lines and a missing result envelope error). It is set
 	// exactly once by the goroutine below, then read from wait() AFTER the
 	// draining caller has observed the events channel close; the close
 	// happens-after this assignment (deferred close runs after Parse returns),
