@@ -147,6 +147,51 @@ func TestAssisted_RunActivatesReadyBlock(t *testing.T) {
 	}
 }
 
+// TestAssisted_HintActivatesRunButton is the characterization for finding A3a:
+// activating an assisted-footer button via hint mode (Space-leader → label) must
+// dispatch it, exactly like a mouse click or the footer's Enter. Before the shared
+// button dispatcher the hint path lacked the `assist-` arm, so a hint-selected
+// footer button fell through to emitAction → nil and did nothing (silent no-op).
+// The shared dispatcher funnels the hint path through assistedActivate like the
+// mouse path, so the ready block starts.
+func TestAssisted_HintActivatesRunButton(t *testing.T) {
+	m := newModel("T", "```bash {id=a}\ntrue\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+	m = m.startAssisted()
+	if m.assistedFooter != "step" {
+		t.Fatalf("setup: expected a step footer, got %q", m.assistedFooter)
+	}
+
+	// Space falls through the footer to the hint leader (see
+	// TestAssisted_SpaceStartsHintNotActivate); its Screen-fixed buttons are hintable.
+	nm, _ := m.Update(key(" "))
+	m2 := nm.(model)
+	if !m2.hintMode {
+		t.Fatal("space must enter hint mode over the visible buttons")
+	}
+	var runLabel string
+	for lbl, b := range m2.hintLabels {
+		if b.Kind == "assist-run" {
+			runLabel = lbl
+			break
+		}
+	}
+	if runLabel == "" {
+		t.Fatal("assist-run must receive a hint label")
+	}
+
+	nm3, _ := m2.Update(key(runLabel))
+	m3 := nm3.(model)
+	if m3.blockStates["a"].Status != "running" {
+		t.Errorf("hint-activating Run must mark the ready block running; got %q (A3a: silent no-op before the shared dispatcher)", m3.blockStates["a"].Status)
+	}
+	if m3.assistedFooter != "" {
+		t.Errorf("hint-activating Run must hide the footer while the step runs; got %q", m3.assistedFooter)
+	}
+}
+
 func TestAssisted_RollbackResolvesFailure(t *testing.T) {
 	m := newModel("T", "```bash {id=a rollback=undo-a}\ntrue\n```\n\n```bash {id=undo-a}\ntrue\n```\n\n```bash {id=boom needs=a}\nfalse\n```\n")
 	m.width, m.height = 80, 24

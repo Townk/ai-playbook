@@ -430,3 +430,43 @@ func TestStopButtonHintKeyActivation(t *testing.T) {
 		t.Error("hint-mode stop activation must return a non-nil cmd")
 	}
 }
+
+// TestCreateButtonHintActivation pins one of the table-driven running-state arms
+// through the hint path: hint-activating a create button flips the block to
+// running/create and flashes it, exactly like a mouse click. Behavior-identical
+// before and after the shared dispatcher extraction (the apply-diff/undo-diff/
+// create/undo-create arms are consolidated into a kind→action table there).
+func TestCreateButtonHintActivation(t *testing.T) {
+	md := "```go {id=cf file=cmd/x/main.go}\npackage main\n```\n"
+	m := newModel("T", md)
+	m.width, m.height = 80, 24
+	m.reflow()
+
+	m2, _ := m.Update(key(" "))
+	m3 := m2.(model)
+	if !m3.hintMode {
+		t.Fatal("space should enter hint mode")
+	}
+	var createLabel string
+	for lbl, b := range m3.hintLabels {
+		if b.BlockID == "cf" && b.Kind == "create" {
+			createLabel = lbl
+			break
+		}
+	}
+	if createLabel == "" {
+		t.Fatal("no hint label found for the create button")
+	}
+
+	msg4, cmd := m3.Update(key(createLabel))
+	m4 := msg4.(model)
+	if st := m4.blockStates["cf"]; st.Status != "running" || st.Action != "create" {
+		t.Errorf("hint create → status=%q action=%q, want running/create", st.Status, st.Action)
+	}
+	if m4.flashKey != "cf:create" {
+		t.Errorf("flashKey = %q, want cf:create", m4.flashKey)
+	}
+	if cmd == nil {
+		t.Error("hint-mode create activation must return a non-nil cmd")
+	}
+}

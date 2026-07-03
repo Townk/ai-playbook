@@ -26,6 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keyboard hint-mode activation of an assisted-run footer button (Run / Skip /
+  Roll back / Leave as-is / Quit) now works: selecting one via the Space-leader
+  hint labels used to be a silent no-op — only a mouse click dispatched it. Both
+  input paths now share one button dispatcher, so they can no longer drift apart.
 - The configured harness (`[agent].harness`) is now honored on the re-engagement
   and fallback authoring paths: those used to run Claude unconditionally, ignoring
   a non-Claude harness selection. All agent calls now route through the single,

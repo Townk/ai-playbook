@@ -460,6 +460,118 @@ func (m model) buttonInert(b Button) bool {
 	return false
 }
 
+// runningActions maps the four "start a run and spin" button kinds to the
+// blockRunState.Action each one sets. They share one arm (Status="running",
+// Action, SpinFrame=0, emitAction, reflow, batch startTick+flash+ac), so
+// activateButton table-drives them off this lookup instead of four clones.
+var runningActions = map[string]string{
+	"apply-diff":  "apply",
+	"undo-diff":   "undo",
+	"create":      "create",
+	"undo-create": "undo",
+}
+
+// activateButton runs the dispatch for one button — shared by the mouse-click and
+// keyboard-hint paths so the two can never drift apart (finding C1a). It sets the
+// flash key (BlockID:Kind) and resolves the button's kind to its action.
+//
+// Callers gate INERTNESS before calling: the mouse path swallows a shell-action
+// button during async startup (returns before this, so no flash); the hint path
+// never assigns a label to an inert button (buttonInert filters assignHintLabels),
+// so it cannot reach here with one. The one inert case handled inline is a DRIFTED
+// block's apply-diff (reachable only by mouse) — it flashes then no-ops, exactly
+// as the mouse path did before.
+//
+// The assisted-footer (`assist-`) arm lives here, so hint activation of a footer
+// button now dispatches through assistedActivate instead of falling through to
+// emitAction → nil and silently doing nothing (finding A3a).
+func (m model) activateButton(b Button) (model, tea.Cmd) {
+	m.flashKey = b.BlockID + ":" + b.Kind
+	switch {
+	case b.Kind == "toggle":
+		m = m.handleToggle(b.BlockID) // handleToggle already calls reflow
+		return m, m.flashCmd()
+	case b.Kind == "run":
+		var ac tea.Cmd
+		m, ac = m.runOrGate(b)
+		m.reflow()
+		return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
+	case b.Kind == "stop":
+		m.markStopped(b.BlockID)
+		ac := m.emitAction(b)
+		m.reflow()
+		return m, tea.Batch(m.flashCmd(), ac)
+	case b.Kind == "apply-diff" && m.blockStates[b.BlockID].Drifted:
+		// Drifted diff block: only apply-diff is inert (you genuinely can't apply a
+		// patch that no longer matches). view-diff/diff still open the read-only
+		// side-by-side pager below so a drifted diff can be viewed.
+		return m, nil
+	}
+
+	if action, ok := runningActions[b.Kind]; ok {
+		st := m.blockStates[b.BlockID]
+		st.Status = "running"
+		st.Action = action
+		st.SpinFrame = 0
+		m.blockStates[b.BlockID] = st
+		ac := m.emitAction(b)
+		m.reflow()
+		return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
+	}
+
+	switch {
+	case b.Kind == "undo-resolve":
+		return m.undoResolve(b)
+	case b.Kind == "diff" || b.Kind == "view-diff":
+		return m.activateDiffButton(b)
+	case b.Kind == "drift-resolve":
+		return m.driftResolveDispatch(b)
+	case b.Kind == "drift-regen":
+		if m.orch == nil {
+			return m, nil
+		}
+		st := m.blockStates[b.BlockID]
+		st.Status = "regenerating"
+		st.RegenFailed = false
+		st.RegenNote = ""
+		st.SpinFrame = 0
+		m.blockStates[b.BlockID] = st
+		m.reflow()
+		return m, tea.Batch(m.startTick(), m.flashCmd(), m.driftRegenCmd(b.BlockID, b.Payload))
+	case b.Kind == "regenerate":
+		m.flashKey = "cached:regenerate"
+		// In-process: re-author via the orchestrator and re-arm the parser
+		// (REPLACE). Else flash-only (no regenerate path wired).
+		if cmd := m.beginRegenerate(); cmd != nil {
+			return m, tea.Batch(m.flashCmd(), cmd)
+		}
+		m.reflow()
+		return m, m.flashCmd()
+	case b.Kind == "followup":
+		if cmd := m.beginFollowupStream(b.BlockID, b.Payload); cmd != nil {
+			return m, tea.Batch(m.flashCmd(), cmd)
+		}
+		m.reflow()
+		return m, m.flashCmd()
+	case b.Kind == "rollback":
+		return m.beginRollback(b.BlockID)
+	case b.Kind == "confirm-yes" || b.Kind == "confirm-no":
+		if cmd := m.resolveConfirm(b.Kind == "confirm-yes"); cmd != nil {
+			return m, tea.Batch(m.flashCmd(), cmd)
+		}
+		m.reflow()
+		return m, m.flashCmd()
+	case strings.HasPrefix(b.Kind, "assist-"):
+		return m.assistedActivate(b.Kind)
+	case b.Kind == "edit":
+		return m.editDispatch()
+	}
+
+	ac := m.emitAction(b)
+	m.reflow()
+	return m, tea.Batch(m.flashCmd(), ac)
+}
+
 // isShellActionKind reports whether a button kind needs the shell driver /
 // orchestrator to act: run (▶), play (run-in-assistant-shell), stop, (view-)diff,
 // apply-diff, undo-diff, and the cached regenerate pill. These are the buttons gated
@@ -1183,130 +1295,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if isShellActionKind(b.Kind) && !m.shellActionsReady() {
 					return m, nil
 				}
-				m.flashKey = b.BlockID + ":" + b.Kind
-				if b.Kind == "toggle" {
-					m = m.handleToggle(b.BlockID) // handleToggle already calls reflow
-					return m, m.flashCmd()
-				}
-				if b.Kind == "run" {
-					var ac tea.Cmd
-					m, ac = m.runOrGate(b)
-					m.reflow()
-					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
-				}
-				if b.Kind == "stop" {
-					m.flashKey = b.BlockID + ":" + b.Kind
-					m.markStopped(b.BlockID)
-					ac := m.emitAction(b)
-					m.reflow()
-					return m, tea.Batch(m.flashCmd(), ac)
-				}
-				// Drifted diff block: only apply-diff is inert (you genuinely can't apply a
-				// patch that no longer matches). view-diff/diff still open the read-only
-				// side-by-side pager (activateDiffButton) so a drifted diff can be viewed.
-				if b.Kind == "apply-diff" && m.blockStates[b.BlockID].Drifted {
-					return m, nil
-				}
-				if b.Kind == "apply-diff" {
-					st := m.blockStates[b.BlockID]
-					st.Status = "running"
-					st.Action = "apply"
-					st.SpinFrame = 0
-					m.blockStates[b.BlockID] = st
-					ac := m.emitAction(b)
-					m.reflow()
-					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
-				}
-				if b.Kind == "undo-diff" {
-					st := m.blockStates[b.BlockID]
-					st.Status = "running"
-					st.Action = "undo"
-					st.SpinFrame = 0
-					m.blockStates[b.BlockID] = st
-					ac := m.emitAction(b)
-					m.reflow()
-					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
-				}
-				if b.Kind == "undo-resolve" {
-					m.flashKey = b.BlockID + ":undo-resolve"
-					return m.undoResolve(b)
-				}
-				if b.Kind == "create" {
-					st := m.blockStates[b.BlockID]
-					st.Status = "running"
-					st.Action = "create"
-					st.SpinFrame = 0
-					m.blockStates[b.BlockID] = st
-					ac := m.emitAction(b)
-					m.reflow()
-					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
-				}
-				if b.Kind == "undo-create" {
-					st := m.blockStates[b.BlockID]
-					st.Status = "running"
-					st.Action = "undo"
-					st.SpinFrame = 0
-					m.blockStates[b.BlockID] = st
-					ac := m.emitAction(b)
-					m.reflow()
-					return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
-				}
-				if b.Kind == "diff" || b.Kind == "view-diff" {
-					return m.activateDiffButton(b)
-				}
-				if b.Kind == "drift-resolve" {
-					return m.driftResolveDispatch(b)
-				}
-				if b.Kind == "drift-regen" {
-					if m.orch == nil {
-						return m, nil
-					}
-					st := m.blockStates[b.BlockID]
-					st.Status = "regenerating"
-					st.RegenFailed = false
-					st.RegenNote = ""
-					st.SpinFrame = 0
-					m.blockStates[b.BlockID] = st
-					m.reflow()
-					return m, tea.Batch(m.startTick(), m.flashCmd(), m.driftRegenCmd(b.BlockID, b.Payload))
-				}
-				if b.Kind == "regenerate" {
-					m.flashKey = "cached:regenerate"
-					// In-process: re-author via the orchestrator and re-arm the parser
-					// (REPLACE). Else flash-only (no regenerate path wired).
-					if cmd := m.beginRegenerate(); cmd != nil {
-						return m, tea.Batch(m.flashCmd(), cmd)
-					}
-					m.reflow()
-					return m, m.flashCmd()
-				}
-				if b.Kind == "followup" {
-					if cmd := m.beginFollowupStream(b.BlockID, b.Payload); cmd != nil {
-						return m, tea.Batch(m.flashCmd(), cmd)
-					}
-					m.reflow()
-					return m, m.flashCmd()
-				}
-				if b.Kind == "rollback" {
-					m.flashKey = b.BlockID + ":rollback"
-					return m.beginRollback(b.BlockID)
-				}
-				if b.Kind == "confirm-yes" || b.Kind == "confirm-no" {
-					if cmd := m.resolveConfirm(b.Kind == "confirm-yes"); cmd != nil {
-						return m, tea.Batch(m.flashCmd(), cmd)
-					}
-					m.reflow()
-					return m, m.flashCmd()
-				}
-				if strings.HasPrefix(b.Kind, "assist-") {
-					return m.assistedActivate(b.Kind)
-				}
-				if b.Kind == "edit" {
-					return m.editDispatch()
-				}
-				ac := m.emitAction(b)
-				m.reflow()
-				return m, tea.Batch(m.flashCmd(), ac)
+				return m.activateButton(b)
 			}
 		}
 		return m, nil
@@ -1432,127 +1421,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						m.hintLabels = nil
 						return m, nil
 					}
-					m.flashKey = b.BlockID + ":" + b.Kind
 					m.hintMode = false
 					m.hintLabels = nil
-					if b.Kind == "toggle" {
-						m = m.handleToggle(b.BlockID) // handleToggle already calls reflow
-						return m, m.flashCmd()
-					}
-					if b.Kind == "run" {
-						var ac tea.Cmd
-						m, ac = m.runOrGate(b)
-						m.reflow()
-						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
-					}
-					if b.Kind == "stop" {
-						m.flashKey = b.BlockID + ":" + b.Kind
-						m.markStopped(b.BlockID)
-						ac := m.emitAction(b)
-						m.reflow()
-						return m, tea.Batch(m.flashCmd(), ac)
-					}
-					// Drifted diff block: only apply-diff is inert (you genuinely can't apply a
-					// patch that no longer matches). view-diff/diff still open the read-only
-					// side-by-side pager (activateDiffButton) so a drifted diff can be viewed.
-					if b.Kind == "apply-diff" && m.blockStates[b.BlockID].Drifted {
-						return m, nil
-					}
-					if b.Kind == "apply-diff" {
-						st := m.blockStates[b.BlockID]
-						st.Status = "running"
-						st.Action = "apply"
-						st.SpinFrame = 0
-						m.blockStates[b.BlockID] = st
-						ac := m.emitAction(b)
-						m.reflow()
-						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
-					}
-					if b.Kind == "undo-diff" {
-						st := m.blockStates[b.BlockID]
-						st.Status = "running"
-						st.Action = "undo"
-						st.SpinFrame = 0
-						m.blockStates[b.BlockID] = st
-						ac := m.emitAction(b)
-						m.reflow()
-						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
-					}
-					if b.Kind == "undo-resolve" {
-						m.flashKey = b.BlockID + ":undo-resolve"
-						return m.undoResolve(b)
-					}
-					if b.Kind == "create" {
-						st := m.blockStates[b.BlockID]
-						st.Status = "running"
-						st.Action = "create"
-						st.SpinFrame = 0
-						m.blockStates[b.BlockID] = st
-						ac := m.emitAction(b)
-						m.reflow()
-						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
-					}
-					if b.Kind == "undo-create" {
-						st := m.blockStates[b.BlockID]
-						st.Status = "running"
-						st.Action = "undo"
-						st.SpinFrame = 0
-						m.blockStates[b.BlockID] = st
-						ac := m.emitAction(b)
-						m.reflow()
-						return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
-					}
-					if b.Kind == "diff" || b.Kind == "view-diff" {
-						return m.activateDiffButton(b)
-					}
-					if b.Kind == "drift-resolve" {
-						return m.driftResolveDispatch(b)
-					}
-					if b.Kind == "drift-regen" {
-						if m.orch == nil {
-							return m, nil
-						}
-						st := m.blockStates[b.BlockID]
-						st.Status = "regenerating"
-						st.RegenFailed = false
-						st.RegenNote = ""
-						st.SpinFrame = 0
-						m.blockStates[b.BlockID] = st
-						m.reflow()
-						return m, tea.Batch(m.startTick(), m.flashCmd(), m.driftRegenCmd(b.BlockID, b.Payload))
-					}
-					if b.Kind == "regenerate" {
-						m.flashKey = "cached:regenerate"
-						if cmd := m.beginRegenerate(); cmd != nil {
-							return m, tea.Batch(m.flashCmd(), cmd)
-						}
-						m.reflow()
-						return m, m.flashCmd()
-					}
-					if b.Kind == "followup" {
-						if cmd := m.beginFollowupStream(b.BlockID, b.Payload); cmd != nil {
-							return m, tea.Batch(m.flashCmd(), cmd)
-						}
-						m.reflow()
-						return m, m.flashCmd()
-					}
-					if b.Kind == "rollback" {
-						m.flashKey = b.BlockID + ":rollback"
-						return m.beginRollback(b.BlockID)
-					}
-					if b.Kind == "confirm-yes" || b.Kind == "confirm-no" {
-						if cmd := m.resolveConfirm(b.Kind == "confirm-yes"); cmd != nil {
-							return m, tea.Batch(m.flashCmd(), cmd)
-						}
-						m.reflow()
-						return m, m.flashCmd()
-					}
-					if b.Kind == "edit" {
-						return m.editDispatch()
-					}
-					ac := m.emitAction(b)
-					m.reflow()
-					return m, tea.Batch(m.flashCmd(), ac)
+					return m.activateButton(b)
 				}
 				m.hintMode = false
 				m.hintLabels = nil
