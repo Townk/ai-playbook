@@ -16,6 +16,7 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 
 ## Tasks
 
+- [ ] Extend the shared-test-driver speedup to `internal/{orchestrator,driver,tools,launcher}` — each still spawns a real zsh per test (the ~1200ms `driver.Open` idle floor), so the `-race` lane is still ~3–5min on CI (orchestrator ~68s, driver ~38s, tools ~33s locally). The same `TestMain` shared-driver pattern used for `internal/ui` (577a0ed) applies; once done, `-race` can move back onto the fast per-push lane and `race.yml` can be retired (2026-07-03)
 - [ ] ESC-audit (broader sweep): the KNOWN classify-wave case is FIXED — ESC during the `assist` thinking wave now cancels instead of routing (2026-07-02). Remaining: sweep the pager's own `esc` cases in `internal/ui/model.go` (~lines 1345/1351/1386/1423/1674) for consistent cancel/dismiss (never exit the app; Ctrl+C exits). The `--assisted`/`run` variable-confirm gate stays a deliberate exception (ESC ends the run) (2026-06-27)
 - [ ] Prompt/hint-line bleed tests are non-discriminating: the SGR-containment tests for the confirm/choose prompt and hint lines pass even with the `promptStyle`/`hintKW` fix reverted — `renderFrame`'s per-line `Background(Mantle)` wrap carries the bg through a foreground-only span. Devise a discriminating assertion (the text-box-interior bg tests are the working model) (2026-07-02)
 - [ ] internal/ui test suite is slow on CI (~10min+ under -race on 2-core runners) — parallelize / reduce per-test zsh-driver spawns (2026-06-27)
