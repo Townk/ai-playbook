@@ -7,7 +7,7 @@ GOLANGCI := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.
 VERSION ?= dev
 LDFLAGS := -X github.com/Townk/ai-playbook/internal/cli.Version=$(VERSION)
 
-.PHONY: build build-release vet test lint fmt-check check docs
+.PHONY: build build-release vet test lint fmt-check check docs docs-check
 
 build:
 	go build ./...
@@ -21,6 +21,14 @@ build-release:
 
 docs:
 	go run ./cmd/docgen
+
+# docs-check verifies docs/man/*.1 and completions/_ai-playbook are up to date
+# with the climeta registry they're generated from (docgen is idempotent, so a
+# clean re-run must produce no diff). Catches registry edits that forgot `make
+# docs`.
+docs-check:
+	go run ./cmd/docgen
+	git diff --exit-code docs/man completions
 
 vet:
 	go vet ./...
@@ -38,4 +46,4 @@ fmt-check:
 		exit 1; \
 	fi
 
-check: build vet lint fmt-check test
+check: build vet lint fmt-check test docs-check

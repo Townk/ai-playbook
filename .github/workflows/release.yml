@@ -9,8 +9,31 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    name: build / test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install zsh (the shell driver and its tests spawn a zsh shell)
+        run: sudo apt-get update && sudo apt-get install -y zsh
+
+      - name: Build
+        run: go build ./...
+
+      - name: Test
+        run: go test -timeout 15m ./...
+
   goreleaser:
     name: goreleaser
+    needs: test
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
