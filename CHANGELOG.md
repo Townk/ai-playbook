@@ -35,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- A stalled model backend no longer doubles the `assist` triage wait: the
+  classify pass skips its one-retry when the first attempt timed out (retrying
+  a hung harness could only time out again, turning a 60s worst case into 120s).
 - Keyboard hint-mode activation of an assisted-run footer button (Run / Skip /
   Roll back / Leave as-is / Quit) now works: selecting one via the Space-leader
   hint labels used to be a silent no-op — only a mouse click dispatched it. Both

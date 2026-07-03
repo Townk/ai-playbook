@@ -25,7 +25,6 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 - [ ] A5a-full: interactive/streaming AI calls (agentstream fan-out, DriftRegen) still have no cancellation/timeout plumbing — only classify/metadata are bounded (60s, internal/author/events.go:28) (2026-07-03)
 - [ ] B11 residual: `run <slug>` still parses the playbook twice (loadParent + runFile); EnvMain/ValidateMain each double-load — thread the parsed node through dispatch (2026-07-03)
 - [ ] Driver Close lifecycle hardening: add a closed flag under d.mu set before ptmx.Close so Pgrp can't ioctl a reused fd, and make double-Close a no-op (currently re-signals a reaped pid) (2026-07-03)
-- [ ] Classify retry: skip the one-retry when errors.Is(err, context.DeadlineExceeded) — retrying a stalled harness doubles the worst case to 2×60s for nothing (2026-07-03)
 - [ ] Reject backticks in playbook id/file= at submit time (idTokenRe is `[\s{}=]`) — a backtick in the fence info string is CommonMark-invalid, a second fence-corruption vector (2026-07-03)
 - [ ] Consolidate the five fake-harness script writers in internal/author tests (writeFakeHarness/fakeStreamHarness/fakeMetadataHarness/writeStalledHarness/fakeArgvHarness) into one parameterized helper (2026-07-03)
 

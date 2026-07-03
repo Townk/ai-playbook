@@ -1,7 +1,9 @@
 package author
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -144,8 +146,10 @@ const classifyTrigger = "Classify the request above. Respond with the JSON objec
 //
 // Parsing mirrors PlaybookMetadata: drain the event stream for the Final result
 // text, tolerate a fence/whitespace by extracting the outer {...}, json.Unmarshal,
-// retry ONCE. Robustness contract (the caller never blocks — classify ALWAYS routes
-// somewhere):
+// retry ONCE — except on a Timeout (context.DeadlineExceeded), where the harness
+// stalled and a retry would just stall again (doubling the worst case to
+// 2×Timeout). Robustness contract (the caller never blocks — classify ALWAYS
+// routes somewhere):
 //
 //   - an unknown/empty Kind is normalized to "escalate";
 //   - the failed-command GUARD: a "command" whose Content (whitespace-collapsed)
@@ -181,6 +185,12 @@ func ClassifyRequest(req capture.Request, opts AuthorOptions) (Classification, e
 		out, err := runMetadataOnce(sys, classifyTrigger, opts)
 		if err != nil {
 			lastErr = err
+			// A stalled harness that blew its Timeout will stall again — retrying
+			// just doubles the worst case to 2×Timeout for nothing. The one-retry
+			// stays reserved for transient parse/JSON failures below.
+			if errors.Is(err, context.DeadlineExceeded) {
+				break
+			}
 			continue
 		}
 		cls, perr := parseClassification(out)

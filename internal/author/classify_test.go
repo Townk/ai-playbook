@@ -410,3 +410,32 @@ func TestClassifyRequest_TimesOutOnStalledHarness(t *testing.T) {
 		t.Errorf("ClassifyRequest took %v, want well under 5s (the timeout must actually bound it)", elapsed)
 	}
 }
+
+// TestClassifyRequest_NoRetryOnTimeout: a DeadlineExceeded attempt must NOT be
+// retried — the harness stalled past its budget, so a second identical attempt
+// just doubles the worst case to 2×Timeout for nothing. The one-retry stays
+// reserved for transient parse/JSON failures (which a re-roll can fix).
+func TestClassifyRequest_NoRetryOnTimeout(t *testing.T) {
+	bin := writeStalledHarness(t)
+	cfg := config.Default()
+	cfg.Agent.Harness = "claude"
+
+	attempts := 0
+	_, err := ClassifyRequest(sampleClassifyRequest(), AuthorOptions{
+		Cfg:     cfg,
+		Timeout: 100 * time.Millisecond,
+		Command: func(ctx context.Context, b string, args []string) *exec.Cmd {
+			attempts++
+			return exec.CommandContext(ctx, bin, args...)
+		},
+	})
+	if err == nil {
+		t.Fatal("expected a timeout error, got nil")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("error = %v, want it to wrap context.DeadlineExceeded", err)
+	}
+	if attempts != 1 {
+		t.Errorf("harness attempts = %d, want 1 (no retry on a stalled-harness timeout)", attempts)
+	}
+}
