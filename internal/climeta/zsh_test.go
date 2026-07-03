@@ -8,15 +8,16 @@ import (
 )
 
 // TestZsh_Header asserts Zsh() starts with the #compdef pragma zsh requires
-// to recognize this file as a completion function for ai-playbook.
+// to recognize this file as a completion function for both ai-playbook and
+// apb.
 func TestZsh_Header(t *testing.T) {
 	out := Zsh()
-	if !strings.HasPrefix(out, "#compdef ai-playbook") {
+	if !strings.HasPrefix(out, "#compdef ai-playbook apb\n") {
 		head := out
 		if len(head) > 80 {
 			head = head[:80]
 		}
-		t.Errorf("Zsh() does not start with #compdef ai-playbook:\n%s", head)
+		t.Errorf("Zsh() does not start with #compdef ai-playbook apb:\n%s", head)
 	}
 }
 
@@ -48,7 +49,9 @@ func TestZsh_ListsEveryCommand(t *testing.T) {
 
 // TestZsh_SlugHelper asserts the dynamic store-slug completion helper is
 // present, verbatim, including the exact "list --format fuzzy-data-source"
-// invocation it shells out to.
+// invocation it shells out to — and that it invokes the completed binary
+// (via $service), never a hardcoded "ai-playbook", so slug completion still
+// works when only apb is on PATH.
 func TestZsh_SlugHelper(t *testing.T) {
 	out := Zsh()
 	if !strings.Contains(out, "_ai-playbook_slugs()") {
@@ -56,6 +59,12 @@ func TestZsh_SlugHelper(t *testing.T) {
 	}
 	if !strings.Contains(out, "list --format fuzzy-data-source") {
 		t.Error(`Zsh() missing the literal "list --format fuzzy-data-source" invocation`)
+	}
+	if !strings.Contains(out, "${service} list --format fuzzy-data-source") {
+		t.Error(`Zsh() slug helper does not invoke "${service} list --format fuzzy-data-source"`)
+	}
+	if strings.Contains(out, "ai-playbook list --format") {
+		t.Error(`Zsh() slug helper hardcodes "ai-playbook list --format" instead of using the invoked-name variable`)
 	}
 }
 

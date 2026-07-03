@@ -1,8 +1,8 @@
-#compdef ai-playbook
+#compdef ai-playbook apb
 
 _ai-playbook_slugs() {
   local -a slugs
-  slugs=(${(f)"$(ai-playbook list --format fuzzy-data-source 2>/dev/null | awk -F$'\x1f' '{print $2":"$1}')"})
+  slugs=(${(f)"$(${service} list --format fuzzy-data-source 2>/dev/null | awk -F$'\x1f' '{print $2":"$1}')"})
   _describe -t playbooks 'playbook' slugs
 }
 

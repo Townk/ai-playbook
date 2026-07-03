@@ -42,17 +42,21 @@ var Version = "dev"
 // and returns the process exit code. Callers (cmd/ai-playbook, cmd/apb) are
 // thin wrappers: func main() { os.Exit(cli.Run(os.Args)) }.
 func Run(args []string) int {
+	prog := "ai-playbook"
+	if len(args) > 0 {
+		prog = filepath.Base(args[0])
+	}
 	if len(args) < 2 {
-		usage()
+		usage(prog)
 		return 2
 	}
-	if text, handled := helpFor(args[1:]); handled {
+	if text, handled := helpFor(prog, args[1:]); handled {
 		fmt.Println(text)
 		return 0
 	}
 	switch args[1] {
 	case "version", "--version", "-v":
-		fmt.Printf("ai-playbook %s\n", Version)
+		fmt.Printf("%s %s\n", prog, Version)
 		return 0
 	case "selftest":
 		return selftest()
@@ -91,8 +95,8 @@ func Run(args []string) int {
 	case "input":
 		return input.Main()
 	default:
-		fmt.Fprintf(os.Stderr, "ai-playbook: unknown subcommand %q\n", args[1])
-		usage()
+		fmt.Fprintf(os.Stderr, "%s: unknown subcommand %q\n", prog, args[1])
+		usage(prog)
 		return 2
 	}
 }
@@ -100,23 +104,25 @@ func Run(args []string) int {
 // helpFor is the pure top-level help-dispatch decision, factored out of
 // Run() (which returns a process exit code, but note it no longer calls
 // os.Exit itself so it too can be unit-tested) so it can be tested directly.
-// args is the dispatch args (Run's args[1:]). It returns the help text to
-// print and whether help was requested at all — callers print text to stdout
-// and return 0 when handled is true, and otherwise proceed with normal
-// dispatch.
+// prog is the invoked binary's name (e.g. "ai-playbook" or "apb"), threaded
+// into every rendered help text. args is the dispatch args (Run's args[1:]).
+// It returns the help text to print and whether help was requested at all —
+// callers print text to stdout and return 0 when handled is true, and
+// otherwise proceed with normal dispatch.
 //
 // Dispatch rules:
 //   - no args: handled=false — the true no-args case is Run()'s own
 //     pre-existing error path (usage to stderr, exit 2), not this function's
 //     concern.
-//   - a bare "-h"/"--help"/"help": climeta.Overview().
-//   - "help <cmd>" or "--help <cmd>": climeta.Help(<cmd>) if <cmd> is known;
-//     if unknown, still handled (falls back to Overview()) so it never falls
-//     through to normal dispatch.
+//   - a bare "-h"/"--help"/"help": climeta.Overview(prog).
+//   - "help <cmd>" or "--help <cmd>": climeta.Help(prog, <cmd>) if <cmd> is
+//     known; if unknown, still handled (falls back to Overview(prog)) so it
+//     never falls through to normal dispatch.
 //   - "<cmd> ...args..." where a bare -h/--help token appears anywhere in
-//     args: climeta.Help(<cmd>) — so <cmd>'s own flag.FlagSet never sees it.
+//     args: climeta.Help(prog, <cmd>) — so <cmd>'s own flag.FlagSet never
+//     sees it.
 //   - anything else: handled=false, normal dispatch proceeds.
-func helpFor(args []string) (text string, handled bool) {
+func helpFor(prog string, args []string) (text string, handled bool) {
 	if len(args) == 0 {
 		return "", false
 	}
@@ -124,18 +130,18 @@ func helpFor(args []string) (text string, handled bool) {
 	switch args[0] {
 	case "-h", "--help", "help":
 		if len(args) < 2 {
-			return climeta.Overview(), true
+			return climeta.Overview(prog), true
 		}
-		if help, ok := climeta.Help(args[1]); ok {
+		if help, ok := climeta.Help(prog, args[1]); ok {
 			return help, true
 		}
-		return climeta.Overview(), true
+		return climeta.Overview(prog), true
 	default:
 		if wantsHelp(args[1:]) {
-			if help, ok := climeta.Help(args[0]); ok {
+			if help, ok := climeta.Help(prog, args[0]); ok {
 				return help, true
 			}
-			return climeta.Overview(), true
+			return climeta.Overview(prog), true
 		}
 		return "", false
 	}
@@ -153,8 +159,8 @@ func wantsHelp(args []string) bool {
 	return false
 }
 
-func usage() {
-	fmt.Fprintln(os.Stderr, climeta.Overview())
+func usage(prog string) {
+	fmt.Fprintln(os.Stderr, climeta.Overview(prog))
 }
 
 // mcpMain is the `ai-playbook mcp --socket <path>` subcommand: an MCP stdio

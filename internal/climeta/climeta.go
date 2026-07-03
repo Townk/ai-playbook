@@ -326,12 +326,15 @@ func Lookup(name string) (Command, bool) {
 	return Commands[i], true
 }
 
-// Overview renders the top-level `ai-playbook --help` / `ai-playbook help`
-// output: a one-line intro, the user-facing commands (each Name aligned to a
-// common width, followed by its Summary), then the internal/advanced
-// commands the same way, and a closing footer pointing at per-command help.
-// Internal-command flag detail is deliberately never shown here.
-func Overview() string {
+// Overview renders the top-level `<prog> --help` / `<prog> help` output: a
+// one-line intro, the user-facing commands (each Name aligned to a common
+// width, followed by its Summary), then the internal/advanced commands the
+// same way, and a closing footer pointing at per-command help. prog is the
+// invoked binary's name (e.g. "ai-playbook" or "apb") and is used verbatim in
+// the intro line and the closing footer, so output always reflects how the
+// user actually invoked the tool. Internal-command flag detail is
+// deliberately never shown here.
+func Overview(prog string) string {
 	var user, internal []Command
 	for _, cmd := range Commands {
 		if cmd.Internal {
@@ -349,7 +352,7 @@ func Overview() string {
 	}
 
 	var b strings.Builder
-	b.WriteString("ai-playbook — capture, author, and run terminal playbooks.\n")
+	fmt.Fprintf(&b, "%s — capture, author, and run terminal playbooks.\n", prog)
 
 	b.WriteString("\nCommands:\n")
 	for _, cmd := range user {
@@ -363,25 +366,27 @@ func Overview() string {
 		}
 	}
 
-	b.WriteString("\nRun 'ai-playbook <command> --help' for details.\n")
+	fmt.Fprintf(&b, "\nRun '%s <command> --help' for details.\n", prog)
 	return b.String()
 }
 
-// Help renders the `ai-playbook <name> --help` output for name (resolved
-// through Lookup, so an alias returns identical text to its canonical
-// command). ok is false when name is not a registered command or alias.
+// Help renders the `<prog> <name> --help` output for name (resolved through
+// Lookup, so an alias returns identical text to its canonical command). prog
+// is the invoked binary's name (e.g. "ai-playbook" or "apb") and prefixes the
+// USAGE synopsis line. ok is false when name is not a registered command or
+// alias.
 //
 // Sections are USAGE (always present), the Long description (omitted when
 // empty), FLAGS (omitted when the command has none), and EXAMPLES (omitted
 // when the command has none).
-func Help(name string) (string, bool) {
+func Help(prog, name string) (string, bool) {
 	cmd, ok := Lookup(name)
 	if !ok {
 		return "", false
 	}
 
 	var b strings.Builder
-	fmt.Fprintf(&b, "USAGE\n  %s\n", cmd.Synopsis)
+	fmt.Fprintf(&b, "USAGE\n  %s %s\n", prog, cmd.Synopsis)
 
 	if cmd.Long != "" {
 		fmt.Fprintf(&b, "\n%s\n", cmd.Long)

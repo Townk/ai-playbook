@@ -1,13 +1,16 @@
 // zsh.go renders climeta's command registry as a single zsh completion
-// script (#compdef ai-playbook): a top-level state machine that name/summary
-// completes every registered command (user-facing and internal, so every
-// subcommand is at least name-completable), then a per-command _arguments
-// block for each non-Internal command's flags — internal/plumbing commands
-// are deliberately left without flag/arg completion to keep the script lean
-// (see the Commands doc comment for which commands are Internal). Commands
-// whose positional resolves a playbook store slug (SlugArg) — and run's
-// --playbook flag — wire into a dynamic _ai-playbook_slugs helper that shells
-// out to `ai-playbook list --format fuzzy-data-source`. Output is
+// script (#compdef ai-playbook apb): a top-level state machine that
+// name/summary completes every registered command (user-facing and
+// internal, so every subcommand is at least name-completable), then a
+// per-command _arguments block for each non-Internal command's flags —
+// internal/plumbing commands are deliberately left without flag/arg
+// completion to keep the script lean (see the Commands doc comment for which
+// commands are Internal). Commands whose positional resolves a playbook
+// store slug (SlugArg) — and run's --playbook flag — wire into a dynamic
+// _ai-playbook_slugs helper that shells out to `$service list --format
+// fuzzy-data-source`, where $service is zsh's name for the command actually
+// being completed (ai-playbook or apb — see zshSlugsHelper), so slug
+// completion works even when only the apb binary is on PATH. Output is
 // deterministic — no timestamps, no map iteration — so regenerating the
 // completion never produces a spurious diff (see cmd/docgen and the "docs"
 // Makefile target).
@@ -19,15 +22,19 @@ import (
 )
 
 // zshSlugsHelper is the dynamic store-slug completer: it shells out to
-// `ai-playbook list --format fuzzy-data-source`, whose lines are
-// \x1f-delimited "<description>\x1f<slug>\x1f..." records, and reshapes
-// field 2 (slug) and field 1 (description) into "<slug>:<description>"
-// entries for _describe. Kept as a literal constant (not built from Go
-// string concatenation) so the exact invocation this package's tests assert
-// on is unambiguous.
+// `$service list --format fuzzy-data-source` — $service is the zsh
+// completion-system variable holding the name of the command currently being
+// completed (set by #compdef to either "ai-playbook" or "apb"), so this
+// helper always invokes whichever binary the user actually has on PATH
+// rather than a hardcoded name. Its output lines are \x1f-delimited
+// "<description>\x1f<slug>\x1f..." records; the helper reshapes field 2
+// (slug) and field 1 (description) into "<slug>:<description>" entries for
+// _describe. Kept as a literal constant (not built from Go string
+// concatenation) so the exact invocation this package's tests assert on is
+// unambiguous.
 const zshSlugsHelper = `_ai-playbook_slugs() {
   local -a slugs
-  slugs=(${(f)"$(ai-playbook list --format fuzzy-data-source 2>/dev/null | awk -F$'\x1f' '{print $2":"$1}')"})
+  slugs=(${(f)"$(${service} list --format fuzzy-data-source 2>/dev/null | awk -F$'\x1f' '{print $2":"$1}')"})
   _describe -t playbooks 'playbook' slugs
 }
 `
@@ -149,7 +156,7 @@ func zshCommandFunc(cmd Command) string {
 func Zsh() string {
 	var b strings.Builder
 
-	b.WriteString("#compdef ai-playbook\n\n")
+	b.WriteString("#compdef ai-playbook apb\n\n")
 	b.WriteString(zshSlugsHelper)
 	b.WriteString("\n")
 

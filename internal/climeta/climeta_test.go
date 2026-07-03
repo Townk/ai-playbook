@@ -12,7 +12,7 @@ import (
 // closing details footer, and that user-facing commands are listed before
 // internal ones.
 func TestOverview_ListsEveryCommandOnce(t *testing.T) {
-	out := Overview()
+	out := Overview("ai-playbook")
 
 	for _, cmd := range Commands {
 		count := strings.Count(out, cmd.Name)
@@ -58,21 +58,21 @@ func TestOverview_ListsEveryCommandOnce(t *testing.T) {
 // its verbatim description and at least one example, and that an unknown
 // command name resolves to ok=false.
 func TestHelp_ResolvesAliasAndFlags(t *testing.T) {
-	troubleshoot, ok := Help("troubleshoot")
+	troubleshoot, ok := Help("ai-playbook", "troubleshoot")
 	if !ok {
-		t.Fatal("Help(\"troubleshoot\") ok=false, want true")
+		t.Fatal("Help(\"ai-playbook\", \"troubleshoot\") ok=false, want true")
 	}
-	assist, ok := Help("assist")
+	assist, ok := Help("ai-playbook", "assist")
 	if !ok {
-		t.Fatal("Help(\"assist\") ok=false, want true")
+		t.Fatal("Help(\"ai-playbook\", \"assist\") ok=false, want true")
 	}
 	if troubleshoot != assist {
 		t.Errorf("Help(\"troubleshoot\") != Help(\"assist\"):\n--- troubleshoot ---\n%s\n--- assist ---\n%s", troubleshoot, assist)
 	}
 
-	run, ok := Help("run")
+	run, ok := Help("ai-playbook", "run")
 	if !ok {
-		t.Fatal("Help(\"run\") ok=false, want true")
+		t.Fatal("Help(\"ai-playbook\", \"run\") ok=false, want true")
 	}
 	if !strings.Contains(run, "--with-env") {
 		t.Errorf("Help(\"run\") missing --with-env:\n%s", run)
@@ -84,8 +84,36 @@ func TestHelp_ResolvesAliasAndFlags(t *testing.T) {
 		t.Errorf("Help(\"run\") missing an EXAMPLES section:\n%s", run)
 	}
 
-	if _, ok := Help("nope"); ok {
+	if _, ok := Help("ai-playbook", "nope"); ok {
 		t.Error("Help(\"nope\") ok=true, want false")
+	}
+}
+
+// TestOverview_UsesProg asserts Overview(prog) uses prog (not a hardcoded
+// "ai-playbook") in both its intro line and its closing details footer, so
+// `apb --help` reads as apb throughout.
+func TestOverview_UsesProg(t *testing.T) {
+	out := Overview("apb")
+	if !strings.Contains(out, "apb") {
+		t.Errorf("Overview(\"apb\") does not mention \"apb\":\n%s", out)
+	}
+	if !strings.Contains(out, "apb <command> --help") {
+		t.Errorf("Overview(\"apb\") footer does not say \"apb <command> --help\":\n%s", out)
+	}
+	if strings.Contains(out, "ai-playbook") {
+		t.Errorf("Overview(\"apb\") unexpectedly mentions \"ai-playbook\":\n%s", out)
+	}
+}
+
+// TestHelp_UsesProg asserts Help(prog, name)'s USAGE synopsis line is
+// prefixed with prog, so `apb run --help` reads "apb run ...".
+func TestHelp_UsesProg(t *testing.T) {
+	out, ok := Help("apb", "run")
+	if !ok {
+		t.Fatal(`Help("apb", "run") ok=false, want true`)
+	}
+	if !strings.Contains(out, "apb run") {
+		t.Errorf(`Help("apb", "run") does not contain "apb run":`+"\n%s", out)
 	}
 }
 
