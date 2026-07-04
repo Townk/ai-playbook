@@ -1,7 +1,9 @@
 # Playbook-first layering: core schema + executor as `pkg/`, AI as a plug-in layer
 
 - **Status:** Accepted
-- **Date:** 2026-07-04
+- **Date:** 2026-07-04 (revised 2026-07-04: the interaction toolkit added as a
+  fourth surface with its own standalone binary — folded here rather than a
+  separate ADR so the `pkg/` promotion is a single event)
 
 ## Context and Problem Statement
 
@@ -49,7 +51,8 @@ Adopt a three-layer architecture, dependency direction strictly downward:
 |---|---|---|
 | **Core** (public) | Playbook schema (parse/validate/render), executor (PTY driver, run engine, rollback, deps), store | **`pkg/`** — the schema + executor (+ store) are genuinely meant to be importable: an embeddable playbook runner |
 | **AI** (private) | Capture, triage, authoring, harness adapters, streaming, knowledge base, response cache | `internal/` — plugs into Core through narrow interfaces (the Reengage seam, the submit-time DTO) |
-| **UX** (private) | Viewer, input widgets, launcher/mux wiring, CLI | `internal/` — consumes both layers through explicit options/interfaces |
+| **Interaction toolkit** (public) | The user-interaction dialogs (confirm/line/text/choose/form) and their standalone `ask` binary — a product surface of its own, already consumed by external scripts (the user's chezmoi shims) | `internal/input` today; joins the `pkg/` promotion (step 4). Public CLI contract: subcommand-per-widget, exit codes as the answer, `ASK_*` env theming, JSON form spec. ai-playbook's private float plumbing (`--out`/FIFOs/`--thinking`/`--history`) stays on the hidden `ai-playbook input` |
+| **UX** (private) | Viewer, launcher/mux wiring, CLI | `internal/` — consumes the Core, AI, and toolkit layers through explicit options/interfaces |
 
 **`pkg/` promotion is the decision, staging is deliberate.** Pre-1.0 the API
 may still move; promotion happens once the boundaries settle, in this order:
@@ -59,9 +62,15 @@ may still move; promotion happens once the boundaries settle, in this order:
    launcher, and autorun all consume it. *(First, smallest, unblocks the rest.)*
 2. **Split re-engagement out of the orchestrator** — the executor core becomes
    AI-free; the AI layer attaches via the narrowed Reengage interface.
-3. **`ui.Run(Options)`** — replace the `pending*` globals with a real seam.
-4. **Promote** the settled schema + executor (+ store) from `internal/` to
-   `pkg/` (final import paths chosen then; mechanical rename).
+3. **Build the `ask` binary** (`cmd/ask` + a thin subcommand layer over
+   `internal/input`; man page + completion via the docgen pipeline) — the
+   toolkit's public contract exists before promotion, so promotion changes
+   import paths only, never the contract. *(Independent of steps 1–2; may run
+   in parallel.)*
+4. **`ui.Run(Options)`** — replace the `pending*` globals with a real seam.
+5. **Promote** all public surfaces in ONE event — schema + executor (+ store)
+   AND the interaction toolkit — from `internal/` to `pkg/` (final import
+   paths chosen then; mechanical rename; `ask`'s imports flip once).
 
 ## Consequences
 
@@ -73,6 +82,13 @@ may still move; promotion happens once the boundaries settle, in this order:
   rollback semantics) graduate from polish to Core-contract work.
 - Alternative front-ends and harnesses become additive work; the parked
   pi/cursor adapters plug into the existing harness seam untouched.
-- Until step 4 lands, `internal/playbook` temporarily holds both the schema
-  parser and the AI-submission DTO; the promotion separates them (the DTO is
-  AI-layer and stays `internal/`).
+- Until the promotion lands, `internal/playbook` temporarily holds both the
+  schema parser and the AI-submission DTO; the promotion separates them (the
+  DTO is AI-layer and stays `internal/`).
+- The `ask` binary ships from this repo (the `apb` pattern — a third
+  GoReleaser build), NOT a separate repo: the standalone `ai-assist-input`
+  binary was deliberately retired into this module at v0.6.0; this decision
+  re-offers the standalone *surface* without re-fragmenting the codebase.
+- `internal/input` gains a second consumer and therefore an external
+  compatibility bar: widget behavior changes must consider `ask`'s documented
+  contract, not just ai-playbook's own dialogs.
