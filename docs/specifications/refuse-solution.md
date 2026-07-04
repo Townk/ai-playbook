@@ -49,13 +49,16 @@ A `refusals []string` list on the ui model (session-lifetime, in-memory).
   - <reason 2>
   ```
 
-- Plumbing: `orchestrator.Reengage.Events` (`EventsFunc`) and the orchestrator
-  re-engagement methods (`Regenerate`, `FinalPlaybook`, `Followup`) gain a
-  constraints parameter; `internal/launcher/session.go buildReengageEvents`
-  threads it into the prompt builders (`author.SystemPrompt`,
-  `FollowupPrompt`, `FinalPlaybookPrompt`, `DriftRegenPrompt`), each of which
-  gains the section when the list is non-empty. Empty list ⇒ prompts are
-  byte-identical to today (characterization-tested).
+- Plumbing (as built): `orchestrator.Reengage.Events` (`EventsFunc`) and all
+  four orchestrator re-engagement methods (`Regenerate`, `FinalPlaybook`,
+  `Followup`, `DriftRegen`) carry a constraints parameter; the launcher
+  (`internal/launcher/session.go reengagePrompts` and
+  `drift_reengage.go`) appends the section to the built system prompt via
+  `author.WithConstraints` — the four prompt builders themselves are
+  unchanged. Empty list ⇒ prompts are byte-identical to today
+  (characterization-tested). The degraded TEXT fallbacks (fired only when the
+  events producer fails to start) do not carry constraints — recorded as a
+  backlog item, practically unreachable in production.
 - Cache-served solutions: a refused solution that was cached stops mattering
   in-session (the constraint steers every later re-engagement); the re-authored
   document replaces the cached one through the existing commit/wrap-up
@@ -84,8 +87,8 @@ amend-vs-discard, and either way the note persists as a constraint.
 - A small persistent indicator while any constraints are active, in the status
   line: `N constraint(s)`. No management UI (view/edit/remove) — YAGNI;
   constraints die with the session.
-- Help overlay (`?`) and climeta docs updated for the new `r` semantics
-  (docs-check gate keeps man/completions honest).
+- Help overlay (`?`) updated for the new `r` semantics. climeta/man document
+  no pager keys, so no generated-docs change (docs-check stays green).
 
 ### 4. Out of scope (recorded, not built)
 
