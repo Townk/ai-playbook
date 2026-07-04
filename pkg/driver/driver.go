@@ -38,6 +38,9 @@ const maxSentinelLen = 2*len(sentinel) + nonceLen + 1 + 24
 
 // Result is one command's outcome.
 type Result struct {
+	// Out/Err are right-trimmed of trailing newlines (display/value semantics).
+	// For byte-exact output — trailing newlines, binary — read OutPath/ErrPath;
+	// Out is NOT guaranteed to equal the file's contents.
 	Out      string
 	Err      string
 	Exit     int  // -1 if never observed
@@ -47,6 +50,9 @@ type Result struct {
 	// for an identified run (id != "") once retention is active; empty for
 	// unidentified runs. The files survive until Close(); a later block can wire
 	// OutPath into its stdin (RunID's stdinPath) to pipe a prior block's output.
+	// A set OutPath does NOT guarantee the file exists: a run killed before its
+	// redirect opened leaves no file — consumers must treat a missing file as
+	// "producer never ran".
 	OutPath string
 	ErrPath string
 }
@@ -171,8 +177,13 @@ func Open(opts Options) (*Driver, error) {
 	// Session-scoped dir for retained block captures (out_<key>/err_<key>). Created
 	// once here; removed in Close. On failure sessionDir stays "" and identified
 	// runs fall back to transient temp capture (no retention) — the session still
-	// runs, it just can't pipe.
-	sessionDir, _ := os.MkdirTemp("", "apb-session-")
+	// runs, it just can't pipe. That degradation must be OBSERVABLE, not silent:
+	// every from= chain would break with "producer never ran" otherwise.
+	sessionDir, mkErr := os.MkdirTemp("", "apb-session-")
+	if mkErr != nil {
+		sessionDir = ""
+		fmt.Fprintf(os.Stderr, "ai-playbook: capture retention disabled (%v) — from= piping unavailable this session\n", mkErr)
+	}
 	d := &Driver{
 		ptmx:       ptmx,
 		ptmxFd:     int(ptmx.Fd()), // captured once, before the reader goroutine starts

@@ -43,6 +43,8 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 
 - [ ] `draft.Render` silently drops `file=` on a `Static:true` item instead of `draft.Validate` rejecting the contradictory combination (surfaced by the P1 classifier fidelity probe, 2026-07-04) — reject at submit time
 
+- [ ] `sanitizeKey` collides ids `a-b`/`a_b` → same `APB_OUT_a_b` AND (since retention) the same capture file — add a validate warning for id pairs that sanitize identically (2026-07-04)
+
 ## Ideas
 
 - [ ] (low priority) E2E/integration tests for the integration entry points (`launcher` entry points, `cmd` `selftest`/`mcpMain`) — spawn the real binary + drive a TUI/PTY. These render via live mux/model/TUI/driver so they're not unit-testable; coverage there is intentionally low. Would push total coverage 80%→~90% (2026-06-27)
