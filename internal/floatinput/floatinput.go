@@ -70,7 +70,7 @@ const (
 	defaultTimeout = 30 * time.Minute
 )
 
-// cancelSuffix mirrors input.CancelSuffix: a floated `input --out <file>` writes
+// cancelSuffix mirrors dialog.CancelSuffix: a floated `input --out <file>` writes
 // <file>.cancel on cancel so the poll learns of a cancel immediately rather than
 // waiting out defaultTimeout. The two constants MUST agree (the contract between
 // the float and this poller). Kept as a local const to avoid floatinput pulling
@@ -119,7 +119,7 @@ func (a Asker) Ask(req Request) (Result, error) {
 // AskThinking spawns the request float in --thinking mode (stage C): on submit the
 // float WRITES the value to --out but STAYS OPEN animating the wave "Thinking…"
 // state; the caller classifies + routes, then CLOSES the float by writing
-// <out>.done (the returned out path + input.DoneSuffix). It returns the Result and
+// <out>.done (the returned out path + dialog.DoneSuffix). It returns the Result and
 // the out-file path (for the .done marker).
 //
 // Unlike Ask, AskThinking does NOT remove the float's temp dir: the float keeps

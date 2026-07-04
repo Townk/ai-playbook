@@ -47,7 +47,7 @@ func TestProgressAskModel_DoneQuits(t *testing.T) {
 }
 
 // TestProgressAskModel_AskRoundTrip asserts the no-mux ask flow during authoring: a
-// bridge request embeds input.Ask (pausing the waiting line); the user's answer is
+// bridge request embeds dialog.Ask (pausing the waiting line); the user's answer is
 // delivered back to the blocked Ask caller via Respond; the ask clears (resumes).
 func TestProgressAskModel_AskRoundTrip(t *testing.T) {
 	b := askbridge.New()
@@ -61,7 +61,7 @@ func TestProgressAskModel_AskRoundTrip(t *testing.T) {
 	mi, _ := m.Update(paAskMsg{req: req})
 	m = mi.(progressAskModel)
 	if m.ask == nil {
-		t.Fatal("an ask request must embed input.Ask")
+		t.Fatal("an ask request must embed dialog.Ask")
 	}
 	if !strings.Contains(m.View().Content, "which env?") {
 		t.Errorf("paused view must render the ask prompt, got:\n%s", m.View().Content)
