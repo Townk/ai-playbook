@@ -5,6 +5,8 @@
 package driver
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"fmt"
 	"os"
 	"os/exec"
@@ -18,13 +20,19 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-const sentinel = "__APB__" // wraps the exit code: __APB__<rc>__APB__
+const sentinel = "__APB__" // wraps a per-run nonce + exit code: __APB__<nonce>_<rc>__APB__
 
-// maxSentinelLen bounds a full sentinel token (__APB__<rc>__APB__) for the
-// scan-offset rewind in waitSentinel: the two 7-byte markers plus a generous
-// allowance for the signed exit-code digits. The scan rewinds by this much so a
-// sentinel split across two pty read chunks is never missed.
-const maxSentinelLen = 2*len(sentinel) + 24
+// nonceLen is the hex-char width of a run's sentinel nonce (see newNonce): 4
+// crypto/rand bytes rendered as 8 hex chars. Unique per run, so a stale sentinel
+// left in the buffer by an earlier run can never satisfy a later run's wait.
+const nonceLen = 8
+
+// maxSentinelLen bounds a full sentinel token (__APB__<nonce>_<rc>__APB__) for
+// the scan-offset rewind in waitSentinel: the two 7-byte markers, the nonce and
+// its `_` separator, plus a generous allowance for the signed exit-code digits.
+// The scan rewinds by this much so a sentinel split across two pty read chunks is
+// never missed.
+const maxSentinelLen = 2*len(sentinel) + nonceLen + 1 + 24
 
 // Result is one command's outcome.
 type Result struct {
@@ -50,7 +58,6 @@ type Driver struct {
 	ptmx     *os.File
 	ptmxFd   int // ptmx's raw fd, captured once at Open; used for TIOCGPGRP so Pgrp never calls os.File.Fd() (which would race the reader goroutine's fd teardown)
 	cmd      *exec.Cmd
-	re       *regexp.Regexp
 	shellPid int
 	a        shellAdapter // shell-specific spawn/job/source/cd tokens
 
@@ -155,7 +162,6 @@ func Open(opts Options) (*Driver, error) {
 		ptmx:     ptmx,
 		ptmxFd:   int(ptmx.Fd()), // captured once, before the reader goroutine starts
 		cmd:      c,
-		re:       regexp.MustCompile(sentinel + `(-?\d+)` + sentinel),
 		shellPid: c.Process.Pid,
 		lastSeen: time.Now(),
 		a:        a,
@@ -212,10 +218,11 @@ func (d *Driver) runMain(cmd string, timeout time.Duration) {
 	if cmd == "" {
 		return
 	}
+	nonce := newNonce()
 	d.clearBuf()
 	d.setStopped(false)
-	d.send(cmd + "; " + d.a.sentinelEcho())
-	d.waitSentinel(timeout)
+	d.send(cmd + "; " + d.a.sentinelEcho(nonce))
+	d.waitSentinel(sentinelRE(nonce), timeout)
 }
 
 // RunID is Run with value-passing. In the hosted shell's main context — AFTER the
@@ -402,15 +409,16 @@ func (d *Driver) idleFor() time.Duration {
 	return time.Since(d.lastSeen)
 }
 
-// waitSentinel scans the pty for the next __APB__<digits>__APB__; returns the
-// regexp submatch (as []byte slices into buf, valid until the next clearBuf), or
-// nil on timeout. It also returns nil promptly when Stop has been called: a
-// ^C-interrupted job may never print its sentinel, so the stop flag
-// short-circuits the wait instead of blocking for the full timeout.
-func (d *Driver) waitSentinel(timeout time.Duration) [][]byte {
+// waitSentinel scans the pty for the next __APB__<nonce>_<digits>__APB__ matching
+// re (this run's per-run pattern); returns the regexp submatch (as []byte slices
+// into buf, valid until the next clearBuf), or nil on timeout. It also returns nil
+// promptly when Stop has been called: a ^C-interrupted job may never print its
+// sentinel, so the stop flag short-circuits the wait instead of blocking for the
+// full timeout.
+func (d *Driver) waitSentinel(re *regexp.Regexp, timeout time.Duration) [][]byte {
 	dl := time.Now().Add(timeout)
 	for time.Now().Before(dl) {
-		if m := d.scanNext(); m != nil {
+		if m := d.scanNext(re); m != nil {
 			return m
 		}
 		d.mu.Lock()
@@ -424,34 +432,63 @@ func (d *Driver) waitSentinel(timeout time.Duration) [][]byte {
 	return nil
 }
 
-// scanNext does one incremental sentinel scan of buf and advances the scan
-// cursor. It searches d.buf directly (no full-buffer string copy) starting a
+// scanNext does one incremental sentinel scan of buf against re and advances the
+// scan cursor. It searches d.buf directly (no full-buffer string copy) starting a
 // little before the already-scanned prefix — rewound by maxSentinelLen so a
 // sentinel spanning the previous read-chunk boundary is still matched — then
 // advances scanOff past the current buffer length. Returns the submatch or nil.
 // Cheap by design: the poll only rescans bytes near the tail, so it does not
 // starve the reader goroutine under heavy tty output.
-func (d *Driver) scanNext() [][]byte {
+func (d *Driver) scanNext(re *regexp.Regexp) [][]byte {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	start := d.scanOff - maxSentinelLen
 	if start < 0 {
 		start = 0
 	}
-	m := d.re.FindSubmatch(d.buf[start:])
+	m := re.FindSubmatch(d.buf[start:])
 	if n := len(d.buf); n > d.scanOff {
 		d.scanOff = n
 	}
 	return m
 }
 
-// ready waits for the shell to go idle (past startup/instant-prompt) then confirms
-// with a no-op probe, retrying if a buffered-during-init probe is swallowed.
+// newNonce returns a short random hex string that makes each run's sentinel token
+// (__APB__<nonce>_<rc>__APB__) unique. This is what lets ready() probe
+// immediately: a probe swallowed during shell init that prints its sentinel late,
+// or any leftover sentinel from an earlier run, bears a DIFFERENT nonce and so can
+// never satisfy a later run's wait — the ~1.2s idle floor that guarded against
+// that collision is no longer needed. crypto/rand keeps the nonce non-colliding
+// without a shared counter; 8 hex chars keeps maxSentinelLen small.
+func newNonce() string {
+	var b [nonceLen / 2]byte
+	if _, err := rand.Read(b[:]); err != nil {
+		// crypto/rand does not fail in practice; fall back to a clock-derived value
+		// so a run still gets a distinct token rather than a fixed one.
+		return fmt.Sprintf("%0*x", nonceLen, time.Now().UnixNano()&0xffffffff)
+	}
+	return hex.EncodeToString(b[:])
+}
+
+// sentinelRE compiles this run's sentinel matcher for nonce: it matches only the
+// token __APB__<nonce>_<rc>__APB__ and captures the signed exit code. A different
+// run's nonce (or a legacy nonce-less token) will not match. The nonce is
+// crypto/rand hex ([0-9a-f]), so it carries no regexp metacharacters.
+func sentinelRE(nonce string) *regexp.Regexp {
+	return regexp.MustCompile(sentinel + nonce + `_(-?\d+)` + sentinel)
+}
+
+// ready confirms the shell is drivable with a no-op probe. Per-run sentinel nonces
+// make a probe swallowed during shell init harmless — its stale sentinel can never
+// satisfy a later probe's wait — so there is no fixed idle floor: after a brief
+// courtesy pause for the current startup output burst to settle, we probe
+// immediately and retry on a short cadence. The probe itself (`:` returning exit
+// 0 through the full job/sentinel round-trip) remains the readiness check.
 func (d *Driver) ready() error {
 	deadline := time.Now().Add(25 * time.Second)
 	for time.Now().Before(deadline) {
-		for d.idleFor() < 1200*time.Millisecond && time.Now().Before(deadline) {
-			time.Sleep(100 * time.Millisecond)
+		for d.idleFor() < 150*time.Millisecond && time.Now().Before(deadline) {
+			time.Sleep(30 * time.Millisecond)
 		}
 		if r := d.run(":", 3*time.Second); !r.TimedOut && r.Exit == 0 {
 			return nil
@@ -495,6 +532,8 @@ func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
 	// value-passing across blocks goes through APB_OUT_<id>/LAST_*, which the driver
 	// sets in the main context below.)
 	cwdf := filepath.Join(dir, "cwd")
+	nonce := newNonce()
+	re := sentinelRE(nonce)
 	_ = os.WriteFile(job, []byte(d.a.job(jobParams{
 		cmdline: cmdline,
 		o:       o,
@@ -502,13 +541,14 @@ func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
 		cwdf:    cwdf,
 		id:      id,
 		key:     sanitizeKey(id),
+		nonce:   nonce,
 	})), 0644)
 	d.clearBuf()
 	d.setStopped(false)
 	d.send(d.a.sourceCmd(job))
 
 	res := Result{Exit: -1}
-	m := d.waitSentinel(timeout)
+	m := d.waitSentinel(re, timeout)
 	if m == nil {
 		// Stop the running command's group by PID (TERM then KILL) — not ^C.
 		if pg := d.Pgrp(); pg > 0 && pg != d.shellPid {
@@ -516,7 +556,7 @@ func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
 			time.Sleep(300 * time.Millisecond)
 			_ = unix.Kill(-pg, unix.SIGKILL)
 		}
-		m = d.waitSentinel(5 * time.Second)
+		m = d.waitSentinel(re, 5*time.Second)
 		res.TimedOut = true
 	}
 	ob, _ := os.ReadFile(o)

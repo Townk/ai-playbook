@@ -8,7 +8,7 @@ import (
 // goldenZshJob independently reproduces, for the given params, the EXACT job-script
 // bytes the pre-adapter runID emitted (the verbatim historical template). It is the
 // byte-identity oracle: zshAdapter{}.job must equal this for any inputs.
-func goldenZshJob(cmdline, o, e, cwdf, id, key string) string {
+func goldenZshJob(cmdline, o, e, cwdf, id, key, nonce string) string {
 	qcwd := shquote(cwdf)
 	trapBody := "builtin pwd >| " + qcwd
 	qo := shquote(o)
@@ -28,20 +28,21 @@ func goldenZshJob(cmdline, o, e, cwdf, id, key string) string {
 		"if [[ $__apb_rc -eq 141 ]]; then __apb_rc=0; fi\n" +
 		"if [[ -s " + qcwd + " ]]; then builtin cd -- \"$(< " + qcwd + ")\" 2>/dev/null; fi\n" +
 		vp +
-		"print -r -- " + sentinel + "${__apb_rc}" + sentinel + "\n"
+		"print -r -- " + sentinel + nonce + "_${__apb_rc}" + sentinel + "\n"
 }
 
 func TestZshAdapterJobBytesUnchanged(t *testing.T) {
+	const nonce = "abcd1234"
 	// With an id: APB_* exports present.
-	got := zshAdapter{}.job(jobParams{cmdline: "echo hi", o: "/d/o", e: "/d/e", cwdf: "/d/cwd", id: "fix", key: "fix"})
-	want := goldenZshJob("echo hi", "/d/o", "/d/e", "/d/cwd", "fix", "fix")
+	got := zshAdapter{}.job(jobParams{cmdline: "echo hi", o: "/d/o", e: "/d/e", cwdf: "/d/cwd", id: "fix", key: "fix", nonce: nonce})
+	want := goldenZshJob("echo hi", "/d/o", "/d/e", "/d/cwd", "fix", "fix", nonce)
 	if got != want {
 		t.Errorf("job bytes drifted from golden template (id case)\n got: %q\nwant: %q", got, want)
 	}
 
 	// Without an id: APB_* lines must be absent, but LAST_* still present.
-	gotNo := zshAdapter{}.job(jobParams{cmdline: "echo hi", o: "/d/o", e: "/d/e", cwdf: "/d/cwd", id: "", key: ""})
-	wantNo := goldenZshJob("echo hi", "/d/o", "/d/e", "/d/cwd", "", "")
+	gotNo := zshAdapter{}.job(jobParams{cmdline: "echo hi", o: "/d/o", e: "/d/e", cwdf: "/d/cwd", id: "", key: "", nonce: nonce})
+	wantNo := goldenZshJob("echo hi", "/d/o", "/d/e", "/d/cwd", "", "", nonce)
 	if gotNo != wantNo {
 		t.Errorf("job bytes drifted from golden template (no-id case)\n got: %q\nwant: %q", gotNo, wantNo)
 	}

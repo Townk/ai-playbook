@@ -35,8 +35,8 @@ func (bashAdapter) historyOff() string {
 // ZDOTDIR-style shim (there is no atuin instant-prompt race for bash here).
 func (bashAdapter) historyShimFiles() map[string]string { return nil }
 
-func (bashAdapter) sentinelEcho() string {
-	return "printf '%s\\n' " + shquote(sentinel+"0"+sentinel)
+func (bashAdapter) sentinelEcho(nonce string) string {
+	return "printf '%s\\n' " + shquote(sentinel+nonce+"_0"+sentinel)
 }
 
 func (bashAdapter) job(p jobParams) string {
@@ -64,5 +64,5 @@ func (bashAdapter) job(p jobParams) string {
 		"if [ $__apb_rc -eq 141 ]; then __apb_rc=0; fi\n" +
 		"if [ -s " + qcwd + " ]; then builtin cd -- \"$(< " + qcwd + ")\" 2>/dev/null; fi\n" +
 		vp +
-		"printf '%s\\n' " + sentinel + "${__apb_rc}" + sentinel + "\n"
+		"printf '%s\\n' " + sentinel + p.nonce + "_${__apb_rc}" + sentinel + "\n"
 }

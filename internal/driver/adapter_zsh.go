@@ -79,8 +79,8 @@ func (zshAdapter) historyShimFiles() map[string]string {
 	}
 }
 
-func (zshAdapter) sentinelEcho() string {
-	return "print -r -- " + sentinel + "0" + sentinel
+func (zshAdapter) sentinelEcho(nonce string) string {
+	return "print -r -- " + sentinel + nonce + "_0" + sentinel
 }
 
 func (zshAdapter) job(p jobParams) string {
@@ -104,5 +104,5 @@ func (zshAdapter) job(p jobParams) string {
 		"if [[ $__apb_rc -eq 141 ]]; then __apb_rc=0; fi\n" +
 		"if [[ -s " + qcwd + " ]]; then builtin cd -- \"$(< " + qcwd + ")\" 2>/dev/null; fi\n" +
 		vp +
-		"print -r -- " + sentinel + "${__apb_rc}" + sentinel + "\n"
+		"print -r -- " + sentinel + p.nonce + "_${__apb_rc}" + sentinel + "\n"
 }

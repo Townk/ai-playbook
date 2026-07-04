@@ -3,9 +3,11 @@ package driver
 // jobParams carries the per-run, shell-agnostic values a shellAdapter needs to
 // render a job script. cmdline is the user's command; o/e/cwdf are the temp-file
 // paths for stdout/stderr/cwd capture; id is the value-passing id ("" disables
-// the APB_* exports) and key is its sanitized form (sanitizeKey(id)).
+// the APB_* exports) and key is its sanitized form (sanitizeKey(id)); nonce is the
+// per-run random token woven into the sentinel (__APB__<nonce>_<rc>__APB__) so a
+// stale sentinel from another run can never satisfy this run's wait.
 type jobParams struct {
-	cmdline, o, e, cwdf, id, key string
+	cmdline, o, e, cwdf, id, key, nonce string
 }
 
 // shellAdapter owns every shell-specific token the driver emits: how to spawn the
@@ -34,7 +36,9 @@ type shellAdapter interface {
 	// shim (bash/sh keep the runtime historyOff path). When non-nil, the driver
 	// skips the runtime historyOff call at Open.
 	historyShimFiles() map[string]string
-	// sentinelEcho prints the driver's sentinel (with exit 0) in the MAIN context,
-	// so runMain can sync on a raw command that is NOT wrapped in job()'s subshell.
-	sentinelEcho() string
+	// sentinelEcho prints the driver's sentinel (with exit 0) for the given per-run
+	// nonce in the MAIN context, so runMain can sync on a raw command that is NOT
+	// wrapped in job()'s subshell. The nonce must match the one runMain compiles its
+	// wait regex from.
+	sentinelEcho(nonce string) string
 }

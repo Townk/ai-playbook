@@ -3,7 +3,6 @@ package driver
 import (
 	"os"
 	"path/filepath"
-	"regexp"
 	"testing"
 	"time"
 
@@ -34,6 +33,28 @@ func newTestDriver(t *testing.T) *Driver {
 	}
 	t.Cleanup(func() { d.Close() })
 	return d
+}
+
+// TestOpenProbesReadyWithoutIdleFloor pins the per-run-nonce win: because a stale
+// sentinel from a swallowed init-time probe can never satisfy a later probe's wait
+// (its nonce differs), ready() no longer pays a fixed idle floor before its first
+// probe — it probes immediately after a brief courtesy settle. The old floor
+// GUARANTEED every Open was >= 1200ms; a generous < 900ms bound proves it is gone
+// while leaving ample headroom against CI jitter. RED before the nonce change.
+func TestOpenProbesReadyWithoutIdleFloor(t *testing.T) {
+	zdot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	start := time.Now()
+	d, err := Open(Options{Shell: "zsh", Env: append(os.Environ(), "ZDOTDIR="+zdot)})
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+	defer d.Close()
+	if el := time.Since(start); el > 900*time.Millisecond {
+		t.Errorf("Open took %v; the per-run nonce should let ready() probe immediately (the old fixed idle floor guaranteed >= 1200ms)", el)
+	}
 }
 
 // historyOff runs in the MAIN context at Open (via runMain): HISTFILE=/dev/null
@@ -297,20 +318,47 @@ func TestPgrp_ClosedDriverNeverIoctls(t *testing.T) {
 // back the scan start up far enough to re-see the opening marker. No live shell —
 // this drives scanNext directly with hand-fed chunks.
 func TestScanNextCatchesSplitSentinel(t *testing.T) {
-	d := &Driver{re: regexp.MustCompile(sentinel + `(-?\d+)` + sentinel)}
-	// Chunk 1 ends mid-sentinel (opening marker present, exit+closing marker not).
-	d.buf = append(d.buf, []byte("noise output "+sentinel)...)
-	if m := d.scanNext(); m != nil {
+	re := sentinelRE("abcd1234")
+	d := &Driver{}
+	// Chunk 1 ends mid-sentinel (opening marker + nonce present, exit+closing not).
+	d.buf = append(d.buf, []byte("noise output "+sentinel+"abcd1234_")...)
+	if m := d.scanNext(re); m != nil {
 		t.Fatalf("scanNext matched a partial sentinel: %q", m)
 	}
 	// The cursor is now at len(buf); the opening marker sits BEFORE it.
 	d.buf = append(d.buf, []byte("0"+sentinel+" trailing")...)
-	m := d.scanNext()
+	m := d.scanNext(re)
 	if m == nil {
 		t.Fatal("scanNext missed a sentinel split across the read boundary (rewind too small)")
 	}
 	if string(m[1]) != "0" {
 		t.Errorf("captured exit field = %q, want \"0\"", m[1])
+	}
+}
+
+// TestScanNextRejectsStaleNonce pins the reason the per-run nonce exists: a
+// COMPLETE, well-formed sentinel left in the buffer by a PREVIOUS run — e.g. a
+// probe swallowed during shell init that prints its __APB__<nonce>_0__APB__ late —
+// must NOT satisfy the current run's wait. Only the token bearing THIS run's own
+// nonce is accepted, which is exactly what lets ready() probe immediately with no
+// stale-collision idle floor. No live shell — drives scanNext directly.
+func TestScanNextRejectsStaleNonce(t *testing.T) {
+	const staleNonce = "deadbeef"
+	const liveNonce = "0badf00d"
+	d := &Driver{}
+	// A leftover sentinel from a previous run (its nonce, exit 0) sits in the buffer.
+	d.buf = append(d.buf, []byte("leftover "+sentinel+staleNonce+"_0"+sentinel+" ")...)
+	if m := d.scanNext(sentinelRE(liveNonce)); m != nil {
+		t.Fatalf("current wait accepted a STALE sentinel (nonce collision still possible): %q", m)
+	}
+	// This run's own sentinel (its nonce, exit 5) then arrives and IS accepted.
+	d.buf = append(d.buf, []byte(sentinel+liveNonce+"_5"+sentinel)...)
+	m := d.scanNext(sentinelRE(liveNonce))
+	if m == nil {
+		t.Fatal("current wait missed its OWN sentinel")
+	}
+	if string(m[1]) != "5" {
+		t.Errorf("captured exit field = %q, want \"5\"", m[1])
 	}
 }
 

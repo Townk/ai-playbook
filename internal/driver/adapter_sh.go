@@ -44,8 +44,8 @@ func (shAdapter) historyOff() string {
 // runtime historyOff path.
 func (shAdapter) historyShimFiles() map[string]string { return nil }
 
-func (shAdapter) sentinelEcho() string {
-	return "printf '%s\\n' " + shquote(sentinel+"0"+sentinel)
+func (shAdapter) sentinelEcho(nonce string) string {
+	return "printf '%s\\n' " + shquote(sentinel+nonce+"_0"+sentinel)
 }
 
 func (shAdapter) job(p jobParams) string {
@@ -71,5 +71,5 @@ func (shAdapter) job(p jobParams) string {
 		"if [ $__apb_rc -eq 141 ]; then __apb_rc=0; fi\n" +
 		"if [ -s " + qcwd + " ]; then cd -- \"$(cat " + qcwd + ")\" 2>/dev/null; fi\n" +
 		vp +
-		"printf '%s\\n' " + sentinel + "${__apb_rc}" + sentinel + "\n"
+		"printf '%s\\n' " + sentinel + p.nonce + "_${__apb_rc}" + sentinel + "\n"
 }

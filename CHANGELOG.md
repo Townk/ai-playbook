@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Opening a session no longer pays a fixed ~1.2s settle delay — readiness is
+  probed immediately. Each run's sentinel now carries a per-run random nonce, so
+  a stale sentinel left over from an earlier run (or a probe swallowed during
+  shell init that prints late) can never satisfy a later run's wait, making
+  stale-output collisions impossible.
+
 ## [0.7.0] - 2026-07-03
 
 ### Changed
