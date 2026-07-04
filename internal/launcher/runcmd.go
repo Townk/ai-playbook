@@ -34,6 +34,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/internal/playbook"
 	"github.com/Townk/ai-playbook/internal/store"
 	"github.com/Townk/ai-playbook/internal/ui"
 )
@@ -191,8 +192,9 @@ func runFile(file string) int {
 // (markdown + cwd + PROJECT_ROOT) that runFile/runPlaybook would open a viewer
 // on — via loadParent, so the parent's FULL front matter (env + depends_on) is
 // available — parses the front-matter-stripped body into blocks with the SAME
-// parser the viewer uses (ui.Render), converts them to autorun.Block, and
-// hands the sequence to autorunRunFn. No viewer/driver pane is ever opened.
+// canonical parser the viewer uses (playbook.ParseBlocks), converts them to
+// autorun.Block, and hands the sequence to autorunRunFn. No viewer/driver pane
+// is ever opened.
 //
 // When the parent declares no depends_on, this is exactly today's
 // single-playbook run (one autorunRunFn call, its own undeclared-override
@@ -326,12 +328,15 @@ func parentSlug(ra runArgs) string {
 	return ra.Value
 }
 
-// blocksFor renders a playbook body and converts it to autorun.Block, the
-// headless-run representation (shared by --auto and the depends_on runner).
+// blocksFor parses a playbook body into blocks and converts them to autorun.Block,
+// the headless-run representation (shared by --auto and the depends_on runner). It
+// uses playbook.ParseBlocks — the single canonical parser (ADR-0009 step 1) — so
+// the headless run enumerates exactly the blocks the viewer would, without paying
+// for a full styled render.
 func blocksFor(body string) []autorun.Block {
-	_, _, uiBlocks := ui.Render(body, 80, ui.RenderOpts{})
-	blocks := make([]autorun.Block, 0, len(uiBlocks))
-	for _, b := range uiBlocks {
+	pbBlocks := playbook.ParseBlocks(body)
+	blocks := make([]autorun.Block, 0, len(pbBlocks))
+	for _, b := range pbBlocks {
 		blocks = append(blocks, autorun.Block{
 			ID:       b.ID,
 			Command:  b.Payload,
@@ -344,7 +349,7 @@ func blocksFor(body string) []autorun.Block {
 	return blocks
 }
 
-// kindFromType maps a ui.Block's Type tag to autorun's StepKind: "diff" →
+// kindFromType maps a playbook.Block's Type tag to autorun's StepKind: "diff" →
 // KindApplyDiff, "create" → KindCreateFile; everything else ("shell", "run",
 // "static") → KindRun (a static block is excluded from execution by its Static
 // flag / autorun.Sequence, not by its Kind).

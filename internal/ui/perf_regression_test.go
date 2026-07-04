@@ -69,28 +69,13 @@ func TestSpinTickDoesNotReflow(t *testing.T) {
 }
 
 // TestCountBlocksMatchesRender pins the B12 single-source contract: countBlocks
-// (cheap goldmark parse, no styling) must return the SAME number as the length of
-// Render's Block list for every document — that count is what isValidPlaybook keys
-// on, so the two must never disagree. The corpus exercises the classification
-// branches (shell/run/diff/create/static), the normalizeFences repair path, indented
-// code blocks, and code nested in a list/quote (which Render does NOT enumerate, so
-// countBlocks must not either).
+// must return the SAME number as the length of Render's Block list for every
+// document — that count is what isValidPlaybook keys on, so the two must never
+// disagree. Since ADR-0009 step 1 both countBlocks and Render derive from
+// playbook.ParseBlocks; this test (over the shared blockCorpus) pins the
+// delegation. See blockCorpus for what the fixtures exercise.
 func TestCountBlocksMatchesRender(t *testing.T) {
-	corpus := []string{
-		"",
-		"# Title\n\nJust prose, no blocks.\n",
-		"# Title\n\n```go {id=a}\nfunc main() {}\n```\n\n```python {id=b}\nprint('x')\n```\n\n```\nplain\n```\n",
-		"# T\n\n```bash {id=s}\nls\n```\n\n```diff {id=d}\n- a\n+ b\n```\n\n```text {id=c file=x.txt}\nhi\n```\n",
-		"# T\n\n```json {static}\n{\"k\":1}\n```\n\n```\nno lang\n```\n",
-		// Malformed closing fence — normalizeFences repairs it; both paths must agree.
-		"# T\n\n```go {id=a}\nfmt.Println(1)\n```trailing text on the closer\n\nmore prose\n",
-		// Indented (4-space) code block → a top-level *ast.CodeBlock.
-		"# T\n\n    indented code block\n    second line\n\nprose\n",
-		// Code fenced INSIDE a list item and a blockquote — Render walks these for
-		// prose only, so neither becomes a Block.
-		"# T\n\n- item with code:\n\n  ```go\n  nested()\n  ```\n\n> ```go\n> quoted()\n> ```\n",
-	}
-	for i, md := range corpus {
+	for i, md := range blockCorpus {
 		_, _, blocks := Render(md, 80, RenderOpts{})
 		if got := countBlocks(md); got != len(blocks) {
 			t.Errorf("corpus[%d]: countBlocks=%d, want len(Render blocks)=%d\n---\n%s", i, got, len(blocks), md)

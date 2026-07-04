@@ -9,7 +9,7 @@ import (
 )
 
 // idTokenRe matches characters that would break the {id=… file=… needs=…
-// rollback=…} fence tag parseFenceInfo (internal/ui/block.go) expects: it
+// rollback=…} fence tag ParseFenceInfo (blocks.go) expects: it
 // splits the tag on whitespace and "=", and the tag itself is delimited by
 // "{"/"}". Any of those characters inside an id or a file= value would
 // mis-split the tag and silently corrupt the rendered playbook. A backtick is

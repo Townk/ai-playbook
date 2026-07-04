@@ -36,7 +36,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/frontmatter"
-	"github.com/Townk/ai-playbook/internal/ui"
+	"github.com/Townk/ai-playbook/internal/playbook"
 	"github.com/Townk/ai-playbook/internal/validate"
 )
 
@@ -101,9 +101,9 @@ func ValidateMain() int {
 
 	fm, body, ok := frontmatter.Parse(content)
 
-	_, _, uiBlocks := ui.Render(body, 80, ui.RenderOpts{})
-	blocks := make([]validate.Block, 0, len(uiBlocks))
-	for _, b := range uiBlocks {
+	pbBlocks := playbook.ParseBlocks(body)
+	blocks := make([]validate.Block, 0, len(pbBlocks))
+	for _, b := range pbBlocks {
 		blocks = append(blocks, validate.Block{
 			ID:     b.ID,
 			Type:   b.Type,

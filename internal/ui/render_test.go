@@ -1677,41 +1677,6 @@ func TestMalformedClosingFenceDoesNotNukeRender(t *testing.T) {
 	}
 }
 
-// TestNormalizeFences_WellFormedUntouched: well-formed fences and fence content
-// (including a line that merely contains backticks mid-content) are not altered.
-func TestNormalizeFences_WellFormedUntouched(t *testing.T) {
-	cases := []string{
-		"```bash\ngg build\n```\nprose after\n",
-		"```\nplain code\n```\n",
-		"```python\nx = 1  # uses `backticks` in a comment\n```\n",
-		"no fences at all\njust prose\n",
-		"~~~\ntilde fence\n~~~\nprose\n",
-	}
-	for _, in := range cases {
-		if got := normalizeFences(in); got != in {
-			t.Errorf("normalizeFences altered well-formed input:\n in: %q\nout: %q", in, got)
-		}
-	}
-}
-
-// TestNormalizeFences_Repairs: the malformed-closer cases are split into a clean
-// closing fence + trailing prose, with newlines preserved.
-func TestNormalizeFences_Repairs(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"```bash\ngg build\n```SDK is here.\n", "```bash\ngg build\n```\nSDK is here.\n"},
-		{"```\ncode\n``` trailing\n", "```\ncode\n```\ntrailing\n"},
-		// Longer opener; closer must be >= opener length.
-		{"````\ncode\n````tail\n", "````\ncode\n````\ntail\n"},
-		// A "```" run shorter than the opener is content, not a closer.
-		{"````\n```\nstill code\n````\nprose\n", "````\n```\nstill code\n````\nprose\n"},
-	}
-	for _, c := range cases {
-		if got := normalizeFences(c.in); got != c.want {
-			t.Errorf("normalizeFences(%q) = %q, want %q", c.in, got, c.want)
-		}
-	}
-}
-
 // renderMarkdownLines renders md at the given width and returns the lines.
 func renderMarkdownLines(t *testing.T, md string, width int) []Line {
 	t.Helper()
