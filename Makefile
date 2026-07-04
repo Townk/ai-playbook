@@ -6,18 +6,20 @@ GOLANGCI := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.
 
 VERSION ?= dev
 LDFLAGS := -X github.com/Townk/ai-playbook/internal/cli.Version=$(VERSION)
+ASK_LDFLAGS := -X github.com/Townk/ai-playbook/internal/askcli.Version=$(VERSION)
 
 .PHONY: build build-release vet test lint fmt-check check docs docs-check
 
 build:
 	go build ./...
 
-# build-release stamps both binaries with VERSION (defaults to "dev";
+# build-release stamps all three binaries with VERSION (defaults to "dev";
 # override with `make build-release VERSION=1.2.3`), mirroring what
 # goreleaser does for release/snapshot builds.
 build-release:
 	go build -ldflags '$(LDFLAGS)' -o bin/ai-playbook ./cmd/ai-playbook
 	go build -ldflags '$(LDFLAGS)' -o bin/apb ./cmd/apb
+	go build -ldflags '$(ASK_LDFLAGS)' -o bin/ask ./cmd/ask
 
 docs:
 	go run ./cmd/docgen

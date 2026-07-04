@@ -37,6 +37,13 @@ runner keys run/diff/apply and success-detection on the `id`.
 | `{rollback=<id>}` | Phase 2    | The rollback for step `<id>`; on failure, completed steps' rollbacks run in REVERSE order. |
 | `{static}`      | shipped      | A non-runnable block (no run button) — illustrative output, config samples, etc. |
 
+Only **top-level** fenced blocks carry block authority: a fence tag (`id=`,
+`rollback=`, `file=`, `{static}`) on a code block nested inside a list or
+blockquote is inert — it is neither runnable, nor a rollback command, nor
+validated. The parser (`playbook.ParseBlocks`), the renderer, `validate`, and
+the run engine all share this rule (settled 2026-07-04; the renderer honored
+nested `rollback=` tags before that).
+
 Multi-language steps run via interpreter heredocs — shell plus
 `python`/`node`/`ruby`/`perl`.
 
