@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Townk/ai-playbook/internal/store"
+	"github.com/Townk/ai-playbook/internal/ui"
 )
 
 // fixedNow anchors age-sensitive tests to a stable point in time.
@@ -363,10 +364,10 @@ func TestShowMain_UnknownSlug_Exit1(t *testing.T) {
 	}
 }
 
-// TestShowMain_KnownSlug_ReshapesArgs verifies that ShowMain reshapes os.Args
-// to {bin, "run", path} before delegating to ui.Main. We intercept via the
-// uiMainFn seam so no TTY is required.
-func TestShowMain_KnownSlug_ReshapesArgs(t *testing.T) {
+// TestShowMain_KnownSlug_BuildsOptions verifies that ShowMain builds a ui.Options
+// with File set to the resolved store path (and no Cached badge) before delegating
+// to ui.Run. We capture the Options via the uiRunFn seam so no TTY is required.
+func TestShowMain_KnownSlug_BuildsOptions(t *testing.T) {
 	const wantPath = "/store/build-app.md"
 	withArgs(t, []string{"ai-playbook", "show", "build-app"})
 	withPathForFn(t, func(slug string) (string, bool) {
@@ -376,9 +377,9 @@ func TestShowMain_KnownSlug_ReshapesArgs(t *testing.T) {
 		return "", false
 	})
 
-	var capturedArgs []string
-	withUIMainFn(t, func() int {
-		capturedArgs = append([]string{}, os.Args...)
+	var got ui.Options
+	withUIRunFn(t, func(o ui.Options) int {
+		got = o
 		return 0
 	})
 
@@ -386,40 +387,24 @@ func TestShowMain_KnownSlug_ReshapesArgs(t *testing.T) {
 	if code != 0 {
 		t.Errorf("ShowMain known slug: want exit 0, got %d", code)
 	}
-	if len(capturedArgs) < 3 {
-		t.Fatalf("ShowMain: os.Args not reshaped; got %v", capturedArgs)
+	if got.File != wantPath {
+		t.Errorf("ShowMain: Options.File = %q, want %q", got.File, wantPath)
 	}
-	if capturedArgs[1] != "run" {
-		t.Errorf("ShowMain: os.Args[1] = %q, want %q", capturedArgs[1], "run")
-	}
-	if capturedArgs[2] != wantPath {
-		t.Errorf("ShowMain: os.Args[2] = %q, want %q", capturedArgs[2], wantPath)
-	}
-	// No --cached flag: read-only render must NOT show the cached badge.
-	for _, a := range capturedArgs {
-		if a == "--cached" {
-			t.Errorf("ShowMain: unexpected --cached in reshaped args: %v", capturedArgs)
-		}
+	// No Cached flag: read-only render must NOT show the cached badge.
+	if got.Cached {
+		t.Errorf("ShowMain: Options.Cached = true, want false (no badge on a read-only show)")
 	}
 }
 
-// withUIMainFn replaces uiMainFn for the duration of t.
-func withUIMainFn(t *testing.T, fn func() int) {
+// withUIRunFn replaces uiRunFn for the duration of t.
+func withUIRunFn(t *testing.T, fn func(ui.Options) int) {
 	t.Helper()
-	old := uiMainFn
-	uiMainFn = fn
-	t.Cleanup(func() { uiMainFn = old })
+	old := uiRunFn
+	uiRunFn = fn
+	t.Cleanup(func() { uiRunFn = old })
 }
 
-// withSetSourcePathFn replaces setSourcePathFn for the duration of t.
-func withSetSourcePathFn(t *testing.T, fn func(string)) {
-	t.Helper()
-	old := setSourcePathFn
-	setSourcePathFn = fn
-	t.Cleanup(func() { setSourcePathFn = old })
-}
-
-// TestShowMain_SetsSourcePath verifies that ShowMain calls setSourcePathFn with
+// TestShowMain_SetsSourcePath verifies that ShowMain sets Options.SourcePath to
 // the resolved store path (the real .md file) so the viewer model can offer an
 // [edit] button for file-backed playbooks.
 func TestShowMain_SetsSourcePath(t *testing.T) {
@@ -431,17 +416,16 @@ func TestShowMain_SetsSourcePath(t *testing.T) {
 		}
 		return "", false
 	})
-	withUIMainFn(t, func() int { return 0 })
 
 	var got string
-	withSetSourcePathFn(t, func(p string) { got = p })
+	withUIRunFn(t, func(o ui.Options) int { got = o.SourcePath; return 0 })
 
 	code := ShowMain()
 	if code != 0 {
 		t.Errorf("ShowMain: want exit 0, got %d", code)
 	}
 	if got != wantPath {
-		t.Fatalf("ShowMain must call setSourcePathFn with the store path; got %q, want %q", got, wantPath)
+		t.Fatalf("ShowMain must set Options.SourcePath to the store path; got %q, want %q", got, wantPath)
 	}
 }
 

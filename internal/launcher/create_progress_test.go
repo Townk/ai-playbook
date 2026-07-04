@@ -18,6 +18,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/reengage"
 	"github.com/Townk/ai-playbook/internal/tools"
 	"github.com/Townk/ai-playbook/internal/triage"
+	"github.com/Townk/ai-playbook/internal/ui"
 )
 
 // ── progress+ask host ───────────────────────────────────────────────────────
@@ -214,23 +215,20 @@ func TestCreateAuthorWithProgress_StreamErrorFallsBack(t *testing.T) {
 
 // ── phase-2 viewer ──────────────────────────────────────────────────────────
 
-// TestCreateViewPlaybook_ReshapesToRunFile asserts the phase-2 viewer reshapes
-// os.Args to `run --file <tmp>` (no --cached badge) and the temp file holds the
-// COMPLETE playbook body handed to ui.Main.
-func TestCreateViewPlaybook_ReshapesToRunFile(t *testing.T) {
-	savedArgs, savedMain := os.Args, uiMainFn
-	t.Cleanup(func() { os.Args, uiMainFn = savedArgs, savedMain })
-	os.Args = []string{"ai-playbook", "create", "fix it"}
+// TestCreateViewPlaybook_BuildsOptions asserts the phase-2 viewer builds a
+// ui.Options with File pointing at the temp file (no Cached badge), and the temp
+// file holds the COMPLETE playbook body handed to ui.Run.
+func TestCreateViewPlaybook_BuildsOptions(t *testing.T) {
+	savedRun := uiRunFn
+	t.Cleanup(func() { uiRunFn = savedRun })
 
 	const fullBody = "# Playbook — Reshape\n\nstep one\n"
-	var gotArgs []string
+	var got ui.Options
 	var fileContent string
-	uiMainFn = func() int {
-		gotArgs = append([]string(nil), os.Args...)
-		for i, a := range os.Args {
-			if a == "--file" && i+1 < len(os.Args) {
-				fileContent = mustRead(t, os.Args[i+1])
-			}
+	uiRunFn = func(o ui.Options) int {
+		got = o
+		if o.File != "" {
+			fileContent = mustRead(t, o.File)
 		}
 		return 0
 	}
@@ -240,14 +238,11 @@ func TestCreateViewPlaybook_ReshapesToRunFile(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
-	if len(gotArgs) < 2 || gotArgs[1] != "run" {
-		t.Fatalf("os.Args not reshaped to `run`: %v", gotArgs)
+	if got.File == "" {
+		t.Errorf("viewer must set Options.File to the temp file: %+v", got)
 	}
-	if !contains(gotArgs, "--file") {
-		t.Errorf("viewer must pass --file: %v", gotArgs)
-	}
-	if contains(gotArgs, "--cached") {
-		t.Errorf("create must NOT pass --cached (no badge): %v", gotArgs)
+	if got.Cached {
+		t.Errorf("create must NOT set Options.Cached (no badge): %+v", got)
 	}
 	if fileContent != fullBody {
 		t.Errorf("temp file content = %q, want the COMPLETE body %q", fileContent, fullBody)

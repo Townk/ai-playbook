@@ -274,7 +274,7 @@ func structuredBody(sess *session, projectRoot, home string, fallback func() str
 }
 
 // createViewFn is the phase-2 viewer seam: production writes the complete playbook
-// to a temp file and opens ui.Main (reshaped to `run --file`) driving the authoring
+// to a temp file and opens ui.Run (with the body as its File) driving the authoring
 // session's shell; tests override it to capture the body handed to the viewer.
 var createViewFn = createViewPlaybook
 
@@ -396,9 +396,9 @@ func createAuthorWithProgress(req capture.Request, d triage.Decision, c *cache.C
 // createViewPlaybook opens the fullscreen viewer with the COMPLETE playbook (no
 // live streaming): write the body to a temp file, reuse the authoring session's
 // driver (so run blocks execute in the same shell the agent authored in), thread the
-// Reengage (regenerate / `w`-wrap-up commit) + the no-mux ask bridge, reshape os.Args
-// to `run --file <tmp>` (no --cached → no badge), and call ui.Main. The temp file is
-// cleaned up after the viewer returns.
+// Reengage (regenerate / `w`-wrap-up commit) + the no-mux ask bridge into a
+// ui.Options (no Cached → no badge), and call ui.Run. The temp file is cleaned up
+// after the viewer returns.
 func createViewPlaybook(body string, sess *session, re *reengage.Reengage, cfg *config.Config, req capture.Request) int {
 	f, err := os.CreateTemp("", "apb-create-*.md")
 	if err != nil {
@@ -417,22 +417,19 @@ func createViewPlaybook(body string, sess *session, re *reengage.Reengage, cfg *
 
 	cwd := reqCwd(req)
 
+	opts := ui.Options{
+		File:       tmp,
+		Cwd:        cwd,
+		Shell:      cfg.Driver.Shell, // own-driver fallback honors the configured shell
+		Reengage:   re,               // regenerate / `w`-wrap-up CommitPlaybook (store file)
+		AskBridge:  bridgeOf(sess),   // no-mux re-engagement `ask` → in-viewer overlay
+		FinalDraft: true,             // the rendered structured playbook IS a final draft: `w` persists (no re-generate)
+		Asker:      sess.asker(cwd),  // `f` proactive amend — same asker the troubleshoot viewer gets (float in mux; no-op in no-mux)
+	}
 	// Reuse the session's shared driver (the same shell the tools backend exposes) so
-	// the viewer's run blocks drive it; Main does NOT close a session-supplied driver.
+	// the viewer's run blocks drive it; Run does NOT close a session-supplied driver.
 	if sess != nil {
-		ui.SetDriver(sess.drv)
+		opts.Driver = sess.drv
 	}
-	ui.SetShell(cfg.Driver.Shell)   // own-driver fallback honors the configured shell
-	ui.SetReengage(re)              // regenerate / `w`-wrap-up CommitPlaybook (store file)
-	ui.SetAskBridge(bridgeOf(sess)) // no-mux re-engagement `ask` → in-viewer overlay
-	ui.SetFinalDraft(true)          // the rendered structured playbook IS a final draft: `w` persists (no re-generate)
-	ui.SetAsker(sess.asker(cwd))    // `f` proactive amend — same asker the troubleshoot viewer gets (float in mux; no-op in no-mux)
-
-	argv := []string{os.Args[0], "run"}
-	if cwd != "" {
-		argv = append(argv, "--cwd", cwd)
-	}
-	argv = append(argv, "--file", tmp)
-	os.Args = argv
-	return uiMainFn()
+	return uiRunFn(opts)
 }

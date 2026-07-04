@@ -267,13 +267,13 @@ type model struct {
 	driverPending bool
 
 	// readyCh delivers the background-opened orchestrator on the async-startup path
-	// (set by Main from the consume-once SetPendingReady stash). Init subscribes to it
+	// (set by Run from Options.Ready). Init subscribes to it
 	// via a tea.Cmd that reads the single OrchReady → orchReadyMsg. nil on the sync
 	// path (the orchestrator was built before the program started).
 	readyCh <-chan OrchReady
 
-	// answerRegen is the cached-ANSWER regenerate seam (set by Main from
-	// SetAnswerRegen). When non-nil, the cached pill's reload re-runs the cheap
+	// answerRegen is the cached-ANSWER regenerate seam (set by Run from
+	// Options.AnswerRegen). When non-nil, the cached pill's reload re-runs the cheap
 	// classify on the original request, streams the fresh prose back (the returned
 	// reader), and re-caches it — INSTEAD of the orchestrator's playbook-shaped
 	// Regenerate. nil → the orchestrator path (playbooks) or a flash-only no-op.
@@ -336,8 +336,8 @@ type model struct {
 	// failing step → the follow-up loop troubleshoots it → the verify-success confirm /
 	// `w`-generate AMENDS the served playbook (base=servedBase) instead of starting
 	// fresh, so the served playbook is improved in place and re-cached under the same
-	// keys. Empty for a FRESH troubleshoot (authorPlaybook / cache MISS). Set by Main
-	// from the consume-once SetServedBase stash, threaded from serveCachedPlaybook.
+	// keys. Empty for a FRESH troubleshoot (authorPlaybook / cache MISS). Set by Run
+	// from Options.ServedBase, threaded from serveCachedPlaybook.
 	servedBase string
 
 	// finalDraft marks that the rendered playbook is a GENERATED final-playbook draft
@@ -371,7 +371,7 @@ type model struct {
 	// the user types a free-form adjustment → re-author the displayed playbook in
 	// AMEND mode (base=m.md, change=the typed value) → REPLACE draft. nil when the
 	// float can't be spawned (off-zellij / tests / no selfExe) → `f` is a no-op. Set
-	// by Main/RunStream from the consume-once SetAsker stash / StreamOptions.Asker.
+	// by Run/RunStream from Options.Asker / StreamOptions.Asker.
 	asker AskFunc
 
 	// structured marks that this stream carries the agent's narration, NOT the
@@ -410,7 +410,7 @@ type model struct {
 	// autoRollback (set from the --auto-rollback run flag) makes a step failure auto-fire
 	// the rollback chain instead of only showing the manual "Rollback playbook" button.
 	autoRollback bool
-	// assisted (set from the --assisted run flag / ui.SetAssisted) opts into the
+	// assisted (set from the --assisted run flag / Options.Assisted) opts into the
 	// GUIDED-fullscreen run mode; it rides the same viewer path as the default
 	// run — the assisted behavior itself is wired by later Plan 2 tasks.
 	assisted bool

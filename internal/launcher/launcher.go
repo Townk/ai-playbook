@@ -527,7 +527,7 @@ func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content, title,
 var answerClassify classifyFunc = author.ClassifyRequest
 
 // answerRegenFunc builds the cached-ANSWER regenerate closure handed to
-// ui.SetAnswerRegen. When the reload pill is clicked it re-runs the cheap classify
+// ui.Options.AnswerRegen. When the reload pill is clicked it re-runs the cheap classify
 // on the ORIGINAL request, re-caches the fresh prose under the SAME (ctx,req) keys
 // with kind=answer (best-effort), and streams the prose back so the pager REPLACES
 // the stale content. The classify's returned Kind is ignored — this pane is prose,
@@ -566,8 +566,8 @@ func answerRegenFunc(req capture.Request) func() (io.ReadCloser, error) {
 // classify "answer" route (spawned by spawnAnswer). It carries the original request
 // so the cached pill's reload can re-run the cheap classify in place. It decodes
 // --request <json>, reads the prose from --content <file>, wires the cached-answer
-// regenerate seam (ui.SetAnswerRegen), then reshapes os.Args to the `run` entry and
-// returns ui.Main() — exactly like serveCachedPlaybook reshapes to `run`.
+// regenerate seam (ui.Options.AnswerRegen), and hands the prose file to ui.Run —
+// exactly the viewer serveCachedPlaybook uses.
 func AnswerMain() int {
 	fs := flag.NewFlagSet("answer", flag.ExitOnError)
 	var requestJSONStr string
@@ -587,41 +587,36 @@ func AnswerMain() int {
 		return 2
 	}
 
+	// The prose file carries no front matter → renders as-is (bypasses RunMain and
+	// adapt-on-run deliberately).
+	opts := ui.Options{
+		File:  contentFile,
+		Title: title,
+		Cwd:   cwd,
+	}
+	if t, ok := cachedTime(cached); ok {
+		opts.Cached = true
+		opts.CachedAt = t
+	}
+
 	// Decode the request so the reload can re-classify it. A decode failure is
 	// non-fatal: the pager still renders the prose; only the reload seam is skipped.
 	if requestJSONStr != "" {
 		if req, err := decodeRequestJSON([]byte(requestJSONStr)); err != nil {
 			dbg("answerMain: request decode failed: %v", err)
 		} else {
-			ui.SetAnswerRegen(answerRegenFunc(req))
+			opts.AnswerRegen = answerRegenFunc(req)
 		}
 	}
 
-	// Thread the configured shell for consistency with the other reshape paths.
-	// Inert on the normal answer path (an answer has no run blocks → ui.Main opens
-	// no driver), but defensive for the empty-request edge.
+	// Thread the configured shell for consistency with the other paths. Inert on the
+	// normal answer path (an answer has no run blocks → ui.Run opens no driver), but
+	// defensive for the empty-request edge.
 	if cfg, err := config.Load(); err == nil {
-		ui.SetShell(cfg.Driver.Shell)
+		opts.Shell = cfg.Driver.Shell
 	}
 
-	// Reshape os.Args to the `run` entrypoint (os.Args[1]="run", flags from [2:]),
-	// exactly like serveCachedPlaybook, and reuse ui.Main().
-	argv := []string{os.Args[0], "run"}
-	if cached != "" {
-		argv = append(argv, "--cached", cached)
-	}
-	if title != "" {
-		argv = append(argv, "--title", title)
-	}
-	if cwd != "" {
-		argv = append(argv, "--cwd", cwd)
-	}
-	// Pass the prose file via --file (not a bare positional): ui.Main honors --file as
-	// the source. This bypasses RunMain (and adapt-on-run) deliberately — the prose
-	// file carries no front matter, so it renders as-is.
-	argv = append(argv, "--file", contentFile)
-	os.Args = argv
-	return ui.Main()
+	return uiRunFn(opts)
 }
 
 // runInlineClassify is runInline's classify seam: tests inject a fake classifyFunc

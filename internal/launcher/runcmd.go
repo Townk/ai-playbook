@@ -13,12 +13,12 @@
 // model adapt-on-run. A project_bound source (store.Meta.ProjectBound, or a
 // --file front matter's project_bound) carries portable $PROJECT_ROOT references:
 // the run path resolves the heuristic project root, sets it on the run driver via
-// ui.SetProjectRoot (which exports PROJECT_ROOT=<root>), and opens the driver
-// there (--cwd). A non-project_bound source renders with no PROJECT_ROOT. A raw
+// ui.Options.ProjectRoot (which exports PROJECT_ROOT=<root>), and opens the driver
+// there (Cwd). A non-project_bound source renders with no PROJECT_ROOT. A raw
 // --file with no front matter renders as-is.
 //
 // Internal callers (serveCachedPlaybook, AnswerMain) do NOT go through RunMain:
-// they reshape os.Args to `run --file <tmp>` and call ui.Main directly.
+// they build their own ui.Options and call ui.Run directly.
 package launcher
 
 import (
@@ -55,22 +55,6 @@ var storePathForFn = store.PathFor
 // project_bound playbook is run in (and exported as $PROJECT_ROOT).
 var projectRootFn = capture.ProjectRoot
 
-// setProjectRootFn injects the run driver's PROJECT_ROOT (the heuristic project
-// root) for a project_bound playbook. Seam so tests observe it without a viewer.
-var setProjectRootFn = ui.SetProjectRoot
-
-// setReengageFn stashes the run-viewer's drift-regen re-engagement context (the harness
-// wiring for regenerating a drifted diff). Seam so tests observe the wiring without a viewer.
-var setReengageFn = ui.SetReengage
-
-// setAutoRollbackFn stashes the --auto-rollback opt-in for the next viewer. Seam so tests
-// observe it without a viewer.
-var setAutoRollbackFn = ui.SetAutoRollback
-
-// setAssistedFn stashes the --assisted opt-in for the next viewer. Seam so tests
-// observe it without a viewer.
-var setAssistedFn = ui.SetAssisted
-
 // autorunRunFn is the autorun.Run seam: the headless (`--auto`) run executes the
 // converted block sequence without a driver/viewer. Tests inject a fake so the
 // auto branch is exercised without opening a real shell.
@@ -78,14 +62,15 @@ var autorunRunFn = autorun.Run
 
 // RunMain is the `ai-playbook run` subcommand: it owns config loading + the
 // configured-shell hand-off (ui stays config-agnostic), resolves the run
-// argument, and renders the resolved playbook through ui.Main (via uiMainFn). A
-// project_bound source sets PROJECT_ROOT on the run driver before it renders.
+// argument, and renders the resolved playbook through ui.Run (via uiRunFn). It
+// seeds a ui.Options with the run-level fields (Shell + the auto-rollback/assisted
+// opt-ins) and threads it down; runFile/runViewer fill in the source-specific
+// fields (File/Cwd/ProjectRoot/Reengage) before the single uiRunFn call.
 func RunMain() int {
 	// cfg is always non-nil (config.Load returns Default on error). The `run`
 	// subcommand opens its own driver, so honor the configured shell — ui stays
-	// config-agnostic and receives the selector as DATA via SetShell.
+	// config-agnostic and receives the selector as DATA via Options.Shell.
 	cfg, _ := config.Load()
-	ui.SetShell(cfg.Driver.Shell)
 
 	ra, err := resolveRunArgs(os.Args[2:])
 	if err != nil {
@@ -119,16 +104,21 @@ func RunMain() int {
 		}
 	}
 
-	setAutoRollbackFn(ra.AutoRollback) // opt-in: auto-fire rollback on a step failure
-	if ra.Mode == modeAssisted {
-		setAssistedFn(true) // opt-in: GUIDED fullscreen mode rides the same viewer path as default
+	// Seed the viewer Options with the run-level fields: the configured shell (for
+	// ui's own-driver open), the auto-rollback opt-in (auto-fire rollback on a step
+	// failure), and the assisted opt-in (GUIDED fullscreen rides the same viewer path
+	// as default). runFile/runViewer fill in the source-specific fields.
+	opts := ui.Options{
+		Shell:        cfg.Driver.Shell,
+		AutoRollback: ra.AutoRollback,
+		Assisted:     ra.Mode == modeAssisted,
 	}
 
 	switch ra.Kind {
 	case "file":
-		return runFile(ra.Value)
+		return runFile(ra.Value, opts)
 	case "playbook":
-		return runPlaybook(ra.Value)
+		return runPlaybook(ra.Value, opts)
 	}
 	return 0
 }
@@ -143,24 +133,24 @@ func RunMain() int {
 // project_root for every stored run. runFile re-reads + re-parses meta.Path
 // itself, so store.Meta.ProjectBound is not consulted here — the file's OWN
 // front matter decides, exactly like `run --file` would.
-func runPlaybook(slug string) int {
+func runPlaybook(slug string, opts ui.Options) int {
 	meta, _, lerr := storeLoadFn(slug)
 	if lerr != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", lerr)
 		return 1
 	}
-	return runFile(meta.Path)
+	return runFile(meta.Path, opts)
 }
 
 // runFile renders a markdown file through the `run --file` viewer. The ORIGINAL file
-// is always what ui.Main renders — ui.Main strips any front matter for display AND
+// is always what ui.Run renders — ui.Run strips any front matter for display AND
 // extracts the declared env map for the confirmation gate, so we must NOT pre-strip it
 // (an earlier temp-file round-trip did, which silently discarded both the run cwd and
 // the env map). A project_bound file resolves its project root (declared project_root
 // relative to the heuristic repo root, else the repo root itself), exports it as
 // PROJECT_ROOT, and opens there; a plain front-matter file opens in the file's own
 // directory; a raw file with no front matter renders as-is in the invocation cwd.
-func runFile(file string) int {
+func runFile(file string, opts ui.Options) int {
 	data, rerr := os.ReadFile(file)
 	if rerr != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", rerr)
@@ -168,13 +158,13 @@ func runFile(file string) int {
 	}
 	fm, _, ok := frontmatter.Parse(string(data))
 	if !ok {
-		// No front matter → render as-is (cwd derived from the file by ui.Main).
-		return runViewer(file, "")
+		// No front matter → render as-is (cwd derived from the file by ui.Run).
+		return runViewer(file, "", opts)
 	}
 	cwd := ""
 	if fm.ProjectBound {
 		root := resolveProjectRoot(fm.ProjectRoot)
-		setProjectRootFn(root) // the run driver exports PROJECT_ROOT=<root>
+		opts.ProjectRoot = root // the run driver exports PROJECT_ROOT=<root>
 		cwd = root
 	} else if dir := filepath.Dir(file); dir != "" {
 		// The `run --file` cwd rule: blocks run in the playbook file's own directory
@@ -185,7 +175,7 @@ func runFile(file string) int {
 			cwd = dir
 		}
 	}
-	return runViewer(file, cwd)
+	return runViewer(file, cwd, opts)
 }
 
 // autoRun executes ra headlessly (`run --auto`): it resolves the same source
@@ -219,7 +209,7 @@ func autoRun(ra runArgs) int {
 		// Pass the front-matter-stripped body — NOT the raw source — so the
 		// YAML fence never gets mis-parsed as a code block.
 		if parent.FM.ProjectBound {
-			os.Setenv("PROJECT_ROOT", parent.Cwd) // mirrors setProjectRootFn's driver export
+			os.Setenv("PROJECT_ROOT", parent.Cwd) // mirrors Options.ProjectRoot's driver export
 		}
 		return autorunRunFn(autorun.RunConfig{
 			Blocks:       blocksFor(parent.Body),
@@ -287,7 +277,7 @@ func loadParent(ra runArgs) (depNode, error) {
 		if ok && fm.ProjectBound {
 			cwd = resolveProjectRoot(fm.ProjectRoot)
 		} else if dir := filepath.Dir(ra.Value); dir != "" {
-			// Mirrors the `run --file` cwd rule (runFile / ui.Main's --cwd
+			// Mirrors the `run --file` cwd rule (runFile / ui.Run's Cwd
 			// default): blocks run in the playbook file's own directory.
 			if abs, aerr := filepath.Abs(dir); aerr == nil {
 				cwd = abs
@@ -378,27 +368,23 @@ func resolveProjectRoot(declared string) string {
 	return filepath.Join(projectRootFn(), declared)
 }
 
-// runViewer renders file through the `run --file` viewer (ui.Main via uiMainFn),
-// passing --cwd when non-empty so the run driver opens there. It wires the harness for
+// runViewer renders file through the `run --file` viewer (ui.Run via uiRunFn),
+// setting Cwd so the run driver opens there. It wires the harness for
 // drift-regenerate (drift-only re-engagement) so a standalone playbook can regenerate a
 // drifted diff block; the viewer keeps its authoring affordances off (DriftRegenOnly).
-func runViewer(file, cwd string) int {
-	setReengageFn(driftRegenReengage())
-	saved := os.Args
-	args := []string{os.Args[0], "run", "--file", file}
-	if cwd != "" {
-		args = append(args, "--cwd", cwd)
-	}
-	os.Args = args
-	code := uiMainFn()
-	os.Args = saved
-	return code
+// opts carries the run-level fields (Shell + auto-rollback/assisted) seeded by RunMain
+// and, for a project_bound source, ProjectRoot set by runFile.
+func runViewer(file, cwd string, opts ui.Options) int {
+	opts.File = file
+	opts.Cwd = cwd
+	opts.Reengage = driftRegenReengage()
+	return uiRunFn(opts)
 }
 
 // runMode selects between the default (interactive viewer), headless (--auto),
 // and GUIDED-fullscreen (--assisted) run paths. modeAssisted rides the SAME
 // viewer path as modeDefault (runFile/runPlaybook) — only the plumbing (the
-// setAssistedFn opt-in) differs; the assisted UI behavior itself is Plan 2's
+// Options.Assisted opt-in) differs; the assisted UI behavior itself is Plan 2's
 // later tasks.
 type runMode int
 

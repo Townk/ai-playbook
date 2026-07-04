@@ -16,7 +16,7 @@ import (
 
 // swap replaces *target with fn for the duration of the test, returning a
 // restore func for `defer`. Generic over the launcher package's function-var
-// seams (reviewFn, storeLoadFn, uiMainFn, …).
+// seams (reviewFn, storeLoadFn, uiRunFn, …).
 func swap[T any](target *T, fn T) func() {
 	old := *target
 	*target = fn

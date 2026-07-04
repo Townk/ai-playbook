@@ -8,15 +8,15 @@
 //     piping; display \x1f slug \x1f path per line.
 //   - json: indented JSON array of []store.Meta for scripting.
 //
-// show renders a saved playbook read-only by reshaping os.Args to the `run`
-// subcommand and delegating to ui.Main (via uiMainFn — seam for tests).
+// show renders a saved playbook read-only by building a ui.Options (File +
+// SourcePath) and delegating to ui.Run (via uiRunFn — seam for tests).
 //
 // edit opens a saved playbook in $EDITOR via the editorSpawn seam.
 //
 // Package-level seams:
 //   - indexFn  / searchFn: production wires store.Index / store.Search; tests inject fakes.
 //   - pathForFn:           production wires store.PathFor; tests inject fakes.
-//   - uiMainFn:            production wires ui.Main; tests inject a no-op.
+//   - uiRunFn:             production wires ui.Run; tests capture the Options / inject a no-op.
 //   - editorSpawn:         production exec.Commands $EDITOR; tests inject a recorder.
 package launcher
 
@@ -43,14 +43,11 @@ var searchFn = func(query string) ([]store.Meta, error) { return store.Search(qu
 // pathForFn is the PathFor seam: resolves a slug to its file path.
 var pathForFn = func(slug string) (string, bool) { return store.PathFor(slug) }
 
-// uiMainFn is the ui.Main seam: delegates to the real pager; tests replace it
-// so ShowMain tests never need a TTY.
-var uiMainFn = func() int { return ui.Main() }
-
-// setSourcePathFn is the ui.SetSourcePath seam: wires the on-disk store path
-// into the viewer model so it can offer an [edit] button. Tests inject a
-// recorder to assert ShowMain calls it with the correct store path.
-var setSourcePathFn = ui.SetSourcePath
+// uiRunFn is the ui.Run seam: delegates to the real viewer; tests replace it to
+// capture the ui.Options a call site builds (and to avoid a TTY). It is the
+// single seam every launcher viewer-launch path now flows through, replacing the
+// former ui.Main() + os.Args-reshaping + per-setter seams.
+var uiRunFn = ui.Run
 
 // editorSpawn is the seam for launching $EDITOR: production opens the editor
 // with inherited stdio; tests inject a recorder.
@@ -212,15 +209,16 @@ func formatJSON(metas []store.Meta) (string, error) {
 
 // resolveShow looks up slug via pathForFn and returns (path, true) on a hit or
 // ("", false) on a miss. Extracted as a pure function so unit tests can verify
-// slug resolution without launching ui.Main (which requires a TTY).
+// slug resolution without launching ui.Run (which requires a TTY).
 func resolveShow(slug string) (string, bool) {
 	return pathForFn(slug)
 }
 
 // ShowMain is the `ai-playbook show <slug>` subcommand: renders a saved
-// playbook read-only by reshaping os.Args to the `run` subcommand and
-// delegating to uiMainFn (ui.Main in production). No --cached flag is passed,
-// so the cached badge never appears.
+// playbook read-only by building a ui.Options over the resolved store path and
+// delegating to uiRunFn (ui.Run in production). No Cached flag is set, so the
+// cached badge never appears. SourcePath threads the real store path into the
+// viewer model so it can offer an [edit] button for this file-backed playbook.
 func ShowMain() int {
 	args := os.Args[2:]
 	if len(args) == 0 || args[0] == "" {
@@ -233,19 +231,7 @@ func ShowMain() int {
 		fmt.Fprintf(os.Stderr, "ai-playbook show: no playbook for slug %q\n", slug)
 		return 1
 	}
-	// Thread the real store path into the viewer model so it can offer an [edit]
-	// button for this file-backed playbook. Must be called before uiMainFn so
-	// ui.Main() consumes the stash on startup.
-	setSourcePathFn(path)
-	// Reshape os.Args so that uiMainFn (ui.Main) sees:
-	//   os.Args = {bin, "run", path}
-	// ui.Main reads its file via fs.Arg(0) — the bare positional after flags.
-	// No --cached: read-only render, badge stays off.
-	saved := os.Args
-	os.Args = []string{os.Args[0], "run", path}
-	code := uiMainFn()
-	os.Args = saved
-	return code
+	return uiRunFn(ui.Options{File: path, SourcePath: path})
 }
 
 // EditMain is the `ai-playbook edit <slug>` subcommand: resolves the playbook

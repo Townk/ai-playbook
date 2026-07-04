@@ -65,8 +65,8 @@ func classifyInline(req capture.Request, onTail func(string)) (author.Classifica
 }
 
 // viewProse renders a short prose answer in the fullscreen viewer in-process:
-// write it to a temp markdown file and reuse ui.Main via the os.Args-reshaped
-// `run` entry (the same reshape serveCachedPlaybook/AnswerMain use).
+// write it to a temp markdown file and hand it to ui.Run as the File (the same
+// viewer serveCachedPlaybook/AnswerMain use).
 func viewProse(content, title, cwd string) int {
 	f, err := os.CreateTemp("", "apb-inline-answer-*.md")
 	if err != nil {
@@ -83,20 +83,14 @@ func viewProse(content, title, cwd string) int {
 	f.Close()
 	defer os.Remove(tmp)
 
-	// ui.Main opens its own driver for this reshaped `run`; honor the configured shell.
+	// ui.Run opens its own driver for this prose file; honor the configured shell.
 	cfg, _ := config.Load()
-	ui.SetShell(cfg.Driver.Shell)
-
-	argv := []string{os.Args[0], "run"}
-	if title != "" {
-		argv = append(argv, "--title", title)
-	}
-	if cwd != "" {
-		argv = append(argv, "--cwd", cwd)
-	}
-	argv = append(argv, tmp)
-	os.Args = argv
-	return ui.Main()
+	return uiRunFn(ui.Options{
+		File:  tmp,
+		Title: title,
+		Cwd:   cwd,
+		Shell: cfg.Driver.Shell,
+	})
 }
 
 // inlineRunFn is the inline-input seam (tests override it to avoid a TTY).

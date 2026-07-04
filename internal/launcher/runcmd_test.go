@@ -9,6 +9,7 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/autorun"
 	"github.com/Townk/ai-playbook/internal/store"
+	"github.com/Townk/ai-playbook/internal/ui"
 )
 
 // ---- resolveRunArgs — the run argument resolution matrix ----
@@ -104,14 +105,14 @@ func withStoreLoadFn(t *testing.T, fn func(string) (store.Meta, string, error)) 
 // ---- runPlaybook: the project_bound run gate ----
 
 // TestRunPlaybook_ProjectBoundSetsProjectRoot verifies a project_bound playbook
-// resolves the heuristic project root, sets it on the run driver via the
-// setProjectRootFn seam, and renders the ORIGINAL stored file as-is (no model
+// resolves the heuristic project root, sets it on the run driver via
+// Options.ProjectRoot, and renders the ORIGINAL stored file as-is (no model
 // adapt). runPlaybook delegates to runFile(meta.Path), so project_bound is
 // decided by the FILE's own front matter (re-parsed by runFile) — the storeLoadFn
 // stub's Meta.ProjectBound is irrelevant here and deliberately left false.
 func TestRunPlaybook_ProjectBoundSetsProjectRoot(t *testing.T) {
-	origLoad, origPR, origUI, origSPR := storeLoadFn, projectRootFn, uiMainFn, setProjectRootFn
-	t.Cleanup(func() { storeLoadFn, projectRootFn, uiMainFn, setProjectRootFn = origLoad, origPR, origUI, origSPR })
+	origLoad, origPR, origUI := storeLoadFn, projectRootFn, uiRunFn
+	t.Cleanup(func() { storeLoadFn, projectRootFn, uiRunFn = origLoad, origPR, origUI })
 	dir := t.TempDir()
 	path := filepath.Join(dir, "pb.md")
 	content := "---\nname: pb\nproject_bound: true\n---\n# Playbook — T\n\n```bash {id=fix}\ncd $PROJECT_ROOT\n```\n"
@@ -122,14 +123,13 @@ func TestRunPlaybook_ProjectBoundSetsProjectRoot(t *testing.T) {
 		return store.Meta{Slug: "pb", Path: path}, "", nil
 	}
 	projectRootFn = func() string { return "/new/proj" }
-	var gotPR string
-	setProjectRootFn = func(p string) { gotPR = p }
-	uiMainFn = func() int { return 0 } // no real viewer
-	if code := runPlaybook("pb"); code != 0 {
+	var got ui.Options
+	uiRunFn = func(o ui.Options) int { got = o; return 0 } // no real viewer
+	if code := runPlaybook("pb", ui.Options{}); code != 0 {
 		t.Fatalf("runPlaybook = %d", code)
 	}
-	if gotPR != "/new/proj" {
-		t.Fatalf("project_bound run must set PROJECT_ROOT to the heuristic root, got %q", gotPR)
+	if got.ProjectRoot != "/new/proj" {
+		t.Fatalf("project_bound run must set Options.ProjectRoot to the heuristic root, got %q", got.ProjectRoot)
 	}
 }
 
@@ -145,8 +145,8 @@ const storedBody = "# Build\n\n```bash {id=verify}\nmake\n```\n"
 // semantics now win uniformly for a stored run, exactly like `run --file` on the
 // identical path would.
 func TestRunPlaybook_NonProjectBoundRendersAsIs(t *testing.T) {
-	origLoad, origUI, origSPR := storeLoadFn, uiMainFn, setProjectRootFn
-	t.Cleanup(func() { storeLoadFn, uiMainFn, setProjectRootFn = origLoad, origUI, origSPR })
+	origLoad, origUI := storeLoadFn, uiRunFn
+	t.Cleanup(func() { storeLoadFn, uiRunFn = origLoad, origUI })
 	dir := t.TempDir()
 	path := filepath.Join(dir, "build.md")
 	content := "---\nname: build\n---\n" + storedBody
@@ -157,22 +157,20 @@ func TestRunPlaybook_NonProjectBoundRendersAsIs(t *testing.T) {
 	storeLoadFn = func(slug string) (store.Meta, string, error) {
 		return store.Meta{Slug: "build", Path: path}, "", nil
 	}
-	setProjectRootFn = func(string) { t.Fatal("non-project_bound run must NOT set PROJECT_ROOT") }
-	var captured []string
-	uiMainFn = func() int { captured = append([]string{}, os.Args...); return 0 }
+	var got ui.Options
+	uiRunFn = func(o ui.Options) int { got = o; return 0 }
 
-	if code := runPlaybook("build"); code != 0 {
+	if code := runPlaybook("build", ui.Options{}); code != 0 {
 		t.Fatalf("runPlaybook = %d", code)
 	}
-	// {bin, run, --file, <original path>, --cwd, <dir-of-file>}.
-	if len(captured) != 6 || captured[1] != "run" || captured[2] != "--file" || captured[4] != "--cwd" {
-		t.Fatalf("non-project_bound run: args = %v, want [bin run --file %s --cwd %s]", captured, path, dir)
+	if got.ProjectRoot != "" {
+		t.Fatalf("non-project_bound run must NOT set ProjectRoot; got %q", got.ProjectRoot)
 	}
-	if captured[3] != path {
-		t.Errorf("non-project_bound run: file = %q, want the ORIGINAL stored path %q (not a temp copy)", captured[3], path)
+	if got.File != path {
+		t.Errorf("non-project_bound run: File = %q, want the ORIGINAL stored path %q (not a temp copy)", got.File, path)
 	}
-	if captured[5] != dir {
-		t.Errorf("non-project_bound run: --cwd = %q, want %q (dir of the stored file)", captured[5], dir)
+	if got.Cwd != dir {
+		t.Errorf("non-project_bound run: Cwd = %q, want %q (dir of the stored file)", got.Cwd, dir)
 	}
 }
 
@@ -184,8 +182,8 @@ func TestRunPlaybook_NonProjectBoundRendersAsIs(t *testing.T) {
 // front-matter-STRIPPED body to a temp file, so ui.Main's loadPlaybookSource found no
 // env: map for a stored run even though `run --file` on the identical file kept it.
 func TestRunPlaybook_EnvFrontMatterReachesViewer(t *testing.T) {
-	origLoad, origUI, origSPR := storeLoadFn, uiMainFn, setProjectRootFn
-	t.Cleanup(func() { storeLoadFn, uiMainFn, setProjectRootFn = origLoad, origUI, origSPR })
+	origLoad, origUI := storeLoadFn, uiRunFn
+	t.Cleanup(func() { storeLoadFn, uiRunFn = origLoad, origUI })
 	dir := t.TempDir()
 	path := filepath.Join(dir, "chapter.md")
 	content := "---\nname: Chapter\nenv:\n  DATA_DIR:\n    value: /tmp/x\n    why: test\n---\n# Chapter\n\n```bash {id=go}\necho hi\n```\n"
@@ -195,22 +193,24 @@ func TestRunPlaybook_EnvFrontMatterReachesViewer(t *testing.T) {
 	storeLoadFn = func(slug string) (store.Meta, string, error) {
 		return store.Meta{Slug: "chapter", Path: path}, "", nil
 	}
-	setProjectRootFn = func(string) { t.Fatal("non-project_bound run must NOT set PROJECT_ROOT") }
-	var captured []string
-	uiMainFn = func() int { captured = append([]string{}, os.Args...); return 0 }
+	var got ui.Options
+	uiRunFn = func(o ui.Options) int { got = o; return 0 }
 
-	if code := runPlaybook("chapter"); code != 0 {
+	if code := runPlaybook("chapter", ui.Options{}); code != 0 {
 		t.Fatalf("runPlaybook = %d", code)
 	}
-	if len(captured) < 4 || captured[2] != "--file" || captured[3] != path {
-		t.Fatalf("runPlaybook: args = %v, want [bin run --file %s ...] (the ORIGINAL file, not a temp copy)", captured, path)
+	if got.ProjectRoot != "" {
+		t.Fatalf("non-project_bound run must NOT set ProjectRoot; got %q", got.ProjectRoot)
 	}
-	got, err := os.ReadFile(captured[3])
+	if got.File != path {
+		t.Fatalf("runPlaybook: File = %q, want the ORIGINAL file %q (not a temp copy)", got.File, path)
+	}
+	data, err := os.ReadFile(got.File)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(string(got), "env:") || !strings.Contains(string(got), "DATA_DIR") {
-		t.Errorf("stored-run file must retain front matter (env: DATA_DIR); got:\n%s", got)
+	if !strings.Contains(string(data), "env:") || !strings.Contains(string(data), "DATA_DIR") {
+		t.Errorf("stored-run file must retain front matter (env: DATA_DIR); got:\n%s", data)
 	}
 }
 
@@ -222,7 +222,7 @@ func TestRunMain_UnknownSlug_Exit1(t *testing.T) {
 		return store.Meta{}, "", os.ErrNotExist
 	})
 	called := false
-	withUIMainFn(t, func() int { called = true; return 0 })
+	withUIRunFn(t, func(ui.Options) int { called = true; return 0 })
 
 	if code := RunMain(); code != 1 {
 		t.Errorf("RunMain unknown slug: want exit 1, got %d", code)
@@ -236,7 +236,7 @@ func TestRunMain_UnknownSlug_Exit1(t *testing.T) {
 func TestRunMain_NoArgs_Exit2(t *testing.T) {
 	withArgs(t, []string{"ai-playbook", "run"})
 	called := false
-	withUIMainFn(t, func() int { called = true; return 0 })
+	withUIRunFn(t, func(ui.Options) int { called = true; return 0 })
 
 	if code := RunMain(); code != 2 {
 		t.Errorf("RunMain no args: want exit 2, got %d", code)
@@ -251,35 +251,37 @@ func TestRunMain_NoArgs_Exit2(t *testing.T) {
 // TestRunMain_FileRaw_RendersAsIs verifies a raw file (NO front matter) renders
 // as-is via `run --file <path>` with no adapt and no PROJECT_ROOT.
 func TestRunMain_FileRaw_RendersAsIs(t *testing.T) {
-	origSPR := setProjectRootFn
-	t.Cleanup(func() { setProjectRootFn = origSPR })
+	origUI := uiRunFn
+	t.Cleanup(func() { uiRunFn = origUI })
 	dir := t.TempDir()
 	raw := filepath.Join(dir, "raw.md")
 	if err := os.WriteFile(raw, []byte("# Just a doc\n\nno front matter here\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	withArgs(t, []string{"ai-playbook", "run", "--file", raw})
-	setProjectRootFn = func(string) { t.Fatal("raw file must NOT set PROJECT_ROOT") }
-	var captured []string
-	withUIMainFn(t, func() int {
-		captured = append([]string{}, os.Args...)
-		return 0
-	})
+	var got ui.Options
+	uiRunFn = func(o ui.Options) int { got = o; return 0 }
 
 	if code := RunMain(); code != 0 {
 		t.Fatalf("RunMain raw file: want exit 0, got %d", code)
 	}
-	if len(captured) != 4 || captured[2] != "--file" || captured[3] != raw {
-		t.Errorf("RunMain raw file: args = %v, want [bin run --file %s]", captured, raw)
+	if got.ProjectRoot != "" {
+		t.Errorf("raw file must NOT set ProjectRoot; got %q", got.ProjectRoot)
+	}
+	if got.File != raw {
+		t.Errorf("RunMain raw file: File = %q, want %q", got.File, raw)
+	}
+	if got.Cwd != "" {
+		t.Errorf("RunMain raw file: Cwd = %q, want \"\" (no front matter → ui derives cwd from the file)", got.Cwd)
 	}
 }
 
 // TestRunMain_FileProjectBound_SetsProjectRoot verifies a --file WITH a
-// project_bound front matter resolves the heuristic project root, sets it via the
-// setProjectRootFn seam, renders the stripped body as-is, and opens at --cwd <root>.
+// project_bound front matter resolves the heuristic project root, sets it via
+// Options.ProjectRoot, renders the stripped body as-is, and opens at Cwd <root>.
 func TestRunMain_FileProjectBound_SetsProjectRoot(t *testing.T) {
-	origPR, origSPR := projectRootFn, setProjectRootFn
-	t.Cleanup(func() { projectRootFn, setProjectRootFn = origPR, origSPR })
+	origPR, origUI := projectRootFn, uiRunFn
+	t.Cleanup(func() { projectRootFn, uiRunFn = origPR, origUI })
 	dir := t.TempDir()
 	fmFile := filepath.Join(dir, "build.md")
 	body := "# Build\n\n```bash {id=verify}\ncd $PROJECT_ROOT && make\n```\n"
@@ -289,28 +291,22 @@ func TestRunMain_FileProjectBound_SetsProjectRoot(t *testing.T) {
 	}
 	withArgs(t, []string{"ai-playbook", "run", "--file", fmFile})
 	projectRootFn = func() string { return "/the/proj" }
-	var gotPR string
-	setProjectRootFn = func(p string) { gotPR = p }
-	var captured []string
-	withUIMainFn(t, func() int {
-		captured = append([]string{}, os.Args...)
-		return 0
-	})
+	var got ui.Options
+	uiRunFn = func(o ui.Options) int { got = o; return 0 }
 
 	if code := RunMain(); code != 0 {
 		t.Fatalf("RunMain fm file: want exit 0, got %d", code)
 	}
-	if gotPR != "/the/proj" {
-		t.Fatalf("project_bound --file must set PROJECT_ROOT; got %q", gotPR)
+	if got.ProjectRoot != "/the/proj" {
+		t.Fatalf("project_bound --file must set Options.ProjectRoot; got %q", got.ProjectRoot)
 	}
-	joined := strings.Join(captured, " ")
-	if !strings.Contains(joined, "--cwd /the/proj") {
-		t.Errorf("project_bound --file: expected --cwd /the/proj; args = %v", captured)
+	if got.Cwd != "/the/proj" {
+		t.Errorf("project_bound --file: Cwd = %q, want /the/proj", got.Cwd)
 	}
-	// The ORIGINAL file is passed to ui.Main (which strips the front matter for display
+	// The ORIGINAL file is passed to ui.Run (which strips the front matter for display
 	// and extracts the env map for the gate) — NOT a stripped temp copy.
-	if captured[3] != fmFile {
-		t.Errorf("project_bound --file: file = %q, want the original %q (not a temp copy)", captured[3], fmFile)
+	if got.File != fmFile {
+		t.Errorf("project_bound --file: File = %q, want the original %q (not a temp copy)", got.File, fmFile)
 	}
 	_ = body
 }
@@ -320,8 +316,8 @@ func TestRunMain_FileProjectBound_SetsProjectRoot(t *testing.T) {
 // so ui.Main extracts the env map for the confirmation gate (F25), and opens at
 // --cwd <dir-of-file> so the body's relative paths resolve (F4). No PROJECT_ROOT.
 func TestRunMain_FileWithFrontMatter_PassesOriginalFile(t *testing.T) {
-	origSPR := setProjectRootFn
-	t.Cleanup(func() { setProjectRootFn = origSPR })
+	origUI := uiRunFn
+	t.Cleanup(func() { uiRunFn = origUI })
 	dir := t.TempDir()
 	fmFile := filepath.Join(dir, "chapter.md")
 	content := "---\nname: Chapter\nenv:\n  DATA_DIR:\n    value: /tmp/x\n    why: test\n---\n# Chapter\n\n```bash {id=go}\necho hi\n```\n"
@@ -329,18 +325,20 @@ func TestRunMain_FileWithFrontMatter_PassesOriginalFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	withArgs(t, []string{"ai-playbook", "run", "--file", fmFile})
-	setProjectRootFn = func(string) { t.Fatal("non-project_bound --file must NOT set PROJECT_ROOT") }
-	var captured []string
-	withUIMainFn(t, func() int { captured = append([]string{}, os.Args...); return 0 })
+	var got ui.Options
+	uiRunFn = func(o ui.Options) int { got = o; return 0 }
 
 	if code := RunMain(); code != 0 {
 		t.Fatalf("RunMain fm file: want exit 0, got %d", code)
 	}
-	if len(captured) != 6 || captured[2] != "--file" || captured[3] != fmFile || captured[4] != "--cwd" {
-		t.Fatalf("fm file: args = %v, want [bin run --file %s --cwd %s]", captured, fmFile, dir)
+	if got.ProjectRoot != "" {
+		t.Errorf("non-project_bound --file must NOT set ProjectRoot; got %q", got.ProjectRoot)
 	}
-	if captured[5] != dir {
-		t.Errorf("fm file: --cwd = %q, want %q (dir of file)", captured[5], dir)
+	if got.File != fmFile {
+		t.Fatalf("fm file: File = %q, want the original %q", got.File, fmFile)
+	}
+	if got.Cwd != dir {
+		t.Errorf("fm file: Cwd = %q, want %q (dir of file)", got.Cwd, dir)
 	}
 }
 
@@ -348,8 +346,8 @@ func TestRunMain_FileWithFrontMatter_PassesOriginalFile(t *testing.T) {
 // --file with an explicit project_root resolves it relative to the heuristic repo
 // root (projectRootFn) and uses THAT as PROJECT_ROOT + --cwd — not the bare repo root.
 func TestRunMain_FileProjectBound_ResolvesDeclaredProjectRoot(t *testing.T) {
-	origPR, origSPR := projectRootFn, setProjectRootFn
-	t.Cleanup(func() { projectRootFn, setProjectRootFn = origPR, origSPR })
+	origPR, origUI := projectRootFn, uiRunFn
+	t.Cleanup(func() { projectRootFn, uiRunFn = origPR, origUI })
 	dir := t.TempDir()
 	fmFile := filepath.Join(dir, "portable.md")
 	content := "---\nname: Portable\nproject_bound: true\nproject_root: sub/proj\n---\n# Portable\n\n```bash {id=go}\necho hi\n```\n"
@@ -358,23 +356,21 @@ func TestRunMain_FileProjectBound_ResolvesDeclaredProjectRoot(t *testing.T) {
 	}
 	withArgs(t, []string{"ai-playbook", "run", "--file", fmFile})
 	projectRootFn = func() string { return "/repo" }
-	var gotPR string
-	setProjectRootFn = func(p string) { gotPR = p }
-	var captured []string
-	withUIMainFn(t, func() int { captured = append([]string{}, os.Args...); return 0 })
+	var got ui.Options
+	uiRunFn = func(o ui.Options) int { got = o; return 0 }
 
 	if code := RunMain(); code != 0 {
 		t.Fatalf("RunMain = %d", code)
 	}
 	want := filepath.Join("/repo", "sub/proj")
-	if gotPR != want {
-		t.Fatalf("declared project_root: PROJECT_ROOT = %q, want %q", gotPR, want)
+	if got.ProjectRoot != want {
+		t.Fatalf("declared project_root: Options.ProjectRoot = %q, want %q", got.ProjectRoot, want)
 	}
-	if joined := strings.Join(captured, " "); !strings.Contains(joined, "--cwd "+want) {
-		t.Errorf("declared project_root: expected --cwd %s; args = %v", want, captured)
+	if got.Cwd != want {
+		t.Errorf("declared project_root: Cwd = %q, want %q", got.Cwd, want)
 	}
-	if captured[3] != fmFile {
-		t.Errorf("declared project_root: file = %q, want original %q", captured[3], fmFile)
+	if got.File != fmFile {
+		t.Errorf("declared project_root: File = %q, want original %q", got.File, fmFile)
 	}
 }
 
@@ -646,7 +642,7 @@ func TestRunMain_NonAuto_DanglingDep_Exit2(t *testing.T) {
 
 	withArgs(t, []string{"ai-playbook", "run", "--file", parentPath})
 	called := false
-	withUIMainFn(t, func() int { called = true; return 0 })
+	withUIRunFn(t, func(ui.Options) int { called = true; return 0 })
 
 	if code := RunMain(); code != 2 {
 		t.Fatalf("RunMain dangling dep = %d, want 2", code)
@@ -686,7 +682,7 @@ func TestRunMain_NonAuto_DepsRunHeadlessBeforeViewer(t *testing.T) {
 
 	withArgs(t, []string{"ai-playbook", "run", "--file", parentPath})
 	viewerRan := false
-	withUIMainFn(t, func() int { viewerRan = true; return 0 })
+	withUIRunFn(t, func(ui.Options) int { viewerRan = true; return 0 })
 
 	if code := RunMain(); code != 0 {
 		t.Fatalf("RunMain = %d, want 0", code)
@@ -719,7 +715,7 @@ func TestRunMain_NonAuto_DepFailure_AbortsBeforeViewer(t *testing.T) {
 
 	withArgs(t, []string{"ai-playbook", "run", "--file", parentPath})
 	viewerRan := false
-	withUIMainFn(t, func() int { viewerRan = true; return 0 })
+	withUIRunFn(t, func(ui.Options) int { viewerRan = true; return 0 })
 
 	if code := RunMain(); code != 3 {
 		t.Fatalf("RunMain dep failure = %d, want 3", code)

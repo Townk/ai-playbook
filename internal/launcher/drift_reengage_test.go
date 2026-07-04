@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/Townk/ai-playbook/internal/reengage"
+	"github.com/Townk/ai-playbook/internal/ui"
 )
 
 // TestDriftRegenReengage_DriftOnly verifies the run-viewer re-engagement is wired for
@@ -19,17 +20,17 @@ func TestDriftRegenReengage_DriftOnly(t *testing.T) {
 	}
 }
 
-// TestRunViewer_WiresDriftRegenReengage verifies the `run --file` viewer path stashes the
-// drift-regen re-engagement context (so a standalone playbook can regenerate a drifted diff).
+// TestRunViewer_WiresDriftRegenReengage verifies the `run --file` viewer path sets the
+// drift-regen re-engagement context on ui.Options (so a standalone playbook can
+// regenerate a drifted diff).
 func TestRunViewer_WiresDriftRegenReengage(t *testing.T) {
-	origUI, origRE := uiMainFn, setReengageFn
-	t.Cleanup(func() { uiMainFn, setReengageFn = origUI, origRE })
+	origUI := uiRunFn
+	t.Cleanup(func() { uiRunFn = origUI })
 	var got *reengage.Reengage
-	setReengageFn = func(re *reengage.Reengage) { got = re }
-	uiMainFn = func() int { return 0 }
+	uiRunFn = func(o ui.Options) int { got = o.Reengage; return 0 }
 	withArgs(t, []string{"ai-playbook", "run", "--file", "/x.md"})
 
-	runViewer("/x.md", "")
+	runViewer("/x.md", "", ui.Options{})
 
 	if got == nil || !got.DriftRegenOnly {
 		t.Fatalf("runViewer must wire a DriftRegenOnly reengage; got %+v", got)

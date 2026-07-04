@@ -277,7 +277,7 @@ func TestOpenSession_AskUnavailableOffMux(t *testing.T) {
 // TestOpenSession_SharedDriverAndToolsBackend asserts the stage-5 lifecycle: ONE
 // driver is created at session start and the tools backend serves THAT driver
 // (the backend's `run` executes in the shared shell). The session's driver is the
-// instance the run path reuses (via StreamOptions.Driver / ui.SetDriver), so the
+// instance the run path reuses (via StreamOptions.Driver / ui.Options.Driver), so the
 // agent and the playbook drive the same shell.
 func TestOpenSession_SharedDriverAndToolsBackend(t *testing.T) {
 	minimalZDOTDIR(t)

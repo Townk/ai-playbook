@@ -86,7 +86,7 @@ var dispatch = map[string]func(prog string) int{
 	"edit":         func(string) int { return launcher.EditMain() },
 	"session":      func(string) int { return launcher.SessionMain() },
 	// RunMain owns config loading + the configured-shell hand-off and resolves
-	// the --playbook/--file/bare argument before rendering via ui.Main.
+	// the --playbook/--file/bare argument before rendering via ui.Run.
 	"run":      func(string) int { return launcher.RunMain() },
 	"validate": func(string) int { return launcher.ValidateMain() },
 	"env":      func(string) int { return launcher.EnvMain() },

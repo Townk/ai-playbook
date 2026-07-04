@@ -96,7 +96,7 @@ func runSession(req capture.Request, title string, m mux.Mux) int {
 
 	// Configured shell (cfg.Driver.Shell) threaded into BOTH the session's shared
 	// driver (openSession) and the ui's own-driver fallbacks (authorPlaybook's
-	// RunStream, serveCachedPlaybook's ui.Main). "" preserves the zsh default.
+	// RunStream, serveCachedPlaybook's ui.Run). "" preserves the zsh default.
 	cfg, _ := config.Load() // always non-nil (Default on error)
 	shell := cfg.Driver.Shell
 
@@ -127,7 +127,7 @@ func runSession(req capture.Request, title string, m mux.Mux) int {
 	case triage.Hit:
 		dbg("runSession: serving cached playbook")
 		// serveCachedPlaybook OWNS the session: it renders instantly, waits for the
-		// background open, and closes the session after ui.Main returns.
+		// background open, and closes the session after ui.Run returns.
 		return serveCachedPlaybook(d, req, sessCh, title, bridge, shell)
 	default:
 		// MISS: authoring needs the session up front (its driver-open wait is the
@@ -148,7 +148,7 @@ func runSession(req capture.Request, title string, m mux.Mux) int {
 // It returns the channel immediately so the caller can render before the shell's
 // blank-pane startup completes. The buffer guarantees the goroutine never blocks
 // on the send even if the caller never reads (e.g. the cached path closes after
-// ui.Main via the done latch), so there's no leak.
+// ui.Run via the done latch), so there's no leak.
 // m is threaded from the caller (never re-loaded) so all paths agree on null-vs-templated.
 // shell is the configured selector (cfg.Driver.Shell) threaded to openSession's driver.
 func openSessionAsync(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell string) <-chan *session {
@@ -766,11 +766,27 @@ func decodeRequestJSON(data []byte) (capture.Request, error) {
 	}, nil
 }
 
-// serveCachedPlaybook renders the cached entry through the existing in-process
-// `run` path. The entry on disk carries YAML front matter; we strip it to the
-// body, write it to a temp file, and reuse ui.Main() (which spins up the driver +
-// orchestrator and drives the playbook in-process), passing --cached for the
-// header badge and --cwd so runs execute in the request's project root.
+// serveCachedPlaybook renders the cached entry through the in-process viewer. The
+// entry on disk carries YAML front matter; we strip it to the body, write it to a
+// temp file, and hand it to ui.Run (which spins up the driver + orchestrator and
+// drives the playbook in-process), setting Cached for the header badge and Cwd so
+// runs execute in the request's project root.
+// cachedTime parses a cache entry's created_at timestamp into the (time, cached)
+// pair the viewer's badge uses: an RFC3339 value yields (t, true); an empty or
+// malformed value yields (zero, false) so no badge is shown. It mirrors the parse
+// ui.Main did on the former --cached flag, shared by the serveCachedPlaybook and
+// AnswerMain paths that build ui.Options directly.
+func cachedTime(created string) (time.Time, bool) {
+	if created == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, created)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
 // strippedAmendBase returns the literate amend base for a served playbook: the
 // front-matter-stripped body. cache.Body has already removed the OUTER (cache)
 // front matter, so body still begins with the playbook's own front matter; amend
@@ -791,7 +807,7 @@ func strippedAmendBase(body string) string {
 // context + the session's shared shell driver into a live orchestrator (built with
 // ui's internal cliMux via ui.BuildOrch) and the request-input-float asker that backs
 // the served pager's `f` keybind. This is the single logic site for the bundle the
-// async path used to stash via SetReengage/SetDriver/SetAsker.
+// async path folds into the OrchReady (formerly stashed via the pending* globals).
 func reengageReady(d triage.Decision, req capture.Request, sess *session, cwd string) ui.OrchReady {
 	if sess == nil {
 		return ui.OrchReady{}
@@ -877,7 +893,7 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *
 	// in-process, re-storing the fresh playbook under the SAME keys so the next
 	// identical request hits the refreshed entry — matching ai-assist-regenerate.
 	//
-	// held captures the session for cleanup after ui.Main returns; it is written
+	// held captures the session for cleanup after ui.Run returns; it is written
 	// before close(done) and read only after <-done, so the access is race-free.
 	readyCh := make(chan ui.OrchReady, 1)
 	held := (*session)(nil)
@@ -888,60 +904,43 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *
 		held = sess
 		readyCh <- reengageReady(d, req, sess, cwd)
 	}()
-	ui.SetPendingReady(readyCh)
 
-	// No-mux ask overlay: stash the bridge for ui.Main (the cached-serve path reshapes
-	// os.Args to `run`, so it can't thread the bridge as a parameter). Re-engagement
-	// (regenerate/followup) re-invokes the agent, whose `ask` then reaches the overlay.
-	// nil when a real mux is present (the float ask path is unchanged).
-	ui.SetAskBridge(bridge)
-
-	// Configured shell for ui.Main's own-driver fallback. On the cached path the run
-	// blocks normally drive the session's shared driver (delivered via readyCh, already
-	// opened with this shell); this covers the fallback where ui.Main opens its own.
-	ui.SetShell(shell)
-
-	// Stage 4 (spec §C amend-on-rerun): this is a cache HIT — we are SERVING an
-	// existing playbook for this context. Stash its body as the served base so a
-	// failing step → troubleshoot → confirm/`w`-generate AMENDS this playbook
-	// (base=servedBase) instead of starting fresh, and the improved version is
-	// re-cached under the SAME CtxHash/ReqHash (populated on the Reengage above) —
-	// the served entry is overwritten, never lost. Amend-vs-fresh is naturally scoped
-	// by the cache key: a same-context failure serves+amends this entry; a different
-	// context is a different cache entry → a cache MISS → authorPlaybook (servedBase
-	// stays "" → fresh). The base is the INPUT to the amend; the output is base+fix.
+	// Build the viewer Options for the served playbook. The re-engagement context, the
+	// shared driver, and the request-input-float asker (the `f` keybind) all depend on
+	// the still-opening session, so they are NOT set here — they are folded into the
+	// OrchReady the background goroutine delivers on Ready once the open lands. Only the
+	// session-independent fields are set now.
 	//
-	// Stage 5 (spec §E/§F): cache.Body strips the OUTER (cache) layer, so `body`
-	// still begins with the playbook's own front matter. Amend operates on the
-	// literate content (H1 + body), not the YAML — the front matter is regenerated
-	// at persist — so strip the playbook front matter before stashing the base.
-	ui.SetServedBase(strippedAmendBase(body))
-
-	// NB: the request-input-float asker (the `f` keybind), the re-engagement context,
-	// and the shared driver are NO LONGER stashed here via SetAsker/SetReengage/
-	// SetDriver — they all depend on the still-opening session, so they're folded into
-	// the OrchReady the background goroutine delivers on readyCh once the open lands.
-
-	// Reuse the `run` subcommand entrypoint in-process by shaping os.Args the way
-	// ui.Main() parses them (os.Args[1]="run", flags from os.Args[2:]).
-	argv := []string{os.Args[0], "run"}
-	if created != "" {
-		argv = append(argv, "--cached", created)
+	// Stage 4 (spec §C amend-on-rerun): this is a cache HIT — we are SERVING an existing
+	// playbook for this context. ServedBase carries its body so a failing step →
+	// troubleshoot → confirm/`w`-generate AMENDS this playbook (base=ServedBase) instead
+	// of starting fresh, and the improved version is re-cached under the SAME
+	// CtxHash/ReqHash — the served entry is overwritten, never lost. Amend-vs-fresh is
+	// naturally scoped by the cache key: a same-context failure serves+amends this entry;
+	// a different context is a cache MISS → authorPlaybook (ServedBase stays "" → fresh).
+	//
+	// Stage 5 (spec §E/§F): cache.Body strips the OUTER (cache) layer, so `body` still
+	// begins with the playbook's own front matter. Amend operates on the literate content
+	// (H1 + body), not the YAML — the front matter is regenerated at persist — so strip
+	// the playbook front matter before stashing the base.
+	opts := ui.Options{
+		File:  tmp, // the temp file carries no front matter → renders as-is (bypasses adapt-on-run)
+		Cwd:   cwd,
+		Title: title, // classify-supplied label overrides the cached H1 until regenerate
+		// No-mux ask overlay: re-engagement (regenerate/followup) re-invokes the agent,
+		// whose `ask` reaches the overlay. nil when a real mux is present (float unchanged).
+		AskBridge: bridge,
+		// Configured shell for ui.Run's own-driver fallback; on the cached path the run
+		// blocks normally drive the session's shared driver (delivered via Ready).
+		Shell:      shell,
+		ServedBase: strippedAmendBase(body),
+		Ready:      readyCh,
 	}
-	if cwd != "" {
-		argv = append(argv, "--cwd", cwd)
+	if t, ok := cachedTime(created); ok {
+		opts.Cached = true
+		opts.CachedAt = t
 	}
-	if title != "" {
-		// Carry the classify-supplied label as the served pager's header (overrides the
-		// cached playbook's own H1 until/unless the user regenerates).
-		argv = append(argv, "--title", title)
-	}
-	// Pass the temp file via --file (not a bare positional): ui.Main honors --file as
-	// the source. This bypasses RunMain (and adapt-on-run) deliberately — the temp
-	// file carries no front matter, so it renders as-is.
-	argv = append(argv, "--file", tmp)
-	os.Args = argv
-	code := ui.Main()
+	code := uiRunFn(opts)
 
 	// Close the session exactly once, after the ui exits: the background goroutine
 	// always sends on readyCh and then closes done (openSessionAsync always delivers),
