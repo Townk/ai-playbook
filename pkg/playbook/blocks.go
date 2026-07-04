@@ -1,10 +1,10 @@
 // Package playbook is the public, harness-agnostic owner of the playbook
 // schema. It parses a Markdown playbook body into the canonical block model
-// (the {id=…}/{rollback=…}/{static}/file=/needs= grammar) and normalizes
-// fences, and is the single source of truth for that grammar. It imports
-// nothing beyond goldmark and the standard library, so any front-end,
-// validator, or embedded runner can consume the schema without pulling in
-// AI, rendering, or terminal concerns.
+// (the {id=…}/{rollback=…}/{static}/file=/needs=/from= grammar) and
+// normalizes fences, and is the single source of truth for that grammar. It
+// imports nothing beyond goldmark and the standard library, so any
+// front-end, validator, or embedded runner can consume the schema without
+// pulling in AI, rendering, or terminal concerns.
 //
 // Public API; pre-1.0, minor versions may still reshape it — see ADR-0009.
 package playbook
@@ -20,9 +20,10 @@ import (
 )
 
 // Block is the canonical parsed representation of one playbook code block — the
-// schema owner's view of a `{id=…}`/`{rollback=…}`/`{static}`/`file=`/`needs=`
-// fenced block (see docs/specifications/playbook-schema.md). The renderer,
-// validate, launcher, and autorun all derive their per-block state from this.
+// schema owner's view of a `{id=…}`/`{rollback=…}`/`{static}`/`file=`/`needs=`/
+// `from=` fenced block (see docs/specifications/playbook-schema.md). The
+// renderer, validate, launcher, and autorun all derive their per-block state
+// from this.
 type Block struct {
 	ID       string
 	Type     string // "shell" | "run" | "diff" | "static" | "create"
@@ -31,7 +32,28 @@ type Block struct {
 	Static   bool
 	File     string
 	Rollback string // id of the block that undoes this one (rollback=<id>); "" if none
+	From     string // id of the block whose retained stdout feeds this one's stdin (from=<id>, ADR-0010); "" if none
 	Payload  string
+}
+
+// EffectiveNeeds returns the block's combined data+order dependency set: Needs
+// plus From (when From is non-empty), deduped so an id already present in
+// Needs is never listed twice. from= implies needs= (ADR-0010) for gating,
+// --auto ordering, and dependent invalidation — callers that need the full
+// dependency set use this instead of Needs directly.
+func (b Block) EffectiveNeeds() []string {
+	if b.From == "" {
+		return b.Needs
+	}
+	for _, n := range b.Needs {
+		if n == b.From {
+			return b.Needs
+		}
+	}
+	out := make([]string, 0, len(b.Needs)+1)
+	out = append(out, b.Needs...)
+	out = append(out, b.From)
+	return out
 }
 
 // blockMD is the shared markdown parser used to enumerate blocks. It mirrors the
@@ -83,10 +105,11 @@ func buildBlock(n ast.Node, src []byte, ordinal int) Block {
 		Lang:     lang,
 		Needs:    splitNeeds(attrs["needs"]),
 		Rollback: attrs["rollback"],
+		From:     attrs["from"],
 		Static:   flags["static"],
 		Payload:  payload,
 	}
-	blk.Type = classifyType(lang, blk.Static)
+	blk.Type = ClassifyType(lang, blk.Static)
 	if f := attrs["file"]; f != "" {
 		blk.File = f
 		blk.Type = "create"
@@ -129,9 +152,16 @@ func nonExecLang(lang string) bool {
 	return false
 }
 
-// classifyType maps a fenced block's language (and its {static} flag) to the
-// runner's block type. A create block (file= tag) is classified by the caller.
-func classifyType(lang string, static bool) string {
+// ClassifyType maps a fenced block's language (and its {static} flag) to the
+// runner's block type. It is THE schema type rule — every layer that needs a
+// block's type (the parser here, and any validator classifying
+// not-yet-rendered block data, e.g. the AI-authoring DTO in internal/draft)
+// must derive it from this one function so they can never disagree. Note the
+// non-executable languages ("", text, console, output, log, json) classify
+// as "static" even without the {static} flag. A create block (file= tag) is
+// classified by the caller: file= always wins over this result (see
+// buildBlock).
+func ClassifyType(lang string, static bool) string {
 	if static || nonExecLang(lang) {
 		return "static"
 	}

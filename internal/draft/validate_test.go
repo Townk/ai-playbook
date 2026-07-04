@@ -68,6 +68,62 @@ func TestValidate_Violations(t *testing.T) {
 		{"backtick in file", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
 			{Kind: "code", Lang: "go", Code: "package main", ID: "new", File: "a`b.txt"},
 		}}}}, false, "file"},
+		// from= (ADR-0010): existence, self-reference, and the
+		// producer/consumer shell/run-only restriction, mirroring
+		// pkg/playbook/validate's rules at submit time.
+		{"from missing target", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "bash", Code: "cat", ID: "c", From: "nope"},
+		}}}}, false, "from"},
+		{"from self reference", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "bash", Code: "cat", ID: "a", From: "a"},
+		}}}}, false, "from"},
+		{"from producer static rejected", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "console", Code: "out", Static: true, ID: "p"},
+			{Kind: "code", Lang: "bash", Code: "cat", ID: "c", From: "p"},
+		}}}}, false, "from"},
+		{"from producer diff rejected", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "diff", Code: "--- a\n+++ b", ID: "p"},
+			{Kind: "code", Lang: "bash", Code: "cat", ID: "c", From: "p"},
+		}}}}, false, "from"},
+		{"from producer create rejected", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "go", Code: "package main", ID: "p", File: "x.go"},
+			{Kind: "code", Lang: "bash", Code: "cat", ID: "c", From: "p"},
+		}}}}, false, "from"},
+		{"from consumer static rejected", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "bash", Code: "echo p", ID: "p"},
+			{Kind: "code", Lang: "console", Code: "out", Static: true, ID: "c", From: "p"},
+		}}}}, false, "from"},
+		{"from consumer diff rejected", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "bash", Code: "echo p", ID: "p"},
+			{Kind: "code", Lang: "diff", Code: "--- a\n+++ b", ID: "c", From: "p"},
+		}}}}, false, "from"},
+		{"from consumer create rejected", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "bash", Code: "echo p", ID: "p"},
+			{Kind: "code", Lang: "go", Code: "package main", ID: "c", File: "x.go", From: "p"},
+		}}}}, false, "from"},
+		// A non-Static block whose lang is non-executable (console/text/…)
+		// re-parses as type=static (pkg/playbook.ClassifyType's nonExecLang
+		// rule), so it must be rejected as a from= consumer/producer HERE
+		// too — otherwise draft accepts what the file validator then fails.
+		{"from consumer console implicit static rejected", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "bash", Code: "echo p", ID: "p"},
+			{Kind: "code", Lang: "console", Code: "out", ID: "c", From: "p"},
+		}}}}, false, "from"},
+		{"from producer console implicit static rejected", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "console", Code: "out", ID: "p"},
+			{Kind: "code", Lang: "bash", Code: "cat", ID: "c", From: "p"},
+		}}}}, false, "from"},
+		{"from comma list rejected", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "bash", Code: "echo p", ID: "p"},
+			{Kind: "code", Lang: "bash", Code: "echo q", ID: "q"},
+			{Kind: "code", Lang: "bash", Code: "cat", ID: "c", From: "p,q"},
+		}}}}, false, "from"},
+		// Combined needs=/from= cycle: a's from= edge to b plus b's
+		// needs= edge to a forms a cycle over the COMBINED graph.
+		{"combined needs from cycle", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "bash", Code: "echo a", ID: "a", From: "b"},
+			{Kind: "code", Lang: "bash", Code: "echo b", ID: "b", Needs: []string{"a"}},
+		}}}}, false, "cycle"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -88,5 +144,18 @@ func TestValidate_NeedsChainAccepted(t *testing.T) {
 	}}}, Verify: &Step{Lang: "bash", Code: "ok", Needs: []string{"b"}}}
 	if err := Validate(pb, true); err != nil {
 		t.Fatalf("want a valid needs/rollback chain accepted, got %v", err)
+	}
+}
+
+// TestValidate_FromChainAccepted verifies a valid shell producer -> run
+// consumer from= chain (the flagship python-reads-stdin case, ADR-0010)
+// passes validation, including a verify step that itself declares from=.
+func TestValidate_FromChainAccepted(t *testing.T) {
+	pb := Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+		{Kind: "code", Lang: "bash", Code: "echo hi", ID: "produce"},
+		{Kind: "code", Lang: "python", Code: "import sys; print(sys.stdin.read())", ID: "consume", From: "produce"},
+	}}}, Verify: &Step{Lang: "bash", Code: "true", From: "consume"}}
+	if err := Validate(pb, true); err != nil {
+		t.Fatalf("want a valid from= chain accepted, got %v", err)
 	}
 }

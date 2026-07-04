@@ -110,6 +110,7 @@ func ValidateMain() int {
 			Lang:   b.Lang,
 			Needs:  b.Needs,
 			Static: b.Static,
+			From:   b.From,
 		})
 	}
 

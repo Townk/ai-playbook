@@ -37,6 +37,7 @@ type ContentItem struct {
 	Rollback   string   `json:"rollback,omitempty" jsonschema:"for kind=code: the id of the block this one rolls back"`
 	Static     bool     `json:"static,omitempty" jsonschema:"for kind=code: true if the block is non-runnable (console output / illustrative)"`
 	File       string   `json:"file,omitempty" jsonschema:"for a NEW file: the relative path; the block body is the file's full content (use a diff block to EDIT an existing file)"`
+	From       string   `json:"from,omitempty" jsonschema:"for kind=code: id of an earlier shell/run block whose captured stdout feeds this block's stdin (e.g. a python block reading sys.stdin); implies a needs= dependency on that id; only shell/run blocks may set this, and only a shell/run block may be the target"`
 }
 
 // Step is a single command used for the top-level verify.
@@ -44,6 +45,7 @@ type Step struct {
 	Lang  string   `json:"lang" jsonschema:"the language/interpreter for the verify command"`
 	Code  string   `json:"code" jsonschema:"the verify command content"`
 	Needs []string `json:"needs,omitempty" jsonschema:"ids the verify depends on (usually the fix block)"`
+	From  string   `json:"from,omitempty" jsonschema:"id of an earlier shell/run block whose captured stdout feeds the verify command's stdin; same rules as a code block's from="`
 }
 
 // Meta carries the classification + provenance fields folded into the same call

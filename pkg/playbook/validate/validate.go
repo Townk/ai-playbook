@@ -28,7 +28,7 @@ const (
 // Finding is one structural problem detected by Check.
 type Finding struct {
 	Severity Severity
-	Check    string // "front-matter"|"duplicate-id"|"needs"|"cycle"|"fence"|"runnable"|"lang"
+	Check    string // "front-matter"|"duplicate-id"|"needs"|"from"|"cycle"|"fence"|"runnable"|"lang"
 	Message  string
 	Where    string // block id | "line N" | "front matter"
 }
@@ -42,6 +42,7 @@ type Block struct {
 	Lang   string
 	Needs  []string
 	Static bool
+	From   string // id of the block whose retained stdout feeds this one's stdin (from=<id>, ADR-0010); "" if none
 }
 
 // Check runs every deterministic check and returns findings (nil ⇔
@@ -100,10 +101,13 @@ func Check(rawBody string, fm frontmatter.FrontMatter, fmOK bool, blocks []Block
 		}
 	}
 
-	// idSet is used by both the needs-existence check and cycle detection.
+	// idSet/typeOf are used by the needs-existence check, from= validation,
+	// and cycle detection.
 	idSet := map[string]bool{}
+	typeOf := map[string]string{}
 	for _, b := range blocks {
 		idSet[b.ID] = true
+		typeOf[b.ID] = b.Type
 	}
 
 	// 3. needs= existence
@@ -120,10 +124,17 @@ func Check(rawBody string, fm frontmatter.FrontMatter, fmOK bool, blocks []Block
 		}
 	}
 
-	// 4. needs= cycle detection: DFS over id -> [needs that exist in idSet].
+	// 4. from= validation (ADR-0010): existence, self-reference, the
+	// single-id constraint, and the shell/run-only restriction on both ends
+	// (a producer must have output to retain; a consumer must have a stdin
+	// to wire the capture into).
+	findings = append(findings, fromFindings(blocks, idSet, typeOf)...)
+
+	// 5. needs=/from= cycle detection: DFS over id -> [needs ∪ from that
+	// exist in idSet] — the COMBINED graph (from= implies needs=, ADR-0010).
 	findings = append(findings, detectCycles(blocks, idSet)...)
 
-	// 5. runnable (Warning)
+	// 6. runnable (Warning)
 	runnable := false
 	for _, b := range blocks {
 		if !b.Static {
@@ -140,7 +151,7 @@ func Check(rawBody string, fm frontmatter.FrontMatter, fmOK bool, blocks []Block
 		})
 	}
 
-	// 6. lang (Warning)
+	// 7. lang (Warning)
 	for _, b := range blocks {
 		if !b.Static && strings.TrimSpace(b.Lang) == "" {
 			findings = append(findings, Finding{
@@ -244,8 +255,76 @@ func fenceCloses(line string, fenceChar byte, fenceLen int) bool {
 	return i == len(strings.TrimRight(line, " "))
 }
 
-// detectCycles runs a DFS over the needs= graph (id -> needs that exist in
-// idSet) and reports one Finding per distinct cycle found, deduped by the
+// runnableType reports whether t is a block type that produces retainable
+// stdout / consumes stdin — the from= restriction (ADR-0010): static has no
+// output, and diff/create targets are rejected in v1.
+func runnableType(t string) bool {
+	return t == "shell" || t == "run"
+}
+
+// fromFindings validates every block's from= attribute (ADR-0010): the
+// target must exist and not be the block itself, a from= value must name
+// exactly one id (a comma list is rejected), the target must be a
+// shell/run block (a producer must have output to retain), and the
+// declaring block itself must be shell/run (only a runnable block has a
+// stdin to wire the capture into).
+func fromFindings(blocks []Block, idSet map[string]bool, typeOf map[string]string) []Finding {
+	var findings []Finding
+	for _, b := range blocks {
+		if b.From == "" {
+			continue
+		}
+		if strings.Contains(b.From, ",") {
+			findings = append(findings, Finding{
+				Severity: Error,
+				Check:    "from",
+				Message:  fmt.Sprintf("block %q from=%q must reference exactly one id (comma-separated lists are not supported)", b.ID, b.From),
+				Where:    b.ID,
+			})
+			continue
+		}
+		if !runnableType(b.Type) {
+			findings = append(findings, Finding{
+				Severity: Error,
+				Check:    "from",
+				Message:  fmt.Sprintf("block %q is a %s block and cannot declare from= (only shell/run blocks may consume piped output)", b.ID, b.Type),
+				Where:    b.ID,
+			})
+		}
+		if b.From == b.ID {
+			findings = append(findings, Finding{
+				Severity: Error,
+				Check:    "from",
+				Message:  fmt.Sprintf("block %q cannot pipe from itself", b.ID),
+				Where:    b.ID,
+			})
+			continue
+		}
+		targetType, exists := typeOf[b.From]
+		if !exists {
+			findings = append(findings, Finding{
+				Severity: Error,
+				Check:    "from",
+				Message:  fmt.Sprintf("block %q pipes from %q, which does not exist", b.ID, b.From),
+				Where:    b.ID,
+			})
+			continue
+		}
+		if !runnableType(targetType) {
+			findings = append(findings, Finding{
+				Severity: Error,
+				Check:    "from",
+				Message:  fmt.Sprintf("block %q pipes from %q, which is a %s block (only shell/run blocks produce output)", b.ID, b.From, targetType),
+				Where:    b.ID,
+			})
+		}
+	}
+	return findings
+}
+
+// detectCycles runs a DFS over the COMBINED needs= ∪ from= graph (id ->
+// needs plus from, when they exist in idSet — from= implies needs= per
+// ADR-0010) and reports one Finding per distinct cycle found, deduped by the
 // sorted set of ids participating in the cycle so the same cycle is never
 // reported more than once (e.g. once per node it could be entered from).
 func detectCycles(blocks []Block, idSet map[string]bool) []Finding {
@@ -255,6 +334,9 @@ func detectCycles(blocks []Block, idSet map[string]bool) []Finding {
 			if idSet[need] {
 				adj[b.ID] = append(adj[b.ID], need)
 			}
+		}
+		if b.From != "" && b.From != b.ID && idSet[b.From] {
+			adj[b.ID] = append(adj[b.ID], b.From)
 		}
 	}
 
@@ -296,7 +378,7 @@ func detectCycles(blocks []Block, idSet map[string]bool) []Finding {
 					findings = append(findings, Finding{
 						Severity: Error,
 						Check:    "cycle",
-						Message:  fmt.Sprintf("needs= cycle: %s", strings.Join(cyclePath, " → ")),
+						Message:  fmt.Sprintf("needs=/from= cycle: %s", strings.Join(cyclePath, " → ")),
 						Where:    "",
 					})
 				}

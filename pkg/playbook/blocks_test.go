@@ -1,6 +1,9 @@
 package playbook
 
-import "testing"
+import (
+	"reflect"
+	"testing"
+)
 
 func TestParseFenceInfo(t *testing.T) {
 	lang, attrs, flags := ParseFenceInfo("bash {id=fix needs=diag,prep}")
@@ -18,11 +21,11 @@ func TestClassifyType(t *testing.T) {
 		"node": "run", "diff": "diff", "patch": "diff", "console": "static",
 		"text": "static", "json": "static", "": "static"}
 	for lang, want := range cases {
-		if got := classifyType(lang, false); got != want {
-			t.Fatalf("classifyType(%q)=%q want %q", lang, got, want)
+		if got := ClassifyType(lang, false); got != want {
+			t.Fatalf("ClassifyType(%q)=%q want %q", lang, got, want)
 		}
 	}
-	if classifyType("bash", true) != "static" {
+	if ClassifyType("bash", true) != "static" {
 		t.Fatalf("static flag must force static")
 	}
 }
@@ -59,6 +62,54 @@ func TestAssignIDsNoCollisionWithExplicit(t *testing.T) {
 	}
 	if bs2[1].ID != "b1" {
 		t.Fatalf("explicit id was mutated: got %q, want b1", bs2[1].ID)
+	}
+}
+
+// TestBuildBlock_From verifies that a `from=<id>` fence attribute populates
+// Block.From (ADR-0010: from= is a new fence attribute alongside needs=).
+func TestBuildBlock_From(t *testing.T) {
+	md := "```bash {id=consumer from=producer}\ncat\n```\n"
+	blocks := ParseBlocks(md)
+	if len(blocks) != 1 {
+		t.Fatalf("want 1 block, got %d", len(blocks))
+	}
+	if blocks[0].From != "producer" {
+		t.Fatalf("From = %q, want %q", blocks[0].From, "producer")
+	}
+}
+
+// TestBuildBlock_FromEmptyByDefault verifies a block with no from= attribute
+// leaves Block.From empty (empty = no producer, per the Block doc comment).
+func TestBuildBlock_FromEmptyByDefault(t *testing.T) {
+	md := "```bash {id=solo}\necho hi\n```\n"
+	blocks := ParseBlocks(md)
+	if blocks[0].From != "" {
+		t.Fatalf("From = %q, want empty", blocks[0].From)
+	}
+}
+
+// TestEffectiveNeeds covers the dedup semantics ADR-0010 requires: From is
+// folded into the effective needs set for gating/ordering/invalidation
+// without duplicating an id already present in Needs textually.
+func TestEffectiveNeeds(t *testing.T) {
+	cases := []struct {
+		name string
+		b    Block
+		want []string
+	}{
+		{"neither", Block{}, nil},
+		{"needs only", Block{Needs: []string{"a"}}, []string{"a"}},
+		{"from only", Block{From: "p"}, []string{"p"}},
+		{"from already in needs: no dup", Block{Needs: []string{"p"}, From: "p"}, []string{"p"}},
+		{"needs plus distinct from", Block{Needs: []string{"a", "b"}, From: "c"}, []string{"a", "b", "c"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := c.b.EffectiveNeeds()
+			if !reflect.DeepEqual(got, c.want) {
+				t.Fatalf("EffectiveNeeds() = %v, want %v", got, c.want)
+			}
+		})
 	}
 }
 

@@ -58,6 +58,86 @@ func TestCheck_Cycle(t *testing.T) {
 	}
 }
 
+// --- from= (ADR-0010): existence, self-reference, producer/consumer type
+// restrictions, single-id constraint, and combined needs=/from= cycles.
+
+func TestCheck_FromMissingTarget(t *testing.T) {
+	blocks := []Block{{ID: "a", Type: "shell", Lang: "bash", From: "nope"}}
+	if fs := Check("", fm("N", "D", "C", "x"), true, blocks, 0); !has(fs, "from", Error) {
+		t.Fatal("from= referencing a nonexistent block must error")
+	}
+}
+
+func TestCheck_FromSelfReference(t *testing.T) {
+	blocks := []Block{{ID: "a", Type: "shell", Lang: "bash", From: "a"}}
+	if fs := Check("", fm("N", "D", "C", "x"), true, blocks, 0); !has(fs, "from", Error) {
+		t.Fatal("from= referencing the block itself must error")
+	}
+}
+
+func TestCheck_FromProducerMustBeRunnable(t *testing.T) {
+	for _, producerType := range []string{"static", "diff", "create"} {
+		t.Run(producerType, func(t *testing.T) {
+			blocks := []Block{
+				{ID: "p", Type: producerType, Static: producerType == "static"},
+				{ID: "c", Type: "shell", Lang: "bash", From: "p"},
+			}
+			if fs := Check("", fm("N", "D", "C", "x"), true, blocks, 0); !has(fs, "from", Error) {
+				t.Fatalf("from= targeting a %s block must error", producerType)
+			}
+		})
+	}
+}
+
+func TestCheck_FromConsumerMustBeRunnable(t *testing.T) {
+	for _, consumerType := range []string{"static", "diff", "create"} {
+		t.Run(consumerType, func(t *testing.T) {
+			blocks := []Block{
+				{ID: "p", Type: "shell", Lang: "bash"},
+				{ID: "c", Type: consumerType, Static: consumerType == "static", From: "p"},
+			}
+			if fs := Check("", fm("N", "D", "C", "x"), true, blocks, 0); !has(fs, "from", Error) {
+				t.Fatalf("a %s block declaring from= must error", consumerType)
+			}
+		})
+	}
+}
+
+func TestCheck_FromCommaListRejected(t *testing.T) {
+	blocks := []Block{
+		{ID: "p", Type: "shell", Lang: "bash"},
+		{ID: "q", Type: "shell", Lang: "bash"},
+		{ID: "c", Type: "shell", Lang: "bash", From: "p,q"},
+	}
+	if fs := Check("", fm("N", "D", "C", "x"), true, blocks, 0); !has(fs, "from", Error) {
+		t.Fatal("a comma-separated from= list must error")
+	}
+}
+
+// TestCheck_FromCombinedCycle proves cycle detection runs over the COMBINED
+// needs= ∪ from= graph: a's from= edge to b plus b's needs= edge to a forms a
+// cycle even though neither attribute alone would.
+func TestCheck_FromCombinedCycle(t *testing.T) {
+	blocks := []Block{
+		{ID: "a", Type: "shell", Lang: "bash", From: "b"},
+		{ID: "b", Type: "shell", Lang: "bash", Needs: []string{"a"}},
+	}
+	if fs := Check("", fm("N", "D", "C", "x"), true, blocks, 0); !has(fs, "cycle", Error) {
+		t.Fatal("a combined needs=/from= cycle must be detected")
+	}
+}
+
+func TestCheck_FromValid(t *testing.T) {
+	blocks := []Block{
+		{ID: "p", Type: "shell", Lang: "bash"},
+		{ID: "c", Type: "run", Lang: "python", From: "p"},
+	}
+	fs := Check("", fm("N", "D", "C", "x"), true, blocks, 0)
+	if has(fs, "from", Error) || has(fs, "cycle", Error) {
+		t.Fatalf("a valid shell->run from= chain must not error: %+v", fs)
+	}
+}
+
 func TestCheck_Warnings(t *testing.T) {
 	// all static → no-runnable warning; a missing lang → lang warning
 	blocks := []Block{{ID: "a", Type: "static", Static: true}}
