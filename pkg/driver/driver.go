@@ -42,6 +42,13 @@ type Result struct {
 	Err      string
 	Exit     int  // -1 if never observed
 	TimedOut bool // killed by us (timeout or stop)
+	// OutPath/ErrPath are the raw filesystem paths to the run's retained
+	// stdout/stderr captures under the session dir (out_<key>/err_<key>). Set only
+	// for an identified run (id != "") once retention is active; empty for
+	// unidentified runs. The files survive until Close(); a later block can wire
+	// OutPath into its stdin (RunID's stdinPath) to pipe a prior block's output.
+	OutPath string
+	ErrPath string
 }
 
 // Options configures a Driver. Env defaults to os.Environ() (the real shell);
@@ -63,7 +70,8 @@ type Driver struct {
 	shellPid int
 	a        shellAdapter // shell-specific spawn/job/source/cd tokens
 
-	shimDir string // temp ZDOTDIR shim dir (zsh history-leak fix); "" if no shim
+	shimDir    string // temp ZDOTDIR shim dir (zsh history-leak fix); "" if no shim
+	sessionDir string // per-session dir holding retained block captures (out_<key>/err_<key>); created at Open, removed on Close; "" if it could not be created (retention degrades off)
 
 	mu       sync.Mutex
 	cwd      string // the session's LIVE cwd: Options.Cwd at Open, then updated after every block from the job's cwd temp-file (guarded by mu)
@@ -160,14 +168,20 @@ func Open(opts Options) (*Driver, error) {
 		return nil, err
 	}
 	_ = pty.Setsize(ptmx, &pty.Winsize{Rows: 50, Cols: 200})
+	// Session-scoped dir for retained block captures (out_<key>/err_<key>). Created
+	// once here; removed in Close. On failure sessionDir stays "" and identified
+	// runs fall back to transient temp capture (no retention) — the session still
+	// runs, it just can't pipe.
+	sessionDir, _ := os.MkdirTemp("", "apb-session-")
 	d := &Driver{
-		ptmx:     ptmx,
-		ptmxFd:   int(ptmx.Fd()), // captured once, before the reader goroutine starts
-		cmd:      c,
-		shellPid: c.Process.Pid,
-		lastSeen: time.Now(),
-		a:        a,
-		shimDir:  shimDir,
+		ptmx:       ptmx,
+		ptmxFd:     int(ptmx.Fd()), // captured once, before the reader goroutine starts
+		cmd:        c,
+		shellPid:   c.Process.Pid,
+		lastSeen:   time.Now(),
+		a:          a,
+		shimDir:    shimDir,
+		sessionDir: sessionDir,
 	}
 	go d.read()
 	if err := d.ready(); err != nil {
@@ -192,9 +206,9 @@ func Open(opts Options) (*Driver, error) {
 
 // Run executes cmd in the shell's MAIN context (cd fires chpwd/precmd → auto-env),
 // captures stdout/stderr/exit, and on timeout kills the running command's process
-// group. Safe to call serially. Equivalent to RunID("", cmd, timeout).
+// group. Safe to call serially. Equivalent to RunID("", cmd, "", timeout).
 func (d *Driver) Run(cmd string, timeout time.Duration) Result {
-	return d.RunID("", cmd, timeout)
+	return d.RunID("", cmd, "", timeout)
 }
 
 // RunMain runs cmd in the driver's MAIN shell context (not the errexit subshell that
@@ -227,16 +241,22 @@ func (d *Driver) runMain(cmd string, timeout time.Duration) {
 	d.waitSentinel(sentinelRE(nonce), timeout)
 }
 
-// RunID is Run with value-passing. In the hosted shell's main context — AFTER the
-// command's exit code is captured and BEFORE the sentinel is printed — it exports
-// LAST_EXCODE / LAST_STDOUT / LAST_STDERR (and, when id != "", APB_OUT_<key> /
-// APB_ERR_<key> / APB_EXIT_<key>, key = id with [^A-Za-z0-9_]→_) so a later block
-// can reference the prior block's output. Because the job is sourced in the main
-// context (not a subshell), these exports persist across Runs.
-func (d *Driver) RunID(id, cmd string, timeout time.Duration) Result {
+// RunID is Run with value-passing and optional stdin wiring. In the hosted
+// shell's main context — AFTER the command's exit code is captured and BEFORE the
+// sentinel is printed — it exports LAST_EXCODE / LAST_STDOUT / LAST_STDERR (and,
+// when id != "", APB_OUT_<key> / APB_ERR_<key> / APB_EXIT_<key> plus the raw-path
+// APB_OUT_FILE_<key> / APB_ERR_FILE_<key>, key = id with [^A-Za-z0-9_]→_) so a
+// later block can reference the prior block's output. Because the job is sourced
+// in the main context (not a subshell), these exports persist across Runs. When id
+// != "" the run's stdout/stderr are also retained as files under the session dir
+// (Result.OutPath/ErrPath), overwritten on re-run and removed at Close.
+//
+// stdinPath, when non-empty, redirects the block's subshell stdin from that file
+// (piping a prior block's retained capture); empty keeps </dev/null exactly as Run.
+func (d *Driver) RunID(id, cmd, stdinPath string, timeout time.Duration) Result {
 	d.runMu.Lock()
 	defer d.runMu.Unlock()
-	return d.runID(id, cmd, timeout)
+	return d.runID(id, cmd, stdinPath, timeout)
 }
 
 // Stop interrupts whatever the session is currently running — the robust,
@@ -360,6 +380,9 @@ func (d *Driver) Close() error {
 	}
 	if d.shimDir != "" {
 		_ = os.RemoveAll(d.shimDir)
+	}
+	if d.sessionDir != "" {
+		_ = os.RemoveAll(d.sessionDir) // drop all retained block captures
 	}
 	return nil
 }
@@ -502,17 +525,31 @@ func (d *Driver) ready() error {
 // run executes cmdline with no value-passing (id=""). Used by ready/stty and as
 // the Run path; routes through runID with an empty id.
 func (d *Driver) run(cmdline string, timeout time.Duration) Result {
-	return d.runID("", cmdline, timeout)
+	return d.runID("", cmdline, "", timeout)
 }
 
-func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
+func (d *Driver) runID(id, cmdline, stdinPath string, timeout time.Duration) Result {
 	dir, err := os.MkdirTemp("", "apb")
 	if err != nil {
 		return Result{Exit: -1}
 	}
 	defer os.RemoveAll(dir)
-	o := filepath.Join(dir, "o")
-	e := filepath.Join(dir, "e")
+	// stdout/stderr capture paths. For an identified run with retention active they
+	// live under the session dir (out_<key>/err_<key>) so they survive this run —
+	// overwritten when the same id re-runs, removed at Close. Otherwise (id=="" or
+	// no session dir) they stay in the per-run temp dir and vanish with it. The
+	// `>`/`2>` redirects write raw bytes, so the retained files are byte-exact even
+	// for binary / no-trailing-newline output.
+	key := sanitizeKey(id)
+	retain := id != "" && d.sessionDir != ""
+	var o, e string
+	if retain {
+		o = filepath.Join(d.sessionDir, "out_"+key)
+		e = filepath.Join(d.sessionDir, "err_"+key)
+	} else {
+		o = filepath.Join(dir, "o")
+		e = filepath.Join(dir, "e")
+	}
 	job := filepath.Join(dir, "job."+d.a.jobExt())
 	// The block runs in a SUBSHELL `( … )` — sourced in the main shell, but the
 	// subshell isolates a block's `set -e`/`set -u`/`setopt`/`trap`. This is
@@ -537,19 +574,27 @@ func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
 	nonce := newNonce()
 	re := sentinelRE(nonce)
 	_ = os.WriteFile(job, []byte(d.a.job(jobParams{
-		cmdline: cmdline,
-		o:       o,
-		e:       e,
-		cwdf:    cwdf,
-		id:      id,
-		key:     sanitizeKey(id),
-		nonce:   nonce,
+		cmdline:   cmdline,
+		o:         o,
+		e:         e,
+		cwdf:      cwdf,
+		id:        id,
+		key:       key,
+		nonce:     nonce,
+		stdinPath: stdinPath,
 	})), 0644)
 	d.clearBuf()
 	d.setStopped(false)
 	d.send(d.a.sourceCmd(job))
 
 	res := Result{Exit: -1}
+	if retain {
+		// The subshell's `>`/`2>` create these files at block start, so they exist
+		// (possibly partial) even on failure or timeout — retention is not gated on
+		// success. Set the paths unconditionally for an identified retained run.
+		res.OutPath = o
+		res.ErrPath = e
+	}
 	m := d.waitSentinel(re, timeout)
 	if m == nil {
 		// Stop the running command's group by PID (TERM then KILL) — not ^C.

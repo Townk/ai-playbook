@@ -64,9 +64,11 @@ func (shAdapter) job(p jobParams) string {
 		vp += "" +
 			"export APB_OUT_" + key + "=\"$(__apb_q \"$(cat " + qo + ")\")\"" + "\n" +
 			"export APB_ERR_" + key + "=\"$(__apb_q \"$(cat " + qe + ")\")\"" + "\n" +
-			"export APB_EXIT_" + key + "=$__apb_rc\n"
+			"export APB_EXIT_" + key + "=$__apb_rc\n" +
+			"export APB_OUT_FILE_" + key + "=" + qo + "\n" +
+			"export APB_ERR_FILE_" + key + "=" + qe + "\n"
 	}
-	return "( trap " + Shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) </dev/null >" + p.o + " 2>" + p.e + "\n" +
+	return "( trap " + Shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) <" + stdinRedir(p) + " >" + p.o + " 2>" + p.e + "\n" +
 		"__apb_rc=$?\n" +
 		"if [ $__apb_rc -eq 141 ]; then __apb_rc=0; fi\n" +
 		"if [ -s " + qcwd + " ]; then cd -- \"$(cat " + qcwd + ")\" 2>/dev/null; fi\n" +

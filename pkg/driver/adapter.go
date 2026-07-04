@@ -5,9 +5,22 @@ package driver
 // paths for stdout/stderr/cwd capture; id is the value-passing id ("" disables
 // the APB_* exports) and key is its sanitized form (sanitizeKey(id)); nonce is the
 // per-run random token woven into the sentinel (__APB__<nonce>_<rc>__APB__) so a
-// stale sentinel from another run can never satisfy this run's wait.
+// stale sentinel from another run can never satisfy this run's wait. stdinPath, when
+// non-empty, is the file the block's subshell reads stdin from (a prior block's
+// retained capture); empty means </dev/null. All paths are driver-chosen (temp /
+// session dir) and space-free, but the adapters single-quote them defensively.
 type jobParams struct {
-	cmdline, o, e, cwdf, id, key, nonce string
+	cmdline, o, e, cwdf, id, key, nonce, stdinPath string
+}
+
+// stdinRedir returns the subshell's stdin source token for p: /dev/null when no
+// stdinPath is set (byte-identical to the historical default), else the shell-
+// quoted capture path. Shared by all three adapters so the redirect is uniform.
+func stdinRedir(p jobParams) string {
+	if p.stdinPath == "" {
+		return "/dev/null"
+	}
+	return Shquote(p.stdinPath)
 }
 
 // shellAdapter owns every shell-specific token the driver emits: how to spawn the

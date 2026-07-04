@@ -221,7 +221,7 @@ func (s *Server) dispatch(req request) reply {
 // agent's block id value-passes APB_OUT_<id>/LAST_* like an authored run block).
 // This runs in the USER's real environment — the whole point of the backend.
 func (s *Server) doRun(req request) reply {
-	res := s.deps.Driver.RunID(req.ID, req.Cmd, runTimeout)
+	res := s.deps.Driver.RunID(req.ID, req.Cmd, "", runTimeout)
 	return reply{Out: res.Out, Err: res.Err, Exit: res.Exit}
 }
 

@@ -21,7 +21,9 @@ func goldenZshJob(cmdline, o, e, cwdf, id, key, nonce string) string {
 		vp += "" +
 			"export APB_OUT_" + key + "=${(q)\"$(<" + qo + ")\"}\n" +
 			"export APB_ERR_" + key + "=${(q)\"$(<" + qe + ")\"}\n" +
-			"export APB_EXIT_" + key + "=${(q)__apb_rc}\n"
+			"export APB_EXIT_" + key + "=${(q)__apb_rc}\n" +
+			"export APB_OUT_FILE_" + key + "=" + qo + "\n" +
+			"export APB_ERR_FILE_" + key + "=" + qe + "\n"
 	}
 	return "( trap " + Shquote(trapBody) + " EXIT\n" + cmdline + "\n) </dev/null >" + o + " 2>" + e + "\n" +
 		"__apb_rc=$?\n" +

@@ -190,7 +190,7 @@ func (o *Orchestrator) Do(a Action) (driver.Result, error) {
 	case KindRun:
 		// Execute the block in the shell, value-passing APB_OUT_<id>/LAST_* so a
 		// later block can reference this one's output.
-		return o.Drv.RunID(a.ID, a.Payload, defaultTimeout), nil
+		return o.Drv.RunID(a.ID, a.Payload, "", defaultTimeout), nil
 	case KindStop:
 		// Interrupt the running block by killing its foreground process group.
 		o.Drv.Stop()

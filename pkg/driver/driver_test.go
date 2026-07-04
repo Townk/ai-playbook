@@ -163,7 +163,7 @@ func TestStopInterruptsInflightRun(t *testing.T) {
 	go func() {
 		// A generous timeout: if Stop did NOT interrupt, the run would block here
 		// for the full 30s and the select below would time out first.
-		done <- d.RunID("", "sleep 30", 30*time.Second)
+		done <- d.RunID("", "sleep 30", "", 30*time.Second)
 	}()
 	// Wait until the command is actually running (a foreground pgrp appears, or
 	// at least the run has had time to start).
@@ -248,7 +248,7 @@ func TestCloseTerminatesRunningBlockPromptly(t *testing.T) {
 		t.Fatalf("Open: %v", err)
 	}
 	done := make(chan Result, 1)
-	go func() { done <- d.RunID("", "sleep 60", 120*time.Second) }()
+	go func() { done <- d.RunID("", "sleep 60", "", 120*time.Second) }()
 	pg := 0
 	for i := 0; i < 150 && pg == 0; i++ {
 		time.Sleep(40 * time.Millisecond)

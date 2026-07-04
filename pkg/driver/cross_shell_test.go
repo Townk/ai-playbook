@@ -120,7 +120,7 @@ func TestCrossShellSemantics(t *testing.T) {
 			//    the per-shell quoting (zsh ${(q)}, bash printf %q, sh __apb_q)
 			//    round-trips — asserting the CONTRACT, not the stored escaping form.
 			const orig = "a b'c\n*d"
-			d.RunID("fix", "printf 'a b'\\''c\\n*d'", to)
+			d.RunID("fix", "printf 'a b'\\''c\\n*d'", "", to)
 			if r := d.Run(`eval "x=$APB_OUT_fix"; printf '%s' "$x"`, to); r.Out != orig {
 				t.Errorf("[value round-trip] consumer saw %q, want %q (per-shell quoting failed)", r.Out, orig)
 			}
