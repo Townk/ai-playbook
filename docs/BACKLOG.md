@@ -25,6 +25,7 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 - [ ] B11 residual: `run <slug>` still parses the playbook twice (loadParent + runFile); EnvMain/ValidateMain each double-load — thread the parsed node through dispatch (2026-07-03)
 - [ ] Consolidate the five fake-harness script writers in internal/author tests (writeFakeHarness/fakeStreamHarness/fakeMetadataHarness/writeStalledHarness/fakeArgvHarness) into one parameterized helper (2026-07-03)
 - [ ] `spinRow` (ui/model.go) hand-duplicates `runRegion`'s spinner-row construction (indent + `frame/10` seconds rule) — share a helper or add a frame-0 equality assertion so a format change can't desync the tick-regenerated row from the reflow-baked one (2026-07-04)
+- [ ] `TestStopInterruptsInflightRun`: the post-Stop liveness probe uses a 5s timeout that flaked on a loaded release runner (master CI green on the same SHA) — lengthen the recovery probe timeout (a longer bound costs nothing on the happy path, Run returns on sentinel) (2026-07-04)
 - [ ] Refuse-solution: the degraded TEXT fallbacks (orchestrator Regenerate/FinalPlaybook/Followup when the events producer fails to start) re-engage without constraints — thread them through author.Author/FinalPlaybookText/Followup, or keep the spec's degraded-mode exemption (2026-07-04)
 - [ ] The pager status line pads but never truncates (`padTo` in ui/scrollbar.go) — on very narrow terminals the hint + new constraints indicator overflow; add graceful truncation (pre-existing, worsened slightly by the indicator) (2026-07-04)
 
