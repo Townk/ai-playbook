@@ -79,7 +79,8 @@ amend-vs-discard, and either way the note persists as a constraint.
 
 ### 3. Feedback affordances
 
-- Status flash on refusal (`noted — regenerating without that approach`).
+- Status flash when a note is recorded (`noted — will avoid that from now on`
+  — worded for the unified flow, where a note may amend or discard).
 - A small persistent indicator while any constraints are active, in the status
   line: `N constraint(s)`. No management UI (view/edit/remove) — YAGNI;
   constraints die with the session.
