@@ -263,10 +263,10 @@ func TestRearm_StructuredRegenerate(t *testing.T) {
 // bodyProvider re-render.
 func TestRearm_FollowupNotStructured(t *testing.T) {
 	m := model{
-		structured: true,
-		reeng:      reengWithBody(func() string { return "x" }),
-		width:      80,
-		height:     24,
+		streamState: streamState{structured: true},
+		reeng:       reengWithBody(func() string { return "x" }),
+		width:       80,
+		height:      24,
 	}
 	_ = m.beginFollowupInProc("failed output")
 	if m.structured {

@@ -43,54 +43,21 @@ type model struct {
 	// computed once in reflow() where m.lines is assigned. clampScroll and the
 	// horizontal home/end ($) handler read it instead of re-walking every rendered
 	// line (an ANSI-aware width scan) on every keypress/wheel/reflow.
-	maxWide    int
-	hintMode   bool
-	hintLabels map[string]Button
-	helpMode   bool
-	helpLines  []Line
-	helpYOff   int
-	helpXOff   int
+	maxWide       int
+	hintMode      bool
+	hintLabels    map[string]Button
+	helpMode      bool
+	helpLines     []Line
+	helpYOff      int
+	helpXOff      int
+	justAnnounced bool // set by announceFollowup so beginFollowupInProc skips its own `---` (the announcement already framed the attempt with a separator ABOVE the phrase)
+	pinTop        int  // body line pinned to the viewport top (>=0): relaxes the scroll clamp so a freshly-announced follow-up sits at top with blank space below until new content fills it. -1 = none (no effect once content grows past the body).
 
-	// no-mux in-viewer diff overlay: when diffMode is true the pager overlays a
-	// bordered scrollable side-by-side diff box (rendered by internal/diff) over the
-	// live document. Only raised on the no-mux path (m.asker == nil); mux-on keeps
-	// the existing emitAction→float path. Closed by q/esc.
-	diffMode  bool
-	diffFiles []idiff.FileDiff // parsed patch; kept so the narrow overlay can render unified
-	diffRows  []idiff.Row      // structured side-by-side rows, rendered (windowed) per frame
-	diffYOff  int
-	diffXOff  int
-	// diff-overlay geometry cache: derived quantities that depend only on diffRows /
-	// diffFiles and the terminal width, so they change at exactly two events — the
-	// overlay opening (activateDiffButton) and a resize (WindowSizeMsg). Both call
-	// recomputeDiffGeometry, which repopulates these and sets diffGeomValid. Without
-	// it, narrow mode re-rendered the whole patch through chroma up to three times
-	// per keypress and wide mode re-walked every row per frame. When diffGeomValid is
-	// false (e.g. a test that assigns diffRows directly, never opening the overlay)
-	// the accessors fall back to a live computation, so behavior is identical.
-	diffGeomValid   bool
-	diffUnifiedC    []string // cached unified lines (narrow mode)
-	diffUnifiedMaxW int      // widest unified line (narrow horizontal max)
-	diffGutterC     int      // cached gutter width (wide mode)
-	diffTextColC    int      // cached per-pane text column (wide mode)
-	diffPaneLeftC   int      // cached left-pane max horizontal offset (wide mode)
-	diffPaneRightC  int      // cached right-pane max horizontal offset (wide mode)
-	diffLangsC      []string // cached per-row highlight language (wide mode)
+	// diffState — the no-mux in-viewer diff overlay (see diffState).
+	diffState
 
-	// no-mux ask overlay: when askBridge is set, a tea.Cmd drains pending agent
-	// asks (recvAskCmd); askMode raises the embedded ask dialog over the document
-	// (the help-modal compositing mechanism) and routes keys to it; askReq is the
-	// pending request answered on submit/cancel. nil bridge (mux path / tests) →
-	// the overlay is never raised.
-	askBridge *askbridge.Bridge
-	askMode   bool
-	ask       *input.Ask
-	askReq    askbridge.Request
-	// askCompletion, when set, fires when a VIEWER-initiated overlay (not a bridge
-	// agent ask) completes: handleAskKey calls it instead of askReq.Respond, and the
-	// returned msg becomes the update result. The no-mux `refine` (f) path sets it to
-	// route the typed refinement into an fChangeMsg amend. nil → the bridge path.
-	askCompletion func(value string, submitted bool) tea.Msg
+	// askState — the no-mux agent-ask overlay (see askState).
+	askState
 
 	// refusals is the session-lifetime list of user-rejected approaches (spec
 	// refuse-solution §1). Every submitted refine note is appended verbatim (trimmed,
@@ -99,22 +66,11 @@ type model struct {
 	// approach cannot resurface. In-memory only — constraints die with the session.
 	refusals []string
 
-	// streaming + thinking
-	thinking      bool
-	thinkLabel    string
-	defaultLabel  string
-	progress      ProgressWidget // spinner frame, elapsed ticks, and activity summary
-	streaming     bool
-	follow        bool      // auto-scroll to bottom while streaming
-	justAnnounced bool      // set by announceFollowup so beginFollowupInProc skips its own `---` (the announcement already framed the attempt with a separator ABOVE the phrase)
-	pinTop        int       // body line pinned to the viewport top (>=0): relaxes the scroll clamp so a freshly-announced follow-up sits at top with blank space below until new content fills it. -1 = none (no effect once content grows past the body).
-	reader        io.Reader // input stream source (set by main); nil in tests/static
-	parser        *streamParser
+	// streamState — the stream / render machine (see streamState).
+	streamState
 
-	dirty           bool // streamed text appended since the last reflow
-	renderScheduled bool // a coalesced render tick is already pending
-	tickRunning     bool // a single 100ms spinner tick loop is live
-	tickGen         int  // current spinner-loop generation; older loops self-cancel
+	// tickState — the spinner tick-generation machine (see tickState).
+	tickState
 
 	// flash: non-empty while a button is briefly highlighted after activation.
 	// Identity key is "<blockID>:<kind>"; cleared by flashTickMsg after ~140ms.
@@ -165,6 +121,129 @@ type model struct {
 	// an in-process action is not yet implemented). Cleared on the next key/click.
 	status string
 
+	// followups counts how many auto-follow-ups have fired this session. The
+	// verify-fail auto-fire repeats on EACH failure while followups < maxFollowups;
+	// past the cap it falls back to the manual "try another fix" button.
+	followups    int
+	maxFollowups int
+
+	// hadFollowup is true after a follow-up (auto or manual) launches — the run
+	// diverged from the proposed playbook. Reset when the playbook is re-authored.
+	hadFollowup bool
+
+	// draftState — the final-playbook draft lifecycle (see draftState).
+	draftState
+
+	// asker spawns the request-input float (the same floatinput.Asker the agent's
+	// `ask` tool uses) and returns the user's typed answer, OFF the bubbletea event
+	// loop. It backs the `f` keybind (spec §D): `f` → ask "What should I change?" →
+	// the user types a free-form adjustment → re-author the displayed playbook in
+	// AMEND mode (base=m.md, change=the typed value) → REPLACE draft. nil when the
+	// float can't be spawned (off-zellij / tests / no selfExe) → `f` is a no-op. Set
+	// by Run/RunStream from Options.Asker / StreamOptions.Asker.
+	asker AskFunc
+
+	// B2b pre-run variable confirmation
+	confirmEnv  map[string]frontmatter.EnvValue // declared env (front matter); nil/empty → no gate
+	projectRoot string                          // heuristic root (the PROJECT_ROOT value)
+	sourcePath  string                          // on-disk .md path (non-empty → file-backed; enables [edit])
+	sourceMtime time.Time                       // mtime of sourcePath at last read; used by the mux poll to detect saves
+	polling     bool                            // a mtime-poll loop is already live; guards against N concurrent [edit] clicks
+
+	// driftState — the drift "resolve manually" machine (see driftState).
+	driftState
+
+	// autoRollback (set from the --auto-rollback run flag) makes a step failure auto-fire
+	// the rollback chain instead of only showing the manual "Rollback playbook" button.
+	autoRollback bool
+
+	// assistedState — the assisted / GUIDED-run machine (see assistedState).
+	assistedState
+
+	// exitCode is the process exit code Run() surfaces after prog.Run() returns
+	// the final model (in place of the default 0). Zero (the default) means "no
+	// override" — a GUIDED/assisted run that ends on a failed/aborted step can
+	// set this to signal failure to the caller.
+	exitCode int
+
+	// rollbackFailedID is the failed block currently driving a rollback chain (it shows
+	// the "rolling back…" spinner, then the "all steps rolled back" suffix); "" = none.
+	// rollbackPending counts the rollback targets still running, so we know when the chain
+	// finishes (→ mark rollbackFailedID's suffix).
+	rollbackFailedID string
+	rollbackPending  int
+	gateSatisfied    bool // the gate ran (or wasn't needed) this session
+	// gate holds the in-progress pre-run confirmation state machine while the user
+	// steps through the confirm/customize overlays; nil when no gate is active.
+	gate *confirmGate
+}
+
+// diffState is the no-mux in-viewer diff-overlay state machine: it holds the
+// parsed patch, the structured side-by-side rows, the scroll offsets, and the
+// width-derived geometry cache. Only exercised on the no-mux path (asker == nil).
+type diffState struct {
+	// no-mux in-viewer diff overlay: when diffMode is true the pager overlays a
+	// bordered scrollable side-by-side diff box (rendered by internal/diff) over the
+	// live document. Only raised on the no-mux path (m.asker == nil); mux-on keeps
+	// the existing emitAction→float path. Closed by q/esc.
+	diffMode  bool
+	diffFiles []idiff.FileDiff // parsed patch; kept so the narrow overlay can render unified
+	diffRows  []idiff.Row      // structured side-by-side rows, rendered (windowed) per frame
+	diffYOff  int
+	diffXOff  int
+	// diff-overlay geometry cache: derived quantities that depend only on diffRows /
+	// diffFiles and the terminal width, so they change at exactly two events — the
+	// overlay opening (activateDiffButton) and a resize (WindowSizeMsg). Both call
+	// recomputeDiffGeometry, which repopulates these and sets diffGeomValid. Without
+	// it, narrow mode re-rendered the whole patch through chroma up to three times
+	// per keypress and wide mode re-walked every row per frame. When diffGeomValid is
+	// false (e.g. a test that assigns diffRows directly, never opening the overlay)
+	// the accessors fall back to a live computation, so behavior is identical.
+	diffGeomValid   bool
+	diffUnifiedC    []string // cached unified lines (narrow mode)
+	diffUnifiedMaxW int      // widest unified line (narrow horizontal max)
+	diffGutterC     int      // cached gutter width (wide mode)
+	diffTextColC    int      // cached per-pane text column (wide mode)
+	diffPaneLeftC   int      // cached left-pane max horizontal offset (wide mode)
+	diffPaneRightC  int      // cached right-pane max horizontal offset (wide mode)
+	diffLangsC      []string // cached per-row highlight language (wide mode)
+}
+
+// askState is the no-mux agent-ask overlay state machine: the bridge that
+// delivers pending asks, the open flag, the embedded dialog, the pending request,
+// and the viewer-initiated completion hook.
+type askState struct {
+	// no-mux ask overlay: when askBridge is set, a tea.Cmd drains pending agent
+	// asks (recvAskCmd); askMode raises the embedded ask dialog over the document
+	// (the help-modal compositing mechanism) and routes keys to it; askReq is the
+	// pending request answered on submit/cancel. nil bridge (mux path / tests) →
+	// the overlay is never raised.
+	askBridge *askbridge.Bridge
+	askMode   bool
+	ask       *input.Ask
+	askReq    askbridge.Request
+	// askCompletion, when set, fires when a VIEWER-initiated overlay (not a bridge
+	// agent ask) completes: handleAskKey calls it instead of askReq.Respond, and the
+	// returned msg becomes the update result. The no-mux `refine` (f) path sets it to
+	// route the typed refinement into an fChangeMsg amend. nil → the bridge path.
+	askCompletion func(value string, submitted bool) tea.Msg
+}
+
+// streamState is the stream / render state machine: the thinking + streaming
+// flags, the progress widget, the reader/parser feeding it, the render-coalescing
+// bookkeeping, and the structured-authoring capture.
+type streamState struct {
+	// streaming + thinking
+	thinking        bool
+	thinkLabel      string
+	defaultLabel    string
+	progress        ProgressWidget // spinner frame, elapsed ticks, and activity summary
+	streaming       bool
+	follow          bool      // auto-scroll to bottom while streaming
+	reader          io.Reader // input stream source (set by main); nil in tests/static
+	parser          *streamParser
+	dirty           bool // streamed text appended since the last reflow
+	renderScheduled bool // a coalesced render tick is already pending
 	// reengageStream is the live re-engagement stream (regenerate/followup/wrapup)
 	// swapped in via the in-process re-arm. It is closed on EOF so the agent
 	// process is reaped and the orchestrator's tee-on-close side effects fire
@@ -178,17 +257,29 @@ type model struct {
 	// tools backend is wired (the no-tools fallback) — then no activity is shown and
 	// the spinner still animates. Set by RunStream from StreamOptions.Activity.
 	activity <-chan string
+	// structured marks that this stream carries the agent's narration, NOT the
+	// playbook (the playbook arrives via submit_playbook → OnPlaybook → bodyProvider).
+	// When true, textEvents are drained (not accumulated as m.md) and on stream EOF
+	// m.md is set from bodyProvider() so the existing finalDraft processing runs on
+	// the captured rendered playbook. Set by RunStream from StreamOptions.Structured.
+	structured bool
+	// bodyProvider, when non-nil, returns the captured rendered playbook at stream EOF
+	// in structured mode. Set by RunStream from StreamOptions.Body.
+	bodyProvider func() string
+}
 
-	// followups counts how many auto-follow-ups have fired this session. The
-	// verify-fail auto-fire repeats on EACH failure while followups < maxFollowups;
-	// past the cap it falls back to the manual "try another fix" button.
-	followups    int
-	maxFollowups int
+// tickState is the spinner tick-generation state machine: the single-loop guard
+// and the generation counter that lets an older overlapping loop self-cancel.
+type tickState struct {
+	tickRunning bool // a single 100ms spinner tick loop is live
+	tickGen     int  // current spinner-loop generation; older loops self-cancel
+}
 
-	// hadFollowup is true after a follow-up (auto or manual) launches — the run
-	// diverged from the proposed playbook. Reset when the playbook is re-authored.
-	hadFollowup bool
-
+// draftState is the final-playbook draft lifecycle state machine: whether a draft
+// is displayed, committed, or re-authored, the pre-generation backup, the quit
+// guard, the wrap-up gate, the served-base amend context, and the verify-success
+// confirm row's own state.
+type draftState struct {
 	// wrappedUp gates the verify-SUCCESS auto wrap-up (issue #3) to fire ONCE per
 	// resolution. A verify RUN with exit 0 auto-triggers the wrap-up re-engagement
 	// (the agent asks the user, via the ask tool, whether the fix solved their
@@ -246,32 +337,12 @@ type model struct {
 	// between clears it (the draft is now saved). Reset on any non-quit key so the
 	// "press quit again" intent stays immediate, not sticky across other interactions.
 	quitGuard bool
+}
 
-	// asker spawns the request-input float (the same floatinput.Asker the agent's
-	// `ask` tool uses) and returns the user's typed answer, OFF the bubbletea event
-	// loop. It backs the `f` keybind (spec §D): `f` → ask "What should I change?" →
-	// the user types a free-form adjustment → re-author the displayed playbook in
-	// AMEND mode (base=m.md, change=the typed value) → REPLACE draft. nil when the
-	// float can't be spawned (off-zellij / tests / no selfExe) → `f` is a no-op. Set
-	// by Run/RunStream from Options.Asker / StreamOptions.Asker.
-	asker AskFunc
-
-	// structured marks that this stream carries the agent's narration, NOT the
-	// playbook (the playbook arrives via submit_playbook → OnPlaybook → bodyProvider).
-	// When true, textEvents are drained (not accumulated as m.md) and on stream EOF
-	// m.md is set from bodyProvider() so the existing finalDraft processing runs on
-	// the captured rendered playbook. Set by RunStream from StreamOptions.Structured.
-	structured bool
-	// bodyProvider, when non-nil, returns the captured rendered playbook at stream EOF
-	// in structured mode. Set by RunStream from StreamOptions.Body.
-	bodyProvider func() string
-
-	// B2b pre-run variable confirmation
-	confirmEnv  map[string]frontmatter.EnvValue // declared env (front matter); nil/empty → no gate
-	projectRoot string                          // heuristic root (the PROJECT_ROOT value)
-	sourcePath  string                          // on-disk .md path (non-empty → file-backed; enables [edit])
-	sourceMtime time.Time                       // mtime of sourcePath at last read; used by the mux poll to detect saves
-	polling     bool                            // a mtime-poll loop is already live; guards against N concurrent [edit] clicks
+// driftState is the drift "resolve manually" state machine: the watched edit
+// target (mux poll), the conflict-marked temp-copy flow, and the pre-resolve
+// backup that backs a resolved block's Undo.
+type driftState struct {
 	// driftEditPath/driftEditMtime back the MUX "resolve manually" (F21) poll: while
 	// driftEditPath is set the shared source-poll loop ALSO watches that target file
 	// and re-checks drift when it is saved (mirrors sourcePath/sourceMtime for [edit]).
@@ -289,18 +360,15 @@ type model struct {
 	// content from just BEFORE the resolve, so the "resolved manually" block's Undo can
 	// restore it (reverting to the drifted state — there is no git patch to reverse).
 	driftResolveBackup map[string]string
-	// autoRollback (set from the --auto-rollback run flag) makes a step failure auto-fire
-	// the rollback chain instead of only showing the manual "Rollback playbook" button.
-	autoRollback bool
+}
+
+// assistedState is the assisted / GUIDED-run state machine: the mode flag, the
+// ready-block cursor, the start guard, and the bottom-footer selection + focus.
+type assistedState struct {
 	// assisted (set from the --assisted run flag / Options.Assisted) opts into the
 	// GUIDED-fullscreen run mode; it rides the same viewer path as the default
 	// run — the assisted behavior itself is wired by later Plan 2 tasks.
 	assisted bool
-	// exitCode is the process exit code Run() surfaces after prog.Run() returns
-	// the final model (in place of the default 0). Zero (the default) means "no
-	// override" — a GUIDED/assisted run that ends on a failed/aborted step can
-	// set this to signal failure to the caller.
-	exitCode int
 	// readyID is the assisted-mode cursor: the block id the GUIDED run wants the
 	// user to act on next ("" when no step is ready — either not started, or the
 	// playbook is done). Advanced by startAssisted/assistedAdvance/assistedSkip.
@@ -321,16 +389,6 @@ type model struct {
 	// assistedFailedID is the block id whose failure raised assistedFooter="failure";
 	// "" when the footer isn't in the failure state.
 	assistedFailedID string
-	// rollbackFailedID is the failed block currently driving a rollback chain (it shows
-	// the "rolling back…" spinner, then the "all steps rolled back" suffix); "" = none.
-	// rollbackPending counts the rollback targets still running, so we know when the chain
-	// finishes (→ mark rollbackFailedID's suffix).
-	rollbackFailedID string
-	rollbackPending  int
-	gateSatisfied    bool // the gate ran (or wasn't needed) this session
-	// gate holds the in-progress pre-run confirmation state machine while the user
-	// steps through the confirm/customize overlays; nil when no gate is active.
-	gate *confirmGate
 }
 
 // AskFunc opens the request-input float with the given prompt (the floatinput Type
@@ -342,17 +400,19 @@ type AskFunc func(prompt string) (value string, submitted bool)
 
 func newModel(harness, md string) model {
 	return model{
-		harness:            harness,
-		md:                 md,
-		width:              80,
-		height:             24,
-		helpLines:          buildHelpLines(),
-		defaultLabel:       "Working…",
-		follow:             false, // start at the top on load; only append (wrap-up) re-enables follow
-		pinTop:             -1,    // no pin until a follow-up announcement frames itself at the top
-		blockStates:        map[string]blockRunState{},
-		maxFollowups:       resolveMaxFollowups(),
-		driftResolveBackup: map[string]string{},
+		harness:      harness,
+		md:           md,
+		width:        80,
+		height:       24,
+		helpLines:    buildHelpLines(),
+		pinTop:       -1, // no pin until a follow-up announcement frames itself at the top
+		blockStates:  map[string]blockRunState{},
+		maxFollowups: resolveMaxFollowups(),
+		streamState: streamState{
+			defaultLabel: "Working…",
+			follow:       false, // start at the top on load; only append (wrap-up) re-enables follow
+		},
+		driftState: driftState{driftResolveBackup: map[string]string{}},
 	}
 }
 
