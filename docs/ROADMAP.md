@@ -3,7 +3,7 @@
 Durable single source of truth for the feature roadmap. Each phase lists its
 goal, status, settled decisions, and open questions. Per-phase, step-by-step
 implementation plans are written just-in-time when a phase starts (they're
-ephemeral; this doc is not). Last updated: 2026-07-04.
+ephemeral; this doc is not). Last updated: 2026-07-04 (v0.9.0).
 
 ## Vision
 
@@ -28,6 +28,31 @@ authoring** (the model writes the playbook from your live context),
 terminal-native. We are at parity on multi-language execution
 (python/node/ruby/perl via interpreter) and close the docs-as-code gap
 with the **project-local store** below.
+
+## Path to 1.0 (proposed 2026-07-04)
+
+1.0 means: **stable public contracts** (the `pkg/` API, the `ask` CLI, the
+playbook schema), a **production-grade executor** (cancellation everywhere,
+CI-consumable output, loud errors), and **CI we trust** (fast, no separate
+race lane, darwin coverage). Proposed milestones:
+
+- **v0.10 — the code matches the architecture.** ADR-0009 steps 4–5
+  (`ui.Run(Options)`, the single `pkg/` promotion) plus the deep
+  maintainability items that get harder with every feature: model.go
+  decomposition, launcher consolidation, input wrapper folding.
+- **v0.11 — Phase 6, cross-block output piping.** The largest remaining core
+  feature, designed against the now-settled schema owner and AI-free executor.
+  Rides with executor-grade polish: JUnit/XML `run --auto` report, the
+  ESC-audit sweep, status-line truncation.
+- **v0.12 — Phase 5, knowledge base** (AI layer, independent) plus A5a-full
+  (cancellation/timeout for streaming AI calls, truncation surfaced on
+  authoring paths).
+- **v1.0 — hardening + trust.** Shared-test-driver speedup (retires the race
+  lane), the CI hardening batch (macOS job, cache keys, dependabot,
+  tidy-diff, release-notes guard), coverage ~90%, width-engine unification,
+  Homebrew tap. Explicitly post-1.0: Windows/no-PTY portability, additional
+  harness adapters (pi/cursor — the seam is ready), GNU info pages.
+
 
 ## Command surface (target)
 
@@ -125,10 +150,12 @@ any wiring into a particular shell/dotfiles setup is separate and secondary.
   author, driver, orchestrator, triage, cache, capture, mux, tools, input,
   config), `pkg/` only for anything genuinely meant to be importable. Largely
   adopted (`cmd/` + `internal/`). **DECIDED (ADR-0009, 2026-07-04): the playbook
-  schema + executor (+ store) ARE meant to be importable and will be promoted
-  to `pkg/`** — staged behind the layering extractions (block parser out of
-  `ui.Render`, re-engagement out of the orchestrator, `ui.Run(Options)`);
-  promotion is the final, mechanical step once those boundaries settle.
+  schema + executor (+ store) AND the interaction toolkit ARE meant to be
+  importable and will be promoted to `pkg/`** in ONE event. Staging progress:
+  steps 1–3 DONE at v0.9.0 (`playbook.ParseBlocks` single schema owner; the
+  AI-free executor with `internal/reengage` extracted; the standalone `ask`
+  binary shipped). Remaining: `ui.Run(Options)` (step 4), then the single
+  `pkg/` promotion (step 5).
 - **README.md** — overview, install, quick start, the command surface, with
   badges: CI status, **test coverage**, Go Report Card, latest release,
   license. — DONE: also now covers shell completion, man pages, and the
