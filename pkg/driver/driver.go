@@ -100,6 +100,15 @@ func (d *Driver) Cwd() string {
 	return d.cwd
 }
 
+// SessionDir returns the per-session directory that holds the driver's retained
+// block captures (out_<key>/err_<key>). It is a session-scoped scratch dir
+// created at Open and removed wholesale at Close, so callers may drop additional
+// session-lifetime files here — e.g. the run-block scripts the schema payload
+// assembly (playbook.ExecCommand) writes. Empty when retention could not be
+// initialized (the mkdir failed); callers must tolerate "" (assembly falls back
+// to os.TempDir()).
+func (d *Driver) SessionDir() string { return d.sessionDir }
+
 // setCwd updates the live session cwd under mu.
 func (d *Driver) setCwd(p string) {
 	d.mu.Lock()

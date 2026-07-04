@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `run --auto` (and the GUIDED/rollback run paths) now execute script blocks
+  (python/node/ruby/perl) through their interpreter instead of feeding the raw
+  program text to the shell. Payload assembly moved to the schema owner
+  (`pkg/playbook.ExecCommand`), the single rule both the viewer and the headless
+  runner share, so a script block is written to a session temp file and invoked
+  as `<interpreter> <script>` — which also frees its stdin for future `from=`
+  piping.
+
 ## [0.10.0] - 2026-07-04
 
 ### Added

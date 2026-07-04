@@ -621,13 +621,18 @@ func TestRunButtonShellAndScript(t *testing.T) {
 	}
 }
 
-func TestRunPayloadWrapsInterpreter(t *testing.T) {
-	got := runPayload(Block{Type: "run", Lang: "python", Payload: "print(1)"})
-	if !strings.Contains(got, "python3 <<'__APB_RUN__'") || !strings.Contains(got, "print(1)") {
-		t.Fatalf("python run payload not wrapped: %q", got)
+func TestScriptRunButtonCarriesRawPayload(t *testing.T) {
+	// Payload assembly moved to dispatch (playbook.ExecCommand): the run button now
+	// carries the RAW script payload — no interpreter heredoc — and the dispatcher
+	// (orchCmd) wraps it into a `<interp> <script>` invocation. This keeps the button
+	// independent of a driver/session dir that may not exist yet at render time.
+	_, btns, _ := Render("```python {id=p}\nprint(1)\n```\n", 80, RenderOpts{})
+	b := buttonForBlock(btns, "p", "run")
+	if b == nil {
+		t.Fatal("python block needs a run button")
 	}
-	if runPayload(Block{Type: "shell", Lang: "bash", Payload: "ls"}) != "ls" {
-		t.Fatalf("shell payload must stay raw")
+	if b.Payload != "print(1)" {
+		t.Fatalf("run button payload = %q, want the raw script %q", b.Payload, "print(1)")
 	}
 }
 

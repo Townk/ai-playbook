@@ -11,6 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/pkg/playbook"
 )
 
 // statusMsg carries a transient one-line status update into the model (e.g. when
@@ -166,8 +167,24 @@ func (m model) orchCmd(b Button) tea.Cmd {
 	if !ok {
 		return nil
 	}
+	// Run blocks are assembled HERE (at dispatch), not at render: the run button
+	// carries the raw block payload, and the canonical schema rule
+	// (playbook.ExecCommand) turns a script block into a `<interp> <script>`
+	// invocation whose stdin stays free for from= piping. Assembly is deferred to
+	// dispatch because the run button is built during render, possibly before the
+	// driver (and its session dir) exists on the async-open path. A shell block —
+	// or an unknown block id (a synthetic rollback/assisted button) — stays
+	// verbatim. cleanup removes the script file once the run completes.
+	payload := b.Payload
+	var cleanup func()
+	if k == orchestrator.KindRun {
+		payload, cleanup = m.assembleRun(b.BlockID, b.Payload)
+	}
 	return func() tea.Msg {
-		res, err := orch.Do(orchestrator.Action{Kind: k, ID: b.BlockID, Payload: b.Payload})
+		if cleanup != nil {
+			defer cleanup()
+		}
+		res, err := orch.Do(orchestrator.Action{Kind: k, ID: b.BlockID, Payload: payload})
 		if errors.Is(err, orchestrator.ErrMisrouted) {
 			// A re-engagement kind reached the executor — a wiring bug (the ui should
 			// have driven it through the reengage engine). Surface it distinctly so it
@@ -195,6 +212,42 @@ func (m model) orchCmd(b Button) tea.Cmd {
 			return nil
 		}
 	}
+}
+
+// assembleRun turns a run block's raw payload into the command the shell eval's,
+// via the canonical schema payload assembly (playbook.ExecCommand): a shell block
+// runs verbatim, a script (run) block is written to a session temp script invoked
+// by its interpreter so its stdin stays free for from= data. The block is looked
+// up by id (m.blocks) to recover its type/lang; an unknown id — e.g. a synthetic
+// rollback/assisted run button whose block isn't currently rendered — falls back
+// to the raw payload with a nil cleanup. Scripts are written under the driver's
+// session dir (survives until Close) and the returned cleanup removes the file
+// after the run.
+func (m model) assembleRun(id, raw string) (string, func()) {
+	blk, ok := m.blockByID(id)
+	if !ok {
+		return raw, nil
+	}
+	scriptDir := ""
+	if m.orch != nil && m.orch.Drv != nil {
+		scriptDir = m.orch.Drv.SessionDir()
+	}
+	cmd, cleanup, err := playbook.ExecCommand(blk, scriptDir)
+	if err != nil {
+		return raw, nil
+	}
+	return cmd, cleanup
+}
+
+// blockByID returns the currently-rendered block with the given id (m.blocks is
+// the canonical parsed list). ok is false when no such block is rendered.
+func (m model) blockByID(id string) (Block, bool) {
+	for _, b := range m.blocks {
+		if b.ID == id {
+			return b, true
+		}
+	}
+	return Block{}, false
 }
 
 // reArmStreamMsg carries a fresh in-process re-engagement stream into the model

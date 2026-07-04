@@ -776,3 +776,25 @@ func TestResolveRunArgs_WithEnv(t *testing.T) {
 		t.Error("bad --with-env JSON must error")
 	}
 }
+
+// TestBlocksFor_CarriesLang locks the payload-assembly wiring: blocksFor must
+// propagate each block's fence language into autorun.Block.Lang so the headless
+// runner can drive a script block through its interpreter (the --auto fix). A
+// python block must arrive as Lang "python", Kind KindRun.
+func TestBlocksFor_CarriesLang(t *testing.T) {
+	body := "```python {id=py}\nprint('hi')\n```\n\n```bash {id=sh}\nls\n```\n"
+	got := blocksFor(body)
+	byID := map[string]autorun.Block{}
+	for _, b := range got {
+		byID[b.ID] = b
+	}
+	if byID["py"].Lang != "python" {
+		t.Fatalf("python block Lang = %q, want %q", byID["py"].Lang, "python")
+	}
+	if byID["py"].Kind != autorun.KindRun {
+		t.Fatalf("python block Kind = %v, want KindRun", byID["py"].Kind)
+	}
+	if byID["sh"].Lang != "bash" {
+		t.Fatalf("shell block Lang = %q, want %q", byID["sh"].Lang, "bash")
+	}
+}

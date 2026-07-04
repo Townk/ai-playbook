@@ -337,6 +337,7 @@ func blocksFor(body string) []autorun.Block {
 		blocks = append(blocks, autorun.Block{
 			ID:       b.ID,
 			Command:  b.Payload,
+			Lang:     b.Lang,
 			Needs:    b.Needs,
 			Rollback: b.Rollback,
 			Static:   b.Static,

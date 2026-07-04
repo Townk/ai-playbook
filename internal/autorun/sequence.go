@@ -13,6 +13,7 @@ const (
 type Block struct {
 	ID       string
 	Command  string // ui.Block.Payload
+	Lang     string // fence language; drives the canonical payload assembly (script blocks self-invoke their interpreter)
 	Needs    []string
 	Rollback string // id of the block that undoes this one; "" if none
 	Static   bool

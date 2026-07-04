@@ -3,6 +3,7 @@ package autorun
 import (
 	"bytes"
 	"io"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -53,6 +54,37 @@ func TestRun_Failure_Integration(t *testing.T) {
 	})
 	if code == 0 {
 		t.Error("a failing block must exit non-zero")
+	}
+}
+
+// TestRun_ScriptBlock_UsesInterpreter is the --auto interpreter regression: a
+// python `run` block must execute through python3 (the canonical schema payload
+// assembly writes a script file and invokes it), NOT have its raw body eval'd by
+// the shell. `import sys` is a shell error but valid Python, so the raw-payload
+// path (the pre-fix bug) fails while the interpreter path prints PY_OK. RED
+// against the old headless path.
+func TestRun_ScriptBlock_UsesInterpreter(t *testing.T) {
+	if testing.Short() {
+		t.Skip("opens a real driver")
+	}
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not available")
+	}
+	var out strings.Builder
+	code := Run(RunConfig{
+		Blocks: []Block{{
+			ID:      "py",
+			Kind:    KindRun,
+			Lang:    "python",
+			Command: "import sys\nprint('PY_OK')",
+		}},
+		Slug: "t", Out: &out, Now: func() string { return "STAMP" },
+	})
+	if code != 0 {
+		t.Fatalf("python block exit = %d, want 0 (interpreter path):\n%s", code, out.String())
+	}
+	if !strings.Contains(out.String(), "PY_OK") {
+		t.Fatalf("want PY_OK in output (ran through python3):\n%s", out.String())
 	}
 }
 

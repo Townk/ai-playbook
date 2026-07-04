@@ -12,6 +12,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 	"github.com/Townk/ai-playbook/pkg/driver"
+	"github.com/Townk/ai-playbook/pkg/playbook"
 	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
@@ -148,9 +149,19 @@ func kindFor(k StepKind) orchestrator.Kind {
 // run. A nil stopCh (the zero value) never fires, so RunStep behaves exactly
 // as before for callers that don't opt into interruption.
 func (r *orchRunner) RunStep(s Step) (exit int, outputPath string, cancelled bool) {
+	// Assemble the command through the canonical schema payload rule
+	// (playbook.ExecCommand): a shell step runs verbatim, a script (run) step is
+	// written to a session temp script and invoked by its interpreter — THE
+	// --auto interpreter fix. Scripts land under the driver's session dir so they
+	// survive the run; cleanup removes them afterward.
+	command, cleanup := r.assemble(s)
+	if cleanup != nil {
+		defer cleanup()
+	}
+
 	doneCh := make(chan driver.Result, 1)
 	go func() {
-		res, _ := r.orch.Do(orchestrator.Action{Kind: kindFor(s.Kind), ID: s.ID, Payload: s.Command})
+		res, _ := r.orch.Do(orchestrator.Action{Kind: kindFor(s.Kind), ID: s.ID, Payload: command})
 		doneCh <- res
 	}()
 
@@ -178,6 +189,36 @@ func (r *orchRunner) RunStep(s Step) (exit int, outputPath string, cancelled boo
 		return cancelExit, logPath, true
 	}
 	return res.Exit, logPath, false
+}
+
+// assemble turns a step into the command the shell eval's, via the canonical
+// schema payload rule (playbook.ExecCommand). Only KindRun steps go through
+// assembly (diff/create steps carry a patch/JSON payload the orchestrator
+// handles structurally, not a shell command). The step's Type is reconstructed
+// from its language (playbook.ClassifyType) so a `run` script self-invokes its
+// interpreter while a `shell` step stays verbatim. Scripts are written under the
+// driver's session dir (survives until Close); the returned cleanup removes the
+// script file after the run. On any assembly error it degrades to the raw
+// command with a nil cleanup.
+func (r *orchRunner) assemble(s Step) (string, func()) {
+	if s.Kind != KindRun {
+		return s.Command, nil
+	}
+	scriptDir := ""
+	if r.orch != nil && r.orch.Drv != nil {
+		scriptDir = r.orch.Drv.SessionDir()
+	}
+	blk := playbook.Block{
+		ID:      s.ID,
+		Lang:    s.Lang,
+		Payload: s.Command,
+		Type:    playbook.ClassifyType(s.Lang, false),
+	}
+	cmd, cleanup, err := playbook.ExecCommand(blk, scriptDir)
+	if err != nil {
+		return s.Command, nil
+	}
+	return cmd, cleanup
 }
 
 // writeStepLog writes a step's captured stdout then stderr to a temp file and

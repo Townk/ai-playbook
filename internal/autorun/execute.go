@@ -8,6 +8,7 @@ import (
 // Step is a unit handed to a StepRunner.
 type Step struct {
 	ID, Command string
+	Lang        string // fence language; a script block's runner assembles its interpreter invocation from this
 	Kind        StepKind
 }
 
@@ -43,7 +44,7 @@ func Execute(cfg Config, r StepRunner) int {
 		}
 
 		fmt.Fprintf(cfg.Out, "[%s] %s\n", b.ID, b.Command)
-		exit, out, cancelled := r.RunStep(Step{ID: b.ID, Command: b.Command, Kind: b.Kind})
+		exit, out, cancelled := r.RunStep(Step{ID: b.ID, Command: b.Command, Lang: b.Lang, Kind: b.Kind})
 		fmt.Fprintln(cfg.Out)
 
 		st := statusFor(exit)
@@ -80,7 +81,7 @@ func Execute(cfg Config, r StepRunner) int {
 			origin, target := pair[0], pair[1]
 			command := commandFor(cfg.Blocks, target)
 			fmt.Fprintf(cfg.Out, "[%s] %s\n", target, command)
-			exit, out, _ := r.RunStep(Step{ID: target, Command: command, Kind: KindRun})
+			exit, out, _ := r.RunStep(Step{ID: target, Command: command, Lang: langFor(cfg.Blocks, target), Kind: KindRun})
 			fmt.Fprintln(cfg.Out)
 
 			status[origin] = StatusRolledBack
@@ -128,6 +129,18 @@ func commandFor(blocks []Block, id string) string {
 	for _, b := range blocks {
 		if b.ID == id {
 			return b.Command
+		}
+	}
+	return ""
+}
+
+// langFor looks up a block's fence language by id, so a rollback target runs
+// through the same canonical payload assembly (interpreter for a script block)
+// as a forward step. Empty when the id is unknown or the block has no language.
+func langFor(blocks []Block, id string) string {
+	for _, b := range blocks {
+		if b.ID == id {
+			return b.Lang
 		}
 	}
 	return ""

@@ -735,7 +735,7 @@ func (r *renderer) code(n ast.Node) {
 					col++
 					sb.WriteString(bg.Render(" "))
 					col++
-					r.buttons = append(r.buttons, Button{Line: lineIdx, Col: runActionCol, Width: 2, Kind: "run", Payload: runPayload(blk), BlockID: blk.ID})
+					r.buttons = append(r.buttons, Button{Line: lineIdx, Col: runActionCol, Width: 2, Kind: "run", Payload: blk.Payload, BlockID: blk.ID})
 				}
 				// else: assisted — collapse the slot entirely, nothing to render.
 			}
@@ -1124,35 +1124,6 @@ func tailFile(path string, n int) []string {
 		return all
 	}
 	return all[len(all)-n:]
-}
-
-// langInterp maps a lang name to the interpreter command used to self-invoke a
-// heredoc. python/python3/py → python3; node/js/javascript → node; else verbatim.
-func langInterp(lang string) string {
-	switch lang {
-	case "python", "python3", "py":
-		return "python3"
-	case "node", "js", "javascript":
-		return "node"
-	case "ruby":
-		return "ruby"
-	case "perl":
-		return "perl"
-	default:
-		return lang
-	}
-}
-
-// runPayload returns the shell command the agent eval's when the run button is
-// pressed. Shell blocks run raw; script blocks (Type=="run") self-invoke their
-// interpreter via a quoted heredoc so the agent shell can eval the whole thing.
-// Note: a script body containing a line that is exactly "__APB_RUN__" would
-// break the heredoc — that constraint is acceptable for troubleshooting snippets.
-func runPayload(blk Block) string {
-	if blk.Type != "run" {
-		return blk.Payload
-	}
-	return langInterp(blk.Lang) + " <<'__APB_RUN__'\n" + blk.Payload + "\n__APB_RUN__"
 }
 
 // needsSatisfied returns the UNMET needs of blk (empty slice ⇔ all satisfied).
