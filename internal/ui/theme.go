@@ -3,10 +3,10 @@ package ui
 import (
 	"github.com/alecthomas/chroma/v2"
 
-	"github.com/Townk/ai-playbook/internal/theme"
+	"github.com/Townk/ai-playbook/pkg/dialog/theme"
 )
 
-// Shared Catppuccin Mocha palette — aliased from internal/theme so every
+// Shared Catppuccin Mocha palette — aliased from pkg/dialog/theme so every
 // existing colXxx call site stays unchanged.
 const (
 	colBlue     = theme.Blue
@@ -45,7 +45,7 @@ const (
 	colFlashOn = "#ffffff" // bright white — bold flash pulse on the normal cell bg
 )
 
-// Helpers aliased from internal/theme so every existing call site stays
+// Helpers aliased from pkg/dialog/theme so every existing call site stays
 // unchanged (var keeps the function signature identical to the original func).
 var (
 	parseHex = theme.ParseHex

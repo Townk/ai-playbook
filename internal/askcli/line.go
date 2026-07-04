@@ -3,7 +3,7 @@ package askcli
 import (
 	"fmt"
 
-	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 func runLineCmd(args []string) int {
@@ -18,7 +18,7 @@ func runLineCmd(args []string) int {
 		return code
 	}
 
-	o := input.LineOptions{
+	o := dialog.LineOptions{
 		Theme:       *c.theme,
 		Variant:     "default",
 		Title:       c.title,
@@ -32,7 +32,7 @@ func runLineCmd(args []string) int {
 	}
 
 	if c.measure {
-		fmt.Println(input.MeasureLine(o))
+		fmt.Println(dialog.MeasureLine(o))
 		return exitOK
 	}
 	if !hasTTY() {

@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/Townk/ai-playbook/internal/autorun"
-	"github.com/Townk/ai-playbook/internal/store"
 	"github.com/Townk/ai-playbook/internal/ui"
+	"github.com/Townk/ai-playbook/pkg/store"
 )
 
 // ---- resolveRunArgs — the run argument resolution matrix ----

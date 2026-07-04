@@ -10,8 +10,8 @@ import (
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/mux"
-	"github.com/Townk/ai-playbook/internal/store"
 	"github.com/Townk/ai-playbook/internal/triage"
+	"github.com/Townk/ai-playbook/pkg/store"
 )
 
 // captureStderr runs f() and returns whatever it wrote to os.Stderr.

@@ -7,8 +7,8 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/capture"
-	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 func TestExplicitProgress_ClassifiesAndRoutes(t *testing.T) {
@@ -115,11 +115,11 @@ func TestInlineInput_SubmitRoutesClassification(t *testing.T) {
 	routeInlineSessionFn = func(_ capture.Request, _ string, _ mux.Mux) int { return 7 }
 	// Fake the inline runner: drive onSubmit (so the classify goroutine runs),
 	// drain it, and report a submit.
-	inlineRunFn = func(_ *os.File, _ input.InlineRequest, onSubmit func(string) <-chan input.ThinkUpdate) (input.InlineResult, error) {
+	inlineRunFn = func(_ *os.File, _ dialog.InlineRequest, onSubmit func(string) <-chan dialog.ThinkUpdate) (dialog.InlineResult, error) {
 		ch := onSubmit("diagnose the crash")
 		for range ch { // drain Line + Done
 		}
-		return input.InlineResult{Value: "diagnose the crash", Submitted: true}, nil
+		return dialog.InlineResult{Value: "diagnose the crash", Submitted: true}, nil
 	}
 	// /dev/tty may be absent in CI: only assert when the inline path is taken.
 	if _, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err != nil {
@@ -135,7 +135,7 @@ func TestInlineInput_SubmitRoutesClassification(t *testing.T) {
 // inlineRunFn reporting Submitted: false must make inlineInput return WITHOUT
 // routing the classification. This is the launcher-side regression test for
 // the "cancel-during-thinking is reported as submitted" bug (fixed at the
-// input.inlineResultFromModel conversion — see internal/input/inline_test.go).
+// dialog.inlineResultFromModel conversion — see pkg/dialog/inline_test.go).
 func TestInlineInput_CancelDuringThinkingDoesNotRoute(t *testing.T) {
 	isolateCache(t)
 	origRun, origCls, origSess := inlineRunFn, classifyFn, routeInlineSessionFn
@@ -147,11 +147,11 @@ func TestInlineInput_CancelDuringThinkingDoesNotRoute(t *testing.T) {
 	routeInlineSessionFn = func(_ capture.Request, _ string, _ mux.Mux) int { routed = true; return 7 }
 	// Fake the inline runner: drive onSubmit (so the classify goroutine runs and
 	// completes, as it would have by the time Esc lands), THEN report a cancel.
-	inlineRunFn = func(_ *os.File, _ input.InlineRequest, onSubmit func(string) <-chan input.ThinkUpdate) (input.InlineResult, error) {
+	inlineRunFn = func(_ *os.File, _ dialog.InlineRequest, onSubmit func(string) <-chan dialog.ThinkUpdate) (dialog.InlineResult, error) {
 		ch := onSubmit("diagnose the crash")
 		for range ch { // drain Line + Done
 		}
-		return input.InlineResult{Submitted: false}, nil
+		return dialog.InlineResult{Submitted: false}, nil
 	}
 	// /dev/tty may be absent in CI: only assert when the inline path is taken.
 	if _, err := os.OpenFile("/dev/tty", os.O_RDWR, 0); err != nil {

@@ -26,9 +26,9 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/climeta"
 	diffpkg "github.com/Townk/ai-playbook/internal/diff"
-	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/launcher"
 	"github.com/Townk/ai-playbook/internal/mcpserver"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
@@ -94,7 +94,7 @@ var dispatch = map[string]func(prog string) int{
 	"finalize": func(string) int { return finalize() },
 	"mcp":      func(string) int { return mcpMain() },
 	"diff":     func(string) int { return diffpkg.Main() },
-	"input":    func(string) int { return input.Main() },
+	"input":    func(string) int { return dialog.Main() },
 }
 
 // versionCmd is the dispatch handler for "version"/"--version"/"-v".

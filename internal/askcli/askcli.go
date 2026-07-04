@@ -1,5 +1,5 @@
 // Package askcli implements the standalone `ask` binary: the themed dialog
-// widgets (confirm/line/text/choose/form) from internal/input exposed as a
+// widgets (confirm/line/text/choose/form) from pkg/dialog exposed as a
 // pure-I/O tool for shell scripts. It owns the subcommand dispatch, per-widget
 // flag sets, ASK_* env fallbacks, JSON form-spec parsing, and the exit-code
 // contract; the widgets remain the single implementation shared with
@@ -20,7 +20,7 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 // Version is the binary's version string. It defaults to "dev" for local
@@ -64,7 +64,7 @@ func version() string {
 func Run(args []string) int {
 	// Match ai-playbook input's rune-width accounting so measure/render widths
 	// agree with the terminal (and with `ai-playbook input --measure`).
-	input.NarrowRuneWidth()
+	dialog.NarrowRuneWidth()
 
 	if len(args) < 2 {
 		usage(os.Stderr)
@@ -156,11 +156,11 @@ func firstArg(pos []string) string {
 // populated options struct for that kind.
 type widgetInvocation struct {
 	kind    string
-	confirm input.ConfirmOptions
-	line    input.LineOptions
-	text    input.TextOptions
-	choose  input.ChooseOptions
-	form    input.FormOptions
+	confirm dialog.ConfirmOptions
+	line    dialog.LineOptions
+	text    dialog.TextOptions
+	choose  dialog.ChooseOptions
+	form    dialog.FormOptions
 }
 
 // widgetOutcome is the normalized result the subcommand maps to exit code +
@@ -169,42 +169,42 @@ type widgetOutcome struct {
 	cancelled bool
 	confirm   string // "yes" | "no" (confirm only)
 	value     string // line/text/choose submitted value
-	formPairs []input.FormPair
+	formPairs []dialog.FormPair
 }
 
 // runWidget is the seam between askcli and the interactive widgets. The default
-// drives the real internal/input runners; tests replace it to inject outcomes
+// drives the real pkg/dialog runners; tests replace it to inject outcomes
 // and capture the options mapping without a TTY.
 var runWidget = defaultRunWidget
 
 func defaultRunWidget(inv widgetInvocation) (widgetOutcome, error) {
 	switch inv.kind {
 	case "confirm":
-		r, err := input.RunConfirm(inv.confirm)
+		r, err := dialog.RunConfirm(inv.confirm)
 		if err != nil {
 			return widgetOutcome{}, err
 		}
 		return widgetOutcome{cancelled: r.Cancelled, confirm: r.Value}, nil
 	case "line":
-		r, err := input.RunLine(inv.line)
+		r, err := dialog.RunLine(inv.line)
 		if err != nil {
 			return widgetOutcome{}, err
 		}
 		return widgetOutcome{cancelled: r.Cancelled, value: r.Value}, nil
 	case "text":
-		r, err := input.RunText(inv.text)
+		r, err := dialog.RunText(inv.text)
 		if err != nil {
 			return widgetOutcome{}, err
 		}
 		return widgetOutcome{cancelled: r.Cancelled, value: r.Value}, nil
 	case "choose":
-		r, err := input.RunChoose(inv.choose)
+		r, err := dialog.RunChoose(inv.choose)
 		if err != nil {
 			return widgetOutcome{}, err
 		}
 		return widgetOutcome{cancelled: r.Cancelled, value: r.Value}, nil
 	case "form":
-		r, err := input.RunForm(inv.form)
+		r, err := dialog.RunForm(inv.form)
 		if err != nil {
 			return widgetOutcome{}, err
 		}

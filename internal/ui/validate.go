@@ -1,5 +1,5 @@
 // validate.go — shared render-validity predicate used by the playbook
-// renderer's tests (internal/playbook/render_test.go) and formerly by the
+// renderer's tests (internal/draft/render_test.go) and formerly by the
 // adapt-on-run junk-guard.
 package ui
 

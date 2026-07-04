@@ -35,7 +35,7 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 
 - [ ] `ask --version` prints a bare `v0.9.0` while `ai-playbook`/`apb` print name-aware `<prog> <version>` — align ask's version line with its siblings (2026-07-04)
 
-- [ ] Finish the `pkg/` promotion (ADR-0009 step 5): `pkg/runner`←orchestrator, `pkg/store`←store, `pkg/dialog`←input are DEFERRED — each transitively imports private leaves (orchestrator→diff/mux, store→config/capture, input→theme; all reach theme/config/cache). Needs a layout decision: promote the shared leaves (`theme`/`diff`/`mux`/`config`/`capture`/`cache`) into `pkg/` too, or narrow the couplings behind runner/store/dialog-owned interfaces. `internal/autorun`→`pkg/runner/auto` blocked on the same (cache + orchestrator) (2026-07-04)
+- [ ] Finish the `pkg/` promotion (ADR-0009 step 5, last piece): `pkg/runner`←orchestrator — the executor holds a `mux.Mux` (edit/float pane spawning; mux→config→cache) and calls `diff.Parse` (diff→theme); needs design (a narrowed executor-owned pane-spawn interface, or a public mux) rather than a mechanical cut. `internal/autorun`→`pkg/runner/auto` waits on the same (imports orchestrator + cache) (2026-07-04)
 
 ## Ideas
 

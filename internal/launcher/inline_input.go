@@ -12,9 +12,9 @@ import (
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
-	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/ui"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 // routeInlineSessionFn / viewProseFn are the escalate / answer seams (tests
@@ -83,7 +83,7 @@ func viewProse(content, title, cwd string) int {
 }
 
 // inlineRunFn is the inline-input seam (tests override it to avoid a TTY).
-var inlineRunFn = input.RunInline
+var inlineRunFn = dialog.RunInline
 
 // inlineInput renders the input UI inline below the shell prompt, classifies the
 // submitted request IN-BOX (sine-wave), then routes the result. Cancel (Esc)
@@ -108,28 +108,28 @@ func inlineInput(req capture.Request, m mux.Mux) int {
 	defer tty.Close()
 
 	dbg("inlineInput: start (box on /dev/tty); waiting for submit")
-	res, rerr := inlineRunFn(tty, input.InlineRequest{
+	res, rerr := inlineRunFn(tty, dialog.InlineRequest{
 		Title:   "ai-playbook",
 		Prompt:  "How can I help you today?",
 		Value:   prefillTemplate(req),
 		History: requestHistoryPath(),
-	}, func(value string) <-chan input.ThinkUpdate {
+	}, func(value string) <-chan dialog.ThinkUpdate {
 		dbg("inlineInput: SUBMIT received value=%q; classify start", value)
-		ch := make(chan input.ThinkUpdate, 8)
+		ch := make(chan dialog.ThinkUpdate, 8)
 		go func() {
 			defer close(ch)
 			r := req
 			r.UserRequest = value
 			cls, cerr := classifyInline(r, func(line string) {
 				select {
-				case ch <- input.ThinkUpdate{Line: line}:
+				case ch <- dialog.ThinkUpdate{Line: line}:
 				default: // drop if the model hasn't drained — the line is cosmetic
 				}
 			})
 			dbg("inlineInput: classify done kind=%q err=%v", cls.Kind, cerr)
 			clsCh <- clsResult{cls: cls, err: cerr}
 			select {
-			case ch <- input.ThinkUpdate{Done: true}:
+			case ch <- dialog.ThinkUpdate{Done: true}:
 			default: // reader cancelled (e.g. esc during classify wave) — don't block
 			}
 		}()
@@ -194,7 +194,7 @@ func classifyWithProgress(req capture.Request) (author.Classification, error) {
 		tea.WithColorProfile(colorprofile.TrueColor),
 	).Run()
 	wm, _ := fm.(waitingModel)
-	input.ClearInline(tty, wm.lastHeight())
+	dialog.ClearInline(tty, wm.lastHeight())
 	if perr != nil {
 		r := <-resCh
 		return r.cls, r.err

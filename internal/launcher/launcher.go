@@ -21,10 +21,10 @@ import (
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/floatinput"
-	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/triage"
 	"github.com/Townk/ai-playbook/internal/ui"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 // troubleshoot is the LAUNCHER: it runs transiently in the user's ORIGIN pane
@@ -344,7 +344,7 @@ func waitFloatClosed(out string) {
 	if out == "" {
 		return
 	}
-	marker := out + input.ClosedSuffix
+	marker := out + dialog.ClosedSuffix
 	deadline := time.Now().Add(floatCloseCap)
 	for time.Now().Before(deadline) {
 		if _, err := os.Stat(marker); err == nil {
@@ -357,13 +357,13 @@ func waitFloatClosed(out string) {
 }
 
 // writeDoneFile writes the thinking float's <out>.done close marker (an empty file,
-// atomic enough). The float, while animating, polls for it (input.DoneSuffix) and
-// exits when it appears. Mirrors input.writeCancelFile. A no-op on an empty path.
+// atomic enough). The float, while animating, polls for it (dialog.DoneSuffix) and
+// exits when it appears. Mirrors dialog.writeCancelFile. A no-op on an empty path.
 func writeDoneFile(outFile string) {
 	if outFile == "" {
 		return
 	}
-	_ = os.WriteFile(outFile+input.DoneSuffix, nil, 0o600)
+	_ = os.WriteFile(outFile+dialog.DoneSuffix, nil, 0o600)
 }
 
 // thinkingTailRunes bounds the sliding-tail window written to <out>.thinking — the
@@ -395,7 +395,7 @@ func writeThinkingFile(out, line string) {
 	if out == "" {
 		return
 	}
-	path := out + input.ThinkingSuffix
+	path := out + dialog.ThinkingSuffix
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(line), 0o600); err != nil {
 		return

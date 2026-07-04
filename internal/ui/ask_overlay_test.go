@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Townk/ai-playbook/internal/askbridge"
-	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 func TestAskOverlay_OpensAndRespondsOnSubmit(t *testing.T) {
@@ -160,7 +160,7 @@ func TestAskOverlay_StreamEventsPassThrough(t *testing.T) {
 
 	// Enter askMode with a live ask widget (mirrors openAsk).
 	m.askMode = true
-	m.ask = input.NewAsk("ai-playbook", "which env?", "", "line", nil, "", "")
+	m.ask = dialog.NewAsk("ai-playbook", "which env?", "", "line", nil, "", "")
 
 	// A streamEventsMsg carrying no events (EOF=false) should be processed by
 	// the main switch, which always issues readStream as its first cmd.

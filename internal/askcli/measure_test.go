@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 // TestMeasureParityConfirm asserts that `ask confirm --measure` reports the same
@@ -23,10 +23,10 @@ func TestMeasureParityConfirm(t *testing.T) {
 		t.Fatalf("ask exit = %d", askCode)
 	}
 
-	// ai-playbook input path (drive input.Main via os.Args).
+	// ai-playbook input path (drive dialog.Main via os.Args).
 	origArgs := os.Args
 	os.Args = []string{"ai-playbook", "input", "--type", "confirm", "--prompt", prompt, "--measure", "--width", width}
-	inCode, inOut, _ := capture(func() int { return input.Main() })
+	inCode, inOut, _ := capture(func() int { return dialog.Main() })
 	os.Args = origArgs
 	if inCode != 0 {
 		t.Fatalf("input exit = %d", inCode)

@@ -13,8 +13,8 @@ import (
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
-	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 // isolateCache points the cache at a throwaway temp root (AI_PLAYBOOK_DATA_DIR)
@@ -94,8 +94,8 @@ func (m *launchMux) snapshotRoute() {
 	if m.out == "" {
 		return
 	}
-	_, derr := os.Stat(m.out + input.DoneSuffix)
-	_, cerr := os.Stat(m.out + input.ClosedSuffix)
+	_, derr := os.Stat(m.out + dialog.DoneSuffix)
+	_, cerr := os.Stat(m.out + dialog.ClosedSuffix)
 	m.doneAtRoute = derr == nil
 	m.closedAtRoute = cerr == nil
 }
@@ -131,7 +131,7 @@ func (m *launchMux) SpawnInputFloat(opts mux.SpawnOptions) error {
 	if m.floatCancel {
 		// Simulate the float writing the cancel marker on dismiss (no .closed: the
 		// cancel path never enters the thinking/close handshake).
-		_ = os.WriteFile(out+input.CancelSuffix, nil, 0o600)
+		_ = os.WriteFile(out+dialog.CancelSuffix, nil, 0o600)
 		return nil
 	}
 	_ = os.WriteFile(out, []byte(m.answer), 0o600)
@@ -140,8 +140,8 @@ func (m *launchMux) SpawnInputFloat(opts mux.SpawnOptions) error {
 	}
 	go func() {
 		for {
-			if _, err := os.Stat(out + input.DoneSuffix); err == nil {
-				_ = os.WriteFile(out+input.ClosedSuffix, nil, 0o600)
+			if _, err := os.Stat(out + dialog.DoneSuffix); err == nil {
+				_ = os.WriteFile(out+dialog.ClosedSuffix, nil, 0o600)
 				return
 			}
 			time.Sleep(time.Millisecond)
@@ -626,7 +626,7 @@ func TestNewThinkingWriter(t *testing.T) {
 	// Input is the streaming classify JSON; the writer surfaces only the "content"
 	// value (decoding \n) and collapses it to a single line.
 	w(`{"kind":"answer","content":"step one\nstep two   step three"`)
-	b, err := os.ReadFile(out + input.ThinkingSuffix)
+	b, err := os.ReadFile(out + dialog.ThinkingSuffix)
 	if err != nil {
 		t.Fatalf("thinking file not written: %v", err)
 	}
@@ -639,7 +639,7 @@ func TestNewThinkingWriter(t *testing.T) {
 
 	// A long content value is tailed to ≤ thinkingTailRunes.
 	w(`{"content":"` + strings.Repeat("x", 1000))
-	b, _ = os.ReadFile(out + input.ThinkingSuffix)
+	b, _ = os.ReadFile(out + dialog.ThinkingSuffix)
 	if n := len([]rune(string(b))); n > thinkingTailRunes {
 		t.Errorf("written tail = %d runes, want ≤ %d", n, thinkingTailRunes)
 	}
@@ -656,7 +656,7 @@ func TestNewThinkingWriter_Throttle(t *testing.T) {
 	w := newThinkingWriter(out)
 	w(`{"content":"first`)
 	w(`{"content":"second`) // throttled out
-	b, err := os.ReadFile(out + input.ThinkingSuffix)
+	b, err := os.ReadFile(out + dialog.ThinkingSuffix)
 	if err != nil {
 		t.Fatalf("first write missing: %v", err)
 	}
@@ -666,7 +666,7 @@ func TestNewThinkingWriter_Throttle(t *testing.T) {
 }
 
 // extractJSONContent shows just the streaming "content" value (the answer/command
-// text forming), decoding escapes, robust to truncated/streaming input.
+// text forming), decoding escapes, robust to truncated/streaming dialog.
 func TestExtractJSONContent(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{`{"kind":"answer","content":"Git merge`, "Git merge"},                         // still streaming, unclosed

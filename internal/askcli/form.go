@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 // jsonFormField is the public JSON form-spec field shape (an array of these).
@@ -34,7 +34,7 @@ type jsonFormField struct {
 // unrecognized "default" value are all errors (cheap to reject before ship,
 // breaking to start rejecting after). Errors are single-line (with a byte
 // position for malformed JSON).
-func parseJSONFormSpec(raw []byte) ([]input.FormFieldSpec, error) {
+func parseJSONFormSpec(raw []byte) ([]dialog.FormFieldSpec, error) {
 	var fields []jsonFormField
 	dec := json.NewDecoder(bytes.NewReader(raw))
 	dec.DisallowUnknownFields()
@@ -50,7 +50,7 @@ func parseJSONFormSpec(raw []byte) ([]input.FormFieldSpec, error) {
 	if len(fields) == 0 {
 		return nil, fmt.Errorf("spec has no fields")
 	}
-	out := make([]input.FormFieldSpec, len(fields))
+	out := make([]dialog.FormFieldSpec, len(fields))
 	for i, f := range fields {
 		if f.Key == "" {
 			return nil, fmt.Errorf("field %d: missing \"key\"", i)
@@ -67,7 +67,7 @@ func parseJSONFormSpec(raw []byte) ([]input.FormFieldSpec, error) {
 		default:
 			return nil, fmt.Errorf("field %q: invalid default %q (use affirmative or negative)", f.Key, f.Default)
 		}
-		out[i] = input.FormFieldSpec{
+		out[i] = dialog.FormFieldSpec{
 			Key:             f.Key,
 			Type:            f.Type,
 			Prompt:          f.Prompt,
@@ -116,7 +116,7 @@ func runFormCmd(args []string) int {
 		return exitUsage
 	}
 
-	o := input.FormOptions{
+	o := dialog.FormOptions{
 		Theme:   *c.theme,
 		Title:   c.title,
 		Fields:  fields,
@@ -126,7 +126,7 @@ func runFormCmd(args []string) int {
 	}
 
 	if c.measure {
-		fmt.Println(input.MeasureForm(o))
+		fmt.Println(dialog.MeasureForm(o))
 		return exitOK
 	}
 	if !hasTTY() {

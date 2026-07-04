@@ -6,13 +6,13 @@
 // Why an out-FILE rather than stdout: a pane spawned by `zellij action new-pane`
 // runs detached — its stdout is the new pane's tty, not a pipe back to the
 // launcher. The float therefore can't hand its answer back over stdout. The
-// `input --out <file>` mode (see package input) writes the submitted value to a
+// `input --out <file>` mode (see pkg/dialog) writes the submitted value to a
 // file atomically (temp + rename) on submit, and writes NOTHING on cancel. The
 // caller here polls for the file's appearance: present → submit (read it),
 // timeout with the float gone → cancel.
 //
 // This replaces the shell's framed-fifo dance (ai-assist-summon's out/in fifos)
-// with a simpler one-shot file hand-back. The fifo path in package input stays
+// with a simpler one-shot file hand-back. The fifo path in pkg/dialog stays
 // for the in-place input→spinner float; this is the request/ask hand-back.
 package floatinput
 
@@ -74,7 +74,7 @@ const (
 // <file>.cancel on cancel so the poll learns of a cancel immediately rather than
 // waiting out defaultTimeout. The two constants MUST agree (the contract between
 // the float and this poller). Kept as a local const to avoid floatinput pulling
-// in the input package's heavy TUI deps.
+// in pkg/dialog's heavy TUI deps.
 const cancelSuffix = ".cancel"
 
 // Asker spawns float-inputs. selfExe is the path to THIS ai-playbook binary (the

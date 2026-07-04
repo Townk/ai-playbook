@@ -3,7 +3,7 @@ package askcli
 import (
 	"fmt"
 
-	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 func runTextCmd(args []string) int {
@@ -19,7 +19,7 @@ func runTextCmd(args []string) int {
 		return code
 	}
 
-	o := input.TextOptions{
+	o := dialog.TextOptions{
 		Theme:   *c.theme,
 		Variant: "default",
 		Title:   c.title,
@@ -33,7 +33,7 @@ func runTextCmd(args []string) int {
 	}
 
 	if c.measure {
-		fmt.Println(input.MeasureText(o))
+		fmt.Println(dialog.MeasureText(o))
 		return exitOK
 	}
 	if !hasTTY() {

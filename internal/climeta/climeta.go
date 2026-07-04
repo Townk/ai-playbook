@@ -65,7 +65,7 @@ type Command struct {
 //   - answer    → AnswerMain, internal/launcher/launcher.go
 //   - mcp       → mcpMain, cmd/ai-playbook/main.go
 //   - diff      → diff.Main, internal/diff/main.go
-//   - input     → input.Main, internal/input/main.go (only --type/--out/--measure
+//   - input     → dialog.Main, pkg/dialog/main.go (only --type/--out/--measure
 //     are documented; the ~40 theme flags are deliberately omitted)
 //   - selftest  → selftest, cmd/ai-playbook/main.go
 //   - version   → cmd/ai-playbook/main.go's "version" case

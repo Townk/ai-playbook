@@ -9,10 +9,10 @@
 // Exactly one source must be given; zero or more than one is a usage error.
 //
 // The check runs in two passes: a deterministic structural pass
-// (internal/validate.Check — front matter, duplicate ids, needs/cycle,
+// (pkg/playbook/validate.Check — front matter, duplicate ids, needs/cycle,
 // unbalanced fences, runnable/lang warnings), extended here with a
 // depends_on chain check (dependsOnFindings, via resolveChain — the same
-// resolver `run`/`env` use — since internal/validate itself stays a pure leaf
+// resolver `run`/`env` use — since pkg/playbook/validate itself stays a pure leaf
 // with no store coupling) that together drive the exit code, and an
 // optional AI review pass (author.ReviewStream, via the reviewStreamFn seam,
 // fanned out with live progress — a TTY spinner + model activity, or a
@@ -58,7 +58,7 @@ const aiSkipNote = "AI review skipped — no model backend (install + authentica
 
 // ValidateMain is the `ai-playbook validate` subcommand: it resolves the single
 // playbook source (a slug via the store, or --file), runs the deterministic
-// structural check (internal/validate.Check), an optional AI review pass, and
+// structural check (pkg/playbook/validate.Check), an optional AI review pass, and
 // prints a plain-text report to stdout. The exit code reflects ONLY the
 // structural check — the AI pass is advisory. --plain forces the low-noise
 // dot-heartbeat progress even on a terminal; --quiet suppresses all output
@@ -177,7 +177,7 @@ func ValidateMain() int {
 // lists its participants joined by " → " (mirroring printDepIssues' own
 // wording). Both are Error severity under the "depends_on" check, so a
 // dep issue folds into ValidateMain's existing findings/exit-code/print path
-// exactly like any structural finding. internal/validate itself stays a pure
+// exactly like any structural finding. pkg/playbook/validate itself stays a pure
 // leaf — the resolver call lives here in the launcher, not there.
 func dependsOnFindings(rootDeps []string) []validate.Finding {
 	if len(rootDeps) == 0 {

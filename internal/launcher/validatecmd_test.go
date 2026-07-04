@@ -11,7 +11,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/askbridge"
 	"github.com/Townk/ai-playbook/internal/config"
-	"github.com/Townk/ai-playbook/internal/store"
+	"github.com/Townk/ai-playbook/pkg/store"
 )
 
 // swap replaces *target with fn for the duration of the test, returning a

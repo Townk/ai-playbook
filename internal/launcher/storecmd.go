@@ -14,8 +14,10 @@
 // edit opens a saved playbook in $EDITOR via the editorSpawn seam.
 //
 // Package-level seams:
-//   - indexFn  / searchFn: production wires store.Index / store.Search; tests inject fakes.
-//   - pathForFn:           production wires store.PathFor; tests inject fakes.
+//   - indexFn  / searchFn: production resolves the configured store.Dirs
+//     (storeDirs) and calls Index / Search on it; tests inject fakes.
+//   - pathForFn:           production wires storePathFor (Dirs.PathFor over the
+//     configured dirs); tests inject fakes.
 //   - uiRunFn:             production wires ui.Run; tests capture the Options / inject a no-op.
 //   - editorSpawn:         production exec.Commands $EDITOR; tests inject a recorder.
 package launcher
@@ -30,18 +32,58 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"github.com/Townk/ai-playbook/internal/store"
+	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/ui"
+	"github.com/Townk/ai-playbook/pkg/store"
 )
 
+// storeDirs resolves the two store directories from the merged configuration
+// and the captured project root. The launcher owns this wiring: the store
+// package takes explicit directories (a store.Dirs) and performs no
+// configuration lookup of its own.
+func storeDirs() (store.Dirs, error) {
+	c, err := config.Load()
+	if err != nil {
+		return store.Dirs{}, err
+	}
+	return store.Dirs{
+		Global:  c.GlobalStoreDir(),
+		Project: c.ProjectStoreDir(capture.ProjectRoot()),
+	}, nil
+}
+
+// storePathFor is the shared production implementation behind the pathForFn and
+// storePathForFn seams: resolve the configured store dirs and route the slug.
+// A config-load failure reads as "not found", matching the pre-Dirs behavior.
+func storePathFor(slug string) (string, bool) {
+	d, err := storeDirs()
+	if err != nil {
+		return "", false
+	}
+	return d.PathFor(slug)
+}
+
 // indexFn is the Index seam: lists all playbooks from both stores.
-var indexFn = func() ([]store.Meta, error) { return store.Index() }
+var indexFn = func() ([]store.Meta, error) {
+	d, err := storeDirs()
+	if err != nil {
+		return nil, err
+	}
+	return d.Index(), nil
+}
 
 // searchFn is the Search seam: filters playbooks by substring query.
-var searchFn = func(query string) ([]store.Meta, error) { return store.Search(query) }
+var searchFn = func(query string) ([]store.Meta, error) {
+	d, err := storeDirs()
+	if err != nil {
+		return nil, err
+	}
+	return d.Search(query), nil
+}
 
 // pathForFn is the PathFor seam: resolves a slug to its file path.
-var pathForFn = func(slug string) (string, bool) { return store.PathFor(slug) }
+var pathForFn = storePathFor
 
 // uiRunFn is the ui.Run seam: delegates to the real viewer; tests replace it to
 // capture the ui.Options a call site builds (and to avoid a TTY). It is the

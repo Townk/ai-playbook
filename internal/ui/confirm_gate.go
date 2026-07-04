@@ -11,7 +11,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 	"github.com/Townk/ai-playbook/pkg/driver"
 	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
@@ -173,8 +173,8 @@ func (m model) raiseGroupConfirm() (model, tea.Cmd) {
 	}
 	var b strings.Builder
 	b.WriteString("Confirm these variables for this run:\n\n")
-	b.WriteString(formatConfirmVars(names, g.values, input.AskInnerWidth()))
-	m.ask = input.NewAsk("Variables", b.String(), "", "confirm", nil, "Confirm", "Customize").WithTertiaryButton("Quit")
+	b.WriteString(formatConfirmVars(names, g.values, dialog.AskInnerWidth()))
+	m.ask = dialog.NewAsk("Variables", b.String(), "", "confirm", nil, "Confirm", "Customize").WithTertiaryButton("Quit")
 	m.askMode = true
 	m.askCompletion = func(value string, submitted bool) tea.Msg {
 		return gateAnswerMsg{value: value, submitted: submitted}
@@ -287,7 +287,7 @@ func (m model) raiseVarEdit() (model, tea.Cmd) {
 	if v.Why != "" {
 		prompt += " — " + v.Why
 	}
-	m.ask = input.NewAsk("Customize", prompt, g.values[v.Name], "line", nil, "", "")
+	m.ask = dialog.NewAsk("Customize", prompt, g.values[v.Name], "line", nil, "", "")
 	m.askMode = true
 	m.askCompletion = func(value string, submitted bool) tea.Msg {
 		return gateAnswerMsg{value: value, submitted: submitted}

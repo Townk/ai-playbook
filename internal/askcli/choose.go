@@ -3,7 +3,7 @@ package askcli
 import (
 	"fmt"
 
-	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 func runChooseCmd(args []string) int {
@@ -26,7 +26,7 @@ func runChooseCmd(args []string) int {
 		items = pos[1:]
 	}
 
-	o := input.ChooseOptions{
+	o := dialog.ChooseOptions{
 		Theme:   *c.theme,
 		Variant: "default",
 		Title:   c.title,
@@ -40,7 +40,7 @@ func runChooseCmd(args []string) int {
 	}
 
 	if c.measure {
-		fmt.Println(input.MeasureChoose(o))
+		fmt.Println(dialog.MeasureChoose(o))
 		return exitOK
 	}
 	if !hasTTY() {

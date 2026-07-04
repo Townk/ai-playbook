@@ -121,9 +121,9 @@ func Validate(pb Playbook, requireVerify bool) error {
 
 // detectNeedsCycles runs a DFS over the needs= graph (id -> needs that exist
 // in seen) and returns one message per distinct cycle, deduped by the sorted
-// set of ids participating in it. Mirrors internal/validate's detectCycles
+// set of ids participating in it. Mirrors pkg/playbook/validate's detectCycles
 // (same algorithm and message shape) — the two packages don't share code
-// (internal/validate is a leaf that never imports playbook, and vice versa)
+// (pkg/playbook/validate is a leaf that never imports draft, and vice versa)
 // but should behave identically on the same needs= graph.
 func detectNeedsCycles(refs []needsRef, seen map[string]bool) []string {
 	adj := map[string][]string{}

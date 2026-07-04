@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 // capture redirects os.Stdout/os.Stderr around fn and returns its exit code plus
@@ -57,27 +57,27 @@ func TestConfirmOptionsMapping(t *testing.T) {
 	tests := []struct {
 		name string
 		args []string
-		want input.ConfirmOptions
+		want dialog.ConfirmOptions
 	}{
 		{
 			name: "defaults",
 			args: []string{"confirm", "Proceed?"},
-			want: input.ConfirmOptions{Variant: "default", Prompt: "Proceed?", Affirmative: "Yes", Negative: "No", DefaultNegative: false, Padding: 1, Inset: 1, Width: 50},
+			want: dialog.ConfirmOptions{Variant: "default", Prompt: "Proceed?", Affirmative: "Yes", Negative: "No", DefaultNegative: false, Padding: 1, Inset: 1, Width: 50},
 		},
 		{
 			name: "danger forces default negative",
 			args: []string{"confirm", "Delete?", "--danger"},
-			want: input.ConfirmOptions{Variant: "danger", Prompt: "Delete?", Affirmative: "Yes", Negative: "No", DefaultNegative: true, Padding: 1, Inset: 1, Width: 50},
+			want: dialog.ConfirmOptions{Variant: "danger", Prompt: "Delete?", Affirmative: "Yes", Negative: "No", DefaultNegative: true, Padding: 1, Inset: 1, Width: 50},
 		},
 		{
 			name: "warning variant",
 			args: []string{"confirm", "Careful?", "--warning"},
-			want: input.ConfirmOptions{Variant: "warning", Prompt: "Careful?", Affirmative: "Yes", Negative: "No", Padding: 1, Inset: 1, Width: 50},
+			want: dialog.ConfirmOptions{Variant: "warning", Prompt: "Careful?", Affirmative: "Yes", Negative: "No", Padding: 1, Inset: 1, Width: 50},
 		},
 		{
 			name: "labels, default side, title, dims",
 			args: []string{"confirm", "Q", "--affirmative", "Sure", "--negative", "Nope", "--default", "negative", "--title", "T", "--width", "42", "--padding", "2", "--inset", "3"},
-			want: input.ConfirmOptions{Variant: "default", Title: "T", Prompt: "Q", Affirmative: "Sure", Negative: "Nope", DefaultNegative: true, Padding: 2, Inset: 3, Width: 42},
+			want: dialog.ConfirmOptions{Variant: "default", Title: "T", Prompt: "Q", Affirmative: "Sure", Negative: "Nope", DefaultNegative: true, Padding: 2, Inset: 3, Width: 42},
 		},
 	}
 	for _, tc := range tests {
@@ -87,7 +87,7 @@ func TestConfirmOptionsMapping(t *testing.T) {
 			if code != exitOK {
 				t.Fatalf("exit = %d, want 0", code)
 			}
-			tc.want.Theme = input.DefaultTheme()
+			tc.want.Theme = dialog.DefaultTheme()
 			if got.confirm != tc.want {
 				t.Errorf("options =\n %+v\nwant\n %+v", got.confirm, tc.want)
 			}
@@ -138,7 +138,7 @@ func TestLineTextOutput(t *testing.T) {
 		if code != 0 || out != "hello\n" {
 			t.Fatalf("code=%d out=%q", code, out)
 		}
-		want := input.LineOptions{Theme: input.DefaultTheme(), Variant: "default", Prompt: "Name?", Value: "init", Placeholder: "ph", Icon: ">", Padding: 1, Inset: 1, Width: 50}
+		want := dialog.LineOptions{Theme: dialog.DefaultTheme(), Variant: "default", Prompt: "Name?", Value: "init", Placeholder: "ph", Icon: ">", Padding: 1, Inset: 1, Width: 50}
 		if got.line != want {
 			t.Errorf("options=\n%+v\nwant\n%+v", got.line, want)
 		}
@@ -352,7 +352,7 @@ func runFormWithStdin(spec string) int {
 
 func TestFormOutput(t *testing.T) {
 	spec := `[{"type":"line","key":"name","prompt":"Name"},{"type":"line","key":"msg","prompt":"Msg"}]`
-	pairs := []input.FormPair{{Key: "name", Value: "ab"}, {Key: "msg", Value: "it's ok"}}
+	pairs := []dialog.FormPair{{Key: "name", Value: "ab"}, {Key: "msg", Value: "it's ok"}}
 
 	t.Run("key=value shell-quoted", func(t *testing.T) {
 		stubWidget(t, widgetOutcome{formPairs: pairs}, nil)
@@ -415,7 +415,7 @@ func TestThemeEnvPrecedence(t *testing.T) {
 	t.Run("default when no env no flag", func(t *testing.T) {
 		got := stubWidget(t, widgetOutcome{confirm: "yes"}, nil)
 		runAsk("confirm", "Q")
-		if got.confirm.Theme.Accent != input.DefaultTheme().Accent {
+		if got.confirm.Theme.Accent != dialog.DefaultTheme().Accent {
 			t.Errorf("accent = %q, want default", got.confirm.Theme.Accent)
 		}
 	})

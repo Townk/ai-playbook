@@ -41,7 +41,7 @@ type DepIssue struct {
 //     before anything that needs it), so running order is simply order[0],
 //     order[1], ... in sequence;
 //   - issues: every distinct dangling slug and every distinct cycle found,
-//     deduped the same way internal/validate.detectCycles dedupes — see that
+//     deduped the same way pkg/playbook/validate.detectCycles dedupes — see that
 //     function's doc comment for the rationale mirrored here.
 //
 // The DFS is the same 3-color (unvisited/inStack/done) walk as detectCycles,
@@ -122,7 +122,7 @@ func analyzeDeps(rootDeps []string, load func(slug string) (depNode, error)) (or
 // cyclePathFrom extracts the cycle path from the DFS stack when a back-edge
 // to back is found: the stack slice starting at back's position, followed by
 // back itself (closing the loop). Mirrors the inline extraction in
-// internal/validate.detectCycles.
+// pkg/playbook/validate.detectCycles.
 func cyclePathFrom(stack []string, back string) []string {
 	start := 0
 	for i, s := range stack {
@@ -139,7 +139,7 @@ func cyclePathFrom(stack []string, back string) []string {
 // cycleKey builds a dedup key from the sorted, unique set of slugs in a cycle
 // path so the same cycle discovered from different entry points (or via a
 // different starting node) is only reported once. Mirrors
-// internal/validate.cycleKey.
+// pkg/playbook/validate.cycleKey.
 func cycleKey(path []string) string {
 	set := map[string]bool{}
 	for _, id := range path {

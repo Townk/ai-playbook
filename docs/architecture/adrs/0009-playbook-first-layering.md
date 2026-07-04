@@ -93,18 +93,19 @@ may still move; promotion happens once the boundaries settle, in this order:
   compatibility bar: widget behavior changes must consider `ask`'s documented
   contract, not just ai-playbook's own dialogs.
 
-## Promotion (2026-07-04): partial — clean core surfaces promoted; coupled surfaces deferred
+## Promotion (2026-07-04): completed except `pkg/runner`
 
 Step 5 was executed after steps 1–4 landed (`playbook.ParseBlocks` schema
 owner, orchestrator reengagement split, the `ask` binary, `ui.Run(Options)`).
 Purity verification (`go list` over each candidate's import graph; a `pkg/`
 package may import only stdlib, third-party deps, and other `pkg/` packages —
-never `internal/`) found that three of the six planned surfaces are
-transitively coupled to leaf packages the layout keeps private (`internal/`).
-Promoting those leaves is an unapproved layout change, so those three surfaces
-are DEFERRED; the clean surfaces were promoted in this single event.
+never `internal/`) found three candidates coupled to private leaf packages.
+Two of those couplings were shallow and were cut within the approved paths
+(store: an explicit-dirs configuration surface; dialog: its theme leaf
+relocated as a subpackage); the third — the executor's — genuinely needs
+design work, so `pkg/runner` is the sole deferral.
 
-**Promoted (verified `pkg/`-pure):**
+**Promoted (each verified `pkg/`-pure):**
 
 - `internal/playbook` (schema half) → `pkg/playbook` — `ParseBlocks`, `Block`,
   `ParseFenceInfo`, `NormalizeFences`, and the `{id=…}`/`{rollback=…}`/
@@ -112,23 +113,27 @@ are DEFERRED; the clean surfaces were promoted in this single event.
 - `internal/frontmatter` → `pkg/playbook/frontmatter`.
 - `internal/validate` → `pkg/playbook/validate`.
 - `internal/driver` → `pkg/driver`.
+- `internal/store` → `pkg/store` — decoupled first: the package-level
+  config/capture seams were replaced by an explicit configuration surface
+  (`store.Dirs{Global, Project}`; the four operations are its methods), so the
+  caller resolves configuration itself and the store performs no
+  config/environment lookup of its own.
+- `internal/input` → `pkg/dialog` (`package input` → `package dialog`) — the
+  interaction toolkit; `internal/askcli` stays internal and imports it (its
+  suite passes with mechanical import/selector updates only).
+- `internal/theme` → `pkg/dialog/theme` — the shared palette was the dialog
+  toolkit's only internal dependency; it relocates as a subpackage of the
+  approved path (package name unchanged; `internal/ui` and `internal/diff`
+  import the new path).
 - The AI submit-time DTO + `Render` + submit-time `Validate` (the other half of
   `internal/playbook`) → `internal/draft` — AI layer, stays private.
 
-**Deferred — BLOCKED on private-leaf coupling** (the leaves are `internal/` per
-the ROADMAP repo-layout track; promoting them was not part of the approved
-pick set, so it is not done unilaterally):
-
-- `pkg/runner` ← `internal/orchestrator`: imports `internal/diff`
-  (→`internal/theme`) and `internal/mux` (→`internal/config`→`internal/cache`).
-- `pkg/store` ← `internal/store`: imports `internal/config` (→`internal/cache`)
-  and `internal/capture` (→`internal/mux`→`internal/config`→`internal/cache`).
-- `pkg/dialog` ← `internal/input`: imports `internal/theme`.
-- `internal/autorun` → `pkg/runner/auto`: NOT clean (imports `internal/cache`
-  and `internal/orchestrator`) — stays `internal/`.
-
-**Open decision (blocks the remaining promotion):** promote the shared leaves
-(`theme`, `diff`, `mux`, `config`, `capture`, `cache`) into `pkg/` so the
-executor/store/dialog can follow, or keep those surfaces `internal/`. The
-"single event" goal is thereby amended to: the clean surfaces promoted now; the
-coupled surfaces once the support-package layout is decided.
+**Remaining work — `pkg/runner` ← `internal/orchestrator` (deferred):** the
+executor imports `internal/mux` (it holds a `mux.Mux` for edit/float pane
+spawning, and mux drags `internal/config` → `internal/cache`) and
+`internal/diff` (`diff.Parse` on the diff-apply path; diff also renders, which
+is why it owns a theme dependency). The mux coupling genuinely needs design —
+the executor must either take a narrowed pane-spawning interface it owns, or
+the mux layer itself must become public; neither is a mechanical cut.
+`internal/autorun` → `pkg/runner/auto` waits on the same decision (it imports
+the orchestrator and `internal/cache`).

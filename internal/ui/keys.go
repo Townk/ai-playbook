@@ -3,7 +3,7 @@ package ui
 import (
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 func (m model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
@@ -295,7 +295,7 @@ func (m model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.askCompletion = func(value string, submitted bool) tea.Msg {
 				return fChangeMsg{base: base, value: value, submitted: submitted}
 			}
-			m.ask = input.NewAsk("ai-playbook", "What should I change?", "", "text", nil, "", "")
+			m.ask = dialog.NewAsk("ai-playbook", "What should I change?", "", "text", nil, "", "")
 			return m, m.ask.Init()
 		}
 		m.status = "refine unavailable in this mode"

@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 // followupAnnouncements are the agent-voice narration lines inserted above each
@@ -113,7 +113,7 @@ func (m model) wFinalize() (model, tea.Cmd) {
 	if !verified && !m.reauthored {
 		// First save of an unrun proposal — warn before committing.
 		m.askMode = true
-		m.ask = input.NewAsk("ai-playbook",
+		m.ask = dialog.NewAsk("ai-playbook",
 			"This playbook wasn't fully run, so we couldn't verify it works. Save this state as a new playbook anyway?",
 			"", "confirm", nil, "Save", "Cancel")
 		m.askCompletion = func(value string, submitted bool) tea.Msg {

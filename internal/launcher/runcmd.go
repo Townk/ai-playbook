@@ -33,23 +33,30 @@ import (
 	"github.com/Townk/ai-playbook/internal/autorun"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
-	"github.com/Townk/ai-playbook/internal/store"
 	"github.com/Townk/ai-playbook/internal/ui"
 	"github.com/Townk/ai-playbook/pkg/playbook"
 	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
+	"github.com/Townk/ai-playbook/pkg/store"
 )
 
-// storeLoadFn is the store.Load seam: resolves a slug to its Meta + body. Tests
-// inject a fake so the run gate is exercised without a real store.
-var storeLoadFn = store.Load
+// storeLoadFn is the store Load seam: resolves a slug to its Meta + body over
+// the configured store dirs (storeDirs, storecmd.go). Tests inject a fake so
+// the run gate is exercised without a real store.
+var storeLoadFn = func(slug string) (store.Meta, string, error) {
+	d, err := storeDirs()
+	if err != nil {
+		return store.Meta{}, "", err
+	}
+	return d.Load(slug)
+}
 
-// storePathForFn is the store.PathFor seam: resolves a slug to its file path +
+// storePathForFn is the store PathFor seam: resolves a slug to its file path +
 // whether it exists, with no parse. loadDepNode uses this (rather than
 // storeLoadFn) because a depends_on chain only needs the raw file to re-parse
 // its full front matter — Meta's Env/DependsOn shapes differ from
 // frontmatter.FrontMatter's. Tests inject a fake so dependency resolution is
 // exercised without a real store.
-var storePathForFn = store.PathFor
+var storePathForFn = storePathFor
 
 // projectRootFn is the capture.ProjectRoot seam: the heuristic project root a
 // project_bound playbook is run in (and exported as $PROJECT_ROOT).

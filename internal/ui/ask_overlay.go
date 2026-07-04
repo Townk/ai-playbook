@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/Townk/ai-playbook/internal/askbridge"
-	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 // askOpenMsg delivers one pending agent ask to the model (produced by recvAskCmd
@@ -29,7 +29,7 @@ func recvAskCmd(b *askbridge.Bridge) tea.Cmd {
 func (m *model) openAsk(req askbridge.Request) tea.Cmd {
 	m.askMode = true
 	m.askReq = req
-	m.ask = input.NewAsk("ai-playbook", req.Prompt, "", req.Type, req.Choices, "", "")
+	m.ask = dialog.NewAsk("ai-playbook", req.Prompt, "", req.Type, req.Choices, "", "")
 	return m.ask.Init()
 }
 
@@ -59,7 +59,7 @@ func (m *model) handleAskKey(msg tea.Msg) tea.Cmd {
 // like the help modal (spliceOver), so the playbook keeps rendering behind it.
 func (m model) askOverlay() string {
 	base := m.normalLines()
-	box := strings.Split(m.ask.View(input.FloatWidthDefault), "\n")
+	box := strings.Split(m.ask.View(dialog.FloatWidthDefault), "\n")
 	boxH := len(box)
 	boxW := 0
 	if boxH > 0 {

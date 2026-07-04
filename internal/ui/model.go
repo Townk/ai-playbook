@@ -11,9 +11,9 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/askbridge"
 	idiff "github.com/Townk/ai-playbook/internal/diff"
-	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 	"github.com/Townk/ai-playbook/internal/reengage"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
@@ -220,7 +220,7 @@ type askState struct {
 	// the overlay is never raised.
 	askBridge *askbridge.Bridge
 	askMode   bool
-	ask       *input.Ask
+	ask       *dialog.Ask
 	askReq    askbridge.Request
 	// askCompletion, when set, fires when a VIEWER-initiated overlay (not a bridge
 	// agent ask) completes: handleAskKey calls it instead of askReq.Respond, and the

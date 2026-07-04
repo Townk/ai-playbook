@@ -8,7 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/mattn/go-runewidth"
 
-	"github.com/Townk/ai-playbook/internal/theme"
+	"github.com/Townk/ai-playbook/pkg/dialog/theme"
 )
 
 const minSideBySide = 80

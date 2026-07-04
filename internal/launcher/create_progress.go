@@ -9,7 +9,7 @@
 //
 // The agent's `ask` tool is fully supported during authoring: with a mux the float
 // hosts it (never reaching the bridge); with no mux the bridge delivers it here and
-// the host pauses the progress line, embeds input.Ask, responds, and resumes.
+// the host pauses the progress line, embeds dialog.Ask, responds, and resumes.
 package launcher
 
 import (
@@ -30,10 +30,10 @@ import (
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/draft"
-	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/reengage"
 	"github.com/Townk/ai-playbook/internal/triage"
 	"github.com/Townk/ai-playbook/internal/ui"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
@@ -42,7 +42,7 @@ import (
 // progressAskModel renders ui.WaitingLine inline (no alt-screen) while the
 // authoring stream is drained in the background, AND — when a no-mux ask bridge is
 // present — subscribes to its request channel. On a request it PAUSES the waiting
-// line and embeds input.Ask (the same dialog the float/overlay use), responds via
+// line and embeds dialog.Ask (the same dialog the float/overlay use), responds via
 // the bridge, then re-arms and resumes the waiting line. It quits on a done signal
 // (the drain reached EOF). mux-present asks go to the float and never reach the
 // bridge, so reqCh is simply nil there.
@@ -56,7 +56,7 @@ type progressAskModel struct {
 	reqs <-chan askbridge.Request
 
 	// embedded ask (no-mux): non-nil while an ask is open (the waiting line is paused).
-	ask    *input.Ask
+	ask    *dialog.Ask
 	askReq askbridge.Request
 }
 
@@ -125,7 +125,7 @@ func (m progressAskModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case paAskMsg:
 		// Pause the waiting line and embed the ask dialog (no re-arm until it resolves).
 		m.askReq = msg.req
-		m.ask = input.NewAsk("ai-playbook", msg.req.Prompt, "", msg.req.Type, msg.req.Choices, "", "")
+		m.ask = dialog.NewAsk("ai-playbook", msg.req.Prompt, "", msg.req.Type, msg.req.Choices, "", "")
 		return m, m.ask.Init()
 	}
 	// While an ask is open, route everything else (key presses, field cmds) to it.
@@ -144,7 +144,7 @@ func (m progressAskModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m progressAskModel) View() tea.View {
 	if m.ask != nil {
-		return tea.NewView(m.ask.View(input.FloatWidthDefault))
+		return tea.NewView(m.ask.View(dialog.FloatWidthDefault))
 	}
 	return tea.NewView(m.pw.Render(m.width))
 }
@@ -154,7 +154,7 @@ func (m progressAskModel) View() tea.View {
 // waiting-line height; it also covers an open ask defensively.
 func (m progressAskModel) lastHeight() int {
 	if m.ask != nil {
-		return strings.Count(m.ask.View(input.FloatWidthDefault), "\n") + 1
+		return strings.Count(m.ask.View(dialog.FloatWidthDefault), "\n") + 1
 	}
 	return strings.Count(m.pw.Render(m.width), "\n") + 1
 }
@@ -194,7 +194,7 @@ func runCreateProgress(activity <-chan string, bridge *askbridge.Bridge, done <-
 		tea.WithColorProfile(colorprofile.TrueColor),
 	).Run()
 	if pm, ok := fm.(progressAskModel); ok {
-		input.ClearInline(tty, pm.lastHeight())
+		dialog.ClearInline(tty, pm.lastHeight())
 	}
 	if perr != nil {
 		// The program failed to run; nothing inline was shown. The drain still owns the

@@ -3,7 +3,7 @@ package askcli
 import (
 	"fmt"
 
-	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/pkg/dialog"
 )
 
 func runConfirmCmd(args []string) int {
@@ -34,7 +34,7 @@ func runConfirmCmd(args []string) int {
 		defaultNegative = true // never default to a destructive action
 	}
 
-	o := input.ConfirmOptions{
+	o := dialog.ConfirmOptions{
 		Theme:           *c.theme,
 		Variant:         variant,
 		Title:           c.title,
@@ -48,7 +48,7 @@ func runConfirmCmd(args []string) int {
 	}
 
 	if c.measure {
-		fmt.Println(input.MeasureConfirm(o))
+		fmt.Println(dialog.MeasureConfirm(o))
 		return exitOK
 	}
 	if !hasTTY() {

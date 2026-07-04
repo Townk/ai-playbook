@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Townk/ai-playbook/internal/store"
 	"github.com/Townk/ai-playbook/internal/ui"
+	"github.com/Townk/ai-playbook/pkg/store"
 )
 
 // fixedNow anchors age-sensitive tests to a stable point in time.
