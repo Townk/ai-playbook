@@ -35,7 +35,9 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 
 - [ ] `ask --version` prints a bare `v0.9.0` while `ai-playbook`/`apb` print name-aware `<prog> <version>` — align ask's version line with its siblings (2026-07-04)
 
-- [ ] Finish the `pkg/` promotion (ADR-0009 step 5, last piece): `pkg/runner`←orchestrator — the executor holds a `mux.Mux` (edit/float pane spawning; mux→config→cache) and calls `diff.Parse` (diff→theme); needs design (a narrowed executor-owned pane-spawn interface, or a public mux) rather than a mechanical cut. `internal/autorun`→`pkg/runner/auto` waits on the same (imports orchestrator + cache) (2026-07-04)
+- [ ] Finish the `pkg/` promotion (ADR-0009 step 5, last piece): `pkg/runner`←orchestrator — the executor holds a `mux.Mux` (edit/float pane spawning; mux→config→cache) and calls `diff.Parse` (diff→theme); needs design (a narrowed executor-owned pane-spawn interface, or a public mux) rather than a mechanical cut. `internal/autorun`→`pkg/runner/auto` waits on the same (imports orchestrator + cache) (2026-07-04); note ui.Options also embeds reengage/askbridge/orchestrator types — the same seam inventory for any future ui/runner promotion
+
+- [ ] `ui.Main` is a tested-but-dead ~50-line shim (zero production callers since ui.Run(Options); its doc claims an argv contract launcher.RunMain now owns) — delete it and its argv-parsing tests, or re-document it as deliberate compat surface (2026-07-04)
 
 ## Ideas
 
@@ -43,7 +45,7 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 - [ ] `inlineInput` (internal/launcher) opens `/dev/tty` unconditionally before the `inlineRunFn` seam, so the `assist` classify→route/cancel flow can't be exercised headless (its tests `t.Skip` without a TTY). Seam the TTY-open so the classify/cancel/route path gets real CI coverage (2026-07-02)
 - [ ] Portability / progressive enhancement: the driver needs a Unix PTY + signals (`x/sys/unix`), so it's Linux/macOS-only. Evaluate a degraded no-PTY "plain exec" mode for a portable core, and a ConPTY-based Windows driver (large) (2026-06-27)
 - [ ] `create`'s similar-playbooks banner uses a whole-string substring search (`store.Search(prompt)`), so multi-word prompts rarely match — make it per-word/token (2026-06-27)
-- [ ] adapt-on-run leaves two temp files per run (`writeTempMarkdown` render+orig in /tmp, never reaped; orig written even when junk-guarded) — defer-cleanup after `ui.Main` returns (2026-06-27)
+- [ ] adapt-on-run leaves two temp files per run (`writeTempMarkdown` render+orig in /tmp, never reaped; orig written even when junk-guarded) — defer-cleanup after `ui.Run` returns (2026-06-27)
 - [ ] Optional rich output via the kitty graphics protocol — images/charts in the pager (2026-06-26)
 - [ ] A JUnit/XML-style report for `run --auto` (CI ingestion) — a plain-text run summary + a JSON per-run log under `${data}/ai-playbook/runs/` shipped 2026-07-01; a JUnit/XML format for CI test-reporters is still open (2026-06-26)
 - [ ] Revisit the cwd rule for non-project_bound STORED playbooks: `run <slug>` now opens in the store content dir (runFile F4 rule, one-code-path fix 2026-07-03); decide whether stored playbooks deserve a stored-vs-file distinction (invocation cwd) or whether `workdir:` front matter suffices (2026-07-03)
