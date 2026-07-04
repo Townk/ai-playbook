@@ -22,7 +22,7 @@ build-release:
 docs:
 	go run ./cmd/docgen
 
-# docs-check verifies docs/man/*.1 and completions/_ai-playbook are up to date
+# docs-check verifies docs/man/*.1 and completions/_ai-playbook + _ask are up to date
 # with the climeta registry they're generated from (docgen is idempotent, so a
 # clean re-run must produce no diff). Catches registry edits that forgot `make
 # docs`.
