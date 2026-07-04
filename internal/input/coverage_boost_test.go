@@ -61,8 +61,8 @@ func TestConfirmModel_Init(t *testing.T) {
 func TestConfirmModel_UpdateEnterDone(t *testing.T) {
 	m := newConfirmModel(defaultTheme(), "default", "T", "Sure?", "Yes", "No", false, 1, 1)
 	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	cm := next.(confirmModel)
-	if !cm.fld.accepted {
+	cm := next.(model)
+	if !cm.fld.(*confirmField).accepted {
 		t.Fatal("Enter must accept the focused button")
 	}
 	if !isQuit(cmd) {
@@ -73,9 +73,9 @@ func TestConfirmModel_UpdateEnterDone(t *testing.T) {
 func TestConfirmModel_UpdateEscCancel(t *testing.T) {
 	m := newConfirmModel(defaultTheme(), "default", "T", "", "Yes", "No", false, 1, 1)
 	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	cm := next.(confirmModel)
-	if !cm.cancelled {
-		t.Fatal("Esc must set cancelled")
+	cm := next.(model)
+	if !cm.quitting {
+		t.Fatal("Esc must set quitting")
 	}
 	if !isQuit(cmd) {
 		t.Fatal("cancel must quit")
@@ -85,8 +85,8 @@ func TestConfirmModel_UpdateEscCancel(t *testing.T) {
 func TestConfirmModel_UpdateWindowResize(t *testing.T) {
 	m := newConfirmModel(defaultTheme(), "default", "T", "", "Yes", "No", false, 1, 1)
 	next, cmd := m.Update(tea.WindowSizeMsg{Width: 80})
-	if next.(confirmModel).width != 80 {
-		t.Fatalf("width after resize = %d, want 80", next.(confirmModel).width)
+	if next.(model).width != 80 {
+		t.Fatalf("width after resize = %d, want 80", next.(model).width)
 	}
 	if cmd != nil {
 		t.Fatal("WindowSizeMsg must return nil cmd")
@@ -96,7 +96,7 @@ func TestConfirmModel_UpdateWindowResize(t *testing.T) {
 func TestConfirmModel_UpdateNonKeyMsgNoop(t *testing.T) {
 	m := newConfirmModel(defaultTheme(), "default", "T", "", "Yes", "No", false, 1, 1)
 	next, cmd := m.Update("unhandled message")
-	if next.(confirmModel).cancelled || cmd != nil {
+	if next.(model).quitting || cmd != nil {
 		t.Fatal("non-key/non-resize msg must be a no-op")
 	}
 }
@@ -132,9 +132,9 @@ func TestChooseModel_Init(t *testing.T) {
 func TestChooseModel_UpdateEnterDone(t *testing.T) {
 	m := newChooseModel(defaultTheme(), "default", "T", "Pick one", []string{"alpha", "beta"}, false, "", 1, 1)
 	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	cm := next.(chooseModel)
-	if !cm.done {
-		t.Fatal("Enter must set done")
+	cm := next.(model)
+	if !cm.submitted {
+		t.Fatal("Enter must set submitted")
 	}
 	if !isQuit(cmd) {
 		t.Fatal("fieldDone must quit")
@@ -144,9 +144,9 @@ func TestChooseModel_UpdateEnterDone(t *testing.T) {
 func TestChooseModel_UpdateEscCancel(t *testing.T) {
 	m := newChooseModel(defaultTheme(), "default", "T", "", []string{"a"}, false, "", 1, 1)
 	next, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	cm := next.(chooseModel)
-	if !cm.cancelled {
-		t.Fatal("Esc must set cancelled")
+	cm := next.(model)
+	if !cm.quitting {
+		t.Fatal("Esc must set quitting")
 	}
 	if !isQuit(cmd) {
 		t.Fatal("cancel must quit")
@@ -156,8 +156,8 @@ func TestChooseModel_UpdateEscCancel(t *testing.T) {
 func TestChooseModel_UpdateWindowResize(t *testing.T) {
 	m := newChooseModel(defaultTheme(), "default", "T", "", []string{"a"}, false, "", 1, 1)
 	next, _ := m.Update(tea.WindowSizeMsg{Width: 90})
-	if next.(chooseModel).width != 90 {
-		t.Fatalf("width after resize = %d, want 90", next.(chooseModel).width)
+	if next.(model).width != 90 {
+		t.Fatalf("width after resize = %d, want 90", next.(model).width)
 	}
 }
 
@@ -166,9 +166,9 @@ func TestChooseModel_UpdateNavigationNoop(t *testing.T) {
 	// and keeps done/cancelled false.
 	m := newChooseModel(defaultTheme(), "default", "T", "", []string{"a", "b"}, false, "", 1, 1)
 	next, cmd := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
-	cm := next.(chooseModel)
-	if cm.done || cm.cancelled {
-		t.Fatal("navigation key must not set done or cancelled")
+	cm := next.(model)
+	if cm.submitted || cm.quitting {
+		t.Fatal("navigation key must not set submitted or quitting")
 	}
 	_ = cmd // cmd from field navigation may be nil
 }
@@ -176,7 +176,7 @@ func TestChooseModel_UpdateNavigationNoop(t *testing.T) {
 func TestChooseModel_UpdateNonKeyMsgNoop(t *testing.T) {
 	m := newChooseModel(defaultTheme(), "default", "T", "", []string{"a"}, false, "", 1, 1)
 	next, cmd := m.Update("some unhandled type")
-	if next.(chooseModel).cancelled || cmd != nil {
+	if next.(model).quitting || cmd != nil {
 		t.Fatal("unhandled msg must be a no-op")
 	}
 }
@@ -1143,8 +1143,8 @@ func TestConfirmModel_UpdateUnknownKeyNoop(t *testing.T) {
 	// An unrecognized key in confirmModel returns fieldNone → return m, cmd (cmd=nil)
 	m := newConfirmModel(defaultTheme(), "default", "T", "", "Yes", "No", false, 1, 1)
 	next, _ := m.Update(tea.KeyPressMsg{Code: 'z', Text: "z"})
-	cm := next.(confirmModel)
-	if cm.cancelled || cm.fld.accepted {
+	cm := next.(model)
+	if cm.quitting || cm.fld.(*confirmField).accepted {
 		t.Fatal("unrecognized key must not change confirm field state")
 	}
 }
@@ -1499,7 +1499,7 @@ func TestRenderOptionRowMultiToggledNonHL(t *testing.T) {
 func TestChooseViewDangerVariant(t *testing.T) {
 	// danger variant changes the highlight background; view must not panic
 	f := newChooseField(defaultTheme(), "danger", []string{"a"}, false, "")
-	out := f.view(40, true)
+	out := f.view(40, true, "")
 	if out == "" {
 		t.Fatal("danger variant view must not be empty")
 	}
@@ -1508,7 +1508,7 @@ func TestChooseViewDangerVariant(t *testing.T) {
 func TestChooseViewWarningVariant(t *testing.T) {
 	// warning variant changes the highlight background; view must not panic
 	f := newChooseField(defaultTheme(), "warning", []string{"a"}, false, "")
-	out := f.view(40, true)
+	out := f.view(40, true, "")
 	if out == "" {
 		t.Fatal("warning variant view must not be empty")
 	}
@@ -1518,7 +1518,7 @@ func TestChooseOtherRowMultiIndicatorUnchecked(t *testing.T) {
 	// Multi+other: other row not highlighted, other field empty → checkboxUnchecked indicator
 	f := newChooseField(defaultTheme(), "default", []string{"a"}, true, "Other…")
 	// Don't navigate to other row; render from first option (focused=true but other row is !isHL)
-	out := f.view(40, true)
+	out := f.view(40, true, "")
 	if out == "" {
 		t.Fatal("multi other-row view with empty text must produce output")
 	}
@@ -1536,7 +1536,7 @@ func TestChooseOtherRowMultiWithTextUnfocused(t *testing.T) {
 	f, _, _ = f.handle(tea.KeyPressMsg{Code: tea.KeyUp})      // back to normal row (other row !isHL)
 	cf := f.(*chooseField)
 	// Other field has "x" text, other row is NOT highlighted → checkboxChecked indicator
-	out := cf.view(40, true)
+	out := cf.view(40, true, "")
 	if !strings.Contains(out, "Other…") {
 		t.Fatalf("other row with text must be visible in view: %q", out)
 	}

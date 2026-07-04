@@ -6,7 +6,13 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+
+	"github.com/Townk/ai-playbook/internal/theme"
 )
+
+// mantleBG is theme.Mantle's truecolor background SGR params (#181825 =
+// rgb(24,24,37)) — the frame background every framed span must carry.
+const mantleBG = "48;2;24;24;37"
 
 // The typed text sits on the textarea's cursor line, which is drawn with the
 // CursorLine style — it must carry the text foreground, not a default colour.
@@ -50,7 +56,7 @@ func topBorderLine(t *testing.T, out string) string {
 // the near-white text fg that made them indistinguishable from the selection.
 func TestChooseNonHighlightedRowUsesMutedFg(t *testing.T) {
 	f := newChooseField(defaultTheme(), "default", []string{"alpha", "beta"}, false, "")
-	out := f.view(40, true) // highlight is on row 0; "beta" is non-highlighted
+	out := f.view(40, true, theme.Mantle) // highlight is on row 0; "beta" is non-highlighted
 	if !strings.Contains(out, fgMuted) {
 		t.Fatalf("non-highlighted rows must use the muted fg %q: %q", fgMuted, out)
 	}
@@ -59,11 +65,47 @@ func TestChooseNonHighlightedRowUsesMutedFg(t *testing.T) {
 	}
 }
 
+// TestChooseField_NonHighlightedRowPaintsFrameBG is the discriminating frame-bg
+// test for the choose widget (the model is TestTextField_FrameBG_MantleVsEmpty):
+// the non-highlighted "beta" row — a muted, foreground-only span that used to
+// bleed the terminal default inside a Mantle frame — must carry frameBG when
+// framed and NOT when inline. A two-sided check so an implementation that ignores
+// frameBG (the pre-contract per-site state) fails one side. The assertion targets
+// the specific non-highlighted row line, not the whole view (the highlighted row
+// carries its own selected bg), and view()'s unwrapped output (renderFrame's own
+// Background wrap would confound a whole-frame scan — see the text-box test).
+func TestChooseField_NonHighlightedRowPaintsFrameBG(t *testing.T) {
+	nonHLLine := func(out string) string {
+		t.Helper()
+		for _, ln := range strings.Split(out, "\n") {
+			if strings.Contains(strip(ln), "beta") {
+				return ln
+			}
+		}
+		t.Fatalf("no non-highlighted 'beta' row in: %q", out)
+		return ""
+	}
+	f := newChooseField(defaultTheme(), "default", []string{"alpha", "beta"}, false, "")
+
+	framed := nonHLLine(f.view(40, true, theme.Mantle))
+	if !strings.Contains(framed, mantleBG) {
+		t.Fatalf("framed non-highlighted row must carry the Mantle background %q: %q", mantleBG, framed)
+	}
+	inline := nonHLLine(f.view(40, true, ""))
+	if strings.Contains(inline, mantleBG) {
+		t.Fatalf("inline non-highlighted row must NOT carry the Mantle background: %q", inline)
+	}
+}
+
 // Problem 3 (unfocused): the other entry shows its label above the box, and the
-// whole widget (label + border) renders in the muted colour with no background.
+// whole widget (label + border) renders in the muted colour on the FRAME
+// background — not the selected background, and (post frame-bg contract) not the
+// terminal default either. The old behavior painted no background at all on the
+// unfocused row, bleeding the terminal default inside the Mantle frame; the
+// frame-bg contract now paints frameBG, so the border line carries the Mantle bg.
 func TestChooseOtherUnfocusedIsMuted(t *testing.T) {
 	f := newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…")
-	out := f.view(40, true) // highlight row 0 → other row (idx 2) unfocused + empty
+	out := f.view(40, true, theme.Mantle) // highlight row 0 → other row (idx 2) unfocused + empty
 	if !strings.Contains(strip(out), "Other…:") {
 		t.Fatalf("other label must render as a heading above the box: %q", strip(out))
 	}
@@ -77,6 +119,11 @@ func TestChooseOtherUnfocusedIsMuted(t *testing.T) {
 	if strings.Contains(bl, bgSel) {
 		t.Fatalf("unfocused other must NOT have the selected background: %q", bl)
 	}
+	// Frame-bg contract (flipped from the old "no background" expectation): the
+	// unfocused border must now carry the Mantle frame background, not bleed.
+	if !strings.Contains(bl, mantleBG) {
+		t.Fatalf("unfocused other border must carry the Mantle frame background %q: %q", mantleBG, bl)
+	}
 }
 
 // Problem 3 (focused): the other entry uses the selected background and bright
@@ -86,7 +133,7 @@ func TestChooseOtherFocusedSelBgBrightWhite(t *testing.T) {
 	g, _, _ := field(newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…")).
 		handle(tea.KeyPressMsg{Code: tea.KeyDown})
 	g, _, _ = g.handle(tea.KeyPressMsg{Code: tea.KeyDown}) // onto the other row (idx 2)
-	out := g.view(40, true)
+	out := g.view(40, true, theme.Mantle)
 
 	// The label heading renders bright white on the selected background.
 	if !strings.Contains(strip(out), "Other…:") {

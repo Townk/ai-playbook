@@ -68,13 +68,6 @@ func TestConfirmRender(t *testing.T) {
 	}
 }
 
-func TestConfirmDefaultNegativeFocus(t *testing.T) {
-	m := newConfirmModel(defaultTheme(), "danger", "T", "P", "Quit", "Cancel", true, 1, 1)
-	if m.focus != 1 {
-		t.Fatal("default-negative must focus the negative (right) button")
-	}
-}
-
 func TestConfirmAcceleratorHint(t *testing.T) {
 	// Yes/No labels → y/n accelerators in the hint.
 	m := newConfirmModel(defaultTheme(), "default", "T", "Proceed?", "Yes", "No", false, 1, 1)

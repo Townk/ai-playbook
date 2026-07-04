@@ -16,7 +16,15 @@ const (
 // form composer interact with it only through this interface.
 type field interface {
 	handle(msg tea.Msg) (field, fieldAction, tea.Cmd) // process a msg while focused
-	view(innerW int, focused bool) string             // interactive area only (no frame)
+	// view renders the interactive area only (no outer frame). frameBG is the
+	// background the hosting frame fills with (theme.Mantle for a framed dialog,
+	// "" for the inline/unframed layout that composites on the terminal). Every
+	// span a field paints — including muted rows, section labels, gaps, and
+	// unfocused widgets — must carry frameBG so a foreground-only SGR reset never
+	// drops those cells to the terminal default (the lipgloss v2 inner-reset bleed
+	// renderFrame's own Background wrapper does not protect against). A focused
+	// widget's own selected background overrides frameBG on its cells.
+	view(innerW int, focused bool, frameBG string) string
 	value() string
 	filled() bool
 	initCmd() tea.Cmd

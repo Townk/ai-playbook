@@ -142,26 +142,41 @@ func TestFormMaxHeightIsTallestField(t *testing.T) {
 }
 
 // TestFormTextField_BoxHasMantleBackground pins the form-field counterpart of
-// TestTextBox_FramedSetsMantleBoxBG_InlineDoesNot (render_test.go): form
-// fields are ALWAYS rendered inside the dialog frame (no inline layout for
-// forms), so formModel.render() must set the focused text field's boxBG to
-// theme.Mantle. See that test's comment for why the assertion targets the
-// field's boxBG/unwrapped view() output rather than the fully-framed render
-// string (renderFrame's own Background(Mantle) wrap confounds a naive
-// whole-string SGR check).
+// TestTextBox_FramedPaintsMantle_InlineDoesNot (render_test.go): form fields are
+// ALWAYS rendered inside the dialog frame (no inline layout for forms), so
+// formModel.render() passes theme.Mantle as field.view's frameBG. See that
+// test's comment for why the assertion targets the field's unwrapped view()
+// output at frameBG=theme.Mantle rather than the fully-framed render string
+// (renderFrame's own Background(Mantle) wrap confounds a naive whole-string SGR
+// check).
 func TestFormTextField_BoxHasMantleBackground(t *testing.T) {
 	const mantleBG = "48;2;24;24;37"
 	m := newFormModel(defaultTheme(), "Setup", []formField{
 		{"a", "line", "First", ""},
 	}, 1, 1)
 	m.width = 50
-	m.render()
 	tf := m.fields[m.focus].(*textField)
-	if tf.boxBG != theme.Mantle {
-		t.Fatalf("form render must set the text field's boxBG to theme.Mantle, got %q", tf.boxBG)
-	}
-	if got := tf.view(m.innerW(), true); !strings.Contains(got, mantleBG) {
+	if got := tf.view(m.innerW(), true, theme.Mantle); !strings.Contains(got, mantleBG) {
 		t.Fatalf("form text field box must paint the Mantle background; got %q", got)
+	}
+}
+
+// TestFormTabRow_PaintsFrameBG is the discriminating frame-bg test for the form
+// tab row (companion to the choose/text-box frame-bg tests). The tab labels are
+// foreground-only styled spans that used to bleed the terminal default inside the
+// always-Mantle form frame; tabRow(frameBG) must now paint frameBG on every label
+// and separator, and leave them bare when frameBG=="". A two-sided check so an
+// implementation ignoring frameBG fails one side.
+func TestFormTabRow_PaintsFrameBG(t *testing.T) {
+	const mantleBG = "48;2;24;24;37"
+	m := newFormModel(defaultTheme(), "Setup", []formField{
+		{"a", "line", "First", ""}, {"b", "line", "Second", ""},
+	}, 1, 1)
+	if got := m.tabRow(theme.Mantle); !strings.Contains(got, mantleBG) {
+		t.Fatalf("framed tab row must carry the Mantle background %q: %q", mantleBG, got)
+	}
+	if got := m.tabRow(""); strings.Contains(got, mantleBG) {
+		t.Fatalf("bare tab row (frameBG=\"\") must NOT carry the Mantle background: %q", got)
 	}
 }
 

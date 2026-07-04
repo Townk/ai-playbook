@@ -5,8 +5,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-
-	"github.com/Townk/ai-playbook/internal/theme"
 )
 
 // confirmField implements the field interface for a two-or-three-button
@@ -139,15 +137,19 @@ func (f *confirmField) button(label string, focused bool) string {
 
 // view renders the button row, horizontally centered within innerW. When
 // focused is false, all buttons are rendered unfocused. The inter-button gap and
-// the centering pad are painted on the theme's Mantle background so they don't
-// fall back to the terminal default after each button's own background + SGR
-// reset.
-func (f *confirmField) view(innerW int, focused bool) string {
-	mantle := func(n int) string {
+// the centering pad are painted on the hosting frame's background (frameBG) so
+// they don't fall back to the terminal default after each button's own
+// background + SGR reset. frameBG=="" (inline/unframed) leaves the gaps bare.
+func (f *confirmField) view(innerW int, focused bool, frameBG string) string {
+	gap := func(n int) string {
 		if n <= 0 {
 			return ""
 		}
-		return lipgloss.NewStyle().Background(lipgloss.Color(theme.Mantle)).Render(strings.Repeat(" ", n))
+		s := strings.Repeat(" ", n)
+		if frameBG == "" {
+			return s
+		}
+		return lipgloss.NewStyle().Background(lipgloss.Color(frameBG)).Render(s)
 	}
 	btns := []string{
 		f.button(f.affirmative, focused && f.focus == 0),
@@ -156,11 +158,11 @@ func (f *confirmField) view(innerW int, focused bool) string {
 	if f.tertiary != "" {
 		btns = append(btns, f.button(f.tertiary, focused && f.focus == 2))
 	}
-	row := strings.Join(btns, mantle(4))
+	row := strings.Join(btns, gap(4))
 	// Center the row within the dialog's inner width.
 	if pad := innerW - lipgloss.Width(row); pad > 0 {
 		left := pad / 2
-		row = mantle(left) + row + mantle(pad-left)
+		row = gap(left) + row + gap(pad-left)
 	}
 	return row
 }

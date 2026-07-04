@@ -72,11 +72,11 @@ func RunConfirm(o ConfirmOptions) (ConfirmResult, error) {
 	if err != nil {
 		return ConfirmResult{}, err
 	}
-	res := fm.(confirmModel)
-	if res.cancelled || !res.fld.accepted {
+	res := fm.(model)
+	if res.quitting || !res.submitted {
 		return ConfirmResult{Cancelled: true}, nil
 	}
-	return ConfirmResult{Value: res.fld.accepted_v}, nil
+	return ConfirmResult{Value: res.fld.value()}, nil
 }
 
 // MeasureConfirm returns the rendered height (lines) of the confirm dialog at
@@ -189,8 +189,8 @@ func RunChoose(o ChooseOptions) (ValueResult, error) {
 	if err != nil {
 		return ValueResult{}, err
 	}
-	res := fm.(chooseModel)
-	if res.cancelled || !res.done {
+	res := fm.(model)
+	if res.quitting || !res.submitted {
 		return ValueResult{Cancelled: true}, nil
 	}
 	val := res.fld.value()

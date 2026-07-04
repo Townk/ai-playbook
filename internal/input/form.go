@@ -249,9 +249,16 @@ func (m formModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // tabRow renders the tab labels: done=✓ (muted), active=◆ (accent), pending=(muted).
-func (m formModel) tabRow() string {
+// frameBG backs every label and separator so the foreground-only tab styles don't
+// bleed the terminal default through the always-framed form (see field.view's
+// contract).
+func (m formModel) tabRow(frameBG string) string {
 	accentStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Accent)).Bold(true)
 	mutedStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Muted))
+	if frameBG != "" {
+		accentStyle = accentStyle.Background(lipgloss.Color(frameBG))
+		mutedStyle = mutedStyle.Background(lipgloss.Color(frameBG))
+	}
 
 	parts := make([]string, len(m.specs))
 	for i, ff := range m.specs {
@@ -302,19 +309,16 @@ func (m formModel) maxHeight(width int) int {
 
 func (m formModel) render() string {
 	iW := m.innerW()
-	descStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(m.theme.Text))
-	desc := descStyle.Render(m.specs[m.focus].label)
-	// Form fields are always rendered inside the dialog frame, so a text field's
-	// box interior must carry Mantle too, or it bleeds to the terminal default
-	// (same bleed promptStyle/hintFrameBG fix for the prompt/hint sections; see
-	// input.go's model.render() framed branch for the non-form counterpart).
-	if tf, ok := m.fields[m.focus].(*textField); ok {
-		tf.boxBG = theme.Mantle
-	}
+	// Forms are ALWAYS framed (no inline layout), so every span paints the frame's
+	// Mantle background via the field.view contract — the tab row, the description
+	// (promptStyle is Text-on-Mantle), and the focused field's own view — so none
+	// bleeds the terminal default (see field.view's contract note).
+	const frameBG = theme.Mantle
+	desc := promptStyle(m.theme).Render(m.specs[m.focus].label)
 	body := []string{
-		m.tabRow(),
+		m.tabRow(frameBG),
 		desc,
-		m.fields[m.focus].view(iW, true),
+		m.fields[m.focus].view(iW, true, frameBG),
 	}
 	return renderFrame(m.theme, "default", m.title, body, m.hint(), m.width, m.padding, m.inset)
 }

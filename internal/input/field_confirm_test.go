@@ -34,7 +34,7 @@ func TestConfirmFieldAlwaysFilled(t *testing.T) {
 
 func TestConfirmField_GapPaintedOnMantle(t *testing.T) {
 	f := newConfirmField(defaultTheme(), "default", "Confirm", "Customize", false)
-	out := f.view(51, true)
+	out := f.view(51, true, theme.Mantle)
 	// The 4-space inter-button gap must carry the Mantle background SGR, not reset
 	// to the terminal default. Mantle's truecolor bg sequence:
 	mantle := lipgloss.NewStyle().Background(lipgloss.Color(theme.Mantle)).Render("    ")
@@ -46,7 +46,7 @@ func TestConfirmField_GapPaintedOnMantle(t *testing.T) {
 func TestConfirmField_ButtonsCentered(t *testing.T) {
 	f := newConfirmField(defaultTheme(), "default", "Confirm", "Customize", false)
 	const innerW = 51
-	out := strip(f.view(innerW, true))
+	out := strip(f.view(innerW, true, theme.Mantle))
 	if w := lipgloss.Width(out); w != innerW {
 		t.Fatalf("centered button row should span innerW=%d, got %d:\n%q", innerW, w, out)
 	}
@@ -73,7 +73,7 @@ func TestConfirmField_TertiaryButtonAndValue(t *testing.T) {
 	if got := cf.buttonCount(); got != 3 {
 		t.Fatalf("buttonCount with tertiary = %d, want 3", got)
 	}
-	if !strings.Contains(cf.view(51, true), "Quit") {
+	if !strings.Contains(cf.view(51, true, theme.Mantle), "Quit") {
 		t.Fatal("three-button view must render the Quit label")
 	}
 	// The 'q' accelerator selects Quit:

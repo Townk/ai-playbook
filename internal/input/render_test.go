@@ -204,42 +204,31 @@ func TestTextIconOverride(t *testing.T) {
 	}
 }
 
-// TestTextBox_FramedSetsMantleBoxBG_InlineDoesNot pins the text-input box
-// interior fix: model.render()'s FRAMED branch must set the hosted
-// textField's boxBG to theme.Mantle before rendering the box — otherwise the
-// box interior (and its border background) bleeds to the terminal default
-// inside the Mantle-filled dialog frame. The INLINE branch must leave it ""
-// — that layout composites on the pane/terminal background, mirroring
-// hintFrameBG's framed/inline split.
+// TestTextBox_FramedPaintsMantle_InlineDoesNot pins the text-input box interior
+// fix as a frame/field contract: model.render()'s FRAMED branch passes
+// theme.Mantle as field.view's frameBG so the box interior (and its border
+// background) never bleeds the terminal default inside the Mantle-filled dialog
+// frame. The INLINE branch passes "" — that layout composites on the
+// pane/terminal background, mirroring hintFrameBG's framed/inline split.
 //
-// The assertion targets the field's own boxBG state and its unwrapped
-// view() output (not the fully-framed render string): renderFrame's outer
-// Background(Mantle) wrap re-supplies the Mantle SGR at the start of every
-// physical line regardless of the box's own background, so scanning the
-// full framed string for the SGR would pass even with the fix reverted
-// (confirmed against a deliberately-reverted build) — it doesn't isolate the
-// property under test the way checking boxBG/view() directly does.
-func TestTextBox_FramedSetsMantleBoxBG_InlineDoesNot(t *testing.T) {
+// The assertion targets the field's own unwrapped view() output at each frameBG,
+// not the fully-framed render string: renderFrame's outer Background(Mantle) wrap
+// re-supplies the Mantle SGR at the start of every physical line regardless of
+// the box's own background, so scanning the full framed string for the SGR would
+// pass even with the fix reverted (confirmed against a deliberately-reverted
+// build) — it doesn't isolate the property under test the way checking view()
+// directly with each frameBG does.
+func TestTextBox_FramedPaintsMantle_InlineDoesNot(t *testing.T) {
 	const mantleBG = "48;2;24;24;37"
 	m := newInputModel(defaultTheme(), "default", "ai-playbook", "", "hi", "", 3, 1, 1, false, "")
 	m.width = 60
 	m.resize()
-
-	m.render() // framed
 	tf := m.fld.(*textField)
-	if tf.boxBG != theme.Mantle {
-		t.Fatalf("framed render must set the text box's boxBG to theme.Mantle, got %q", tf.boxBG)
-	}
-	if got := tf.view(m.innerW(), true); !strings.Contains(got, mantleBG) {
+
+	if got := tf.view(m.innerW(), true, theme.Mantle); !strings.Contains(got, mantleBG) {
 		t.Fatalf("framed text box must paint the Mantle background; got %q", got)
 	}
-
-	m.inline = true
-	m.render() // inline
-	if tf.boxBG != "" {
-		t.Fatalf("inline render must leave the text box's boxBG empty, got %q", tf.boxBG)
-	}
-	if got := tf.view(inlineBoxWidth, true); strings.Contains(got, mantleBG) {
+	if got := tf.view(inlineBoxWidth, true, ""); strings.Contains(got, mantleBG) {
 		t.Fatalf("inline text box must NOT paint the Mantle background; got %q", got)
 	}
 }

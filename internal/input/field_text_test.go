@@ -45,26 +45,24 @@ func TestTextFieldFilled(t *testing.T) {
 	}
 }
 
-// TestTextField_BoxBG_MantleVsEmpty mirrors TestConfirmField_HintBackground
+// TestTextField_FrameBG_MantleVsEmpty mirrors TestConfirmField_HintBackground
 // (field_confirm_test.go): it exercises view() directly (no outer dialog
 // frame wrapping) so the check isolates the actual property under test. A
 // full-frame check would be confounded — renderFrame's own
 // Background(Mantle) wrap re-supplies the Mantle SGR at the very start of
 // every physical line regardless of the box's own background, so scanning a
-// fully-framed render for the SGR passes even with boxBG unwired (verified
-// against a reverted build). Testing view()'s own unwrapped output proves
-// boxBG actually controls the box's background, not an artifact of framing.
-func TestTextField_BoxBG_MantleVsEmpty(t *testing.T) {
+// fully-framed render for the SGR passes even with the frameBG unwired
+// (verified against a reverted build). Testing view()'s own unwrapped output
+// proves the frameBG parameter actually controls the box's background, not an
+// artifact of framing.
+func TestTextField_FrameBG_MantleVsEmpty(t *testing.T) {
 	const mantleBG = "48;2;24;24;37"
 
-	empty := newTextField(defaultTheme(), "hi", "", 1, true)
-	if got := empty.view(40, true); strings.Contains(got, mantleBG) {
-		t.Errorf("boxBG=\"\" (default) must not paint the Mantle background; got %q", got)
+	f := newTextField(defaultTheme(), "hi", "", 1, true)
+	if got := f.view(40, true, ""); strings.Contains(got, mantleBG) {
+		t.Errorf("frameBG=\"\" must not paint the Mantle background; got %q", got)
 	}
-
-	mantle := newTextField(defaultTheme(), "hi", "", 1, true)
-	mantle.boxBG = theme.Mantle
-	if got := mantle.view(40, true); !strings.Contains(got, mantleBG) {
-		t.Errorf("boxBG=theme.Mantle must paint the Mantle background; got %q", got)
+	if got := f.view(40, true, theme.Mantle); !strings.Contains(got, mantleBG) {
+		t.Errorf("frameBG=theme.Mantle must paint the Mantle background; got %q", got)
 	}
 }

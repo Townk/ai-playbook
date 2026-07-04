@@ -302,9 +302,14 @@ func (f *chooseField) renderOptionRow(
 	return resultLines
 }
 
-// view renders the list rows with optional windowed scroll.
-// innerW is the width available inside the outer frame.
-func (f *chooseField) view(innerW int, focused bool) string {
+// view renders the list rows with optional windowed scroll. innerW is the width
+// available inside the outer frame; frameBG is the hosting frame's background
+// (theme.Mantle when framed, "" inline). Every non-highlighted span — muted
+// option rows, the toggled-checkbox marker, the ↑/↓ scroll indicators, and the
+// unfocused "other" row (label, box, and indent) — paints frameBG so a
+// foreground-only SGR reset never bleeds the terminal default. Highlighted rows
+// keep their own selected background.
+func (f *chooseField) view(innerW int, focused bool, frameBG string) string {
 	viewStart, viewEnd, showUp, showDown := f.windowBounds()
 
 	selBg, selFg := f.theme.ButtonSelBg, f.theme.ButtonSelFg
@@ -323,6 +328,10 @@ func (f *chooseField) view(innerW int, focused bool) string {
 		Foreground(lipgloss.Color(f.theme.Muted))
 	markerSelStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(f.theme.Accent))
+	if frameBG != "" {
+		mutedStyle = mutedStyle.Background(lipgloss.Color(frameBG))
+		markerSelStyle = markerSelStyle.Background(lipgloss.Color(frameBG))
+	}
 
 	var rows []string
 
@@ -380,7 +389,9 @@ func (f *chooseField) view(innerW int, focused bool) string {
 			if isHL {
 				st = taStyle{icon: selFg, border: selFg, text: selFg, bg: selBg, placeholder: false}
 			} else {
-				st = taStyle{icon: f.theme.Muted, border: f.theme.Muted, text: f.theme.Muted, bg: "", placeholder: false}
+				// Unfocused: muted colours on the frame background — the box interior,
+				// border, and icon carry frameBG so nothing bleeds the terminal default.
+				st = taStyle{icon: f.theme.Muted, border: f.theme.Muted, text: f.theme.Muted, bg: frameBG, placeholder: false}
 			}
 
 			// Heading line: " <indicator> <label>:".
@@ -399,7 +410,10 @@ func (f *chooseField) view(innerW int, focused bool) string {
 					// and the line is padded to hlW so it spans the whole item.
 					rows = append(rows, hlStyle.Width(hlW).Render(hlStyle.Render(indent)+bl))
 				} else {
-					rows = append(rows, indent+bl)
+					// Unfocused: the leading indent must carry frameBG too, or the
+					// gutter columns bleed the terminal default (mutedStyle paints
+					// frameBG; the box body bl already carries it via st.bg).
+					rows = append(rows, mutedStyle.Render(indent)+bl)
 				}
 			}
 			continue

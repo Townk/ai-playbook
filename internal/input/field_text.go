@@ -37,18 +37,6 @@ type textField struct {
 	// textarea outside viewWith.
 	lastStyleKey taStyleKey
 	styleCached  bool
-
-	// boxBG is the box-interior background view() uses (via viewWith's taStyle.bg).
-	// Default "" keeps the interior bg-less — correct for the inline (no-mux)
-	// layout, which composites on the pane/terminal background. A FRAMED host
-	// (a rounded, Mantle-filled dialog) must set this to theme.Mantle before
-	// calling view(), or else the box interior — and its border background —
-	// stays the terminal default, bleeding a rectangle behind the input inside
-	// the Mantle frame (the same class of bug promptStyle/hintFrameBG fix for
-	// the prompt/hint sections). Set by the FRAMED render paths that host a
-	// text field: input.go's model.render() (framed branch only, not m.inline)
-	// and form.go's formModel.render() (form fields are always framed).
-	boxBG string
 }
 
 // taStyle carries the focus-dependent colors used to render a textField box.
@@ -204,12 +192,15 @@ func (f *textField) handle(msg tea.Msg) (field, fieldAction, tea.Cmd) {
 // view renders the rounded inner box with icon column, textarea, and (for
 // multiline) the scrollbar, using the field's default theme colors. innerW is
 // the width available inside the outer frame (frame-chrome already subtracted).
-func (f *textField) view(innerW int, focused bool) string {
+// frameBG backs the box interior and its border so a framed host (theme.Mantle)
+// never bleeds the terminal default through the box; "" leaves it bg-less for
+// the inline layout.
+func (f *textField) view(innerW int, focused bool, frameBG string) string {
 	return f.viewWith(innerW, taStyle{
 		icon:        f.theme.Accent,
 		border:      f.theme.FieldBorder,
 		text:        f.theme.Text,
-		bg:          f.boxBG,
+		bg:          frameBG,
 		placeholder: true,
 	})
 }

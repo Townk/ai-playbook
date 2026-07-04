@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Framed dialogs no longer leak the terminal's default background through
+  unfocused rows, section labels, and gap rows — the frame background is now a
+  contract every widget span honors.
+
 ## [0.9.0] - 2026-07-04
 
 ### Added

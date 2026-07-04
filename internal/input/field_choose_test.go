@@ -45,7 +45,7 @@ func TestChooseMultiToggle(t *testing.T) {
 
 func TestChooseRendersListNoFuzzy(t *testing.T) {
 	f := field(newChooseField(defaultTheme(), "default", []string{"alpha", "beta"}, false, ""))
-	out := strip(f.view(40, true))
+	out := strip(f.view(40, true, ""))
 	if !strings.Contains(out, "alpha") || !strings.Contains(out, "beta") {
 		t.Fatal("options must render")
 	}
@@ -160,7 +160,7 @@ func TestChooseInitCmdNilWithoutOtherField(t *testing.T) {
 func TestChooseRowSpacingAndFullWidthHighlight(t *testing.T) {
 	f := newChooseField(defaultTheme(), "default", []string{"alpha", "beta"}, false, "")
 	// highlight is row 0 by default
-	out := strip(f.view(30, true))
+	out := strip(f.view(30, true, ""))
 	first := strings.Split(out, "\n")[0]
 	// Layout is now " <indicator> <label> " — leading space + indicator glyph + space.
 	// The highlighted row must contain the label and be padded to the inner width.
@@ -178,7 +178,7 @@ func TestChooseRowSpacingAndFullWidthHighlight(t *testing.T) {
 func TestChooseLongOptionWraps(t *testing.T) {
 	long := "this is a very long option label that must wrap onto a second visual line"
 	f := newChooseField(defaultTheme(), "default", []string{long, "b"}, false, "")
-	out := strip(f.view(24, true))
+	out := strip(f.view(24, true, ""))
 	lines := strings.Split(out, "\n")
 	// the long option occupies >1 visual line, and the continuation is indented
 	// under the label text (past the "  N " number column), not under the number.
@@ -229,10 +229,10 @@ func TestChooseMultiSelectionsPreservedWhenEmptyOtherFocused(t *testing.T) {
 // the other row is not highlighted.
 func TestChooseOtherIsAlwaysFourLines(t *testing.T) {
 	f := newChooseField(defaultTheme(), "default", []string{"a", "b"}, false, "Other…")
-	unfocused := strip(f.view(40, true)) // highlight on row 0 → other (idx 2) unfocused
+	unfocused := strip(f.view(40, true, "")) // highlight on row 0 → other (idx 2) unfocused
 	g, _, _ := field(f).handle(tea.KeyPressMsg{Code: tea.KeyDown})
 	g, _, _ = g.handle(tea.KeyPressMsg{Code: tea.KeyDown}) // onto other row
-	focused := strip(g.view(40, true))
+	focused := strip(g.view(40, true, ""))
 	if len(strings.Split(unfocused, "\n")) != len(strings.Split(focused, "\n")) {
 		t.Fatalf("other height must NOT change on focus: %d vs %d",
 			len(strings.Split(unfocused, "\n")), len(strings.Split(focused, "\n")))
@@ -279,7 +279,7 @@ func TestChooseSingleShowsRadio(t *testing.T) {
 	f := newChooseField(defaultTheme(), "default", []string{"alpha", "beta"}, false, "")
 	// highlight is row 0; single-select radio reflects focus: focused glyph on the
 	// highlighted row, unfocused glyph elsewhere.
-	out := strip(f.view(30, true))
+	out := strip(f.view(30, true, ""))
 	lines := strings.Split(out, "\n")
 	if !strings.Contains(lines[0], "󰄯") { // focused radio on the highlighted row
 		t.Fatalf("highlighted single row must show the focused radio 󰄯: %q", lines[0])
@@ -292,13 +292,13 @@ func TestChooseSingleShowsRadio(t *testing.T) {
 func TestChooseMultiShowsAndTogglesCheckbox(t *testing.T) {
 	f := field(newChooseField(defaultTheme(), "default", []string{"a", "b", "c"}, true, ""))
 	// initially all unchecked checkboxes
-	if !strings.Contains(strip(f.view(30, true)), "󰄱") {
+	if !strings.Contains(strip(f.view(30, true, "")), "󰄱") {
 		t.Fatal("multi rows must show the unchecked checkbox 󰄱")
 	}
 	// space toggles the highlighted row → checked checkbox visible
 	f2, _, _ := f.handle(tea.KeyPressMsg{Code: ' ', Text: " "})
-	if !strings.Contains(strip(f2.view(30, true)), "󰄵") {
-		t.Fatalf("after toggling, a checked checkbox 󰄵 must be visible: %q", strip(f2.view(30, true)))
+	if !strings.Contains(strip(f2.view(30, true, "")), "󰄵") {
+		t.Fatalf("after toggling, a checked checkbox 󰄵 must be visible: %q", strip(f2.view(30, true, "")))
 	}
 }
 
@@ -310,7 +310,7 @@ func TestChooseNoNumberShortcuts(t *testing.T) {
 		t.Fatal("number keys must no longer select")
 	}
 	// the rendered rows must not contain a digit prefix
-	out := strip(f.view(30, true))
+	out := strip(f.view(30, true, ""))
 	if strings.Contains(out, "1 ") || strings.Contains(out, "2 ") {
 		t.Fatalf("rows must not show number prefixes: %q", out)
 	}

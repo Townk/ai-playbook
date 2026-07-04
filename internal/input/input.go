@@ -255,28 +255,24 @@ func (m model) render() string {
 	}
 	if m.inline {
 		// Inline composites on the pane/terminal background, not Mantle — the box
-		// interior must stay bg-less (mirrors why hintFrameBG passes "" here too).
-		if tf, ok := m.fld.(*textField); ok {
-			tf.boxBG = ""
-		}
+		// interior stays bg-less (frameBG="", mirroring why hintFrameBG passes ""
+		// here too).
 		inlinePrompt := prompt
 		if m.prompt != "" {
 			inlinePrompt = lipgloss.NewStyle().Foreground(lipgloss.Color(inlineDescColor)).Render(m.prompt)
 		}
-		return m.inlineLayout(inlinePrompt, m.fld.view(inlineBoxWidth, true), hint)
+		return m.inlineLayout(inlinePrompt, m.fld.view(inlineBoxWidth, true, ""), hint)
 	}
-	// Framed: the dialog frame fills Mantle (frame.go), so the box interior must
-	// carry it too, or its interior (and border background) bleeds to the
-	// terminal default — the same bleed promptStyle/hintFrameBG fix elsewhere.
-	if tf, ok := m.fld.(*textField); ok {
-		tf.boxBG = theme.Mantle
-	}
+	// Framed: the dialog frame fills Mantle (frame.go), so the field paints its
+	// spans on Mantle too, or their interiors (and borders) bleed to the terminal
+	// default — the same bleed promptStyle/hintFrameBG fix elsewhere. frameBG is
+	// now a field-contract parameter (field.view), not a per-site boxBG patch.
 	iW := m.innerW()
 	sections := []string{}
 	if prompt != "" {
 		sections = append(sections, prompt)
 	}
-	sections = append(sections, m.fld.view(iW, true))
+	sections = append(sections, m.fld.view(iW, true, theme.Mantle))
 	return renderFrame(m.theme, m.variant, m.title, sections, hint, m.width, m.padding, m.inset)
 }
 
@@ -373,12 +369,16 @@ func (m model) renderThinking() string {
 	if m.inline {
 		iW = inlineBoxWidth
 	}
+	frameBG := theme.Mantle
+	if m.inline {
+		frameBG = ""
+	}
 	top := lipgloss.NewStyle().Foreground(lipgloss.Color(thinkingPromptColor(m.phase))).Render("Thinking…")
 	var box string
 	if tf, ok := m.fld.(*textField); ok {
 		box = tf.thinkingView(iW, m.phase, m.theme.Border, thinkingWaveRed, m.theme.Accent)
 	} else {
-		box = m.fld.view(iW, true)
+		box = m.fld.view(iW, true, frameBG)
 	}
 	// The model-activity line goes in the bottom slot, dark grey, truncated to the
 	// box width. (The waves stay full inside the input box.)
