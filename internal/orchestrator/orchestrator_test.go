@@ -646,7 +646,7 @@ func TestDriftRegen_DrainsFreshDiff(t *testing.T) {
 	o := newTestOrchInDir(t, dir)
 	fresh := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-current\n+fixed\n"
 	o.Reengage = &Reengage{
-		Events: func(kind ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error) {
+		Events: func(kind ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
 			if kind != KindReengageDriftRegen {
 				t.Fatalf("wrong kind %v", kind)
 			}
@@ -660,12 +660,45 @@ func TestDriftRegen_DrainsFreshDiff(t *testing.T) {
 		},
 	}
 	stalePatch := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-stale\n+fixed\n"
-	got, err := o.DriftRegen(stalePatch)
+	got, err := o.DriftRegen(stalePatch, nil)
 	if err != nil {
 		t.Fatalf("DriftRegen returned error: %v", err)
 	}
 	if strings.TrimSpace(got) != strings.TrimSpace(fresh) {
 		t.Fatalf("DriftRegen = %q; want %q", got, fresh)
+	}
+}
+
+// TestDriftRegen_ThreadsConstraints verifies the fourth re-engagement kind is not
+// left behind by the refuse-solution plumbing (spec §1: constraints reach ALL four
+// kinds): DriftRegen's constraints parameter must arrive at the injected EventsFunc
+// verbatim, not be swallowed by a hardcoded nil.
+func TestDriftRegen_ThreadsConstraints(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "x.txt"), []byte("current\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	o := newTestOrchInDir(t, dir)
+	want := []string{"no docker", "no sudo"}
+	var got []string
+	o.Reengage = &Reengage{
+		Events: func(kind ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
+			if kind != KindReengageDriftRegen {
+				t.Fatalf("wrong kind %v", kind)
+			}
+			got = constraints
+			ch := make(chan agentstream.Event, 1)
+			ch <- agentstream.Event{Kind: agentstream.Final, Text: "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-current\n+fixed\n"}
+			close(ch)
+			return ch, func() error { return nil }, nil
+		},
+	}
+	stalePatch := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-stale\n+fixed\n"
+	if _, err := o.DriftRegen(stalePatch, want); err != nil {
+		t.Fatalf("DriftRegen returned error: %v", err)
+	}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("EventsFunc received constraints %q; want %q", got, want)
 	}
 }
 
@@ -681,7 +714,7 @@ func TestDriftRegen_StripsFencedOutput(t *testing.T) {
 	fresh := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-current\n+fixed\n"
 	fenced := "```diff\n" + fresh + "```"
 	o.Reengage = &Reengage{
-		Events: func(kind ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error) {
+		Events: func(kind ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
 			if kind != KindReengageDriftRegen {
 				t.Fatalf("wrong kind %v", kind)
 			}
@@ -692,7 +725,7 @@ func TestDriftRegen_StripsFencedOutput(t *testing.T) {
 		},
 	}
 	stalePatch := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-stale\n+fixed\n"
-	got, err := o.DriftRegen(stalePatch)
+	got, err := o.DriftRegen(stalePatch, nil)
 	if err != nil {
 		t.Fatalf("DriftRegen returned error: %v", err)
 	}

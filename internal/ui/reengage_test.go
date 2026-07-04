@@ -409,7 +409,7 @@ type fakeEventsProducer struct {
 	calls        int
 }
 
-func (f *fakeEventsProducer) fn(kind orchestrator.ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error) {
+func (f *fakeEventsProducer) fn(kind orchestrator.ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
 	f.calls++
 	f.gotKind = kind
 	f.gotBase = base

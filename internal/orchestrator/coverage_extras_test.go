@@ -195,7 +195,7 @@ func TestWritePatch_EmptyDiff(t *testing.T) {
 
 func TestFinalPlaybook_NoReengage(t *testing.T) {
 	o := &Orchestrator{Mux: &recMux{}}
-	_, _, _, err := o.FinalPlaybook("", "change")
+	_, _, _, err := o.FinalPlaybook("", "change", nil)
 	if !errors.Is(err, ErrNotImplemented) {
 		t.Errorf("FinalPlaybook without Reengage: err = %v, want ErrNotImplemented", err)
 	}
@@ -211,7 +211,7 @@ func TestFinalPlaybook_TextFallback(t *testing.T) {
 		// Events deliberately nil — exercises the text fallback.
 	}}
 
-	stream, activity, mode, err := o.FinalPlaybook("", "the resolved troubleshoot")
+	stream, activity, mode, err := o.FinalPlaybook("", "the resolved troubleshoot", nil)
 	if err != nil {
 		t.Fatalf("FinalPlaybook text path: %v", err)
 	}
@@ -237,7 +237,7 @@ func TestFinalPlaybook_NoAgentNoEvents(t *testing.T) {
 		Req: sampleReq(),
 		// Agent deliberately nil; Events deliberately nil.
 	}}
-	_, _, _, err := o.FinalPlaybook("", "change")
+	_, _, _, err := o.FinalPlaybook("", "change", nil)
 	if !errors.Is(err, ErrNotImplemented) {
 		t.Errorf("FinalPlaybook no agent/events: err = %v, want ErrNotImplemented", err)
 	}
@@ -246,7 +246,7 @@ func TestFinalPlaybook_NoAgentNoEvents(t *testing.T) {
 // errorEvents returns an EventsFunc that always errors — used to trigger the
 // fall-through to the text Agent path in Regenerate/Followup/FinalPlaybook.
 func errorEvents() EventsFunc {
-	return func(ReengageKind, string, string) (<-chan agentstream.Event, func() error, error) {
+	return func(ReengageKind, string, string, []string) (<-chan agentstream.Event, func() error, error) {
 		return nil, nil, errors.New("events producer: simulated start error")
 	}
 }
@@ -260,7 +260,7 @@ func TestFinalPlaybook_EventErrorFallsToText(t *testing.T) {
 		Agent:  fa.agent,
 	}}
 
-	stream, activity, mode, err := o.FinalPlaybook("", "change")
+	stream, activity, mode, err := o.FinalPlaybook("", "change", nil)
 	if err != nil {
 		t.Fatalf("FinalPlaybook event-error→text: %v", err)
 	}
@@ -288,7 +288,7 @@ func TestRegenerate_EventErrorFallsToText(t *testing.T) {
 		Agent:  fa.agent,
 	}}
 
-	stream, activity, mode, err := o.Regenerate()
+	stream, activity, mode, err := o.Regenerate(nil)
 	if err != nil {
 		t.Fatalf("Regenerate event-error→text: %v", err)
 	}
@@ -315,7 +315,7 @@ func TestRegenerate_EventErrorNoAgent(t *testing.T) {
 		Events: errorEvents(),
 		// Agent deliberately nil.
 	}}
-	_, _, _, err := o.Regenerate()
+	_, _, _, err := o.Regenerate(nil)
 	if !errors.Is(err, ErrNotImplemented) {
 		t.Errorf("Regenerate event-error + no agent: err = %v, want ErrNotImplemented", err)
 	}
@@ -333,7 +333,7 @@ func TestFollowup_EventErrorFallsToText(t *testing.T) {
 	}}
 
 	const failedOut = "ld: symbol not found"
-	stream, activity, mode, err := o.Followup(failedOut)
+	stream, activity, mode, err := o.Followup(failedOut, nil)
 	if err != nil {
 		t.Fatalf("Followup event-error→text: %v", err)
 	}
@@ -357,7 +357,7 @@ func TestFollowup_EventErrorNoAgent(t *testing.T) {
 		Events: errorEvents(),
 		// Agent deliberately nil.
 	}}
-	_, _, _, err := o.Followup("failed output")
+	_, _, _, err := o.Followup("failed output", nil)
 	if !errors.Is(err, ErrNotImplemented) {
 		t.Errorf("Followup event-error + no agent: err = %v, want ErrNotImplemented", err)
 	}
@@ -438,7 +438,7 @@ func TestRegenerate_ReStoreSkippedOnEmptyBody(t *testing.T) {
 		ReqHash: "reqhash2",
 	}}
 
-	stream, _, _, err := o.Regenerate()
+	stream, _, _, err := o.Regenerate(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -466,7 +466,7 @@ func TestRegenerate_TextAgentError(t *testing.T) {
 		Req:   sampleReq(),
 		Agent: errAgent,
 	}}
-	_, _, _, err := o.Regenerate()
+	_, _, _, err := o.Regenerate(nil)
 	if err == nil {
 		t.Error("Regenerate with failing text agent should return error")
 	}
@@ -478,7 +478,7 @@ func TestFollowup_TextAgentError(t *testing.T) {
 		Req:   sampleReq(),
 		Agent: errAgent,
 	}}
-	_, _, _, err := o.Followup("failed output")
+	_, _, _, err := o.Followup("failed output", nil)
 	if err == nil {
 		t.Error("Followup with failing text agent should return error")
 	}
@@ -490,7 +490,7 @@ func TestFinalPlaybook_TextAgentError(t *testing.T) {
 		Req:   sampleReq(),
 		Agent: errAgent,
 	}}
-	_, _, _, err := o.FinalPlaybook("", "change")
+	_, _, _, err := o.FinalPlaybook("", "change", nil)
 	if err == nil {
 		t.Error("FinalPlaybook with failing text agent should return error")
 	}

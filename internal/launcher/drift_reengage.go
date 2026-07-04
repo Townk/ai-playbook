@@ -25,7 +25,7 @@ import (
 func driftRegenReengage() *orchestrator.Reengage {
 	return &orchestrator.Reengage{
 		DriftRegenOnly: true,
-		Events: func(kind orchestrator.ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error) {
+		Events: func(kind orchestrator.ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
 			if kind != orchestrator.KindReengageDriftRegen {
 				// A DriftRegenOnly context is never asked for another kind (the followup
 				// affordances are gated off), but fail loudly rather than silently if it is.
@@ -34,6 +34,10 @@ func driftRegenReengage() *orchestrator.Reengage {
 			cfg, _ := config.Load()
 			// base = the current file content, change = the stale patch (DriftRegen's args).
 			sys, user := author.DriftRegenPrompt(base, change)
+			// Session constraints (refuse-solution §1) fold in here like the other
+			// kinds; nil/empty leaves the prompt byte-identical. A standalone
+			// `run --file` viewer has no refusal UI, so the list is nil in practice.
+			sys = author.WithConstraints(sys, constraints)
 			return author.RunHarnessEvents(sys, user, author.AuthorOptions{Cfg: cfg})
 		},
 	}

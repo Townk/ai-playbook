@@ -174,8 +174,13 @@ const (
 //     finalplaybook the troubleshoot content / fix to fold in.
 //     Unused for regenerate.
 //
+// constraints carries the session's user-rejected-approach reasons (spec
+// "refuse-solution" §1): the producer folds them into the built system prompt via
+// author.WithConstraints for EVERY kind, so a refused approach cannot resurface in
+// a later re-engagement. An empty/nil list leaves the prompt byte-identical.
+//
 // A nil Events on Reengage selects the legacy text Agent fallback.
-type EventsFunc func(kind ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error)
+type EventsFunc func(kind ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error)
 
 // Reengage bundles the re-engagement context. Req is the original captured
 // request; Agent is the injected author.Agent (author.HarnessAgent in production,
@@ -352,7 +357,7 @@ func (o *Orchestrator) Do(a Action) (driver.Result, error) {
 // closed — the same tee-on-completion pattern authorPlaybook uses. Re-store is
 // best-effort and only fires when the cache + keys are present (it is skipped when
 // the original entry was unkeyed).
-func (o *Orchestrator) Regenerate() (io.ReadCloser, <-chan string, StreamMode, error) {
+func (o *Orchestrator) Regenerate(constraints []string) (io.ReadCloser, <-chan string, StreamMode, error) {
 	if o.Reengage == nil {
 		return nil, nil, ModeReplace, ErrNotImplemented
 	}
@@ -374,7 +379,7 @@ func (o *Orchestrator) Regenerate() (io.ReadCloser, <-chan string, StreamMode, e
 	// EVENT PATH (preferred): the owned harness invocation streams the model's live
 	// reasoning + tool activity during the wait, exactly like the initial authoring.
 	if re.Events != nil {
-		events, closeFn, err := re.Events(KindReengageRegenerate, "", "")
+		events, closeFn, err := re.Events(KindReengageRegenerate, "", "", constraints)
 		if err == nil {
 			reader, activity, fan := agentstream.FanOut(events, closeFn, reengageActivityBuffer)
 			reader = newCloseHook(reader, func() { restore(fan.Body()) })
@@ -404,7 +409,7 @@ func (o *Orchestrator) Regenerate() (io.ReadCloser, <-chan string, StreamMode, e
 // change arg carries the troubleshoot content (fresh) or the requested change (amend)
 // to integrate. Stage 2 is GENERATE-ONLY: this method does NOT save or cache the
 // result (no restore-on-close); persistence (save + cache-replace) is stage 3.
-func (o *Orchestrator) FinalPlaybook(base, change string) (io.ReadCloser, <-chan string, StreamMode, error) {
+func (o *Orchestrator) FinalPlaybook(base, change string, constraints []string) (io.ReadCloser, <-chan string, StreamMode, error) {
 	if o.Reengage == nil {
 		return nil, nil, ModeReplace, ErrNotImplemented
 	}
@@ -412,7 +417,7 @@ func (o *Orchestrator) FinalPlaybook(base, change string) (io.ReadCloser, <-chan
 
 	// EVENT PATH (preferred): stream the model's live reasoning + tool activity.
 	if re.Events != nil {
-		events, closeFn, err := re.Events(KindReengageFinalPlaybook, base, change)
+		events, closeFn, err := re.Events(KindReengageFinalPlaybook, base, change, constraints)
 		if err == nil {
 			reader, activity, _ := agentstream.FanOut(events, closeFn, reengageActivityBuffer)
 			return reader, activity, ModeReplace, nil
@@ -659,7 +664,7 @@ func playbookSlug(body, ctxHash string) string {
 // revised-fix stream (ModeAppend — the ui appends the new section below the
 // existing playbook). It does NOT re-store the main playbook (matching
 // ai-assist-followup, which streams without persisting an artifact).
-func (o *Orchestrator) Followup(failedOutput string) (io.ReadCloser, <-chan string, StreamMode, error) {
+func (o *Orchestrator) Followup(failedOutput string, constraints []string) (io.ReadCloser, <-chan string, StreamMode, error) {
 	if o.Reengage == nil {
 		return nil, nil, ModeAppend, ErrNotImplemented
 	}
@@ -667,7 +672,7 @@ func (o *Orchestrator) Followup(failedOutput string) (io.ReadCloser, <-chan stri
 
 	// EVENT PATH (preferred): stream the model's live reasoning + tool activity.
 	if re.Events != nil {
-		events, closeFn, err := re.Events(KindReengageFollowup, "", failedOutput)
+		events, closeFn, err := re.Events(KindReengageFollowup, "", failedOutput, constraints)
 		if err == nil {
 			reader, activity, _ := agentstream.FanOut(events, closeFn, reengageActivityBuffer)
 			return reader, activity, ModeAppend, nil
@@ -1007,7 +1012,12 @@ func (o *Orchestrator) DriftTargetPath(patch string) (string, error) {
 // DriftRegen asks the model for a fresh unified diff for a drifted patch, against the
 // CURRENT target file, and returns it as text. It does NOT touch the structured/lastPB
 // capture path. The empty string with a nil error means the model produced nothing.
-func (o *Orchestrator) DriftRegen(patch string) (string, error) {
+//
+// constraints carries the session's user-rejected-approach reasons (refuse-solution
+// spec §1: injected into ALL FOUR re-engagement kinds — the drift-regen button in the
+// authoring viewer is reachable after refusals, so this kind must carry them too).
+// A nil/empty list leaves the prompt byte-identical.
+func (o *Orchestrator) DriftRegen(patch string, constraints []string) (string, error) {
 	re := o.Reengage
 	if re == nil || re.Events == nil {
 		return "", errors.New("regenerate unavailable")
@@ -1020,7 +1030,7 @@ func (o *Orchestrator) DriftRegen(patch string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	events, closeFn, err := re.Events(KindReengageDriftRegen, string(content), patch)
+	events, closeFn, err := re.Events(KindReengageDriftRegen, string(content), patch, constraints)
 	if err != nil {
 		return "", err
 	}

@@ -25,7 +25,7 @@ type fakeEvents struct {
 	final     string
 }
 
-func (f *fakeEvents) fn(kind ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error) {
+func (f *fakeEvents) fn(kind ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
 	f.calls++
 	f.gotKind = kind
 	f.gotBase = base
@@ -98,7 +98,7 @@ func TestRegenerate_EventPath_StreamsActivityAndReStores(t *testing.T) {
 		ReqHash: "reqhash",
 	})
 
-	stream, activity, mode, err := o.Regenerate()
+	stream, activity, mode, err := o.Regenerate(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestFollowup_EventPath_StreamsActivity(t *testing.T) {
 	})
 
 	const failed = "ld: symbol not found"
-	stream, activity, mode, err := o.Followup(failed)
+	stream, activity, mode, err := o.Followup(failed, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestFinalPlaybook_EventPath_ReplaceNoPersist(t *testing.T) {
 	})
 
 	const change = "# Troubleshoot\nthe fixes that worked\n"
-	stream, activity, mode, err := o.FinalPlaybook("", change)
+	stream, activity, mode, err := o.FinalPlaybook("", change, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -241,7 +241,7 @@ func TestFinalPlaybook_AmendThreadsBase(t *testing.T) {
 
 	const base = "# Playbook — existing\nstep one\n"
 	const change = "also configure the NDK"
-	stream, _, mode, err := o.FinalPlaybook(base, change)
+	stream, _, mode, err := o.FinalPlaybook(base, change, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -272,7 +272,7 @@ func TestReengage_FallsBackToTextWhenNoEvents(t *testing.T) {
 		// Events deliberately nil.
 	})
 
-	stream, activity, mode, err := o.Regenerate()
+	stream, activity, mode, err := o.Regenerate(nil)
 	if err != nil {
 		t.Fatal(err)
 	}

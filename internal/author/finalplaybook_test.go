@@ -68,6 +68,25 @@ func TestFinalPlaybookPrompt_Amend(t *testing.T) {
 	}
 }
 
+// The AMEND branch must carry the discard-if-rejected instruction so an outright
+// rejection re-authors from scratch instead of patching the refused approach; the
+// FRESH branch (empty base) has no base to discard, so it must NOT carry it.
+func TestFinalPlaybookPrompt_AmendDiscardInstruction(t *testing.T) {
+	req := sampleFailure()
+	const discard = "if the change note rejects the current approach outright, discard the base playbook and re-author from scratch honoring the note — do not patch the rejected approach"
+
+	const base = "# Playbook — set up the build\n\n```bash {id=verify}\nmake build\n```\n"
+	amend := FinalPlaybookPrompt(req, base, "use podman instead of docker")
+	if !strings.Contains(amend, discard) {
+		t.Errorf("amend prompt missing the discard-if-rejected instruction %q\n--- prompt ---\n%s", discard, amend)
+	}
+
+	fresh := FinalPlaybookPrompt(req, "", "the resolved troubleshoot")
+	if strings.Contains(fresh, discard) {
+		t.Errorf("fresh prompt must NOT carry the discard-if-rejected instruction:\n%s", fresh)
+	}
+}
+
 // Empty req fields fall back to the placeholders the other prompts use.
 func TestFinalPlaybookPrompt_EmptyRequest(t *testing.T) {
 	sys := FinalPlaybookPrompt(capture.Request{}, "", "")

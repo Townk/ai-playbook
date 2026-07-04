@@ -131,7 +131,7 @@ func (m model) driftRegenCmd(id, patch string) tea.Cmd {
 		return nil
 	}
 	return func() tea.Msg {
-		np, err := orch.DriftRegen(patch)
+		np, err := orch.DriftRegen(patch, nil)
 		return driftRegenMsg{ID: id, NewPatch: np, Err: err}
 	}
 }
@@ -281,7 +281,7 @@ func (m *model) beginRegenerate() tea.Cmd {
 		m.bodyProvider = m.orch.Reengage.Body
 	}
 	return tea.Batch(m.restartTick(), func() tea.Msg {
-		stream, activity, _, err := orch.Regenerate()
+		stream, activity, _, err := orch.Regenerate(nil)
 		return reArmStreamMsg{reader: stream, activity: activity, err: err}
 	})
 }
@@ -317,7 +317,7 @@ func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
 	m.structured = false
 	m.bodyProvider = nil
 	return tea.Batch(m.restartTick(), func() tea.Msg {
-		stream, activity, _, err := orch.Followup(failedOutput)
+		stream, activity, _, err := orch.Followup(failedOutput, nil)
 		return reArmStreamMsg{reader: stream, activity: activity, err: err}
 	})
 }
@@ -397,7 +397,7 @@ func (m *model) beginFinalPlaybookGenerate(base, change string) tea.Cmd {
 		m.bodyProvider = m.orch.Reengage.Body
 	}
 	return tea.Batch(m.restartTick(), func() tea.Msg {
-		stream, activity, _, err := orch.FinalPlaybook(base, change)
+		stream, activity, _, err := orch.FinalPlaybook(base, change, nil)
 		return reArmStreamMsg{reader: stream, activity: activity, err: err}
 	})
 }

@@ -496,6 +496,34 @@ func reengageStructured(kind orchestrator.ReengageKind) bool {
 	return kind != orchestrator.KindReengageFollowup && kind != orchestrator.KindReengageDriftRegen
 }
 
+// reengagePrompts builds the (system, user) prompt pair for one re-engagement
+// invocation: the per-kind base prompt (regenerate → the standard authoring prompt
+// + folded KB; followup → the failed-output prompt; finalplaybook → the
+// FINAL-PLAYBOOK prompt; drift-regen → the drift prompt), then the session
+// constraints folded into the system prompt via author.WithConstraints for ALL four
+// kinds (spec "refuse-solution" §1). A nil/empty constraints list leaves the system
+// prompt byte-identical to the pre-feature output (characterization-tested). It is a
+// pure function (no session/process state) so the constraints injection is testable
+// without spawning the harness.
+func reengagePrompts(req capture.Request, kind orchestrator.ReengageKind, base, change string, constraints []string, cfg *config.Config) (sys, user string) {
+	switch kind {
+	case orchestrator.KindReengageFollowup:
+		sys = author.FollowupPrompt(req, change) // change carries the failed output for followup
+		user = author.BuildUserMessage(req)
+	case orchestrator.KindReengageFinalPlaybook:
+		// FINAL-PLAYBOOK (stage 2): fresh when base=="" (change = the troubleshoot
+		// content to distill), amend when base!="" (fold change into the base).
+		sys = author.FinalPlaybookPrompt(req, base, change)
+		user = author.BuildUserMessage(req)
+	case orchestrator.KindReengageDriftRegen:
+		sys, user = author.DriftRegenPrompt(base, change) // base=current file, change=stale patch
+	default: // KindReengageRegenerate → the standard authoring prompt + folded KB
+		sys = author.SystemPrompt(req, author.KnowledgeBase(kb.Load(req.ProjectRoot)), driver.ResolveShellName(cfg.Driver.Shell))
+		user = author.BuildUserMessage(req)
+	}
+	return author.WithConstraints(sys, constraints), user
+}
+
 // buildReengageEvents builds the orchestrator.EventsFunc that re-engagement
 // (regenerate/followup/finalplaybook) uses to stream the model's live reasoning +
 // tool activity, exactly like the initial authoring. It lives in main (which imports
@@ -513,28 +541,13 @@ func reengageStructured(kind orchestrator.ReengageKind) bool {
 // text Agent only if config can't be loaded — otherwise the EventsFunc is always
 // returned and the orchestrator prefers it.
 func buildReengageEvents(req capture.Request, sess *session) orchestrator.EventsFunc {
-	return func(kind orchestrator.ReengageKind, base, change string) (<-chan agentstream.Event, func() error, error) {
+	return func(kind orchestrator.ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
 		// Per-invocation mcp-config so the re-engaged agent reaches the live backend.
 		mcpPath, removeMCP := sess.writeMCPConfig()
 
 		cfg, _ := config.Load()
 
-		var sys, user string
-		switch kind {
-		case orchestrator.KindReengageFollowup:
-			sys = author.FollowupPrompt(req, change) // change carries the failed output for followup
-			user = author.BuildUserMessage(req)
-		case orchestrator.KindReengageFinalPlaybook:
-			// FINAL-PLAYBOOK (stage 2): fresh when base=="" (change = the troubleshoot
-			// content to distill), amend when base!="" (fold change into the base).
-			sys = author.FinalPlaybookPrompt(req, base, change)
-			user = author.BuildUserMessage(req)
-		case orchestrator.KindReengageDriftRegen:
-			sys, user = author.DriftRegenPrompt(base, change) // base=current file, change=stale patch
-		default: // KindReengageRegenerate → the standard authoring prompt + folded KB
-			sys = author.SystemPrompt(req, author.KnowledgeBase(kb.Load(req.ProjectRoot)), driver.ResolveShellName(cfg.Driver.Shell))
-			user = author.BuildUserMessage(req)
-		}
+		sys, user := reengagePrompts(req, kind, base, change, constraints, cfg)
 
 		// cfg already loaded above.
 		events, wait, err := author.RunHarnessEvents(sys, user, author.AuthorOptions{

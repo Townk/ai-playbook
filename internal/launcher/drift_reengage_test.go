@@ -14,7 +14,7 @@ func TestDriftRegenReengage_DriftOnly(t *testing.T) {
 	if re == nil || !re.DriftRegenOnly || re.Events == nil {
 		t.Fatalf("driftRegenReengage must be DriftRegenOnly with Events wired; got %+v", re)
 	}
-	if _, _, err := re.Events(orchestrator.KindReengageFollowup, "", ""); err == nil {
+	if _, _, err := re.Events(orchestrator.KindReengageFollowup, "", "", nil); err == nil {
 		t.Error("drift-only Events must refuse a non-drift-regen kind")
 	}
 }
