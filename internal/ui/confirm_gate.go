@@ -11,9 +11,9 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/Townk/ai-playbook/internal/driver"
-	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/input"
+	"github.com/Townk/ai-playbook/pkg/driver"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 // groupSizes returns the per-dialog variable counts for n variables: ceil(n/5)

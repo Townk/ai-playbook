@@ -1,3 +1,12 @@
+// Package playbook is the public, harness-agnostic owner of the playbook
+// schema. It parses a Markdown playbook body into the canonical block model
+// (the {id=…}/{rollback=…}/{static}/file=/needs= grammar) and normalizes
+// fences, and is the single source of truth for that grammar. It imports
+// nothing beyond goldmark and the standard library, so any front-end,
+// validator, or embedded runner can consume the schema without pulling in
+// AI, rendering, or terminal concerns.
+//
+// Public API; pre-1.0, minor versions may still reshape it — see ADR-0009.
 package playbook
 
 import (

@@ -10,9 +10,9 @@ import (
 	"time"
 
 	"github.com/Townk/ai-playbook/internal/cache"
-	"github.com/Townk/ai-playbook/internal/driver"
-	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/pkg/driver"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 // cancelExit is the exit code RunStep reports for a step aborted by an

@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"github.com/Townk/ai-playbook/internal/capture"
-	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // TestOpenSession_ThreadsConfiguredShell is the regression guard that the

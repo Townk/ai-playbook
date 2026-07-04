@@ -33,10 +33,10 @@ import (
 	"github.com/Townk/ai-playbook/internal/autorun"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
-	"github.com/Townk/ai-playbook/internal/frontmatter"
-	"github.com/Townk/ai-playbook/internal/playbook"
 	"github.com/Townk/ai-playbook/internal/store"
 	"github.com/Townk/ai-playbook/internal/ui"
+	"github.com/Townk/ai-playbook/pkg/playbook"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 // storeLoadFn is the store.Load seam: resolves a slug to its Meta + body. Tests

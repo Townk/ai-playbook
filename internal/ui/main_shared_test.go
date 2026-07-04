@@ -7,7 +7,7 @@ import (
 
 	"testing"
 
-	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // sharedDriver is one *driver.Driver opened for the whole package's test run and

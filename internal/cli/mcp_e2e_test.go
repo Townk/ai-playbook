@@ -11,8 +11,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/tools"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // TestE2E_MCPForwardsToBackend is a live end-to-end of the claude path: a real

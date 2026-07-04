@@ -8,8 +8,8 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/capture"
-	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/kb"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // maxStderrTail caps how much captured harness stderr we surface on failure.

@@ -43,10 +43,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/internal/draft"
 	"github.com/Townk/ai-playbook/internal/floatinput"
 	"github.com/Townk/ai-playbook/internal/kb"
-	"github.com/Townk/ai-playbook/internal/playbook"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // runTimeout bounds a single agent-issued `run` (matches the orchestrator /
@@ -78,13 +78,13 @@ type Deps struct {
 	Ask         AskFunc
 	// OnPlaybook, when set, receives a validated structured playbook submitted via
 	// the submit_playbook tool. nil → submit_playbook replies "unavailable".
-	OnPlaybook func(pb playbook.Playbook)
+	OnPlaybook func(pb draft.Playbook)
 	// ValidateFileBlocks, when set, is called after schema validation and before
 	// OnPlaybook: it rejects the submission (as reply.Error) if any file= block
 	// targets a path that already exists in the project (the model should use a diff
 	// block to edit existing files). nil → skipped. The FS/project-root logic lives
 	// in the launcher, which injects it here so internal/tools stays FS-decoupled.
-	ValidateFileBlocks func(pb playbook.Playbook) error
+	ValidateFileBlocks func(pb draft.Playbook) error
 }
 
 // request is the inbound RPC: tool selector + the union of per-tool fields.
@@ -278,11 +278,11 @@ func (s *Server) doSubmitPlaybook(req request) reply {
 	if len(req.Playbook) == 0 {
 		return reply{Error: "submit_playbook requires a playbook field"}
 	}
-	var pb playbook.Playbook
+	var pb draft.Playbook
 	if err := json.Unmarshal(req.Playbook, &pb); err != nil {
 		return reply{Error: "could not parse playbook: " + err.Error()}
 	}
-	if err := playbook.Validate(pb, false); err != nil {
+	if err := draft.Validate(pb, false); err != nil {
 		return reply{Error: err.Error()}
 	}
 	if s.deps.ValidateFileBlocks != nil {

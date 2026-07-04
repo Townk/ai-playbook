@@ -8,8 +8,8 @@ import (
 	"testing"
 
 	"github.com/Townk/ai-playbook/internal/capture"
-	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/kb"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // sampleFailure is a representative failed-command request.

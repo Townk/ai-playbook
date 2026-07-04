@@ -7,9 +7,9 @@ import (
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
-	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/kb"
 	"github.com/Townk/ai-playbook/internal/reengage"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // reengagePrompts folds the session constraints into the per-kind system prompt via

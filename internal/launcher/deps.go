@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/Townk/ai-playbook/internal/autorun"
-	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 // depNode is one playbook resolved for dependency analysis: enough to render

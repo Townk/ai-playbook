@@ -3,7 +3,7 @@ package ui
 import (
 	"testing"
 
-	"github.com/Townk/ai-playbook/internal/playbook"
+	"github.com/Townk/ai-playbook/pkg/playbook"
 )
 
 // TestCollectRollbackTargets_TopLevelOnly pins the schema rule for rollback=

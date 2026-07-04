@@ -14,9 +14,9 @@ import (
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/draft"
 	"github.com/Townk/ai-playbook/internal/floatinput"
 	"github.com/Townk/ai-playbook/internal/mux"
-	"github.com/Townk/ai-playbook/internal/playbook"
 	"github.com/Townk/ai-playbook/internal/reengage"
 	"github.com/Townk/ai-playbook/internal/tools"
 	"github.com/Townk/ai-playbook/internal/triage"
@@ -513,11 +513,11 @@ func TestEscalate_AuthorsStructured(t *testing.T) {
 	}
 	defer sess.close()
 
-	pb := playbook.Playbook{
+	pb := draft.Playbook{
 		Title: "Fix the build",
-		Sections: []playbook.Section{{Heading: "Fix", Content: []playbook.ContentItem{
+		Sections: []draft.Section{{Heading: "Fix", Content: []draft.ContentItem{
 			{Kind: "code", Lang: "bash", Code: "make", ID: "fix"}}}},
-		Meta: playbook.Meta{Description: "fix it", ProjectBound: true},
+		Meta: draft.Meta{Description: "fix it", ProjectBound: true},
 	}
 	raw, _ := json.Marshal(pb)
 
@@ -531,7 +531,7 @@ func TestEscalate_AuthorsStructured(t *testing.T) {
 	}
 
 	// The shared body() closure: escalate's RunStream renders this on EOF as the
-	// finalDraft. With a captured playbook it is playbook.Render(sess.lastPB) — the
+	// finalDraft. With a captured playbook it is draft.Render(sess.lastPB) — the
 	// fan-out fallback is never consulted. Pass empty projectRoot/home: the block code
 	// ("make") contains no absolute paths, so portabilization is a no-op here.
 	body := structuredBody(sess, "", "", nil)
@@ -549,7 +549,7 @@ func TestValidateFileBlocks_RejectsExistingPath(t *testing.T) {
 		t.Fatal(err)
 	}
 	check := fileBlockValidator(dir) // the launcher's checker constructor
-	pb := playbook.Playbook{Sections: []playbook.Section{{Content: []playbook.ContentItem{
+	pb := draft.Playbook{Sections: []draft.Section{{Content: []draft.ContentItem{
 		{Kind: "code", File: "exists.go", Code: "y"}}}}}
 	if err := check(pb); err == nil || !strings.Contains(err.Error(), "diff") {
 		t.Fatalf("must reject existing file= path + suggest diff, got %v", err)

@@ -8,10 +8,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/internal/draft"
 	"github.com/Townk/ai-playbook/internal/floatinput"
 	"github.com/Townk/ai-playbook/internal/kb"
-	"github.com/Townk/ai-playbook/internal/playbook"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // newTestDriver opens a real driver against a minimal controlled ZDOTDIR (no
@@ -219,7 +219,7 @@ func TestServe_NilDriver(t *testing.T) {
 func TestServe_SubmitPlaybookEmptyPayload(t *testing.T) {
 	d := newTestDriver(t)
 	called := false
-	socket := serveTest(t, Deps{Driver: d, OnPlaybook: func(playbook.Playbook) { called = true }})
+	socket := serveTest(t, Deps{Driver: d, OnPlaybook: func(draft.Playbook) { called = true }})
 
 	// No Playbook field → should be rejected before OnPlaybook is called.
 	res, err := Dial(socket, Call{Tool: "submit_playbook"})
@@ -239,9 +239,9 @@ func TestServe_SubmitPlaybookNoHandler(t *testing.T) {
 	// No OnPlaybook wired → submit_playbook must return unavailable error.
 	socket := serveTest(t, Deps{Driver: d})
 
-	pb := playbook.Playbook{
+	pb := draft.Playbook{
 		Title:    "T",
-		Sections: []playbook.Section{{Heading: "S", Content: []playbook.ContentItem{{Kind: "code", Lang: "bash", Code: "echo hi", ID: "fix"}}}},
+		Sections: []draft.Section{{Heading: "S", Content: []draft.ContentItem{{Kind: "code", Lang: "bash", Code: "echo hi", ID: "fix"}}}},
 	}
 	raw, _ := json.Marshal(pb)
 
@@ -259,14 +259,14 @@ func TestServe_SubmitPlaybookNoHandler(t *testing.T) {
 
 func TestServe_SubmitPlaybook(t *testing.T) {
 	d := newTestDriver(t)
-	var got playbook.Playbook
+	var got draft.Playbook
 	gotN := 0
-	socket := serveTest(t, Deps{Driver: d, OnPlaybook: func(pb playbook.Playbook) { got = pb; gotN++ }})
+	socket := serveTest(t, Deps{Driver: d, OnPlaybook: func(pb draft.Playbook) { got = pb; gotN++ }})
 
-	pb := playbook.Playbook{
+	pb := draft.Playbook{
 		Title:    "T",
-		Sections: []playbook.Section{{Heading: "S", Content: []playbook.ContentItem{{Kind: "code", Lang: "bash", Code: "echo hi", ID: "fix"}}}},
-		Meta:     playbook.Meta{Description: "d", ProjectBound: true},
+		Sections: []draft.Section{{Heading: "S", Content: []draft.ContentItem{{Kind: "code", Lang: "bash", Code: "echo hi", ID: "fix"}}}},
+		Meta:     draft.Meta{Description: "d", ProjectBound: true},
 	}
 	raw, _ := json.Marshal(pb)
 
@@ -282,7 +282,7 @@ func TestServe_SubmitPlaybook(t *testing.T) {
 	}
 
 	// An invalid playbook (no runnable block) is rejected and NOT delivered.
-	bad, _ := json.Marshal(playbook.Playbook{Title: "T", Sections: []playbook.Section{{Heading: "S"}}})
+	bad, _ := json.Marshal(draft.Playbook{Title: "T", Sections: []draft.Section{{Heading: "S"}}})
 	res, err = Dial(socket, Call{Tool: "submit_playbook", Playbook: bad})
 	if err != nil {
 		t.Fatalf("Dial bad submit: %v", err)
@@ -304,19 +304,19 @@ func TestServe_SubmitPlaybook_ValidateFileBlocksRejects(t *testing.T) {
 	fakeErr := errors.New(`file "main.go" already exists — use a diff block to edit an existing file (file= is for new files)`)
 	socket := serveTest(t, Deps{
 		Driver:     d,
-		OnPlaybook: func(playbook.Playbook) { called = true },
-		ValidateFileBlocks: func(pb playbook.Playbook) error {
+		OnPlaybook: func(draft.Playbook) { called = true },
+		ValidateFileBlocks: func(pb draft.Playbook) error {
 			return fakeErr
 		},
 	})
 
 	// A valid playbook with a file= block (lang required for the code block to pass Validate).
-	pb := playbook.Playbook{
+	pb := draft.Playbook{
 		Title: "T",
-		Sections: []playbook.Section{{Heading: "S", Content: []playbook.ContentItem{
+		Sections: []draft.Section{{Heading: "S", Content: []draft.ContentItem{
 			{Kind: "code", Lang: "go", Code: "package main", File: "main.go"},
 		}}},
-		Meta: playbook.Meta{Description: "d", ProjectBound: true},
+		Meta: draft.Meta{Description: "d", ProjectBound: true},
 	}
 	raw, _ := json.Marshal(pb)
 

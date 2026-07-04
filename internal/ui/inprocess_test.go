@@ -6,9 +6,9 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 	"github.com/Townk/ai-playbook/internal/reengage"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // newInProcModel builds a model wired to a real orchestrator over a controlled-rc

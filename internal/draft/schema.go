@@ -1,8 +1,10 @@
-// Package playbook defines the structured playbook schema the authoring model
-// fills via the submit_playbook MCP tool, plus the deterministic markdown
-// renderer and semantic validation. The model returns DATA; we render the
-// markdown, so structure (H1, sections, block tags) cannot drift.
-package playbook
+// Package draft defines the AI-layer submit-time playbook DTO: the structured
+// schema the authoring model fills via the submit_playbook MCP tool, plus the
+// deterministic markdown renderer and submit-time semantic validation. The
+// model returns DATA; we render the markdown, so structure (H1, sections,
+// block tags) cannot drift. This is an internal AI-layer surface — the public,
+// harness-agnostic schema owner is pkg/playbook (see ADR-0009).
+package draft
 
 // Playbook is the whole document. Title is the playbook name (rendered as the H1
 // "# <Title>" and used as the saved front-matter name). Front matter other than

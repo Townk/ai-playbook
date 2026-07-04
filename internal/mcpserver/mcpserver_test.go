@@ -13,7 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/Townk/ai-playbook/internal/playbook"
+	"github.com/Townk/ai-playbook/internal/draft"
 	"github.com/Townk/ai-playbook/internal/tools"
 )
 
@@ -143,8 +143,8 @@ func TestForward_BackendUnreachable(t *testing.T) {
 func TestForward_SubmitPlaybook(t *testing.T) {
 	fb := startFakeBackend(t, tools.Result{OK: true})
 
-	pb := playbook.Playbook{Title: "T", Sections: []playbook.Section{{Heading: "S",
-		Content: []playbook.ContentItem{{Kind: "code", Lang: "bash", Code: "x", ID: "fix"}}}}}
+	pb := draft.Playbook{Title: "T", Sections: []draft.Section{{Heading: "S",
+		Content: []draft.ContentItem{{Kind: "code", Lang: "bash", Code: "x", ID: "fix"}}}}}
 	raw, _ := json.Marshal(pb)
 	res, err := forward(fb.socket, tools.Call{Tool: "submit_playbook", Playbook: raw})
 	if err != nil {
@@ -163,7 +163,7 @@ func TestForward_SubmitPlaybook(t *testing.T) {
 }
 
 // TestSubmitPlaybook_SchemaShape asserts that the submit_playbook tool's input
-// schema is generated from playbook.Playbook (i.e. it mentions the playbook
+// schema is generated from draft.Playbook (i.e. it mentions the playbook
 // fields). The brief uses srv.ListTools which does not exist on *mcp.Server;
 // ListTools lives on mcp.ClientSession. We connect a client to the server via
 // mcp.NewInMemoryTransports and call cs.ListTools instead.

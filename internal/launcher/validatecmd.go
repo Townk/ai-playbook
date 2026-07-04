@@ -35,9 +35,9 @@ import (
 	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/config"
-	"github.com/Townk/ai-playbook/internal/frontmatter"
-	"github.com/Townk/ai-playbook/internal/playbook"
-	"github.com/Townk/ai-playbook/internal/validate"
+	"github.com/Townk/ai-playbook/pkg/playbook"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
+	"github.com/Townk/ai-playbook/pkg/playbook/validate"
 )
 
 // reviewStreamFn is the author.ReviewStream seam: the AI review pass. Tests

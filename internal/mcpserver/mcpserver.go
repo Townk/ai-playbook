@@ -18,7 +18,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/Townk/ai-playbook/internal/playbook"
+	"github.com/Townk/ai-playbook/internal/draft"
 	"github.com/Townk/ai-playbook/internal/tools"
 )
 
@@ -162,8 +162,8 @@ func askHandler(socketPath string) mcp.ToolHandlerFor[askInput, any] {
 	}
 }
 
-func submitPlaybookHandler(socketPath string) mcp.ToolHandlerFor[playbook.Playbook, any] {
-	return func(_ context.Context, _ *mcp.CallToolRequest, in playbook.Playbook) (*mcp.CallToolResult, any, error) {
+func submitPlaybookHandler(socketPath string) mcp.ToolHandlerFor[draft.Playbook, any] {
+	return func(_ context.Context, _ *mcp.CallToolRequest, in draft.Playbook) (*mcp.CallToolResult, any, error) {
 		raw, err := json.Marshal(in)
 		if err != nil {
 			return &mcp.CallToolResult{IsError: true, Content: []mcp.Content{&mcp.TextContent{Text: "could not encode playbook: " + err.Error()}}}, nil, nil

@@ -13,8 +13,8 @@ import (
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/draft"
 	"github.com/Townk/ai-playbook/internal/mux"
-	"github.com/Townk/ai-playbook/internal/playbook"
 	"github.com/Townk/ai-playbook/internal/reengage"
 	"github.com/Townk/ai-playbook/internal/tools"
 	"github.com/Townk/ai-playbook/internal/triage"
@@ -290,10 +290,10 @@ func TestCapturedMetaSeam_MapsEnv(t *testing.T) {
 	}
 	defer sess.close()
 
-	pb := playbook.Playbook{
+	pb := draft.Playbook{
 		Title:    "T",
-		Sections: []playbook.Section{{Heading: "S", Content: []playbook.ContentItem{{Kind: "code", Lang: "bash", Code: "echo ok", ID: "run"}}}},
-		Meta:     playbook.Meta{Env: []playbook.EnvVar{{Name: "FOO", Why: "bar"}}},
+		Sections: []draft.Section{{Heading: "S", Content: []draft.ContentItem{{Kind: "code", Lang: "bash", Code: "echo ok", ID: "run"}}}},
+		Meta:     draft.Meta{Env: []draft.EnvVar{{Name: "FOO", Why: "bar"}}},
 	}
 	raw, _ := json.Marshal(pb)
 
@@ -328,12 +328,12 @@ func TestStructuredBody_PortabilizesProjectBound(t *testing.T) {
 	}
 	defer sess.close()
 
-	pb := playbook.Playbook{
+	pb := draft.Playbook{
 		Title: "T",
-		Meta:  playbook.Meta{ProjectBound: true},
-		Sections: []playbook.Section{{
+		Meta:  draft.Meta{ProjectBound: true},
+		Sections: []draft.Section{{
 			Heading: "S",
-			Content: []playbook.ContentItem{
+			Content: []draft.ContentItem{
 				{Kind: "code", Lang: "bash", ID: "fix", Code: "cd /proj/app"},
 			},
 		}},
@@ -363,10 +363,10 @@ func TestCreate_StructuredRenderAndSeam(t *testing.T) {
 	}
 	defer sess.close()
 
-	pb := playbook.Playbook{
+	pb := draft.Playbook{
 		Title:    "Restore wrapper",
-		Sections: []playbook.Section{{Heading: "Fix", Content: []playbook.ContentItem{{Kind: "code", Lang: "bash", Code: "gradle wrapper", ID: "fix"}}}},
-		Meta:     playbook.Meta{Description: "Restore the wrapper", Category: "Android / build", Tags: []string{"gradle"}, ProjectBound: true},
+		Sections: []draft.Section{{Heading: "Fix", Content: []draft.ContentItem{{Kind: "code", Lang: "bash", Code: "gradle wrapper", ID: "fix"}}}},
+		Meta:     draft.Meta{Description: "Restore the wrapper", Category: "Android / build", Tags: []string{"gradle"}, ProjectBound: true},
 	}
 	raw, _ := json.Marshal(pb)
 
@@ -381,7 +381,7 @@ func TestCreate_StructuredRenderAndSeam(t *testing.T) {
 	}
 
 	// The captured playbook renders deterministically (body-only markdown).
-	body := playbook.Render(*sess.lastPB.Load())
+	body := draft.Render(*sess.lastPB.Load())
 	if !strings.Contains(body, "# Restore wrapper") || !strings.Contains(body, "```bash {id=fix}") {
 		t.Fatalf("rendered body wrong:\n%s", body)
 	}
@@ -411,8 +411,8 @@ func TestReengageBody_RendersCapturedPlaybook(t *testing.T) {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
 	defer sess.close()
-	pb := playbook.Playbook{Title: "T", Sections: []playbook.Section{{Heading: "S",
-		Content: []playbook.ContentItem{{Kind: "code", Lang: "bash", ID: "fix", Code: "echo hi"}}}}}
+	pb := draft.Playbook{Title: "T", Sections: []draft.Section{{Heading: "S",
+		Content: []draft.ContentItem{{Kind: "code", Lang: "bash", ID: "fix", Code: "echo hi"}}}}}
 	raw, _ := json.Marshal(pb)
 	res, err := tools.Dial(sess.socket, tools.Call{Tool: "submit_playbook", Playbook: raw})
 	if err != nil || !res.OK {

@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Townk/ai-playbook/internal/playbook"
+	"github.com/Townk/ai-playbook/pkg/playbook"
 )
 
 // blockCorpus is the shared fixture corpus pinning the block-parse contract

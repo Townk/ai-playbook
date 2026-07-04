@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Townk/ai-playbook/internal/autorun"
-	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 func TestStartAssisted_SetsCursorToFirstRunnable(t *testing.T) {

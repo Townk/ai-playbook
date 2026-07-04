@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The playbook schema and the PTY driver are now importable as public `pkg/`
+  packages: `pkg/playbook` (the block/fence parser — the schema owner),
+  `pkg/playbook/frontmatter` and `pkg/playbook/validate` (front-matter
+  assembly and structural validation), and `pkg/driver` (the unaltered-shell
+  PTY driver) — the first stable, embeddable pieces of an AI-independent
+  playbook toolkit (see ADR-0009). Pre-1.0 the API may still reshape.
+
 ### Fixed
 
 - Framed dialogs no longer leak the terminal's default background through

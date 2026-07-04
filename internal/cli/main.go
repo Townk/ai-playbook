@@ -26,10 +26,10 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/climeta"
 	diffpkg "github.com/Townk/ai-playbook/internal/diff"
-	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/launcher"
 	"github.com/Townk/ai-playbook/internal/mcpserver"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // Version is the binary's version string. It defaults to "dev" for local

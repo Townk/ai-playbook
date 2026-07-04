@@ -20,7 +20,7 @@ import (
 	"github.com/yuin/goldmark/text"
 
 	"github.com/Townk/ai-playbook/internal/orchestrator"
-	"github.com/Townk/ai-playbook/internal/playbook"
+	"github.com/Townk/ai-playbook/pkg/playbook"
 )
 
 // admon describes one admonition type: display title, nerd-font icon glyph, and

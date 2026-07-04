@@ -35,6 +35,8 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 
 - [ ] `ask --version` prints a bare `v0.9.0` while `ai-playbook`/`apb` print name-aware `<prog> <version>` — align ask's version line with its siblings (2026-07-04)
 
+- [ ] Finish the `pkg/` promotion (ADR-0009 step 5): `pkg/runner`←orchestrator, `pkg/store`←store, `pkg/dialog`←input are DEFERRED — each transitively imports private leaves (orchestrator→diff/mux, store→config/capture, input→theme; all reach theme/config/cache). Needs a layout decision: promote the shared leaves (`theme`/`diff`/`mux`/`config`/`capture`/`cache`) into `pkg/` too, or narrow the couplings behind runner/store/dialog-owned interfaces. `internal/autorun`→`pkg/runner/auto` blocked on the same (cache + orchestrator) (2026-07-04)
+
 ## Ideas
 
 - [ ] (low priority) E2E/integration tests for the integration entry points (`launcher` entry points, `cmd` `selftest`/`mcpMain`) — spawn the real binary + drive a TUI/PTY. These render via live mux/model/TUI/driver so they're not unit-testable; coverage there is intentionally low. Would push total coverage 80%→~90% (2026-06-27)

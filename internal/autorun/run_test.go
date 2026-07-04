@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 func TestRun_MissingRequiredEnv_ExitsBeforeDriver(t *testing.T) {

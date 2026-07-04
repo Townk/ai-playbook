@@ -92,3 +92,43 @@ may still move; promotion happens once the boundaries settle, in this order:
 - `internal/input` gains a second consumer and therefore an external
   compatibility bar: widget behavior changes must consider `ask`'s documented
   contract, not just ai-playbook's own dialogs.
+
+## Promotion (2026-07-04): partial — clean core surfaces promoted; coupled surfaces deferred
+
+Step 5 was executed after steps 1–4 landed (`playbook.ParseBlocks` schema
+owner, orchestrator reengagement split, the `ask` binary, `ui.Run(Options)`).
+Purity verification (`go list` over each candidate's import graph; a `pkg/`
+package may import only stdlib, third-party deps, and other `pkg/` packages —
+never `internal/`) found that three of the six planned surfaces are
+transitively coupled to leaf packages the layout keeps private (`internal/`).
+Promoting those leaves is an unapproved layout change, so those three surfaces
+are DEFERRED; the clean surfaces were promoted in this single event.
+
+**Promoted (verified `pkg/`-pure):**
+
+- `internal/playbook` (schema half) → `pkg/playbook` — `ParseBlocks`, `Block`,
+  `ParseFenceInfo`, `NormalizeFences`, and the `{id=…}`/`{rollback=…}`/
+  `{static}`/`file=`/`needs=` grammar (the schema owner).
+- `internal/frontmatter` → `pkg/playbook/frontmatter`.
+- `internal/validate` → `pkg/playbook/validate`.
+- `internal/driver` → `pkg/driver`.
+- The AI submit-time DTO + `Render` + submit-time `Validate` (the other half of
+  `internal/playbook`) → `internal/draft` — AI layer, stays private.
+
+**Deferred — BLOCKED on private-leaf coupling** (the leaves are `internal/` per
+the ROADMAP repo-layout track; promoting them was not part of the approved
+pick set, so it is not done unilaterally):
+
+- `pkg/runner` ← `internal/orchestrator`: imports `internal/diff`
+  (→`internal/theme`) and `internal/mux` (→`internal/config`→`internal/cache`).
+- `pkg/store` ← `internal/store`: imports `internal/config` (→`internal/cache`)
+  and `internal/capture` (→`internal/mux`→`internal/config`→`internal/cache`).
+- `pkg/dialog` ← `internal/input`: imports `internal/theme`.
+- `internal/autorun` → `pkg/runner/auto`: NOT clean (imports `internal/cache`
+  and `internal/orchestrator`) — stays `internal/`.
+
+**Open decision (blocks the remaining promotion):** promote the shared leaves
+(`theme`, `diff`, `mux`, `config`, `capture`, `cache`) into `pkg/` so the
+executor/store/dialog can follow, or keep those surfaces `internal/`. The
+"single event" goal is thereby amended to: the clean surfaces promoted now; the
+coupled surfaces once the support-package layout is decided.

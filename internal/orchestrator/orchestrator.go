@@ -26,8 +26,8 @@ import (
 	"time"
 
 	"github.com/Townk/ai-playbook/internal/diff"
-	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // defaultTimeout bounds a single run block (matches the broker's

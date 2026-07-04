@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/Townk/ai-playbook/internal/config"
-	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 // writePB writes a valid playbook file (front matter + a minimal body) into dir

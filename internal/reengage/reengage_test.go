@@ -10,7 +10,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
-	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // fakeAgent records the system prompt it was called with and returns a canned

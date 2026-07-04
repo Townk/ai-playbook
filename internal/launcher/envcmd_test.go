@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/store"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 func TestResolveEnvJSON(t *testing.T) {

@@ -11,10 +11,10 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/config"
-	"github.com/Townk/ai-playbook/internal/driver"
-	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/launcher"
 	"github.com/Townk/ai-playbook/internal/reengage"
+	"github.com/Townk/ai-playbook/pkg/driver"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 // finalizeDoc is the testable core of the `finalize` subcommand: it backfills

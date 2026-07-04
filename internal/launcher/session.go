@@ -18,16 +18,16 @@ import (
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
-	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/internal/draft"
 	"github.com/Townk/ai-playbook/internal/floatinput"
-	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/kb"
 	"github.com/Townk/ai-playbook/internal/mux"
-	"github.com/Townk/ai-playbook/internal/playbook"
 	"github.com/Townk/ai-playbook/internal/reengage"
 	"github.com/Townk/ai-playbook/internal/tools"
 	"github.com/Townk/ai-playbook/internal/triage"
 	"github.com/Townk/ai-playbook/internal/ui"
+	"github.com/Townk/ai-playbook/pkg/driver"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 // sessionMain is the `ai-playbook session` subcommand: the persistent docked
@@ -190,7 +190,7 @@ type session struct {
 	m       mux.Mux           // already-selected mux (never re-loaded); used for ask seam + asker
 	bridge  *askbridge.Bridge // no-mux ask overlay bridge (nil when a real mux is present)
 
-	lastPB atomic.Pointer[playbook.Playbook] // the most recent captured playbook (for the meta seam)
+	lastPB atomic.Pointer[draft.Playbook] // the most recent captured playbook (for the meta seam)
 }
 
 // bridgeAskFunc adapts an askbridge.Bridge to a tools.AskFunc: the agent's `ask`
@@ -265,7 +265,7 @@ func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell
 	// captured-meta seam via atomic.Load, so no data race). Store is the sole writer;
 	// Load is called only after the claude round-trip completes on the create goroutine.
 	sess := &session{drv: drv, socket: socket, selfExe: selfExe, m: m, bridge: bridge}
-	onPlaybook := func(p playbook.Playbook) {
+	onPlaybook := func(p draft.Playbook) {
 		sess.lastPB.Store(&p)
 	}
 
@@ -298,8 +298,8 @@ func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell
 // and directs the model to use a diff block instead. A path that does NOT exist is
 // accepted (nil error). An empty projectRoot causes filepath.Join to treat File as
 // relative to the process cwd — still functional.
-func fileBlockValidator(projectRoot string) func(playbook.Playbook) error {
-	return func(pb playbook.Playbook) error {
+func fileBlockValidator(projectRoot string) func(draft.Playbook) error {
+	return func(pb draft.Playbook) error {
 		for _, sec := range pb.Sections {
 			for _, item := range sec.Content {
 				if item.Kind != "code" || item.File == "" {
@@ -476,8 +476,8 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 
 // reengageStructured reports whether a re-engagement kind authors a playbook
 // (submit_playbook) vs continuing the troubleshoot in markdown. Followup is
-// markdown continuation; FinalPlaybook + Regenerate produce a playbook.
-// DriftRegen returns a raw unified diff (text), not a structured playbook.
+// markdown continuation; FinalPlaybook + Regenerate produce a draft.
+// DriftRegen returns a raw unified diff (text), not a structured draft.
 func reengageStructured(kind reengage.ReengageKind) bool {
 	return kind != reengage.KindReengageFollowup && kind != reengage.KindReengageDriftRegen
 }
@@ -883,7 +883,7 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *
 		readyCh <- reengageReady(d, req, sess, cwd)
 	}()
 
-	// Build the viewer Options for the served playbook. The re-engagement context, the
+	// Build the viewer Options for the served draft. The re-engagement context, the
 	// shared driver, and the request-input-float asker (the `f` keybind) all depend on
 	// the still-opening session, so they are NOT set here — they are folded into the
 	// OrchReady the background goroutine delivers on Ready once the open lands. Only the

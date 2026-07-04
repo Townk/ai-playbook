@@ -11,8 +11,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/mux"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // newTestDriver spawns a controlled-rc zsh (a minimal .zshrc — no p10k/mise), the

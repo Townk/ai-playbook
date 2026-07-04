@@ -4,7 +4,7 @@
 // Waiting… + elapsed + model-activity line) INLINE below the shell prompt while
 // the agent authors, drains the authoring stream to collect the COMPLETE playbook,
 // persists it (cache + the store-file commit wired through the viewer's Reengage),
-// and only THEN opens the fullscreen viewer with the finished playbook. The flow
+// and only THEN opens the fullscreen viewer with the finished draft. The flow
 // is identical with or without a multiplexer.
 //
 // The agent's `ask` tool is fully supported during authoring: with a mux the float
@@ -29,12 +29,12 @@ import (
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
-	"github.com/Townk/ai-playbook/internal/driver"
+	"github.com/Townk/ai-playbook/internal/draft"
 	"github.com/Townk/ai-playbook/internal/input"
-	"github.com/Townk/ai-playbook/internal/playbook"
 	"github.com/Townk/ai-playbook/internal/reengage"
 	"github.com/Townk/ai-playbook/internal/triage"
 	"github.com/Townk/ai-playbook/internal/ui"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // ── progress+ask host ───────────────────────────────────────────────────────
@@ -262,9 +262,9 @@ func structuredBody(sess *session, projectRoot, home string, fallback func() str
 		if last := sess.lastPB.Load(); last != nil {
 			pb := *last
 			if pb.Meta.ProjectBound {
-				playbook.Portabilize(&pb, projectRoot, home)
+				draft.Portabilize(&pb, projectRoot, home)
 			}
-			return playbook.Render(pb)
+			return draft.Render(pb)
 		}
 	}
 	if fallback != nil {
@@ -354,7 +354,7 @@ func capturedMetaSeam(sess *session) func(doc string) (reengage.PlaybookMeta, er
 // authoring event stream, DRAIN it to collect the COMPLETE playbook body while the
 // inline progress host (spinner + activity + the no-mux ask) renders on /dev/tty,
 // persist the body (cache store now + the store-file commit wired through the
-// viewer's Reengage), then open the fullscreen viewer with the finished playbook.
+// viewer's Reengage), then open the fullscreen viewer with the finished draft.
 // On a stream-start failure (harness missing/unsupported) it falls back to the
 // existing text author path. NO triage / classify / cache-hit serve is consulted.
 func createAuthorWithProgress(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, sess *session, cfg *config.Config) int {

@@ -32,7 +32,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 // envArgs is resolveEnvArgs's parsed result: the single playbook source.

@@ -2,6 +2,8 @@
 // environment 100% unaltered — no config edits, no env overrides, no prompt/hook
 // tampering, no framework names. See docs: the own-sentinel + idle/probe-readiness
 // + main-context + foreground-pgrp approach validated by the PoC.
+//
+// Public API; pre-1.0, minor versions may still reshape it — see ADR-0009.
 package driver
 
 import (

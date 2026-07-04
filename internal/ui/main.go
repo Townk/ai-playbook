@@ -15,11 +15,11 @@ import (
 	"github.com/mattn/go-runewidth"
 
 	"github.com/Townk/ai-playbook/internal/askbridge"
-	"github.com/Townk/ai-playbook/internal/driver"
-	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 	"github.com/Townk/ai-playbook/internal/reengage"
+	"github.com/Townk/ai-playbook/pkg/driver"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 // Options configures Run — the in-process render+drive viewer for a finalized

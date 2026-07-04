@@ -157,11 +157,14 @@ any wiring into a particular shell/dotfiles setup is separate and secondary.
   config), `pkg/` only for anything genuinely meant to be importable. Largely
   adopted (`cmd/` + `internal/`). **DECIDED (ADR-0009, 2026-07-04): the playbook
   schema + executor (+ store) AND the interaction toolkit ARE meant to be
-  importable and will be promoted to `pkg/`** in ONE event. Staging progress:
-  steps 1–3 DONE at v0.9.0 (`playbook.ParseBlocks` single schema owner; the
-  AI-free executor with `internal/reengage` extracted; the standalone `ask`
-  binary shipped). Remaining: `ui.Run(Options)` (step 4), then the single
-  `pkg/` promotion (step 5).
+  importable and will be promoted to `pkg/`.** Steps 1–4 DONE (schema owner,
+  AI-free executor, `ask` binary, `ui.Run(Options)`). Step 5 PARTIAL: the clean
+  surfaces are promoted — `pkg/playbook` (+`/frontmatter`, +`/validate`) and
+  `pkg/driver`; the DTO went to `internal/draft`. The executor (`pkg/runner`),
+  store (`pkg/store`), and dialog toolkit (`pkg/dialog`) are DEFERRED — each is
+  transitively coupled to private leaves (`diff`/`mux`/`theme`/`config`/
+  `capture`/`cache`); finishing the promotion needs a decision on whether those
+  leaves join `pkg/` (see ADR-0009 "Promotion (2026-07-04)").
 - **README.md** — overview, install, quick start, the command surface, with
   badges: CI status, **test coverage**, Go Report Card, latest release,
   license. — DONE: also now covers shell completion, man pages, and the

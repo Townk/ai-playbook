@@ -7,6 +7,8 @@
 // performs no I/O: the environment is read through a func(name)(value,bool)
 // lookup supplied by the caller, so every function here is deterministic and
 // testable. Driver/persistence/render wiring lives in later stages.
+//
+// Public API; pre-1.0, minor versions may still reshape it — see ADR-0009.
 package frontmatter
 
 import (

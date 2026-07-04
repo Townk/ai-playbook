@@ -11,10 +11,10 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/askbridge"
 	idiff "github.com/Townk/ai-playbook/internal/diff"
-	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 	"github.com/Townk/ai-playbook/internal/reengage"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 type model struct {

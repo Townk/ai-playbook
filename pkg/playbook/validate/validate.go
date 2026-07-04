@@ -4,6 +4,8 @@
 // package (for the FrontMatter type) and the Go standard library, so it can
 // be driven from tests, the CLI launcher, or any future caller without
 // pulling in rendering or terminal concerns.
+//
+// Public API; pre-1.0, minor versions may still reshape it — see ADR-0009.
 package validate
 
 import (
@@ -11,7 +13,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 // Severity classifies a Finding: Error findings fail validation (drive a

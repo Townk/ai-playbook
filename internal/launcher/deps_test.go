@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/Townk/ai-playbook/internal/autorun"
-	"github.com/Townk/ai-playbook/internal/frontmatter"
+	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
 // fakeLoader builds a depNode loader from an in-memory slug -> depends_on
