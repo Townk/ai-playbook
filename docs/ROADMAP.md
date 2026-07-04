@@ -3,7 +3,7 @@
 Durable single source of truth for the feature roadmap. Each phase lists its
 goal, status, settled decisions, and open questions. Per-phase, step-by-step
 implementation plans are written just-in-time when a phase starts (they're
-ephemeral; this doc is not). Last updated: 2026-07-04 (v0.9.0).
+ephemeral; this doc is not). Last updated: 2026-07-04 (v0.10.0).
 
 ## Vision
 
@@ -36,10 +36,11 @@ with the **project-local store** below.
 on top of stable public contracts (the `pkg/` API, the `ask` CLI, the playbook
 schema), a production-grade executor, and CI we trust. Milestones:
 
-- **v0.10 — the code matches the architecture.** ADR-0009 steps 4–5
-  (`ui.Run(Options)`, the single `pkg/` promotion) plus the deep
-  maintainability items that get harder with every feature: model.go
-  decomposition, launcher consolidation, input wrapper folding.
+- **v0.10 — the code matches the architecture.** DONE (2026-07-04):
+  `ui.Run(Options)`; model.go decomposed (3618→869 + sub-structs); launcher
+  consolidated; input wrappers folded + the frame-bg contract; `pkg/`
+  promotion shipped for playbook/driver/store/dialog — `pkg/runner` deferred
+  to its own design task (mux/diff coupling; see BACKLOG).
 - **v0.11 — Phase 6, cross-block output piping.** The largest remaining core
   feature, designed against the now-settled schema owner and AI-free executor.
   Rides with executor-grade polish: JUnit/XML `run --auto` report, the
