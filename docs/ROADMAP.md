@@ -3,7 +3,7 @@
 Durable single source of truth for the feature roadmap. Each phase lists its
 goal, status, settled decisions, and open questions. Per-phase, step-by-step
 implementation plans are written just-in-time when a phase starts (they're
-ephemeral; this doc is not). Last updated: 2026-07-03.
+ephemeral; this doc is not). Last updated: 2026-07-04.
 
 ## Vision
 
@@ -123,11 +123,12 @@ any wiring into a particular shell/dotfiles setup is separate and secondary.
   [golang-standards/project-layout](https://github.com/golang-standards/project-layout):
   `cmd/ai-playbook/` (the binary `main`), `internal/` (the private packages: ui,
   author, driver, orchestrator, triage, cache, capture, mux, tools, input,
-  config), `pkg/` only for anything genuinely meant to be importable (candidate:
-  `store`). Foundational — do this FIRST (before Phase 1 adds the `store`
-  package), since it rewrites every import path. **[near-term]** — largely
-  adopted (`cmd/` + `internal/`); the `internal/cli` entrypoint extraction
-  (2026-07-03) pushed this further, no `pkg/` yet.
+  config), `pkg/` only for anything genuinely meant to be importable. Largely
+  adopted (`cmd/` + `internal/`). **DECIDED (ADR-0009, 2026-07-04): the playbook
+  schema + executor (+ store) ARE meant to be importable and will be promoted
+  to `pkg/`** — staged behind the layering extractions (block parser out of
+  `ui.Render`, re-engagement out of the orchestrator, `ui.Run(Options)`);
+  promotion is the final, mechanical step once those boundaries settle.
 - **README.md** — overview, install, quick start, the command surface, with
   badges: CI status, **test coverage**, Go Report Card, latest release,
   license. — DONE: also now covers shell completion, man pages, and the
@@ -348,6 +349,9 @@ the same frame-background bleed and want the same treatment.
 
 ## Phase 5 — Knowledge base (remember / recall)
 
+**Layer note (ADR-0009): a pure AI-layer feature — independent of the
+playbook-first extractions; may proceed in parallel at any time.**
+
 **Goal:** turn the agent's `remember` facts into a usable, recalled KB so
 authoring gets smarter per project over time. **Status:** to be designed (own
 brainstorm → spec). The `remember` MCP tool already persists facts; this phase
@@ -357,6 +361,11 @@ adds storage/browse/search + recall of relevant facts during
 ---
 
 ## Phase 6 — Cross-block output piping
+
+**Re-classified (ADR-0009, 2026-07-04): this is a CORE schema/executor feature,
+not an AI feature — sequence it AFTER the playbook-first layering extractions
+(canonical `ParseBlocks` owner + AI-free executor) so it is designed against
+the schema's owner, not the renderer.**
 
 **Goal:** let a runnable block consume a prior block's output — pipe the
 `{command, exit, output}` a step produced into a downstream step (beyond the
