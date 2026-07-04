@@ -208,17 +208,18 @@ func Render(md string, width int, opts RenderOpts) ([]Line, []Button, []Block) {
 	}
 	src := []byte(playbook.NormalizeFences(md))
 	doc := goldmarkMD.Parser().Parse(text.NewReader(src))
+	parsed := playbook.ParseBlocks(md)
 	r := &renderer{
 		src:             src,
 		width:           width,
-		parsed:          playbook.ParseBlocks(md),
+		parsed:          parsed,
 		states:          opts.States,
 		flashKey:        opts.FlashKey,
 		shellDisabled:   opts.ShellDisabled,
 		reengageAvail:   !opts.NoReengage,
 		rollbackAvail:   opts.RollbackAvail,
 		muxActive:       opts.MuxActive,
-		rollbackTargets: collectRollbackTargets(doc, src),
+		rollbackTargets: collectRollbackTargets(parsed),
 		rollbackForNum:  map[string]int{},
 		readyID:         opts.ReadyID,
 	}
@@ -1176,23 +1177,19 @@ func countBlocks(md string) int {
 	return len(playbook.ParseBlocks(md))
 }
 
-// collectRollbackTargets pre-scans the parsed document for every fenced block's
-// rollback= attribute and returns the set of referenced target IDs. A block in this set
-// is rollback-only — it renders without its own run/play button.
-func collectRollbackTargets(doc ast.Node, src []byte) map[string]bool {
+// collectRollbackTargets returns the set of block IDs referenced by some block's
+// rollback= attribute; a block in this set is rollback-only — it renders without its
+// own run/play button. It derives the set from playbook.ParseBlocks (the single
+// schema owner, TOP-LEVEL blocks only) rather than walking the full AST, so a
+// rollback= tag on code nested in a list/blockquote is inert — the renderer and
+// `validate` can no longer disagree about which blocks carry rollback authority.
+func collectRollbackTargets(blocks []playbook.Block) map[string]bool {
 	targets := map[string]bool{}
-	_ = ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-		if !entering {
-			return ast.WalkContinue, nil
+	for _, b := range blocks {
+		if b.Rollback != "" {
+			targets[b.Rollback] = true
 		}
-		if fc, ok := n.(*ast.FencedCodeBlock); ok && fc.Info != nil {
-			_, attrs, _ := playbook.ParseFenceInfo(string(fc.Info.Segment.Value(src)))
-			if rb := attrs["rollback"]; rb != "" {
-				targets[rb] = true
-			}
-		}
-		return ast.WalkContinue, nil
-	})
+	}
 	return targets
 }
 

@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `rollback=` authority now follows the schema rule — only top-level blocks
+  count — so the renderer and `validate` can no longer disagree about which
+  blocks are rollback commands.
+
 ## [0.8.1] - 2026-07-04
 
 ### Fixed
