@@ -3,6 +3,8 @@ package ui
 import (
 	"strings"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
 
@@ -108,4 +110,247 @@ type blockRunState struct {
 	// rolled-back TARGET blocks themselves render via Status "rolledback".)
 	RollingBack bool
 	RolledBack  bool
+}
+
+func (m model) handleResult(msg resultMsg) (tea.Model, tea.Cmd) {
+	st := m.blockStates[msg.ID]
+	prevAction := st.Action
+	if dbgFile != nil {
+		ids := make([]string, 0, len(m.blockStates))
+		for id := range m.blockStates {
+			ids = append(ids, id)
+		}
+		dbg("result id=%s exit=%d priorStatus=%q priorAction=%q knownBlockStates=%v", msg.ID, msg.Exit, st.Status, prevAction, ids)
+	}
+	st.Logpath = msg.Logpath
+	st.Exit = msg.Exit
+	// A result for a block the user deliberately stopped is NOT a failed fix.
+	// Resolve to the neutral "stopped" state, clear the flag, and never auto-fire
+	// the follow-up — regardless of the (typically 143/SIGTERM) exit code.
+	if st.Stopped {
+		st.Status = "stopped"
+		st.Action = ""
+		st.Stopped = false
+		m.blockStates[msg.ID] = st
+		dbg("result id=%s exit=%d STOPPED — no auto-followup", msg.ID, msg.Exit)
+		m.reflow()
+		return m, nil
+	}
+	switch {
+	case st.Action == "rollback":
+		// A rollback-chain target (the undo command) finished. Exit 0 → a normal
+		// success (✓ ran) — the rolled-back step it undid is what shows "↺ step
+		// rolled back". A non-zero rollback is itself a failure (undo didn't run
+		// cleanly).
+		if msg.Exit == 0 {
+			st.Status = "ok"
+		} else {
+			st.Status = "failed"
+		}
+		st.Action = ""
+	case msg.Exit == 0 && st.Action == "undo":
+		// Successful undo: patch is no longer applied; clear status so dependents re-lock.
+		st.Status = ""
+		st.Action = ""
+		// Drop stale run results on blocks that (transitively) needed this one, so they
+		// re-lock cleanly instead of showing a leftover "✓ ran" beside a blocked block.
+		resetDependents(m.blockStates, m.blocks, msg.ID)
+	case msg.Exit != 0 && st.Action == "undo":
+		// Failed undo: patch is still applied (graceful — surface error, keep button as undo).
+		st.Status = "ok"
+		// keep st.Action="" so the error region shows normally
+		st.Action = ""
+	case msg.Exit == 0:
+		// Successful apply or run.
+		st.Status = "ok"
+		st.Action = ""
+	default:
+		// Failed apply or run.
+		st.Status = "failed"
+		st.Action = ""
+	}
+	m.blockStates[msg.ID] = st
+	dbg("result id=%s exit=%d action=%s status->%s", msg.ID, msg.Exit, prevAction, st.Status)
+	// Assisted (GUIDED) advance hook: the readyID cursor only reacts to its OWN
+	// step's result (never a rollback target's — prevAction=="rollback" is that
+	// chain, handled below by the ordinary rollback bookkeeping instead).
+	if m.assisted && msg.ID == m.readyID && prevAction != "rollback" {
+		switch st.Status {
+		case "ok":
+			m = m.assistedAdvance()
+		case "failed":
+			m.assistedFailedID = msg.ID
+			m.assistedFooter = "failure"
+			m.footerFocus = 0
+			m.exitCode = 1
+		}
+	}
+	// A rollback target completed: count it down; when the whole chain is done, clear
+	// the failed block's spinner and append its "all steps rolled back" suffix.
+	if prevAction == "rollback" {
+		if m.rollbackPending > 0 {
+			m.rollbackPending--
+		}
+		m = m.finishRollbackIfDone()
+	}
+	m.reflow()
+	// --auto-rollback: on a step failure, if the user opted in and there are applied
+	// steps to undo, fire the rollback chain automatically (unattended runs) instead
+	// of leaving the manual "Rollback playbook" button. Takes precedence over the
+	// verify auto-followup below (rollback, not re-engage, is the opted-in response).
+	// Guard against re-firing on a rollback TARGET's own result (prevAction rollback).
+	if prevAction != "rollback" && st.Status == "failed" && m.autoRollback && m.anyRollbackable() && !m.assisted {
+		return m.beginRollback(msg.ID)
+	}
+	// Auto-fire a follow-up when the VERIFY re-run fails: a non-zero exit on a
+	// RUN result (not an apply/undo) for block id "verify" is the unambiguous
+	// "the fix didn't work" signal. It fires on EACH verify failure — including
+	// the re-armed follow-up playbook's own verify block, which reuses id=verify
+	// and so flows through this same path — until the attempt cap (m.maxFollowups,
+	// default 3, $AI_PLAYBOOK_MAX_FOLLOWUPS) is reached. Past the cap it stops
+	// auto-firing and the manual "try another fix" button is shown on the verify
+	// block instead (render.go gates that button on m.followups >= m.maxFollowups).
+	//
+	// NOTE: the previous once-only guard (prevStatus == "failed") meant the SECOND
+	// verify failure — the re-armed playbook's verify, which leaves the block in
+	// "failed" — was suppressed as "already fired", so the loop never auto-repeated.
+	// The attempt counter replaces that guard.
+	//
+	// verifyID is the agent's {id=verify} tag; if the agent drifted and left its
+	// blocks untagged (the parser then auto-names them), fall back to the LAST
+	// runnable block as the verify so success/follow-up detection still works.
+	verifyID := m.verifyBlockID()
+	if msg.ID == verifyID && msg.Exit != 0 &&
+		prevAction != "apply" && prevAction != "undo" && !m.assisted {
+		switch {
+		case m.followups >= m.maxFollowups:
+			// Cap reached: stop auto-firing. Mark the verify block so render.go shows
+			// the manual "try another fix" button, letting the user keep going by hand.
+			dbg("auto-followup SUPPRESSED: cap reached (followups=%d max=%d id=%s)", m.followups, m.maxFollowups, msg.ID)
+			vst := m.blockStates[msg.ID]
+			vst.FollowupExhausted = true
+			m.blockStates[msg.ID] = vst
+			m.reflow()
+		case msg.Exit > 128:
+			// Signal-killed (e.g. 143=SIGTERM, 130=SIGINT): a deliberate kill is
+			// not a fix failure — do NOT auto-fire. Ordinary non-zero exits
+			// (1/2/…) still escalate to a follow-up below.
+			dbg("auto-followup SUPPRESSED: signal-killed exit>128 (id=%s exit=%d)", msg.ID, msg.Exit)
+		case msg.Exit == 127:
+			// "command not found": the verify command itself couldn't run (e.g. the
+			// original command is a shell alias/function absent from the agent's
+			// non-interactive shell), NOT that the fix failed — do NOT auto-fire.
+			// The manual "try another fix" button still appears (unchanged).
+			dbg("auto-followup SUPPRESSED: exit 127 (command not found) id=%s", msg.ID)
+		case !m.canReengageInProc():
+			// No way to deliver the follow-up: in-process re-engagement is not wired
+			// (no orch + Reengage). The live session path (file/stdin input, Reengage
+			// set) does have it and so still auto-fires below.
+			dbg("auto-followup SUPPRESSED: no in-process reengage (id=%s exit=%d)", msg.ID, msg.Exit)
+		default:
+			m.followups++
+			dbg("auto-followup fire: id=%s exit=%d attempt=%d/%d", msg.ID, msg.Exit, m.followups, m.maxFollowups)
+			// Issue #1+#2: announce this AUTO follow-up in the agent's voice ABOVE the
+			// new attempt and scroll once so it becomes the top visible row. Only the
+			// AUTO path narrates; the manual "try another fix" button does not.
+			m.announceFollowup(m.followups)
+			if cmd := m.beginFollowupStream(verifyID, m.blockCommand(verifyID)); cmd != nil {
+				return m, cmd
+			}
+		}
+	}
+	// Stage 2 (spec §A): a SUCCESSFUL verify (exit 0 on a RUN, not an apply/undo)
+	// means the fix verified — render the NATIVE in-pager confirm row INSTEAD of the
+	// old agent-ask wrap-up. The ui owns the branch: Yes generates the final-playbook
+	// draft (REPLACE); No dismisses the confirm (the command already succeeded, so
+	// there is nothing to re-fix — the user can quit or press `c` to bring the
+	// confirm back). Gated on m.wrappedUp so it shows
+	// ONCE per resolution — a re-rendered or re-run verify-0 must not re-prompt. A
+	// deliberately stopped verify already returned above; exit 0 is by definition
+	// neither signal-killed (>128) nor 127. Requires in-process re-engagement (the
+	// live session path), so the confirm's Yes can actually generate.
+	if msg.ID == verifyID && msg.Exit == 0 && !m.wrappedUp &&
+		prevAction != "apply" && prevAction != "undo" &&
+		m.canReengageInProc() && !m.assisted {
+		m.wrappedUp = true
+		m.confirmResolved = true
+		m.confirmFocus = 0 // default keyboard focus = Yes
+		dbg("verify exit 0 — rendering native resolve-confirm row")
+		m.reflow()
+		// The confirm row appearing is a one-shot repaint; re-assert the hide so
+		// zellij can't re-show the cursor on it.
+		return m, reassertHideCursor()
+	}
+	return m, nil
+}
+
+func (m model) handleDrift(msg driftMsg) (tea.Model, tea.Cmd) {
+	// Async drift-check result. The verdict fully describes the diff block's state
+	// against its target file, so drive both Drifted AND the applied/not-applied
+	// status off it:
+	//   - DriftDrifted → the patch neither applies nor reverses: show the drift region.
+	//   - DriftApplied → the file already matches the patch's NEW side (it was applied,
+	//     or a manual resolve kept the "proposed" lines) → mark it APPLIED so the block
+	//     shows Undo + a greyed number, not an Apply button.
+	//   - DriftClean → the patch applies but isn't applied yet → Apply available.
+	st := m.blockStates[msg.ID]
+	switch msg.Verdict {
+	case orchestrator.DriftDrifted:
+		if st.pendingResolve {
+			// A manual resolve CHANGED the file to a custom/mixed state the whole-patch
+			// git-apply can neither apply nor reverse → terminal "resolved manually",
+			// not unresolved drift. (An unchanged "kept current" resolve never sets
+			// pendingResolve, so it correctly falls through to Drifted below.)
+			st.Drifted = false
+			st.Resolved = true
+		} else {
+			st.Drifted = true
+		}
+	case orchestrator.DriftApplied:
+		st.Drifted = false
+		st.Resolved = false
+		st.Status = "ok"
+	default: // DriftClean
+		st.Drifted = false
+		st.Resolved = false
+		if st.Status == "ok" {
+			st.Status = "" // not applied → don't linger as applied (Apply, not Undo)
+		}
+	}
+	st.pendingResolve = false
+	m.blockStates[msg.ID] = st
+	m.reflow()
+	return m, nil
+}
+
+func (m model) handleDriftRegen(msg driftRegenMsg) (tea.Model, tea.Cmd) {
+	// Async DriftRegen result: clear the "regenerating" spinner status, then either
+	// splice the fresh patch into m.md and re-check drift (success path), or keep the
+	// block Drifted and set RegenFailed so the drift region shows the alternate note
+	// (failure path). Never touches m.reader/structured/bodyProvider/streaming/thinking.
+	st := m.blockStates[msg.ID]
+	st.Status = ""
+	if msg.Err != nil || strings.TrimSpace(msg.NewPatch) == "" {
+		st.RegenFailed = true // block stays Drifted; render shows alternate message
+		// F24: surface WHY it failed. A missing/unconfigured AI backend gets a
+		// specific, actionable note; any other failure (or an empty patch) keeps the
+		// generic "resolve manually" alternate — either way the drift region shows a
+		// visible message, never a silent no-op.
+		if looksLikeNoBackend(msg.Err) {
+			st.RegenNote = "no AI backend found — install and authenticate the Claude CLI (claude), or resolve manually"
+		} else {
+			st.RegenNote = ""
+		}
+		m.blockStates[msg.ID] = st
+		m.reflow()
+		return m, nil
+	}
+	st.RegenFailed = false
+	st.RegenNote = ""
+	m.blockStates[msg.ID] = st
+	if newMd, ok := replaceBlockBody(m.md, msg.ID, msg.NewPatch); ok {
+		m.md = newMd
+	}
+	m.reflow()
+	return m, m.driftCheckCmds() // re-check all diff blocks; clears Drifted if fresh patch applies
 }
