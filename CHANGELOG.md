@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Refuse a proposed solution with a reason: any note submitted through `r`
+  (refine) now persists as a session constraint injected into every later
+  regeneration/follow-up — and a note that rejects the current approach makes
+  the agent re-author from scratch instead of patching it. Active constraints
+  show in the status line.
+
 ### Changed
 
 - Opening a session no longer pays a fixed ~1.2s settle delay — readiness is

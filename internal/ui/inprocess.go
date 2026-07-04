@@ -130,8 +130,9 @@ func (m model) driftRegenCmd(id, patch string) tea.Cmd {
 	if orch == nil {
 		return nil
 	}
+	constraints := m.refusals // snapshot: inject session-rejected approaches (refuse-solution §1)
 	return func() tea.Msg {
-		np, err := orch.DriftRegen(patch, nil)
+		np, err := orch.DriftRegen(patch, constraints)
 		return driftRegenMsg{ID: id, NewPatch: np, Err: err}
 	}
 }
@@ -280,8 +281,9 @@ func (m *model) beginRegenerate() tea.Cmd {
 		m.structured = true
 		m.bodyProvider = m.orch.Reengage.Body
 	}
+	constraints := m.refusals // snapshot: inject session-rejected approaches (refuse-solution §1)
 	return tea.Batch(m.restartTick(), func() tea.Msg {
-		stream, activity, _, err := orch.Regenerate(nil)
+		stream, activity, _, err := orch.Regenerate(constraints)
 		return reArmStreamMsg{reader: stream, activity: activity, err: err}
 	})
 }
@@ -316,8 +318,9 @@ func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
 	// so the EOF render does NOT clobber the appended markdown with a stale bodyProvider.
 	m.structured = false
 	m.bodyProvider = nil
+	constraints := m.refusals // snapshot: inject session-rejected approaches (refuse-solution §1)
 	return tea.Batch(m.restartTick(), func() tea.Msg {
-		stream, activity, _, err := orch.Followup(failedOutput, nil)
+		stream, activity, _, err := orch.Followup(failedOutput, constraints)
 		return reArmStreamMsg{reader: stream, activity: activity, err: err}
 	})
 }
@@ -396,8 +399,9 @@ func (m *model) beginFinalPlaybookGenerate(base, change string) tea.Cmd {
 		m.structured = true
 		m.bodyProvider = m.orch.Reengage.Body
 	}
+	constraints := m.refusals // snapshot: inject session-rejected approaches (refuse-solution §1)
 	return tea.Batch(m.restartTick(), func() tea.Msg {
-		stream, activity, _, err := orch.FinalPlaybook(base, change, nil)
+		stream, activity, _, err := orch.FinalPlaybook(base, change, constraints)
 		return reArmStreamMsg{reader: stream, activity: activity, err: err}
 	})
 }

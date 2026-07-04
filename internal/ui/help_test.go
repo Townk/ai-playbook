@@ -25,7 +25,7 @@ func TestBuildHelpLines(t *testing.T) {
 		"Actions", "Movement", "Horizontal", "Buttons", // sub-group headers
 		"down one line", "half page down / up", "left / right half-width",
 		"hint mode for keyboard-only click", "mouse clicks activate buttons",
-		"refine the playbook", "wrap-up work in the playbook",
+		"refine (note persists as a session constraint)", "wrap-up work in the playbook",
 		"generate a playbook for the solution",
 		"toggle this help", "quit/dismiss",
 		"copy block to clipboard", "run entire block in origin shell",

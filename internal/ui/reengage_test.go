@@ -402,11 +402,12 @@ func newReengageEventsModel(t *testing.T, delta, final string) (model, *fakeEven
 // canned normalized event stream (delta → playbook; reasoning + tool → activity;
 // Final → body) so a re-engagement exercises the live activity feed deterministically.
 type fakeEventsProducer struct {
-	delta, final string
-	gotKind      orchestrator.ReengageKind
-	gotBase      string
-	gotChange    string
-	calls        int
+	delta, final   string
+	gotKind        orchestrator.ReengageKind
+	gotBase        string
+	gotChange      string
+	gotConstraints []string
+	calls          int
 }
 
 func (f *fakeEventsProducer) fn(kind orchestrator.ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
@@ -414,6 +415,7 @@ func (f *fakeEventsProducer) fn(kind orchestrator.ReengageKind, base, change str
 	f.gotKind = kind
 	f.gotBase = base
 	f.gotChange = change
+	f.gotConstraints = constraints
 	ch := make(chan agentstream.Event)
 	go func() {
 		ch <- agentstream.Event{Kind: agentstream.TextDelta, Text: f.delta}

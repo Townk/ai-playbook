@@ -209,6 +209,13 @@ type model struct {
 	// route the typed refinement into an fChangeMsg amend. nil → the bridge path.
 	askCompletion func(value string, submitted bool) tea.Msg
 
+	// refusals is the session-lifetime list of user-rejected approaches (spec
+	// refuse-solution §1). Every submitted refine note is appended verbatim (trimmed,
+	// non-empty only) and injected as a Constraints section into EVERY subsequent
+	// re-engagement prompt (regenerate/followup/final-playbook/drift-regen) so a rejected
+	// approach cannot resurface. In-memory only — constraints die with the session.
+	refusals []string
+
 	// streaming + thinking
 	thinking      bool
 	thinkLabel    string
@@ -2033,6 +2040,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if strings.TrimSpace(msg.value) == "" {
 			return m, nil
 		}
+		// Refuse-solution §2a: record the note verbatim (trimmed) as a session constraint
+		// BEFORE re-authoring, so it steers this amend AND every later re-engagement —
+		// anything steered away from cannot resurface. The flash confirms it was noted.
+		m.refusals = append(m.refusals, strings.TrimSpace(msg.value))
+		m.status = "noted — will avoid that from now on"
 		dbg("f: proactive amend (base len=%d, change=%q)", len(msg.base), msg.value)
 		if cmd := m.beginFinalPlaybookGenerate(msg.base, msg.value); cmd != nil {
 			return m, cmd
@@ -2716,13 +2728,30 @@ func (m *model) clampHelpScroll() {
 // statusBar is the slim, mode-aware bottom hint.
 func (m model) statusBar() string {
 	st := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
+	ind := m.constraintIndicator()
 	if m.status != "" && !m.hintMode && !m.helpMode && !m.diffMode {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render(m.status)
+		return lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render(m.status) + ind
 	}
 	if m.hintMode || m.helpMode || m.diffMode {
 		return st.Render("\U000F12B7: cancel")
 	}
-	return st.Render("\U000F1050: action • \U000F12B7: close • ?: keys")
+	return st.Render("\U000F1050: action • \U000F12B7: close • ?: keys") + ind
+}
+
+// constraintIndicator is the persistent status-line segment shown while any
+// session constraints (refused approaches, refuse-solution §3) are active: a
+// pluralized `N constraint(s)` count. Empty when none are active.
+func (m model) constraintIndicator() string {
+	n := len(m.refusals)
+	if n == 0 {
+		return ""
+	}
+	noun := "constraint"
+	if n != 1 {
+		noun += "s"
+	}
+	seg := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
+	return seg.Render(fmt.Sprintf("  • %d %s", n, noun))
 }
 
 // confirmPromptFresh / confirmPromptAmend are the leading prose of the native
