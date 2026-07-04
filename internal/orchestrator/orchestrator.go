@@ -10,10 +10,12 @@
 package orchestrator
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -807,24 +809,64 @@ const (
 	DriftDrifted                     // neither applies — target changed incompatibly
 )
 
+// driftCheckTimeout bounds a single `git apply --check` invocation. The check is
+// read-only and near-instant; the timeout only guards against a filesystem stall
+// (a hung git) wedging document load, since CheckDrift fires once per diff block.
+const driftCheckTimeout = 10 * time.Second
+
 // CheckDrift classifies whether diff still applies to its target. It never mutates
-// the working tree (git apply --check).
+// the working tree (git apply --check, forward then reverse).
+//
+// It runs git DIRECTLY via exec.Command, not through the session shell: the check
+// is read-only, needs no session shell state, and must NOT contend with an
+// in-flight Run on the driver's runMu (it fires once per diff block on document
+// load). The check is anchored at projectRoot() — the SAME directory
+// DriftTargetPath resolves the target file against — so the check and any
+// subsequent apply agree on which file they evaluate. The patch reaches git as a
+// file path (the same temp-patch mechanism applyDiff uses), not stdin.
+//
+// State mapping (preserved bit-for-bit from the prior shell path): forward
+// `--check` exit 0 → DriftClean; else reverse `--check --reverse` exit 0 →
+// DriftApplied; else DriftDrifted (which also absorbs environmental failures —
+// git missing, not a repo, target absent — that the viewer treats as "needs
+// attention").
 func (o *Orchestrator) CheckDrift(diff string) (DriftVerdict, error) {
 	patch, err := writePatch(diff)
 	if err != nil {
 		return DriftDrifted, err
 	}
 	defer os.Remove(patch)
-	base := "git apply --check --recount --ignore-whitespace "
-	if o.Drv.Run(base+"-- "+shquote(patch), applyTimeout).Exit == 0 {
+	if o.gitApplyChecks(patch, false) {
 		return DriftClean, nil
 	}
-	if o.Drv.Run(base+"--reverse -- "+shquote(patch), applyTimeout).Exit == 0 {
+	if o.gitApplyChecks(patch, true) {
 		return DriftApplied, nil
 	}
-	// Intentional: environmental failures (git missing, not a repo, target absent)
-	// also fall through here; the viewer treats DriftDrifted as "needs attention".
 	return DriftDrifted, nil
+}
+
+// gitApplyChecks runs `git apply --check` (adding --reverse when reverse) on the
+// temp patch file, anchored at projectRoot(), and reports whether it applied
+// cleanly (exit 0). It mirrors the flags the shell path used exactly (--recount
+// --ignore-whitespace) and bounds the run with a context timeout so a hung git
+// can't wedge document load. A non-zero exit, a launch error (git missing), or a
+// timeout all report false — the CheckDrift caller maps a double-false to
+// DriftDrifted, matching the prior path's environmental-failure handling.
+func (o *Orchestrator) gitApplyChecks(patch string, reverse bool) bool {
+	ctx, cancel := context.WithTimeout(context.Background(), driftCheckTimeout)
+	defer cancel()
+	args := []string{"apply", "--check", "--recount", "--ignore-whitespace"}
+	if reverse {
+		args = append(args, "--reverse")
+	}
+	args = append(args, "--", patch)
+	cmd := exec.CommandContext(ctx, "git", args...)
+	// Anchor at the session root the same way DriftTargetPath does, so the check's
+	// resolution of the patch's a/b paths matches the file a later apply targets.
+	// An empty projectRoot leaves Dir unset → exec uses the process cwd, which is
+	// what the session shell inherited when it too had no tracked cwd.
+	cmd.Dir = o.projectRoot()
+	return cmd.Run() == nil
 }
 
 // fileAction is the JSON payload shared by KindCreateFile / KindUndoCreate.

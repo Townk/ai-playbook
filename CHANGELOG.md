@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   a stale sentinel left over from an earlier run (or a probe swallowed during
   shell init that prints late) can never satisfy a later run's wait, making
   stale-output collisions impossible.
+- Opening a playbook with diff blocks no longer queues per-block drift checks
+  behind the session shell — they run instantly and never contend with an
+  in-flight block.
 
 ## [0.7.0] - 2026-07-03
 

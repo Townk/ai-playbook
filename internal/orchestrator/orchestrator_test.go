@@ -588,6 +588,53 @@ func TestCheckDrift_CleanAppliedDrifted(t *testing.T) {
 	}
 }
 
+// TestCheckDrift_NoRunContention asserts CheckDrift does NOT serialize behind an
+// in-flight Run: git apply --check runs directly (exec.Command), never touching the
+// driver's runMu. Pre-change CheckDrift went through the session shell and blocked
+// on runMu for the whole run; here a long block holds runMu while CheckDrift must
+// still complete promptly. The bound is generous (well under the run's sleep) to
+// avoid flake.
+func TestCheckDrift_NoRunContention(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not available")
+	}
+	dir := t.TempDir()
+	o := newTestOrchInDir(t, dir)
+	sh(t, dir, "git init -q && git config user.email t@t && git config user.name t")
+	if err := os.WriteFile(filepath.Join(dir, "f.txt"), []byte("one\ntwo\nthree\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sh(t, dir, "git add f.txt && git commit -qm init")
+	patch := "--- a/f.txt\n+++ b/f.txt\n@@ -1,3 +1,3 @@\n one\n-two\n+TWO\n three\n"
+
+	// Launch a long block that holds runMu for the whole sleep.
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, _ = o.Do(Action{Kind: KindRun, Payload: "sleep 5"})
+	}()
+	// Give the block time to be dispatched and acquire runMu.
+	time.Sleep(500 * time.Millisecond)
+
+	// CheckDrift must complete WITHOUT waiting for the 5s block to finish.
+	start := time.Now()
+	v, err := o.CheckDrift(patch)
+	elapsed := time.Since(start)
+	if err != nil {
+		t.Fatalf("CheckDrift err=%v", err)
+	}
+	if v != DriftClean {
+		t.Fatalf("CheckDrift = %v; want DriftClean", v)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("CheckDrift took %v while a Run was in flight — it is contending on runMu", elapsed)
+	}
+
+	// Stop the block and let the goroutine unwind before the driver is closed.
+	o.Drv.Stop()
+	<-done
+}
+
 // TestDriftRegen_DrainsFreshDiff verifies that DriftRegen reads the current file,
 // calls Events with KindReengageDriftRegen and the current content as base, and
 // returns the fresh diff text emitted by the stub.
