@@ -578,7 +578,11 @@ func (d *Driver) runID(id, cmdline string, timeout time.Duration) Result {
 	return res
 }
 
-func shquote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+// Shquote single-quotes s for safe inclusion in a shell command line (the driver
+// runs cmd through the session shell). It is the single source of shell-quoting for
+// the module: the executor's git-apply path (internal/orchestrator) reuses it rather
+// than keeping a comment-synced copy.
+func Shquote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
 
 // sanitizeKey mirrors the broker convention: id with [^A-Za-z0-9_] → _.
 func sanitizeKey(id string) string {

@@ -14,8 +14,8 @@ import (
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/mux"
-	"github.com/Townk/ai-playbook/internal/orchestrator"
 	"github.com/Townk/ai-playbook/internal/playbook"
+	"github.com/Townk/ai-playbook/internal/reengage"
 	"github.com/Townk/ai-playbook/internal/tools"
 	"github.com/Townk/ai-playbook/internal/triage"
 )
@@ -143,9 +143,9 @@ func TestCreateAuthorWithProgress_DrainsCollectsAndViews(t *testing.T) {
 	runCreateProgressFn = func(_ <-chan string, _ *askbridge.Bridge, done <-chan struct{}) { <-done }
 
 	var gotBody string
-	var gotRe *orchestrator.Reengage
+	var gotRe *reengage.Reengage
 	viewCalled := false
-	createViewFn = func(body string, _ *session, re *orchestrator.Reengage, _ *config.Config, _ capture.Request) int {
+	createViewFn = func(body string, _ *session, re *reengage.Reengage, _ *config.Config, _ capture.Request) int {
 		viewCalled = true
 		gotBody = body
 		gotRe = re
@@ -192,7 +192,7 @@ func TestCreateAuthorWithProgress_StreamErrorFallsBack(t *testing.T) {
 		return createStream{}, io.ErrUnexpectedEOF
 	}
 	viewCalled := false
-	createViewFn = func(_ string, _ *session, _ *orchestrator.Reengage, _ *config.Config, _ capture.Request) int {
+	createViewFn = func(_ string, _ *session, _ *reengage.Reengage, _ *config.Config, _ capture.Request) int {
 		viewCalled = true
 		return 0
 	}
@@ -236,7 +236,7 @@ func TestCreateViewPlaybook_ReshapesToRunFile(t *testing.T) {
 	}
 
 	req := capture.Request{ProjectRoot: "/proj", CWD: "/proj"}
-	code := createViewPlaybook(fullBody, nil, &orchestrator.Reengage{}, config.Default(), req)
+	code := createViewPlaybook(fullBody, nil, &reengage.Reengage{}, config.Default(), req)
 	if code != 0 {
 		t.Fatalf("exit = %d, want 0", code)
 	}
@@ -270,7 +270,7 @@ func TestRealCreateAuthor_NullMuxReachesStreamSeam(t *testing.T) {
 		return fakeCreateStream("# x\n"), nil
 	}
 	runCreateProgressFn = func(_ <-chan string, _ *askbridge.Bridge, done <-chan struct{}) { <-done }
-	createViewFn = func(_ string, _ *session, _ *orchestrator.Reengage, _ *config.Config, _ capture.Request) int {
+	createViewFn = func(_ string, _ *session, _ *reengage.Reengage, _ *config.Config, _ capture.Request) int {
 		return 0
 	}
 

@@ -126,47 +126,28 @@ func (m model) driftCheckCmds() tea.Cmd {
 // pane — that is beginRegenerate's role. Mirrors the shape of driftCheckCmds.
 // Returns nil when the orchestrator is not installed.
 func (m model) driftRegenCmd(id, patch string) tea.Cmd {
-	orch := m.orch
-	if orch == nil {
-		return nil
+	reeng := m.reeng
+	if reeng == nil {
+		// No re-engagement wired: yield the same "unavailable" verdict the engine would,
+		// so the drift block surfaces RegenFailed rather than spinning forever.
+		return func() tea.Msg {
+			return driftRegenMsg{ID: id, Err: errors.New("regenerate unavailable")}
+		}
 	}
 	constraints := m.refusals // snapshot: inject session-rejected approaches (refuse-solution §1)
 	return func() tea.Msg {
-		np, err := orch.DriftRegen(patch, constraints)
+		np, err := reeng.DriftRegen(patch, constraints)
 		return driftRegenMsg{ID: id, NewPatch: np, Err: err}
 	}
 }
 
-// kindOf maps a UI button kind string to the orchestrator's typed Kind. The
-// second result is false for kinds that have no orchestrator action (e.g.
-// "toggle", which is pager-local and never reaches emitAction in in-process use).
+// kindOf maps a UI button kind string to the orchestrator's typed Kind. It
+// delegates to orchestrator.ParseKind — the single inverse of Kind.String — so the
+// ui does not hand-maintain a duplicate switch. The second result is false for kinds
+// that have no orchestrator action (e.g. "toggle", which is pager-local and never
+// reaches emitAction in in-process use).
 func kindOf(s string) (orchestrator.Kind, bool) {
-	switch s {
-	case "run":
-		return orchestrator.KindRun, true
-	case "stop":
-		return orchestrator.KindStop, true
-	case "copy":
-		return orchestrator.KindCopy, true
-	case "play":
-		return orchestrator.KindPlay, true
-	case "diff", "view-diff":
-		return orchestrator.KindViewDiff, true
-	case "apply-diff":
-		return orchestrator.KindApplyDiff, true
-	case "undo-diff":
-		return orchestrator.KindUndoDiff, true
-	case "create":
-		return orchestrator.KindCreateFile, true
-	case "undo-create":
-		return orchestrator.KindUndoCreate, true
-	case "regenerate":
-		return orchestrator.KindRegenerate, true
-	case "followup":
-		return orchestrator.KindFollowup, true
-	default:
-		return 0, false
-	}
+	return orchestrator.ParseKind(s)
 }
 
 // orchCmd builds the tea.Cmd that performs button b's action against the live
@@ -187,6 +168,12 @@ func (m model) orchCmd(b Button) tea.Cmd {
 	}
 	return func() tea.Msg {
 		res, err := orch.Do(orchestrator.Action{Kind: k, ID: b.BlockID, Payload: b.Payload})
+		if errors.Is(err, orchestrator.ErrMisrouted) {
+			// A re-engagement kind reached the executor — a wiring bug (the ui should
+			// have driven it through the reengage engine). Surface it distinctly so it
+			// doesn't masquerade as an unimplemented action.
+			return statusMsg{text: b.Kind + ": internal routing error (should use the reengage engine)"}
+		}
 		if errors.Is(err, orchestrator.ErrNotImplemented) {
 			return statusMsg{text: b.Kind + ": not available in in-process mode yet"}
 		}
@@ -256,8 +243,8 @@ func (m *model) beginRegenerate() tea.Cmd {
 			return reArmStreamMsg{reader: r, activity: nil, err: err}
 		})
 	}
-	orch := m.orch
-	if orch == nil || orch.Reengage == nil {
+	reeng := m.reeng
+	if reeng == nil {
 		return nil
 	}
 	// REPLACE: reset the rendered content + thinking state, exactly like the
@@ -277,13 +264,13 @@ func (m *model) beginRegenerate() tea.Cmd {
 	// Per-stream structured render: only enter structured mode when the Body closure
 	// is set (the event path with Task-1's live capture). The text-fallback path
 	// (Body==nil) streams the playbook directly into m.md and must NOT drain the stream.
-	if m.orch != nil && m.orch.Reengage != nil && m.orch.Reengage.Body != nil {
+	if body := reeng.Body(); body != nil {
 		m.structured = true
-		m.bodyProvider = m.orch.Reengage.Body
+		m.bodyProvider = body
 	}
 	constraints := m.refusals // snapshot: inject session-rejected approaches (refuse-solution §1)
 	return tea.Batch(m.restartTick(), func() tea.Msg {
-		stream, activity, _, err := orch.Regenerate(constraints)
+		stream, activity, _, err := reeng.Regenerate(constraints)
 		return reArmStreamMsg{reader: stream, activity: activity, err: err}
 	})
 }
@@ -294,8 +281,8 @@ func (m *model) beginRegenerate() tea.Cmd {
 // streams in. failedOutput is the captured output of the failed command (read from
 // the block's run log, capped). Returns nil when re-engagement isn't wired.
 func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
-	orch := m.orch
-	if orch == nil || orch.Reengage == nil {
+	reeng := m.reeng
+	if reeng == nil {
 		return nil
 	}
 	// APPEND: keep the existing playbook, add a separator + spinner below it — UNLESS
@@ -320,7 +307,7 @@ func (m *model) beginFollowupInProc(failedOutput string) tea.Cmd {
 	m.bodyProvider = nil
 	constraints := m.refusals // snapshot: inject session-rejected approaches (refuse-solution §1)
 	return tea.Batch(m.restartTick(), func() tea.Msg {
-		stream, activity, _, err := orch.Followup(failedOutput, constraints)
+		stream, activity, _, err := reeng.Followup(failedOutput, constraints)
 		return reArmStreamMsg{reader: stream, activity: activity, err: err}
 	})
 }
@@ -360,8 +347,8 @@ func (m *model) beginFinalPlaybookInProc() tea.Cmd {
 // REPLACE mode. base!="" → AMEND (fold change into base, preserve existing steps);
 // base=="" → FRESH. Returns nil when re-engagement isn't wired (off-zellij/tests).
 func (m *model) beginFinalPlaybookGenerate(base, change string) tea.Cmd {
-	orch := m.orch
-	if orch == nil || orch.Reengage == nil {
+	reeng := m.reeng
+	if reeng == nil {
 		return nil
 	}
 	// Reset hadFollowup: the playbook is being re-authored, so the doc now reflects
@@ -395,27 +382,27 @@ func (m *model) beginFinalPlaybookGenerate(base, change string) tea.Cmd {
 	// Per-stream structured render: only enter structured mode when the Body closure
 	// is set (the event path with Task-1's live capture). The text-fallback path
 	// (Body==nil) streams the playbook directly into m.md and must NOT drain the stream.
-	if m.orch != nil && m.orch.Reengage != nil && m.orch.Reengage.Body != nil {
+	if body := reeng.Body(); body != nil {
 		m.structured = true
-		m.bodyProvider = m.orch.Reengage.Body
+		m.bodyProvider = body
 	}
 	constraints := m.refusals // snapshot: inject session-rejected approaches (refuse-solution §1)
 	return tea.Batch(m.restartTick(), func() tea.Msg {
-		stream, activity, _, err := orch.FinalPlaybook(base, change, constraints)
+		stream, activity, _, err := reeng.FinalPlaybook(base, change, constraints)
 		return reArmStreamMsg{reader: stream, activity: activity, err: err}
 	})
 }
 
 // commitPlaybookCmd (in-process, spec §D/§E) persists the displayed final playbook
-// draft via orchestrator.CommitPlaybook (save the .md + cache-replace this request's
-// entry, assembling+prepending front matter), OFF the event loop, and surfaces the
-// outcome as a playbookCommittedMsg. The handler flips committed=true on success and
-// shows "✓ saved playbook → <path>" / the error. body is the draft to commit
-// (snapshotted on the trigger so a later stream can't race it). Returns a no-op status
-// when re-engagement is unwired.
+// draft via the reengage engine's CommitPlaybook (save the .md + cache-replace this
+// request's entry, assembling+prepending front matter), OFF the event loop, and
+// surfaces the outcome as a playbookCommittedMsg. The handler flips committed=true on
+// success and shows "✓ saved playbook → <path>" / the error. body is the draft to
+// commit (snapshotted on the trigger so a later stream can't race it). Returns a no-op
+// status when re-engagement is unwired.
 func (m *model) commitPlaybookCmd(body string) tea.Cmd {
-	orch := m.orch
-	if orch == nil || orch.Reengage == nil {
+	reeng := m.reeng
+	if reeng == nil {
 		return func() tea.Msg { return statusMsg{text: "commit: not available in this mode"} }
 	}
 	// Backstop: never save/cache a non-playbook (no H1 / no runnable block). The
@@ -429,7 +416,7 @@ func (m *model) commitPlaybookCmd(body string) tea.Cmd {
 		}
 	}
 	return func() tea.Msg {
-		path, err := orch.CommitPlaybook(body)
+		path, err := reeng.CommitPlaybook(body)
 		return playbookCommittedMsg{path: path, err: err}
 	}
 }

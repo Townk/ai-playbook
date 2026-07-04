@@ -16,8 +16,8 @@ import (
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/floatinput"
 	"github.com/Townk/ai-playbook/internal/mux"
-	"github.com/Townk/ai-playbook/internal/orchestrator"
 	"github.com/Townk/ai-playbook/internal/playbook"
+	"github.com/Townk/ai-playbook/internal/reengage"
 	"github.com/Townk/ai-playbook/internal/tools"
 	"github.com/Townk/ai-playbook/internal/triage"
 	"github.com/Townk/ai-playbook/internal/ui"
@@ -142,11 +142,14 @@ func TestReengageReady_StoreDirWired(t *testing.T) {
 	if got.Orch == nil {
 		t.Fatal("live session: OrchReady.Orch should be non-nil")
 	}
-	if got.Orch.Reengage == nil {
-		t.Fatal("Orch.Reengage should be non-nil")
+	if got.Reeng == nil {
+		t.Fatal("OrchReady.Reeng (the re-engagement engine) should be non-nil")
 	}
-	if got.Orch.Reengage.StoreDir != wantDir {
-		t.Errorf("Reengage.StoreDir = %q, want %q", got.Orch.Reengage.StoreDir, wantDir)
+	// The engine's Reengage context is unexported; assert StoreDir wiring on the
+	// builder reengageReady uses (escalateReengage) — the same value flows into the engine.
+	re := escalateReengage(triage.Decision{}, capture.Request{}, sess, cfg)
+	if re.StoreDir != wantDir {
+		t.Errorf("Reengage.StoreDir = %q, want %q", re.StoreDir, wantDir)
 	}
 }
 
@@ -561,13 +564,13 @@ func TestValidateFileBlocks_RejectsExistingPath(t *testing.T) {
 // and Regenerate author structured playbooks (submit_playbook); Followup stays
 // markdown (continues the troubleshoot with run/ask).
 func TestReengageStructuredByKind(t *testing.T) {
-	if !reengageStructured(orchestrator.KindReengageFinalPlaybook) {
+	if !reengageStructured(reengage.KindReengageFinalPlaybook) {
 		t.Error("finalplaybook must be structured")
 	}
-	if !reengageStructured(orchestrator.KindReengageRegenerate) {
+	if !reengageStructured(reengage.KindReengageRegenerate) {
 		t.Error("regenerate must be structured")
 	}
-	if reengageStructured(orchestrator.KindReengageFollowup) {
+	if reengageStructured(reengage.KindReengageFollowup) {
 		t.Error("followup must stay markdown")
 	}
 }
@@ -575,7 +578,7 @@ func TestReengageStructuredByKind(t *testing.T) {
 // TestReengageStructured_DriftRegenIsText asserts that the drift-regen kind is
 // non-structured: the model returns a raw unified diff (text), not submit_playbook.
 func TestReengageStructured_DriftRegenIsText(t *testing.T) {
-	if reengageStructured(orchestrator.KindReengageDriftRegen) {
+	if reengageStructured(reengage.KindReengageDriftRegen) {
 		t.Fatal("KindReengageDriftRegen must be NON-structured (text diff back)")
 	}
 }

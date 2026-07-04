@@ -11,10 +11,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Townk/ai-playbook/internal/agentstream"
-	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/driver"
-	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/mux"
 )
 
@@ -124,13 +121,14 @@ func TestCopyPlayRecorded(t *testing.T) {
 	}
 }
 
-func TestDeferredKindsNotImplemented(t *testing.T) {
+// The re-engagement kinds (regenerate / followup) still name UI buttons, but they
+// never route through Do — reaching it is a wiring bug, surfaced as the distinct
+// ErrMisrouted (NOT ErrNotImplemented) so it can't masquerade as "not available".
+func TestReengageKindsAreMisrouted(t *testing.T) {
 	o := New(newTestDriver(t), &recMux{})
-	// apply-diff / undo-diff / view-diff are implemented as of stage 4c-i; only
-	// regenerate / followup remain deferred.
 	for _, k := range []Kind{KindRegenerate, KindFollowup} {
-		if _, err := o.Do(Action{Kind: k}); !errors.Is(err, ErrNotImplemented) {
-			t.Errorf("%s → err=%v (want ErrNotImplemented)", k, err)
+		if _, err := o.Do(Action{Kind: k}); !errors.Is(err, ErrMisrouted) {
+			t.Errorf("%s → err=%v (want ErrMisrouted)", k, err)
 		}
 	}
 }
@@ -337,29 +335,6 @@ func TestViewDiff(t *testing.T) {
 	}
 }
 
-// TestBuildFrontMatter_NoWorkdir verifies buildFrontMatter does not write a
-// workdir field (the field was removed in the dead-code sweep; portability is
-// via PROJECT_ROOT instead).
-func TestBuildFrontMatter_NoWorkdir(t *testing.T) {
-	home, _ := os.UserHomeDir()
-	projRoot := filepath.Join(home, "Projects", "myapp")
-	re := &Reengage{
-		Req: capture.Request{
-			ProjectRoot: projRoot,
-			UserRequest: "fix the build",
-		},
-		EnvLookup: func(string) (string, bool) { return "", false },
-		Metadata:  nil,
-	}
-	body := "# Playbook — Fix Build\n\nDo the thing.\n"
-	fm := re.buildFrontMatter(body)
-	// the assembled FM must NOT carry a workdir: key
-	assembled := frontmatter.Assemble(fm)
-	if strings.Contains(assembled, "workdir:") {
-		t.Errorf("assembled FM must not carry a workdir: key:\n%s", assembled)
-	}
-}
-
 func TestKindString(t *testing.T) {
 	cases := map[Kind]string{
 		KindCopy: "copy", KindPlay: "play", KindRun: "run", KindStop: "stop",
@@ -370,68 +345,6 @@ func TestKindString(t *testing.T) {
 		if got := k.String(); got != want {
 			t.Errorf("Kind(%d).String() = %q, want %q", k, got, want)
 		}
-	}
-}
-
-// TestCommitPlaybook_HonorsStoreDir asserts that CommitPlaybook writes the .md
-// file under Reengage.StoreDir when it is set, NOT under dataRoot/playbooks.
-func TestCommitPlaybook_HonorsStoreDir(t *testing.T) {
-	storeDir := t.TempDir()
-	dataRoot := t.TempDir()
-
-	re := &Reengage{
-		StoreDir:  storeDir,
-		DataRoot:  dataRoot,
-		Req:       capture.Request{},
-		EnvLookup: func(string) (string, bool) { return "", false },
-	}
-	o := New(nil, &recMux{}).WithReengage(re)
-
-	body := "# Playbook — StoreDir Test\n\nVerify the injected store dir is used.\n"
-	path, err := o.CommitPlaybook(body)
-	if err != nil {
-		t.Fatalf("CommitPlaybook: %v", err)
-	}
-
-	// File must land under storeDir (the injected value), not under dataRoot/playbooks.
-	if !strings.HasPrefix(path, storeDir) {
-		t.Errorf("CommitPlaybook path = %q, want prefix %q", path, storeDir)
-	}
-	badDir := filepath.Join(dataRoot, "playbooks")
-	if strings.HasPrefix(path, badDir) {
-		t.Errorf("CommitPlaybook used dataRoot fallback: path = %q", path)
-	}
-	if _, err := os.Stat(path); err != nil {
-		t.Errorf("returned path does not exist: %v", err)
-	}
-}
-
-func TestBuildFrontMatter_ProjectBound(t *testing.T) {
-	re := &Reengage{
-		Req:      capture.Request{},
-		Metadata: func(string) (PlaybookMeta, error) { return PlaybookMeta{Description: "d", ProjectBound: true}, nil },
-	}
-	fm := re.buildFrontMatter("# Playbook — T\n\n```bash {id=fix}\nx\n```\n")
-	if !fm.ProjectBound {
-		t.Fatalf("buildFrontMatter must copy ProjectBound from the seam meta")
-	}
-	if fm.Description != "d" {
-		t.Fatalf("description = %q, want d", fm.Description)
-	}
-}
-
-// TestBuildFrontMatter_DeclaresProjectRoot asserts that buildFrontMatter injects
-// PROJECT_ROOT into the env map when the metadata seam returns ProjectBound: true.
-func TestBuildFrontMatter_DeclaresProjectRoot(t *testing.T) {
-	re := &Reengage{
-		Req: capture.Request{},
-		Metadata: func(string) (PlaybookMeta, error) {
-			return PlaybookMeta{ProjectBound: true}, nil
-		},
-	}
-	fm := re.buildFrontMatter("# Playbook — T\n\n```bash {id=fix}\ncd $PROJECT_ROOT\n```\n")
-	if _, ok := fm.Env["PROJECT_ROOT"]; !ok {
-		t.Fatalf("project_bound front matter must declare PROJECT_ROOT, got env=%v", fm.Env)
 	}
 }
 
@@ -522,31 +435,6 @@ func TestCreateBackupsConcurrent(t *testing.T) {
 	wg.Wait()
 }
 
-// TestCommitPlaybook_NoStoreDir_FallsBackToDataRoot asserts the back-compat
-// path: when StoreDir is empty, CommitPlaybook writes under dataRoot/playbooks.
-func TestCommitPlaybook_NoStoreDir_FallsBackToDataRoot(t *testing.T) {
-	dataRoot := t.TempDir()
-
-	re := &Reengage{
-		// StoreDir deliberately left empty → must fall back to dataRoot/playbooks.
-		DataRoot:  dataRoot,
-		Req:       capture.Request{},
-		EnvLookup: func(string) (string, bool) { return "", false },
-	}
-	o := New(nil, &recMux{}).WithReengage(re)
-
-	body := "# Playbook — Fallback Test\n\nVerify the dataRoot fallback.\n"
-	path, err := o.CommitPlaybook(body)
-	if err != nil {
-		t.Fatalf("CommitPlaybook: %v", err)
-	}
-
-	wantPrefix := filepath.Join(dataRoot, "playbooks")
-	if !strings.HasPrefix(path, wantPrefix) {
-		t.Errorf("CommitPlaybook path = %q, want prefix %q", path, wantPrefix)
-	}
-}
-
 // TestCheckDrift_CleanAppliedDrifted verifies the three DriftVerdict states:
 // DriftClean (patch not yet applied), DriftApplied (already applied), and
 // DriftDrifted (target changed incompatibly).
@@ -633,106 +521,4 @@ func TestCheckDrift_NoRunContention(t *testing.T) {
 	// Stop the block and let the goroutine unwind before the driver is closed.
 	o.Drv.Stop()
 	<-done
-}
-
-// TestDriftRegen_DrainsFreshDiff verifies that DriftRegen reads the current file,
-// calls Events with KindReengageDriftRegen and the current content as base, and
-// returns the fresh diff text emitted by the stub.
-func TestDriftRegen_DrainsFreshDiff(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "x.txt"), []byte("current\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	o := newTestOrchInDir(t, dir)
-	fresh := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-current\n+fixed\n"
-	o.Reengage = &Reengage{
-		Events: func(kind ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
-			if kind != KindReengageDriftRegen {
-				t.Fatalf("wrong kind %v", kind)
-			}
-			if !strings.Contains(base, "current") {
-				t.Fatalf("base lacks current file content: %q", base)
-			}
-			ch := make(chan agentstream.Event, 1)
-			ch <- agentstream.Event{Kind: agentstream.Final, Text: fresh}
-			close(ch)
-			return ch, func() error { return nil }, nil
-		},
-	}
-	stalePatch := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-stale\n+fixed\n"
-	got, err := o.DriftRegen(stalePatch, nil)
-	if err != nil {
-		t.Fatalf("DriftRegen returned error: %v", err)
-	}
-	if strings.TrimSpace(got) != strings.TrimSpace(fresh) {
-		t.Fatalf("DriftRegen = %q; want %q", got, fresh)
-	}
-}
-
-// TestDriftRegen_ThreadsConstraints verifies the fourth re-engagement kind is not
-// left behind by the refuse-solution plumbing (spec §1: constraints reach ALL four
-// kinds): DriftRegen's constraints parameter must arrive at the injected EventsFunc
-// verbatim, not be swallowed by a hardcoded nil.
-func TestDriftRegen_ThreadsConstraints(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "x.txt"), []byte("current\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	o := newTestOrchInDir(t, dir)
-	want := []string{"no docker", "no sudo"}
-	var got []string
-	o.Reengage = &Reengage{
-		Events: func(kind ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
-			if kind != KindReengageDriftRegen {
-				t.Fatalf("wrong kind %v", kind)
-			}
-			got = constraints
-			ch := make(chan agentstream.Event, 1)
-			ch <- agentstream.Event{Kind: agentstream.Final, Text: "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-current\n+fixed\n"}
-			close(ch)
-			return ch, func() error { return nil }, nil
-		},
-	}
-	stalePatch := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-stale\n+fixed\n"
-	if _, err := o.DriftRegen(stalePatch, want); err != nil {
-		t.Fatalf("DriftRegen returned error: %v", err)
-	}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
-		t.Fatalf("EventsFunc received constraints %q; want %q", got, want)
-	}
-}
-
-// TestDriftRegen_StripsFencedOutput verifies that DriftRegen strips a wrapping
-// ```diff ... ``` code fence from the model's output (the prompt forbids fences
-// but models sometimes add them), returning only the clean diff lines.
-func TestDriftRegen_StripsFencedOutput(t *testing.T) {
-	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "x.txt"), []byte("current\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	o := newTestOrchInDir(t, dir)
-	fresh := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-current\n+fixed\n"
-	fenced := "```diff\n" + fresh + "```"
-	o.Reengage = &Reengage{
-		Events: func(kind ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
-			if kind != KindReengageDriftRegen {
-				t.Fatalf("wrong kind %v", kind)
-			}
-			ch := make(chan agentstream.Event, 1)
-			ch <- agentstream.Event{Kind: agentstream.Final, Text: fenced}
-			close(ch)
-			return ch, func() error { return nil }, nil
-		},
-	}
-	stalePatch := "--- a/x.txt\n+++ b/x.txt\n@@ -1 +1 @@\n-stale\n+fixed\n"
-	got, err := o.DriftRegen(stalePatch, nil)
-	if err != nil {
-		t.Fatalf("DriftRegen returned error: %v", err)
-	}
-	if strings.HasPrefix(strings.TrimSpace(got), "```") || strings.HasSuffix(strings.TrimSpace(got), "```") {
-		t.Fatalf("DriftRegen must strip wrapping code fence, got %q; want %q", got, fresh)
-	}
-	if !strings.Contains(got, "--- a/x.txt") || !strings.Contains(got, "+++ b/x.txt") || !strings.Contains(got, "+fixed") {
-		t.Fatalf("DriftRegen stripped too much: got %q; want content like %q", got, fresh)
-	}
 }

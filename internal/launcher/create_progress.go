@@ -31,8 +31,8 @@ import (
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/input"
-	"github.com/Townk/ai-playbook/internal/orchestrator"
 	"github.com/Townk/ai-playbook/internal/playbook"
+	"github.com/Townk/ai-playbook/internal/reengage"
 	"github.com/Townk/ai-playbook/internal/triage"
 	"github.com/Townk/ai-playbook/internal/ui"
 )
@@ -283,12 +283,12 @@ var createViewFn = createViewPlaybook
 // shell and the `w`-key wrap-up CommitPlaybook writes the store file). create's newCreateReengage
 // and escalate's inline Reengage (session.go) are field-identical: StoreDir from cfg.GlobalStoreDir()
 // and the createDecision cache keys (only when the cache wasn't disabled/bypassed).
-func newCreateReengage(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, sess *session, cfg *config.Config) *orchestrator.Reengage {
+func newCreateReengage(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, sess *session, cfg *config.Config) *reengage.Reengage {
 	var sharedDrv *driver.Driver
 	if sess != nil {
 		sharedDrv = sess.drv
 	}
-	re := &orchestrator.Reengage{
+	re := &reengage.Reengage{
 		Req:         req,
 		Agent:       sess.authoringAgent(cfg),
 		Events:      buildReengageEvents(req, sess),
@@ -321,8 +321,8 @@ func reengageBody(sess *session, req capture.Request) func() string {
 // Falls back to the model classifier (buildMetadataSeam) only if create produced no
 // structured playbook (the text-fallback path), so the commit still gets a
 // classification.
-func capturedMetaSeam(sess *session) func(doc string) (orchestrator.PlaybookMeta, error) {
-	return func(doc string) (orchestrator.PlaybookMeta, error) {
+func capturedMetaSeam(sess *session) func(doc string) (reengage.PlaybookMeta, error) {
+	return func(doc string) (reengage.PlaybookMeta, error) {
 		if sess != nil {
 			if last := sess.lastPB.Load(); last != nil {
 				m := last.Meta
@@ -332,7 +332,7 @@ func capturedMetaSeam(sess *session) func(doc string) (orchestrator.PlaybookMeta
 						notes[ev.Name] = ev.Why
 					}
 				}
-				return orchestrator.PlaybookMeta{
+				return reengage.PlaybookMeta{
 					Description:  m.Description,
 					Category:     m.Category,
 					Tags:         m.Tags,
@@ -399,7 +399,7 @@ func createAuthorWithProgress(req capture.Request, d triage.Decision, c *cache.C
 // Reengage (regenerate / `w`-wrap-up commit) + the no-mux ask bridge, reshape os.Args
 // to `run --file <tmp>` (no --cached → no badge), and call ui.Main. The temp file is
 // cleaned up after the viewer returns.
-func createViewPlaybook(body string, sess *session, re *orchestrator.Reengage, cfg *config.Config, req capture.Request) int {
+func createViewPlaybook(body string, sess *session, re *reengage.Reengage, cfg *config.Config, req capture.Request) int {
 	f, err := os.CreateTemp("", "apb-create-*.md")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook create: %v\n", err)

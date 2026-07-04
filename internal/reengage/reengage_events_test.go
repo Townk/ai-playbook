@@ -1,4 +1,4 @@
-package orchestrator
+package reengage
 
 import (
 	"io"
@@ -90,15 +90,15 @@ func TestRegenerate_EventPath_StreamsActivityAndReStores(t *testing.T) {
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
 	fe := &fakeEvents{delta: "# Fresh\n", final: "# Fresh regenerated body\n"}
 	c := cache.Open()
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+	e := New(&Reengage{
 		Req:     sampleReq(),
 		Events:  fe.fn,
 		Cache:   c,
 		CtxHash: "ctxhash",
 		ReqHash: "reqhash",
-	})
+	}, nil)
 
-	stream, activity, mode, err := o.Regenerate(nil)
+	stream, activity, mode, err := e.Regenerate(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -152,13 +152,13 @@ func TestRegenerate_EventPath_StreamsActivityAndReStores(t *testing.T) {
 // threaded through, the StreamMode is Append, and the activity feed streams.
 func TestFollowup_EventPath_StreamsActivity(t *testing.T) {
 	fe := &fakeEvents{delta: "# Revised\n", final: "# Revised fix\n"}
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+	e := New(&Reengage{
 		Req:    sampleReq(),
 		Events: fe.fn,
-	})
+	}, nil)
 
 	const failed = "ld: symbol not found"
-	stream, activity, mode, err := o.Followup(failed, nil)
+	stream, activity, mode, err := e.Followup(failed, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,22 +183,22 @@ func TestFollowup_EventPath_StreamsActivity(t *testing.T) {
 	}
 }
 
-// FinalPlaybook via the EVENT path (stage 2): the prompt kind is finalplaybook, the
-// base + change are threaded through, the StreamMode is Replace, the playbook
-// streams, and (stage 2) NOTHING is persisted — no cache entry is written.
+// FinalPlaybook via the EVENT path: the prompt kind is finalplaybook, the base +
+// change are threaded through, the StreamMode is Replace, the playbook streams, and
+// NOTHING is persisted — no cache entry is written (persistence is CommitPlaybook).
 func TestFinalPlaybook_EventPath_ReplaceNoPersist(t *testing.T) {
 	root := t.TempDir()
 	fe := &fakeEvents{delta: "# Playbook — fix\n", final: "# Playbook — fix\nclean setup\n"}
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+	e := New(&Reengage{
 		Req:      sampleReq(),
 		Events:   fe.fn,
 		CtxHash:  "ctxhash",
 		ReqHash:  "reqhash",
 		DataRoot: root,
-	})
+	}, nil)
 
 	const change = "# Troubleshoot\nthe fixes that worked\n"
-	stream, activity, mode, err := o.FinalPlaybook("", change, nil)
+	stream, activity, mode, err := e.FinalPlaybook("", change, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,23 +225,23 @@ func TestFinalPlaybook_EventPath_ReplaceNoPersist(t *testing.T) {
 		t.Errorf("change = %q, want %q", fe.gotFailed, change)
 	}
 
-	// Stage 2 is GENERATE-ONLY: no cache entry must be written (persistence is stage 3).
+	// GENERATE-ONLY: no cache entry must be written (persistence is CommitPlaybook).
 	if matches, _ := filepath.Glob(filepath.Join(root, "cache", "ctxhash", "*")); len(matches) != 0 {
-		t.Errorf("stage 2 FinalPlaybook must NOT persist a cache entry, found %v", matches)
+		t.Errorf("FinalPlaybook must NOT persist a cache entry, found %v", matches)
 	}
 }
 
 // FinalPlaybook in AMEND mode threads the base playbook through to the producer.
 func TestFinalPlaybook_AmendThreadsBase(t *testing.T) {
 	fe := &fakeEvents{delta: "# Playbook\n", final: "# Playbook\nupdated\n"}
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+	e := New(&Reengage{
 		Req:    sampleReq(),
 		Events: fe.fn,
-	})
+	}, nil)
 
 	const base = "# Playbook — existing\nstep one\n"
 	const change = "also configure the NDK"
-	stream, _, mode, err := o.FinalPlaybook(base, change, nil)
+	stream, _, mode, err := e.FinalPlaybook(base, change, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,13 +266,13 @@ func TestFinalPlaybook_AmendThreadsBase(t *testing.T) {
 func TestReengage_FallsBackToTextWhenNoEvents(t *testing.T) {
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir())
 	fa := &fakeAgent{canned: "# Text fallback\n"}
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+	e := New(&Reengage{
 		Req:   sampleReq(),
 		Agent: fa.agent,
 		// Events deliberately nil.
-	})
+	}, nil)
 
-	stream, activity, mode, err := o.Regenerate(nil)
+	stream, activity, mode, err := e.Regenerate(nil)
 	if err != nil {
 		t.Fatal(err)
 	}

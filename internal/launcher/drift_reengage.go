@@ -6,7 +6,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/config"
-	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/reengage"
 )
 
 // driftRegenReengage builds the minimal re-engagement context a `run --file` viewer
@@ -22,11 +22,11 @@ import (
 // not found" error, which the viewer surfaces as a clear "no AI backend" note (F24).
 // No harness picker: one supported harness today → use it; detection of a second is a
 // later concern.
-func driftRegenReengage() *orchestrator.Reengage {
-	return &orchestrator.Reengage{
+func driftRegenReengage() *reengage.Reengage {
+	return &reengage.Reengage{
 		DriftRegenOnly: true,
-		Events: func(kind orchestrator.ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
-			if kind != orchestrator.KindReengageDriftRegen {
+		Events: func(kind reengage.ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
+			if kind != reengage.KindReengageDriftRegen {
 				// A DriftRegenOnly context is never asked for another kind (the followup
 				// affordances are gated off), but fail loudly rather than silently if it is.
 				return nil, nil, errors.New("run --file re-engagement supports drift regenerate only")

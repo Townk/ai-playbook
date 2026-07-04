@@ -19,6 +19,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/reengage"
 )
 
 // pendingReengage is the re-engagement context consumed by the next Main() call,
@@ -26,12 +27,12 @@ import (
 // via os.Args reshaping and can't pass a struct through that seam, so it stashes
 // the Reengage here; Main attaches it to the orchestrator and clears it. nil
 // disables the regenerate/followup/wrapup kinds (their pre-4c-ii behavior).
-var pendingReengage *orchestrator.Reengage
+var pendingReengage *reengage.Reengage
 
 // SetReengage stashes the re-engagement context for the next ui.Main() invocation
 // (used by the troubleshoot cached-replay path so the regenerate/followup/wrapup
 // kinds can re-author in-process). It is consumed (and cleared) by Main.
-func SetReengage(re *orchestrator.Reengage) { pendingReengage = re }
+func SetReengage(re *reengage.Reengage) { pendingReengage = re }
 
 // pendingAutoRollback is the --auto-rollback opt-in consumed by the next Main() call,
 // set by SetAutoRollback. When true, a step failure auto-fires the rollback chain
@@ -174,6 +175,7 @@ func SetFinalDraft(fd bool) { pendingFinalDraft = fd }
 // and stays degraded (shell buttons remain disabled) rather than hanging.
 type OrchReady struct {
 	Orch  *orchestrator.Orchestrator
+	Reeng *reengage.Engine
 	Asker AskFunc
 }
 
@@ -190,19 +192,18 @@ var pendingReady <-chan OrchReady
 // waits for the orchestrator on the channel. Mirrors SetReengage/SetDriver.
 func SetPendingReady(ch <-chan OrchReady) { pendingReady = ch }
 
-// BuildOrch constructs the in-process orchestrator the way ui.Main does, wired to
-// the ui-internal cliMux + the active float mux. The async-startup path (main.go's
-// serveCachedPlaybook) can't build this itself — the cliMux is unexported — so it
-// hands the driver + re-engagement context here off the background goroutine and
-// delivers the result over OrchReady. When re is non-nil the orchestrator is wired
-// for re-engagement (the cached replay's regenerate/wrap-up). This is the SINGLE
-// construction site: ui.Main's sync path calls it too.
-func BuildOrch(d *driver.Driver, re *orchestrator.Reengage) *orchestrator.Orchestrator {
+// BuildOrch constructs the in-process executor + the AI-layer re-engagement engine
+// the way ui.Main does, wired to the ui-internal cliMux + the active float mux. The
+// async-startup path (the launcher's serveCachedPlaybook) can't build this itself —
+// the cliMux is unexported — so it hands the driver + re-engagement context here off
+// the background goroutine and delivers the pair over OrchReady. When re is non-nil
+// the engine is wired for re-engagement (the cached replay's regenerate/wrap-up),
+// with the executor's DriftTargetPath injected as the drift-target resolver so the
+// engine never imports the orchestrator. The engine is nil when re is nil. This is
+// the SINGLE construction site: ui.Main's sync path calls it too.
+func BuildOrch(d *driver.Driver, re *reengage.Reengage) (*orchestrator.Orchestrator, *reengage.Engine) {
 	orch := orchestrator.New(d, &cliMux{}).WithFloat(mux.Load())
-	if re != nil {
-		orch.WithReengage(re)
-	}
-	return orch
+	return orch, reengage.New(re, orch.DriftTargetPath)
 }
 
 // loadPlaybookSource reads a finalized-playbook file (run-from-file / cached-serve),
@@ -367,6 +368,7 @@ func Main() int {
 	// Done only on the interactive path (after a real TTY) so render-only
 	// invocations never spawn a shell.
 	var orch *orchestrator.Orchestrator
+	var reeng *reengage.Engine
 	// Async-orchestrator path (consume-once): when a ready-channel is stashed, do NOT
 	// open a driver or build an orch synchronously. Render the playbook IMMEDIATELY
 	// with the shell-action buttons disabled (driverPending), and let a startup
@@ -426,7 +428,7 @@ func Main() int {
 				}
 			}
 			if d != nil {
-				orch = BuildOrch(d, pendingReengage)
+				orch, reeng = BuildOrch(d, pendingReengage)
 			}
 		}
 	}
@@ -464,6 +466,7 @@ func Main() int {
 	// path). When the gate is reused for an in-session assisted run, projectRoot must
 	// also be threaded on those paths — otherwise PROJECT_ROOT exports empty string.
 	m.orch = orch
+	m.reeng = reeng
 	m.driverPending = driverPending
 	m.readyCh = readyCh
 	m.defaultLabel = thinkingLabel

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/reengage"
 )
 
 // Refuse-solution (spec §1/§2a): a submitted, non-empty refine note is recorded
@@ -148,16 +149,17 @@ func TestDriftRegenThreadsRefusals(t *testing.T) {
 	fe := &fakeEventsProducer{final: fmt.Sprintf("--- %s\n+++ %s\n@@ -1 +1 @@\n-current\n+fixed\n", target, target)}
 	m := newModel("agent", "old playbook content")
 	m.width, m.height = 80, 24
-	m.orch = orchestrator.New(sharedDriver, &cliMux{}).WithReengage(&orchestrator.Reengage{
+	m.orch = orchestrator.New(sharedDriver, &cliMux{})
+	m.reeng = reengage.New(&reengage.Reengage{
 		Req:      capture.Request{ProjectRoot: dir},
 		Events:   fe.fn,
 		DataRoot: t.TempDir(),
-	})
+	}, m.orch.DriftTargetPath)
 	m.refusals = []string{"no docker"}
 
 	cmd := m.driftRegenCmd("blk", stalePatch)
 	if cmd == nil {
-		t.Fatal("driftRegenCmd returned nil (orchestrator not wired?)")
+		t.Fatal("driftRegenCmd returned nil (re-engagement not wired?)")
 	}
 	_ = cmd() // run off the event loop; DriftRegen calls the fake EventsFunc synchronously
 	if len(fe.gotConstraints) != 1 || fe.gotConstraints[0] != "no docker" {

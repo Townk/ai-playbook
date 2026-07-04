@@ -19,7 +19,7 @@ func (bashAdapter) spawnArgs() []string             { return []string{"-il"} }
 func (bashAdapter) jobExt() string                  { return "bash" }
 func (bashAdapter) sourceCmd(jobPath string) string { return "source " + jobPath }
 func (bashAdapter) cdCmd(target string) string {
-	return "builtin cd -- " + shquote(target) + " 2>/dev/null"
+	return "builtin cd -- " + Shquote(target) + " 2>/dev/null"
 }
 
 // historyOff disables on-disk history (HISTFILE=/dev/null, `set +o history`) and
@@ -36,14 +36,14 @@ func (bashAdapter) historyOff() string {
 func (bashAdapter) historyShimFiles() map[string]string { return nil }
 
 func (bashAdapter) sentinelEcho(nonce string) string {
-	return "printf '%s\\n' " + shquote(sentinel+nonce+"_0"+sentinel)
+	return "printf '%s\\n' " + Shquote(sentinel+nonce+"_0"+sentinel)
 }
 
 func (bashAdapter) job(p jobParams) string {
-	qcwd := shquote(p.cwdf)
+	qcwd := Shquote(p.cwdf)
 	trapBody := "builtin pwd >| " + qcwd
-	qo := shquote(p.o)
-	qe := shquote(p.e)
+	qo := Shquote(p.o)
+	qe := Shquote(p.e)
 	// printf %q quotes a value so it re-expands word-split- and glob-safely.
 	// macOS ships bash 3.2 which lacks ${var@Q}, so printf %q is the portable
 	// bash quoting primitive. Numbers (exit codes) are their own printf %q output,
@@ -59,7 +59,7 @@ func (bashAdapter) job(p jobParams) string {
 			"export APB_ERR_" + key + "=\"$(printf %q \"$(<" + qe + ")\")\"" + "\n" +
 			"export APB_EXIT_" + key + "=$__apb_rc\n"
 	}
-	return "( trap " + shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) </dev/null >" + p.o + " 2>" + p.e + "\n" +
+	return "( trap " + Shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) </dev/null >" + p.o + " 2>" + p.e + "\n" +
 		"__apb_rc=$?\n" +
 		"if [ $__apb_rc -eq 141 ]; then __apb_rc=0; fi\n" +
 		"if [ -s " + qcwd + " ]; then builtin cd -- \"$(< " + qcwd + ")\" 2>/dev/null; fi\n" +

@@ -1,4 +1,4 @@
-package orchestrator
+package reengage
 
 import (
 	"errors"
@@ -62,7 +62,7 @@ func TestCommitPlaybook_AssemblesFrontMatter(t *testing.T) {
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
 	c := cache.Open()
 
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+	e := New(&Reengage{
 		Req:         sampleReq(),
 		Cache:       c,
 		CtxHash:     "ctxhash",
@@ -82,10 +82,10 @@ func TestCommitPlaybook_AssemblesFrontMatter(t *testing.T) {
 			v, ok := m[name]
 			return v, ok
 		},
-	})
+	}, nil)
 
 	body := "# Playbook — X\n\nRun `echo $ANDROID_HOME` to confirm.\n"
-	path, err := o.CommitPlaybook(body)
+	path, err := e.CommitPlaybook(body)
 	if err != nil {
 		t.Fatalf("CommitPlaybook: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestCommitPlaybook_MetadataErrorStillPersists(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			root := t.TempDir()
-			o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+			e := New(&Reengage{
 				Req:      sampleReq(),
 				DataRoot: root,
 				Metadata: tc.meta,
@@ -172,9 +172,9 @@ func TestCommitPlaybook_MetadataErrorStillPersists(t *testing.T) {
 					}
 					return "", false
 				},
-			})
+			}, nil)
 			body := "# Playbook — X\n\nUse $ANDROID_HOME.\n"
-			path, err := o.CommitPlaybook(body)
+			path, err := e.CommitPlaybook(body)
 			if err != nil {
 				t.Fatalf("CommitPlaybook should never fail over metadata: %v", err)
 			}
@@ -199,7 +199,7 @@ func TestCommitPlaybook_MetadataErrorStillPersists(t *testing.T) {
 // A secret-named ref has its value redacted in the front matter (name-pattern match).
 func TestCommitPlaybook_RedactsSecretValue(t *testing.T) {
 	root := t.TempDir()
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+	e := New(&Reengage{
 		Req:      sampleReq(),
 		DataRoot: root,
 		EnvLookup: func(name string) (string, bool) {
@@ -208,9 +208,9 @@ func TestCommitPlaybook_RedactsSecretValue(t *testing.T) {
 			}
 			return "", false
 		},
-	})
+	}, nil)
 	body := "# Playbook — X\n\nexport API_KEY=$API_KEY\n"
-	path, err := o.CommitPlaybook(body)
+	path, err := e.CommitPlaybook(body)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,15 +234,15 @@ func TestCommitPlaybook_CacheBodyPreservesInnerFM(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
 	c := cache.Open()
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+	e := New(&Reengage{
 		Req:      sampleReq(),
 		Cache:    c,
 		CtxHash:  "ctxhash",
 		ReqHash:  "reqhash",
 		DataRoot: root,
-	})
+	}, nil)
 	body := "# Playbook — Round Trip\n\nbody line.\n"
-	if _, err := o.CommitPlaybook(body); err != nil {
+	if _, err := e.CommitPlaybook(body); err != nil {
 		t.Fatal(err)
 	}
 	entry, err := os.ReadFile(filepath.Join(root, "cache", "ctxhash", "reqhash.md"))
@@ -270,8 +270,7 @@ func TestCommitPlaybook_CacheBodyPreservesInnerFM(t *testing.T) {
 // front-matter field on an existing saved playbook survives a re-commit (e.g. a
 // regenerate) of the SAME title. buildFrontMatter rebuilds the front matter from
 // scratch and has no seam for DependsOn, so CommitPlaybook itself must read back
-// the file it's about to overwrite and carry the field forward — mirroring
-// finalizeDoc's old/new front-matter merge (cmd/ai-playbook/finalize.go).
+// the file it's about to overwrite and carry the field forward.
 func TestCommitPlaybook_PreservesDependsOn(t *testing.T) {
 	storeDir := t.TempDir()
 	dataRoot := t.TempDir()
@@ -286,18 +285,17 @@ func TestCommitPlaybook_PreservesDependsOn(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	re := &Reengage{
+	e := New(&Reengage{
 		StoreDir:  storeDir,
 		DataRoot:  dataRoot,
 		Req:       sampleReq(),
 		EnvLookup: func(string) (string, bool) { return "", false },
-	}
-	o := New(newTestDriver(t), &recMux{}).WithReengage(re)
+	}, nil)
 
 	// Re-commit a regenerated body of the SAME title (simulating a regenerate ->
 	// commit round trip); the resolved slug/path is unchanged.
 	body := "# Playbook — Depends Test\n\nregenerated body content.\n"
-	path, err := o.CommitPlaybook(body)
+	path, err := e.CommitPlaybook(body)
 	if err != nil {
 		t.Fatalf("CommitPlaybook: %v", err)
 	}

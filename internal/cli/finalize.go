@@ -14,7 +14,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/launcher"
-	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/reengage"
 )
 
 // finalizeDoc is the testable core of the `finalize` subcommand: it backfills
@@ -49,10 +49,10 @@ func finalizeDoc(
 	// (1) Drop any existing front matter (idempotency) then strip preamble above
 	// the first H1, so we re-assemble from the literate body only.
 	old, body, _ := frontmatter.Parse(raw)
-	body = orchestrator.StripPreamble(body)
+	body = reengage.StripPreamble(body)
 
 	// (2) name: same derivation as the commit path (# Playbook — <t> else first H1).
-	name := orchestrator.PlaybookName(body)
+	name := reengage.PlaybookName(body)
 
 	// (3) model classification (best-effort): on error, continue with empty model
 	// fields but surface the error to the caller for logging.

@@ -12,6 +12,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/reengage"
 )
 
 // fakeAgent returns a canned stream and records calls. Injected as author.Agent.
@@ -25,13 +26,15 @@ func (f *fakeAgent) agent(systemPrompt, userMessage string) (io.ReadCloser, erro
 	return io.NopCloser(strings.NewReader(f.canned)), nil
 }
 
-// newReengageModel wires an in-process model to an orchestrator whose Reengage uses
-// a fake agent, so regenerate/followup/wrapup re-author deterministically.
+// newReengageModel wires an in-process model to an executor + a re-engagement engine
+// whose Reengage uses a fake agent, so regenerate/followup/wrapup re-author
+// deterministically.
 func newReengageModel(t *testing.T, canned string) (model, *fakeAgent) {
 	t.Helper()
 	fa := &fakeAgent{canned: canned}
 	m := newModel("agent", "old playbook content")
-	m.orch = orchestrator.New(sharedDriver, &cliMux{}).WithReengage(&orchestrator.Reengage{
+	m.orch = orchestrator.New(sharedDriver, &cliMux{})
+	m.reeng = reengage.New(&reengage.Reengage{
 		Req: capture.Request{
 			Command:     "make build",
 			Exit:        "2",
@@ -40,15 +43,15 @@ func newReengageModel(t *testing.T, canned string) (model, *fakeAgent) {
 		},
 		Agent:    fa.agent,
 		DataRoot: t.TempDir(),
-	})
+	}, m.orch.DriftTargetPath)
 	return m, fa
 }
 
-// orchWithReengage creates a minimal orchestrator with Reengage wired (using a fake agent),
-// for testing re-engagement functions that need orch.Reengage to be non-nil.
-func orchWithReengage(t *testing.T) *orchestrator.Orchestrator {
+// reengWithFake creates a minimal re-engagement engine (using a fake agent), for
+// testing re-engagement functions that need m.reeng to be non-nil.
+func reengWithFake(t *testing.T) *reengage.Engine {
 	t.Helper()
-	return orchestrator.New(sharedDriver, &cliMux{}).WithReengage(&orchestrator.Reengage{
+	return reengage.New(&reengage.Reengage{
 		Req: capture.Request{
 			Command:     "make build",
 			Exit:        "2",
@@ -57,7 +60,7 @@ func orchWithReengage(t *testing.T) *orchestrator.Orchestrator {
 		},
 		Agent:    (&fakeAgent{canned: "# Revised fix\n"}).agent,
 		DataRoot: t.TempDir(),
-	})
+	}, nil)
 }
 
 // collectMsgs runs a tea.Cmd and flattens any tea.BatchMsg it yields into a slice
@@ -385,7 +388,8 @@ func newReengageEventsModel(t *testing.T, delta, final string) (model, *fakeEven
 	fe := &fakeEventsProducer{delta: delta, final: final}
 	m := newModel("agent", "old playbook content")
 	m.width, m.height = 80, 24
-	m.orch = orchestrator.New(sharedDriver, &cliMux{}).WithReengage(&orchestrator.Reengage{
+	m.orch = orchestrator.New(sharedDriver, &cliMux{})
+	m.reeng = reengage.New(&reengage.Reengage{
 		Req: capture.Request{
 			Command:     "make build",
 			Exit:        "2",
@@ -394,23 +398,23 @@ func newReengageEventsModel(t *testing.T, delta, final string) (model, *fakeEven
 		},
 		Events:   fe.fn,
 		DataRoot: t.TempDir(),
-	})
+	}, m.orch.DriftTargetPath)
 	return m, fe
 }
 
-// fakeEventsProducer is the ui-side injected orchestrator.EventsFunc: it emits a
+// fakeEventsProducer is the ui-side injected reengage.EventsFunc: it emits a
 // canned normalized event stream (delta → playbook; reasoning + tool → activity;
 // Final → body) so a re-engagement exercises the live activity feed deterministically.
 type fakeEventsProducer struct {
 	delta, final   string
-	gotKind        orchestrator.ReengageKind
+	gotKind        reengage.ReengageKind
 	gotBase        string
 	gotChange      string
 	gotConstraints []string
 	calls          int
 }
 
-func (f *fakeEventsProducer) fn(kind orchestrator.ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
+func (f *fakeEventsProducer) fn(kind reengage.ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
 	f.calls++
 	f.gotKind = kind
 	f.gotBase = base
@@ -1007,7 +1011,7 @@ func TestConfirmYesGeneratesFinalPlaybookReplaceDraft(t *testing.T) {
 	if fe.calls != 1 {
 		t.Fatalf("producer calls = %d, want 1", fe.calls)
 	}
-	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+	if fe.gotKind != reengage.KindReengageFinalPlaybook {
 		t.Errorf("producer kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
 	}
 	if fe.gotBase != "" {
@@ -1092,7 +1096,7 @@ func TestConfirmYesAmendsServedPlaybook(t *testing.T) {
 	if fe.calls != 1 {
 		t.Fatalf("producer calls = %d, want 1", fe.calls)
 	}
-	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+	if fe.gotKind != reengage.KindReengageFinalPlaybook {
 		t.Errorf("producer kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
 	}
 	if fe.gotBase != served {
@@ -1126,7 +1130,7 @@ func TestConfirmYesFreshWhenNoServedBase(t *testing.T) {
 		t.Fatal("confirm Yes must trigger the fresh generation")
 	}
 	m = pumpReArm(t, m, cmd)
-	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+	if fe.gotKind != reengage.KindReengageFinalPlaybook {
 		t.Errorf("producer kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
 	}
 	if fe.gotBase != "" {
@@ -1245,7 +1249,7 @@ func TestConfirmResolvesByClick(t *testing.T) {
 		t.Error("clicking Yes must mark a finalDraft")
 	}
 	m = pumpReArm(t, m, cmd)
-	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+	if fe.gotKind != reengage.KindReengageFinalPlaybook {
 		t.Errorf("click Yes kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
 	}
 }
@@ -1272,7 +1276,7 @@ func TestManualWGeneratesFinalPlaybookDraft(t *testing.T) {
 		t.Errorf("w must mark a draft (finalDraft=%v committed=%v)", m.finalDraft, m.committed)
 	}
 	m = pumpReArm(t, m, cmd)
-	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+	if fe.gotKind != reengage.KindReengageFinalPlaybook {
 		t.Errorf("w kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
 	}
 }
@@ -1378,7 +1382,7 @@ func TestWGeneratesOnTranscript(t *testing.T) {
 		t.Errorf("w-generate must mark a draft (finalDraft=%v committed=%v)", m.finalDraft, m.committed)
 	}
 	m = pumpReArm(t, m, cmd)
-	if fe.calls != 1 || fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+	if fe.calls != 1 || fe.gotKind != reengage.KindReengageFinalPlaybook {
 		t.Errorf("w-generate must call the final-playbook producer once, got calls=%d kind=%v", fe.calls, fe.gotKind)
 	}
 }
@@ -1452,7 +1456,7 @@ func TestFAmendDoesNotAutoPersistAtEOF(t *testing.T) {
 	if m.committed {
 		t.Error("an f amend must leave committed=false after EOF (no auto-persist)")
 	}
-	if fe.calls != 1 || fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+	if fe.calls != 1 || fe.gotKind != reengage.KindReengageFinalPlaybook {
 		t.Errorf("f amend must call the final-playbook producer once, got calls=%d kind=%v", fe.calls, fe.gotKind)
 	}
 }
@@ -2032,7 +2036,7 @@ func TestFChangeSubmittedTriggersAmend(t *testing.T) {
 	if fe.calls != 1 {
 		t.Fatalf("producer calls = %d, want 1", fe.calls)
 	}
-	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+	if fe.gotKind != reengage.KindReengageFinalPlaybook {
 		t.Errorf("producer kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
 	}
 	if fe.gotBase != base {
@@ -2262,7 +2266,7 @@ func TestConfirmSpaceSelectsFocusedYes(t *testing.T) {
 		t.Error("Space on Yes must mark a finalDraft")
 	}
 	m = pumpReArm(t, m, cmd)
-	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+	if fe.gotKind != reengage.KindReengageFinalPlaybook {
 		t.Errorf("Space-on-Yes kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
 	}
 }
@@ -2287,7 +2291,7 @@ func TestConfirmYNStillWorkWithFocus(t *testing.T) {
 		t.Error("y must mark a finalDraft (Yes path)")
 	}
 	m = pumpReArm(t, m, cmd)
-	if fe.gotKind != orchestrator.KindReengageFinalPlaybook {
+	if fe.gotKind != reengage.KindReengageFinalPlaybook {
 		t.Errorf("y kind = %v, want KindReengageFinalPlaybook", fe.gotKind)
 	}
 }
@@ -2555,7 +2559,7 @@ func TestRegenerateScrollsToTop(t *testing.T) {
 }
 
 func TestHadFollowup_SetByFollowup(t *testing.T) {
-	m := &model{orch: orchWithReengage(t)} // an orch whose Reengage != nil so beginFollowupStream proceeds
+	m := &model{reeng: reengWithFake(t)} // an orch whose Reengage != nil so beginFollowupStream proceeds
 	_ = m.beginFollowupStream("verify", "false")
 	if !m.hadFollowup {
 		t.Fatal("a follow-up must set hadFollowup")
@@ -2564,7 +2568,7 @@ func TestHadFollowup_SetByFollowup(t *testing.T) {
 
 func TestSaveDecision_NoFollowupPersists(t *testing.T) {
 	m := &model{hadFollowup: false, md: "# P\n\n```bash {id=fix}\ntrue\n```\n",
-		orch: orchWithReengage(t)}
+		reeng: reengWithFake(t)}
 	cmd := m.saveDecision()
 	if cmd == nil {
 		t.Fatal("no-followup save must return the commit cmd")
@@ -2576,7 +2580,7 @@ func TestSaveDecision_NoFollowupPersists(t *testing.T) {
 }
 
 func TestSaveDecision_FollowupReauthors(t *testing.T) {
-	m := &model{hadFollowup: true, orch: orchWithReengage(t)}
+	m := &model{hadFollowup: true, reeng: reengWithFake(t)}
 	_ = m.saveDecision()
 	// beginFinalPlaybookGenerate resets hadFollowup so the re-authored doc is then final
 	if m.hadFollowup {
@@ -2591,7 +2595,7 @@ func TestSaveDecision_FollowupReauthors(t *testing.T) {
 // Task 6: `w` on a troubleshoot transcript without a verified run raises the
 // "save unverified" confirm overlay instead of saving immediately.
 func TestW_NotVerifiedRaisesConfirm(t *testing.T) {
-	m := model{md: "# P\n\n```bash {id=verify}\ntrue\n```\n", orch: orchWithReengage(t)}
+	m := model{md: "# P\n\n```bash {id=verify}\ntrue\n```\n", reeng: reengWithFake(t)}
 	m.width, m.height = 80, 24
 	m.reflow()
 	// blockStates is empty → not verified
@@ -2604,7 +2608,7 @@ func TestW_NotVerifiedRaisesConfirm(t *testing.T) {
 
 // Task 6: `w` on a verified troubleshoot transcript saves directly (no overlay).
 func TestW_VerifiedSavesDirectly(t *testing.T) {
-	m := model{md: "# P\n\n```bash {id=verify}\ntrue\n```\n", orch: orchWithReengage(t)}
+	m := model{md: "# P\n\n```bash {id=verify}\ntrue\n```\n", reeng: reengWithFake(t)}
 	m.width, m.height = 80, 24
 	m.blockStates = map[string]blockRunState{"verify": {Status: "ok"}}
 	m.reflow()
@@ -2617,7 +2621,7 @@ func TestW_VerifiedSavesDirectly(t *testing.T) {
 
 // Task 6: saveConfirmMsg{ok:true} drives saveDecision (a non-nil cmd is returned).
 func TestW_SaveConfirmMsgOk(t *testing.T) {
-	m := model{md: "# P\n", orch: orchWithReengage(t)}
+	m := model{md: "# P\n", reeng: reengWithFake(t)}
 	m.width, m.height = 80, 24
 	m.blockStates = map[string]blockRunState{}
 	// hadFollowup=false → saveDecision takes the commit path (commitPlaybookCmd).
@@ -2629,7 +2633,7 @@ func TestW_SaveConfirmMsgOk(t *testing.T) {
 
 // Task 6: saveConfirmMsg{ok:false} is a no-op (the user cancelled the confirm).
 func TestW_SaveConfirmMsgCancel(t *testing.T) {
-	m := model{md: "# P\n", orch: orchWithReengage(t)}
+	m := model{md: "# P\n", reeng: reengWithFake(t)}
 	m.width, m.height = 80, 24
 	m.blockStates = map[string]blockRunState{}
 	nm, cmd := m.Update(saveConfirmMsg{ok: false})

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/reengage"
 )
 
 // newInProcModel builds a model wired to a real orchestrator over a controlled-rc
@@ -206,14 +207,12 @@ func TestEmitActionNoOrchNoFifoReturnsNil(t *testing.T) {
 	}
 }
 
-// orchWithReengageBody builds a minimal *orchestrator.Orchestrator (no live driver
-// needed) with a Reengage whose Body closure returns the given function. Used by the
-// per-stream structured-render tests below; the Cmd returned by begin* is never
-// called, so the nil Drv/Mux are harmless.
-func orchWithReengageBody(body func() string) *orchestrator.Orchestrator {
-	return &orchestrator.Orchestrator{
-		Reengage: &orchestrator.Reengage{Body: body},
-	}
+// reengWithBody builds a minimal *reengage.Engine (no live driver needed) with a
+// Reengage whose Body closure returns the given function. Used by the per-stream
+// structured-render tests below; the Cmd returned by begin* is never called, so the
+// nil drift-target resolver is harmless.
+func reengWithBody(body func() string) *reengage.Engine {
+	return reengage.New(&reengage.Reengage{Body: body}, nil)
 }
 
 // TestRearm_StructuredFinalPlaybook: beginFinalPlaybookGenerate must set
@@ -222,7 +221,7 @@ func orchWithReengageBody(body func() string) *orchestrator.Orchestrator {
 func TestRearm_StructuredFinalPlaybook(t *testing.T) {
 	want := "# Re-authored\n"
 	m := model{
-		orch:   orchWithReengageBody(func() string { return want }),
+		reeng:  reengWithBody(func() string { return want }),
 		width:  80,
 		height: 24,
 	}
@@ -243,7 +242,7 @@ func TestRearm_StructuredFinalPlaybook(t *testing.T) {
 func TestRearm_StructuredRegenerate(t *testing.T) {
 	want := "# Regenerated\n"
 	m := model{
-		orch:   orchWithReengageBody(func() string { return want }),
+		reeng:  reengWithBody(func() string { return want }),
 		width:  80,
 		height: 24,
 	}
@@ -265,7 +264,7 @@ func TestRearm_StructuredRegenerate(t *testing.T) {
 func TestRearm_FollowupNotStructured(t *testing.T) {
 	m := model{
 		structured: true,
-		orch:       orchWithReengageBody(func() string { return "x" }),
+		reeng:      reengWithBody(func() string { return "x" }),
 		width:      80,
 		height:     24,
 	}

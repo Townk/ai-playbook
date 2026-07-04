@@ -31,7 +31,7 @@ func (shAdapter) spawnArgs() []string             { return []string{"-i"} }
 func (shAdapter) jobExt() string                  { return "sh" }
 func (shAdapter) sourceCmd(jobPath string) string { return ". " + jobPath }
 func (shAdapter) cdCmd(target string) string {
-	return "cd -- " + shquote(target) + " 2>/dev/null"
+	return "cd -- " + Shquote(target) + " 2>/dev/null"
 }
 
 // historyOff disables on-disk history. POSIX sh/dash has no atuin integration of
@@ -45,14 +45,14 @@ func (shAdapter) historyOff() string {
 func (shAdapter) historyShimFiles() map[string]string { return nil }
 
 func (shAdapter) sentinelEcho(nonce string) string {
-	return "printf '%s\\n' " + shquote(sentinel+nonce+"_0"+sentinel)
+	return "printf '%s\\n' " + Shquote(sentinel+nonce+"_0"+sentinel)
 }
 
 func (shAdapter) job(p jobParams) string {
-	qcwd := shquote(p.cwdf)
+	qcwd := Shquote(p.cwdf)
 	trapBody := "pwd >| " + qcwd
-	qo := shquote(p.o)
-	qe := shquote(p.e)
+	qo := Shquote(p.o)
+	qe := Shquote(p.e)
 	// Value-passing: store the pure-shell single-quote-quoted capture so it
 	// re-expands word-split- and glob-safely. Exit codes are bare integers.
 	vp := shQuoterFunc + "\n" +
@@ -66,7 +66,7 @@ func (shAdapter) job(p jobParams) string {
 			"export APB_ERR_" + key + "=\"$(__apb_q \"$(cat " + qe + ")\")\"" + "\n" +
 			"export APB_EXIT_" + key + "=$__apb_rc\n"
 	}
-	return "( trap " + shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) </dev/null >" + p.o + " 2>" + p.e + "\n" +
+	return "( trap " + Shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) </dev/null >" + p.o + " 2>" + p.e + "\n" +
 		"__apb_rc=$?\n" +
 		"if [ $__apb_rc -eq 141 ]; then __apb_rc=0; fi\n" +
 		"if [ -s " + qcwd + " ]; then cd -- \"$(cat " + qcwd + ")\" 2>/dev/null; fi\n" +

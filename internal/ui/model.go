@@ -22,6 +22,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/input"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/reengage"
 )
 
 // spinTickMsg drives the spinner animation/timer while thinking. gen identifies
@@ -248,6 +249,13 @@ type model struct {
 	// Main when a playbook file is run, or delivered later via orchReadyMsg.
 	orch *orchestrator.Orchestrator
 
+	// reeng is the AI-layer re-engagement engine (ADR-0009 step 2): the second handle
+	// the model holds beside the executor. It owns regenerate / followup /
+	// finalplaybook / drift-regenerate / commit. nil means no re-engagement context is
+	// wired (a standalone/sample viewer), so those affordances degrade to inert no-ops.
+	// Set alongside orch by Main / RunStream, or delivered later via orchReadyMsg.
+	reeng *reengage.Engine
+
 	// driverPending marks the ASYNC-startup window: the playbook renders IMMEDIATELY
 	// while the shell driver + orchestrator open in the BACKGROUND. While true the
 	// shell-action buttons (run ▶ / run-in-assistant-shell / view-diff / apply / undo /
@@ -334,7 +342,7 @@ type model struct {
 
 	// finalDraft marks that the rendered playbook is a GENERATED final-playbook draft
 	// (the confirm "Yes" / `f` / `w`-on-transcript produced it). committed flips true
-	// once it is persisted (save + cache-replace via orchestrator.CommitPlaybook) —
+	// once it is persisted (save + cache-replace via reengage.Engine.CommitPlaybook) —
 	// either by the auto-finish baseline (spec §D) or a `w` re-persist.
 	finalDraft bool
 	committed  bool
@@ -1272,6 +1280,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// the playbook may already be rendered (diff blocks present) but the orch
 		// arrived later via the async-startup path.
 		m.orch = msg.Orch
+		m.reeng = msg.Reeng
 		if msg.Asker != nil {
 			m.asker = msg.Asker
 		}
@@ -3488,7 +3497,7 @@ func (m *model) resolveConfirm(yes bool) tea.Cmd {
 // A DriftRegenOnly context (a `run --file` viewer wired to the harness for drift
 // regenerate alone) does NOT count — the followup affordances stay off there.
 func (m *model) canReengageInProc() bool {
-	return m.orch != nil && m.orch.Reengage != nil && !m.orch.Reengage.DriftRegenOnly
+	return m.reeng != nil && !m.reeng.DriftRegenOnly()
 }
 
 // canRegenerate reports whether the cached pill's reload can actually do something —
@@ -3510,7 +3519,7 @@ func (m model) canRegenerate() bool {
 	if m.driverPending {
 		return true
 	}
-	return m.orch != nil && m.orch.Reengage != nil ||
+	return m.reeng != nil ||
 		m.answerRegen != nil
 }
 
@@ -3523,7 +3532,7 @@ func (m *model) beginFollowupStream(blockID, command string) tea.Cmd {
 	// In-process: re-engage the agent via the orchestrator and re-arm the parser
 	// with the revised-fix stream (APPEND). The failed command's output is read
 	// from the block's run logfile (capped, like the shell's tail -c 4000).
-	if m.orch != nil && m.orch.Reengage != nil {
+	if m.reeng != nil {
 		failedOut := m.failedOutput(blockID)
 		if cmd := m.beginFollowupInProc(failedOut); cmd != nil {
 			return cmd

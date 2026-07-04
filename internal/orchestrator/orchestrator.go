@@ -1,34 +1,32 @@
 // Package orchestrator is the in-process, typed replacement for the shell
 // ai-assist-action-broker. The broker read <kind>␟<id>␟<payload>␞ records off a
 // fifo and performed them; here the pager calls typed Go methods directly — no
-// fifos, no text framing. Stage 2 wired the run/stop path to the driver (with
-// value-passing across blocks) plus copy/play via the Mux. Stage 4c-i wires the
-// diff kinds in-process: apply-diff / undo-diff git-apply the patch via the
-// driver, and view-diff spawns the in-process diff renderer (`ai-playbook diff`)
-// in a Float mux pane. The regenerate / followup / wrapup kinds remain modeled
-// but deferred.
+// fifos, no text framing. It wires the run/stop path to the driver (with
+// value-passing across blocks), copy/play via the Mux, and the diff kinds
+// in-process: apply-diff / undo-diff git-apply the patch via the driver, and
+// view-diff spawns the in-process diff renderer (`ai-playbook diff`) in a Float mux
+// pane, plus file create/undo and drift checking.
+//
+// This is the executor CORE (ADR-0009 step 2): it is AI-free. The re-engagement
+// surface (regenerate / followup / finalplaybook / commit) lives in
+// internal/reengage; the ui holds that engine as a second handle. The regenerate /
+// followup button kinds still exist in the action vocabulary so the ui can name
+// them, but they never route through Do — reaching Do is a wiring bug (ErrMisrouted).
 package orchestrator
 
 import (
 	"context"
 	"encoding/json"
 	"errors"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/Townk/ai-playbook/internal/agentstream"
-	"github.com/Townk/ai-playbook/internal/author"
-	"github.com/Townk/ai-playbook/internal/cache"
-	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/diff"
 	"github.com/Townk/ai-playbook/internal/driver"
-	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/mux"
 )
 
@@ -36,14 +34,17 @@ import (
 // AI_PLAYBOOK_RUN_TIMEOUT default of 120s).
 const defaultTimeout = 120 * time.Second
 
-// reengageActivityBuffer bounds the re-engagement fan-out's activity channel —
-// enough to absorb a brief ui stall without blocking the event pump (sends are
-// drop-if-full). Mirrors the initial authoring's activityBuffer in package main.
-const reengageActivityBuffer = 16
-
 // ErrNotImplemented marks an action kind that is modeled but deferred to a later
 // migration stage.
 var ErrNotImplemented = errors.New("orchestrator: action kind not implemented yet")
+
+// ErrMisrouted marks a re-engagement kind (regenerate / followup) that reached the
+// executor's Do. Those kinds re-author and yield a NEW stream that must SWAP the
+// ui's rendered playbook — that does not fit Do's (Result, error) shape, so the ui
+// drives them through the internal/reengage engine instead. Reaching Do means the
+// caller used the wrong seam; a distinct error (not ErrNotImplemented) keeps such a
+// wiring bug from masquerading as "not available in in-process mode yet".
+var ErrMisrouted = errors.New("orchestrator: re-engagement kind reached the executor — route via the reengage engine")
 
 // Mux is the terminal-multiplexer surface the orchestrator needs. Stage 2 needs
 // only clipboard + type-into-origin-pane; diff-float et al. come with later
@@ -102,6 +103,40 @@ func (k Kind) String() string {
 	}
 }
 
+// ParseKind maps a UI button-kind string to its typed Kind — the single inverse of
+// Kind.String, so the ui does not hand-maintain a duplicate switch. It accepts the
+// canonical names Kind.String emits plus the "diff" alias for view-diff (the button
+// kind the renderer uses). The second result is false for strings that name no
+// executor action (e.g. pager-local "toggle"), so a caller can degrade cleanly.
+func ParseKind(s string) (Kind, bool) {
+	switch s {
+	case "copy":
+		return KindCopy, true
+	case "play":
+		return KindPlay, true
+	case "run":
+		return KindRun, true
+	case "stop":
+		return KindStop, true
+	case "diff", "view-diff":
+		return KindViewDiff, true
+	case "apply-diff":
+		return KindApplyDiff, true
+	case "undo-diff":
+		return KindUndoDiff, true
+	case "create":
+		return KindCreateFile, true
+	case "undo-create":
+		return KindUndoCreate, true
+	case "regenerate":
+		return KindRegenerate, true
+	case "followup":
+		return KindFollowup, true
+	default:
+		return 0, false
+	}
+}
+
 // Action is the typed form of the broker's 3-field record (kind␟id␟payload).
 type Action struct {
 	Kind    Kind
@@ -131,146 +166,7 @@ type Orchestrator struct {
 	// (Run/Stop/Copy) that touch neither the map nor each other's state.
 	backupMu      sync.Mutex
 	createBackups map[string]*[]byte
-
-	// Reengage carries everything the regenerate / followup / wrapup kinds need to
-	// re-invoke the author in-process: the original request, the injected capable
-	// agent, and (for regenerate's re-store) the cache + the original decision keys.
-	// It is set via WithReengage by the troubleshoot path; nil in tests/callers that
-	// don't exercise re-engagement (those kinds then return ErrNotImplemented, the
-	// pre-4c-ii behavior).
-	Reengage *Reengage
 }
-
-// ReengageKind selects which re-engagement prompt the injected Events producer
-// builds for a given invocation.
-type ReengageKind int
-
-const (
-	// KindReengageRegenerate re-authors the original request (standard prompt).
-	KindReengageRegenerate ReengageKind = iota
-	// KindReengageFollowup builds the "your fix didn't work" prompt from the
-	// failed block's captured output.
-	KindReengageFollowup
-	// KindReengageFinalPlaybook builds the FINAL-PLAYBOOK prompt (author.FinalPlaybookPrompt):
-	// fresh when base=="" (distill the resolved troubleshoot into a clean reusable
-	// playbook), amend when base!="" (fold the change into the served base playbook).
-	KindReengageFinalPlaybook
-	// KindReengageDriftRegen re-authors ONE drifted diff block against the current
-	// target file; non-structured, returns a unified diff as text (no submit_playbook).
-	KindReengageDriftRegen
-)
-
-// EventsFunc is the injected event producer for re-engagement: per kind it builds
-// the right system prompt + user message (regenerate → standard authoring prompt;
-// followup → the failed-output prompt; finalplaybook → the FINAL-PLAYBOOK prompt)
-// and runs the OWNED harness invocation (author.RunHarnessEvents), returning a
-// normalized agentstream.Event channel + a close/wait func. It is built in main.go
-// (which imports author + carries the session's mcp-config) so the orchestrator
-// does NOT import author for the event path.
-//
-// The two payload args generalize the producer so each kind gets what it needs:
-//   - base: the base playbook to AMEND (KindReengageFinalPlaybook only; "" → fresh).
-//   - change: the change/context — for followup the failed command's output; for
-//     finalplaybook the troubleshoot content / fix to fold in.
-//     Unused for regenerate.
-//
-// constraints carries the session's user-rejected-approach reasons (spec
-// "refuse-solution" §1): the producer folds them into the built system prompt via
-// author.WithConstraints for EVERY kind, so a refused approach cannot resurface in
-// a later re-engagement. An empty/nil list leaves the prompt byte-identical.
-//
-// A nil Events on Reengage selects the legacy text Agent fallback.
-type EventsFunc func(kind ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error)
-
-// Reengage bundles the re-engagement context. Req is the original captured
-// request; Agent is the injected author.Agent (author.HarnessAgent in production,
-// a fake in tests) used as the TEXT-path FALLBACK. Events, when set, is the
-// normalized event producer (author.RunHarnessEvents) that streams the model's
-// live reasoning + tool activity during the re-engagement wait, exactly like the
-// initial authoring; it is preferred over Agent. Cache/CtxHash/ReqHash/RequestJSON
-// drive regenerate's fresh re-store of the produced playbook (followup/wrapup do
-// NOT re-store the main playbook). DataRoot is the data dir for the wrap-up
-// solution artifact and the KB append (defaults to cache.DefaultRoot when empty).
-type Reengage struct {
-	Req    capture.Request
-	Agent  author.Agent
-	Events EventsFunc
-	// DriftRegenOnly marks a re-engagement context that supports ONLY the
-	// drift-regenerate action (a `run --file` viewer wired to the harness for that one
-	// thing), not a full authoring/troubleshoot session. The viewer keeps its followup
-	// and whole-playbook-regenerate affordances OFF for such a context (see
-	// canReengageInProc), so a standalone playbook can regenerate a drifted diff without
-	// sprouting an authoring-only "try another fix" button.
-	DriftRegenOnly bool
-	Cache          *cache.Cache
-	CtxHash        string
-	ReqHash        string
-	RequestJSON    string
-	DataRoot       string
-
-	// Body, when set, renders the currently-captured structured playbook (live).
-	// Re-engagement uses it so the in-viewer stream EOF can show the re-authored
-	// playbook from the session's submit_playbook capture, not the streamed text.
-	Body func() string
-
-	// Metadata is the injected model-classification seam used by CommitPlaybook to
-	// fill the front-matter description/category/tags + per-var env rationales (spec
-	// §B). main.go wires it from author.PlaybookMetadata; tests inject a fake. It is
-	// nil-safe: a nil seam (or any error from it) means CommitPlaybook persists with
-	// empty model fields — metadata MUST NEVER fail the commit (the playbook must
-	// still persist). It is decoupled from the author package via PlaybookMeta.
-	Metadata func(doc string) (PlaybookMeta, error)
-
-	// EnvLookup is the injected ground-truth environment seam used by CommitPlaybook
-	// to fill (and redact) the front-matter env values (spec §C). main.go wires it to
-	// the driver shell's environment (dumped once, cached in the closure); tests
-	// inject a fake map lookup. nil-safe: a nil seam means no env VALUES are captured
-	// (referenced vars are simply omitted, since their values are unknown).
-	EnvLookup func(name string) (value string, ok bool)
-
-	// StoreDir is the resolved global store directory CommitPlaybook writes playbooks
-	// into. Set by the launcher to cfg.GlobalStoreDir() so the writer and the store
-	// reader (store.Index) always resolve the same directory. When empty, CommitPlaybook
-	// falls back to <dataRoot>/playbooks for back-compat (the pre-Task-4 behaviour).
-	// The orchestrator does NOT import config — the launcher injects the resolved dir.
-	StoreDir string
-}
-
-// PlaybookMeta is the orchestrator-local mirror of the model's four classification
-// fields (spec §A/§B), decoupling the orchestrator from the author package on the
-// CommitPlaybook path. main.go maps author.Metadata → PlaybookMeta, building
-// EnvNotes (env-var-name → why) from author.Metadata.ImportantEnvVars.
-type PlaybookMeta struct {
-	Description  string
-	Category     string
-	Tags         []string
-	ProjectBound bool
-	// EnvNotes maps an env-var name to the model's one-line rationale (why). It feeds
-	// frontmatter.BuildEnv's notes argument: both a union source of var names and the
-	// per-var why recorded in the front matter (never redacted — a rationale).
-	EnvNotes map[string]string
-}
-
-// dataRoot resolves the data dir for wrap-up side effects: the explicit DataRoot,
-// else cache.DefaultRoot (AI_PLAYBOOK_DATA_DIR / XDG), matching the shell's $DATA.
-func (re *Reengage) dataRoot() string {
-	if re.DataRoot != "" {
-		return re.DataRoot
-	}
-	return cache.DefaultRoot()
-}
-
-// StreamMode tells the ui how to splice a re-engagement stream into the rendered
-// playbook: Replace clears the rendered content first (regenerate); Append streams
-// the new section below the existing playbook (followup, wrapup).
-type StreamMode int
-
-const (
-	// ModeReplace resets the rendered playbook and streams a fresh one (regenerate).
-	ModeReplace StreamMode = iota
-	// ModeAppend streams a new section below the existing playbook (followup/wrapup).
-	ModeAppend
-)
 
 // New builds an Orchestrator over the given driver and mux. The Float mux (for
 // view-diff) is set separately via WithFloat so existing two-arg callers/tests
@@ -284,15 +180,6 @@ func New(d *driver.Driver, m Mux) *Orchestrator {
 // nil makes view-diff a graceful no-op.
 func (o *Orchestrator) WithFloat(f mux.Mux) *Orchestrator {
 	o.Float = f
-	return o
-}
-
-// WithReengage sets the re-engagement context (request + agent + cache keys) used
-// by the regenerate / followup / wrapup kinds and returns the orchestrator
-// (chainable). Optional — leaving it nil keeps those kinds returning
-// ErrNotImplemented.
-func (o *Orchestrator) WithReengage(re *Reengage) *Orchestrator {
-	o.Reengage = re
 	return o
 }
 
@@ -332,363 +219,17 @@ func (o *Orchestrator) Do(a Action) (driver.Result, error) {
 		// Restore the backed-up content (or delete the file if it was new).
 		return o.undoCreate(a.Payload), nil
 
-	// ---- re-engagement kinds (stage 4c-ii) ----
+	// ---- re-engagement kinds ----
 	// These re-invoke the author and yield a NEW stream that must SWAP the ui's
 	// rendered playbook — that doesn't fit Do's (Result, error) shape, so the ui
-	// drives them through the dedicated Regenerate/Followup methods (which
-	// return io.ReadCloser + a StreamMode) instead of Do. Reaching them here means
-	// the caller used the wrong seam; surface ErrNotImplemented rather than
-	// silently doing nothing.
+	// drives them through the internal/reengage engine instead of Do. Reaching them
+	// here means the caller used the wrong seam; surface the distinct ErrMisrouted so
+	// the wiring bug doesn't render as "not available in in-process mode yet".
 	case KindRegenerate, KindFollowup:
-		return driver.Result{}, ErrNotImplemented
+		return driver.Result{}, ErrMisrouted
 	default:
 		return driver.Result{}, ErrNotImplemented
 	}
-}
-
-// Regenerate re-authors the ORIGINAL request with the cache bypassed and returns
-// the fresh playbook stream (ModeReplace — the ui resets the rendered content and
-// streams the new playbook). It re-stores the fresh playbook so a later identical
-// request hits the refreshed entry, matching ai-assist-regenerate
-// (AI_PLAYBOOK_NO_CACHE=1 for the lookup, then `cache store` the new body).
-//
-// Because the body is consumed by the ui (rendered incrementally), the re-store
-// tees the stream into a buffer and persists it when the stream is fully read and
-// closed — the same tee-on-completion pattern authorPlaybook uses. Re-store is
-// best-effort and only fires when the cache + keys are present (it is skipped when
-// the original entry was unkeyed).
-func (o *Orchestrator) Regenerate(constraints []string) (io.ReadCloser, <-chan string, StreamMode, error) {
-	if o.Reengage == nil {
-		return nil, nil, ModeReplace, ErrNotImplemented
-	}
-	re := o.Reengage
-
-	// restore re-stores the fresh playbook on completion (best-effort), matching
-	// the shell's regenerate re-store. followup/wrapup do NOT re-store the main
-	// playbook. Skipped when the cache + keys are absent (unkeyed original entry).
-	restore := func(body string) {
-		if re.Cache == nil || re.CtxHash == "" || re.ReqHash == "" {
-			return
-		}
-		if strings.TrimSpace(body) == "" {
-			return
-		}
-		_, _ = re.Cache.Store(re.CtxHash, re.ReqHash, "playbook", body, nil, re.RequestJSON)
-	}
-
-	// EVENT PATH (preferred): the owned harness invocation streams the model's live
-	// reasoning + tool activity during the wait, exactly like the initial authoring.
-	if re.Events != nil {
-		events, closeFn, err := re.Events(KindReengageRegenerate, "", "", constraints)
-		if err == nil {
-			reader, activity, fan := agentstream.FanOut(events, closeFn, reengageActivityBuffer)
-			reader = newCloseHook(reader, func() { restore(fan.Body()) })
-			return reader, activity, ModeReplace, nil
-		}
-		// Fall through to the text path on a producer/start error.
-	}
-
-	// TEXT PATH (fallback): no live activity line, the pre-2b behavior.
-	if re.Agent == nil {
-		return nil, nil, ModeReplace, ErrNotImplemented
-	}
-	stream, err := author.Author(re.Req, re.Agent)
-	if err != nil {
-		return nil, nil, ModeReplace, err
-	}
-	if re.Cache != nil && re.CtxHash != "" && re.ReqHash != "" {
-		stream = newStoreOnClose(stream, restore)
-	}
-	return stream, nil, ModeReplace, nil
-}
-
-// FinalPlaybook generates the clean, reusable FINAL-PLAYBOOK (spec §B) and returns
-// its stream in ModeReplace — the ui clears the rendered troubleshoot and streams
-// the playbook in, as if `run <file>.md`. base selects the mode: "" → FRESH (distill
-// the resolved troubleshoot), non-empty → AMEND (fold the change into the base). The
-// change arg carries the troubleshoot content (fresh) or the requested change (amend)
-// to integrate. Stage 2 is GENERATE-ONLY: this method does NOT save or cache the
-// result (no restore-on-close); persistence (save + cache-replace) is stage 3.
-func (o *Orchestrator) FinalPlaybook(base, change string, constraints []string) (io.ReadCloser, <-chan string, StreamMode, error) {
-	if o.Reengage == nil {
-		return nil, nil, ModeReplace, ErrNotImplemented
-	}
-	re := o.Reengage
-
-	// EVENT PATH (preferred): stream the model's live reasoning + tool activity.
-	if re.Events != nil {
-		events, closeFn, err := re.Events(KindReengageFinalPlaybook, base, change, constraints)
-		if err == nil {
-			reader, activity, _ := agentstream.FanOut(events, closeFn, reengageActivityBuffer)
-			return reader, activity, ModeReplace, nil
-		}
-		// Fall through to the text path on a producer/start error.
-	}
-
-	// TEXT PATH (fallback): the FinalPlaybook prompt over the legacy text Agent.
-	if re.Agent == nil {
-		return nil, nil, ModeReplace, ErrNotImplemented
-	}
-	stream, err := author.FinalPlaybookText(re.Req, base, change, re.Agent)
-	if err != nil {
-		return nil, nil, ModeReplace, err
-	}
-	return stream, nil, ModeReplace, nil
-}
-
-// CommitPlaybook persists a finalized playbook (spec §E — the `w` commit action),
-// taking the displayed draft body and making it THE saved asset. It performs the
-// two durable side effects:
-//
-//  1. Cache-REPLACE: it re-stores this request's cache entry (same context/request
-//     keys, kind "playbook") with body, exactly as Regenerate's re-store does — so a
-//     future identical context → cache HIT serves the clean final playbook. This is
-//     skipped gracefully (no error) when the cache or the decision keys are absent
-//     (an unkeyed/cache-disabled request): there is no entry to replace, but the file
-//     save below still runs so the asset is never lost.
-//  2. File save: it writes body to <DataRoot>/playbooks/<slug>.md, where <slug> is
-//     derived from the `# Playbook — <title>` heading (sanitized), falling back to the
-//     context hash (then "playbook") when no title is present. The directory is
-//     created. The saved path is returned so the ui can confirm it to the user.
-//
-// Front matter (spec §C/§E): the saved + cached asset is `FM + body`, not the bare
-// body. The front matter is ASSEMBLED here, never authored into the live draft —
-// `name`/`slug`/`created`/`project_root`/`request`/`env` are programmatic; only
-// description/category/tags + per-var rationales come from the injected Metadata
-// seam. Both seams (Metadata, EnvLookup) are nil-safe and best-effort: a missing or
-// erroring Metadata yields empty model fields, a missing EnvLookup yields no env
-// values — neither EVER fails the commit (the playbook must always persist).
-//
-// `depends_on:` is the one field with no regenerating seam: it is purely
-// human-authored, so a rebuild-from-scratch would otherwise silently drop it on
-// every re-commit. Before writing, if a file already exists at the resolved save
-// path (i.e. this is a re-commit of the same title, not a first-time save), its
-// `depends_on:` is read back and carried onto the freshly assembled front matter —
-// mirroring `finalizeDoc`'s old/new front-matter merge in cmd/ai-playbook/finalize.go.
-//
-// KB remember is DEFERRED (spec §E note): the final playbook + cache entry + saved
-// file are the durable assets; a KB fact is a later refinement and must not block the
-// commit. An empty body or a missing Reengage context is an error (nothing to commit).
-func (o *Orchestrator) CommitPlaybook(body string) (string, error) {
-	if o.Reengage == nil {
-		return "", ErrNotImplemented
-	}
-	if strings.TrimSpace(body) == "" {
-		return "", errors.New("orchestrator: cannot commit an empty playbook")
-	}
-	re := o.Reengage
-
-	// Strip any preamble prose above the playbook's H1 title so the SAVED + CACHED
-	// asset begins at the heading. Idempotent: a body already starting at the H1 is
-	// unchanged; a body with no H1 is left untouched.
-	body = stripPreamble(body)
-
-	// Assemble the §C/§E front matter. `fm` is completed below with the ONE field
-	// that has no regenerating seam (DependsOn: purely human-authored) before it is
-	// prepended to the body.
-	fm := re.buildFrontMatter(body)
-
-	// Resolve the .md save path under the resolved store dir / <slug>.md.
-	// StoreDir is injected by the launcher (cfg.GlobalStoreDir()); empty → back-compat
-	// fallback to <dataRoot>/playbooks so unmodified callers/tests are unaffected.
-	// The slug is derived from the (unchanged) title, so re-committing a playbook
-	// resolves to the SAME path as its prior save.
-	dir := re.StoreDir
-	if dir == "" {
-		dir = filepath.Join(re.dataRoot(), "playbooks")
-	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return "", err
-	}
-	slug := playbookSlug(body, re.CtxHash)
-	path := filepath.Join(dir, slug+".md")
-
-	// Carry forward `depends_on:` from the file this commit is about to overwrite,
-	// if one exists — it is the only purely human-authored front-matter field, and
-	// buildFrontMatter (rebuilding from scratch) has no way to know about it. A
-	// missing prior file is NOT an error: it just means this is a genuinely
-	// first-time commit, so DependsOn stays nil. Mirrors finalizeDoc's
-	// old, _, _ := frontmatter.Parse(raw); fm.DependsOn = old.DependsOn.
-	if raw, err := os.ReadFile(path); err == nil {
-		old, _, _ := frontmatter.Parse(string(raw))
-		fm.DependsOn = old.DependsOn
-	}
-
-	// `full` is what we persist (file + cache) instead of the bare body.
-	full := frontmatter.Prepend(fm, body)
-
-	// (1) Cache-REPLACE — best-effort, skipped when keys/cache absent (no entry to
-	// replace). Mirrors Regenerate's restore: same keys + kind + request sidecar.
-	// The stored body now leads with the playbook FM; cache.Store wraps it in the
-	// cache's OWN technical FM, so the entry has two ---…--- layers (spec §F).
-	if re.Cache != nil && re.CtxHash != "" && re.ReqHash != "" {
-		_, _ = re.Cache.Store(re.CtxHash, re.ReqHash, "playbook", full, nil, re.RequestJSON)
-	}
-
-	// (2) Save the .md file (FM + body) at the resolved path.
-	if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
-		return "", err
-	}
-	return path, nil
-}
-
-// buildFrontMatter assembles the playbook front matter (spec §C/§E) for body: the
-// programmatic name (the H1) + provenance (created/project_root/request) we already
-// hold, the model's classification fields (description/category/tags + per-var why)
-// via the injected Metadata seam, and the redacted env map via frontmatter.BuildEnv
-// over the injected EnvLookup. Both seams are nil-safe and best-effort: a nil/erroring
-// Metadata leaves the model fields empty; a nil EnvLookup captures no env values.
-func (re *Reengage) buildFrontMatter(body string) frontmatter.FrontMatter {
-	// name: the playbook's H1 title (the model authored it; we just read it),
-	// matching playbookSlug's title source.
-	title := PlaybookName(body)
-
-	// Model classification (best-effort): on a nil seam OR any error, continue with
-	// empty model fields — NEVER fail the commit over metadata.
-	var meta PlaybookMeta
-	if re.Metadata != nil {
-		if m, err := re.Metadata(body); err == nil {
-			meta = m
-		}
-	}
-
-	// env (spec §C): union of body-referenced vars and the model's importantEnvVars
-	// (EnvNotes keys), values filled + redacted from the injected ground-truth lookup.
-	// A nil lookup → an always-miss lookup so referenced vars are simply omitted.
-	lookup := re.EnvLookup
-	if lookup == nil {
-		lookup = func(string) (string, bool) { return "", false }
-	}
-	// home anchors home-dir → "~" normalization for portability (shared playbooks).
-	// An os.UserHomeDir error yields "" → no normalization (still safe).
-	home, _ := os.UserHomeDir()
-	env := frontmatter.BuildEnv(frontmatter.ScanEnvRefs(body), meta.EnvNotes, lookup, home)
-
-	// PROJECT_ROOT is not in the shell, so BuildEnv cannot discover it via ScanEnvRefs
-	// on a portabilized body (it appears as a literal $PROJECT_ROOT, which IS a ref, but
-	// the lookup will miss it since it's not in the host shell). Declare it explicitly for
-	// project_bound playbooks so the host knows to set it at run time.
-	if meta.ProjectBound {
-		if env == nil {
-			env = map[string]frontmatter.EnvValue{}
-		}
-		if _, ok := env["PROJECT_ROOT"]; !ok {
-			env["PROJECT_ROOT"] = frontmatter.EnvValue{Why: "the project directory; the host sets it to your project root at run"}
-		}
-	}
-
-	return frontmatter.FrontMatter{
-		Name:         title,
-		Description:  meta.Description,
-		Category:     meta.Category,
-		Tags:         meta.Tags,
-		Env:          env,
-		Created:      time.Now().Format("2006-01-02"),
-		ProjectRoot:  frontmatter.NormalizeHome(re.Req.ProjectRoot, home),
-		ProjectBound: meta.ProjectBound,
-		Request:      re.Req.UserRequest,
-	}
-}
-
-// playbookTitle matches the literate-config playbook heading `# Playbook — <title>`
-// (the em-dash the FINAL-PLAYBOOK prompt mandates), capturing <title>. A plain
-// `# <title>` (no "Playbook —" prefix) is matched by the fallback in playbookSlug.
-var playbookTitle = regexp.MustCompile(`(?m)^#\s+Playbook\s+—\s+(.+?)\s*$`)
-
-// PlaybookName derives the front-matter `name` from a playbook body, the SAME way
-// the live commit path does: the title in the `# Playbook — <title>` heading, else
-// the first markdown H1 `# <title>`, else "". Exported so the `finalize` subcommand
-// reuses the exact name-derivation the commit path uses (no second implementation
-// to drift). A body with no H1 yields "".
-func PlaybookName(body string) string {
-	if m := playbookTitle.FindStringSubmatch(body); m != nil {
-		return m[1]
-	}
-	if m := firstHeading.FindStringSubmatch(body); m != nil {
-		return m[1]
-	}
-	return ""
-}
-
-// StripPreamble removes any prose ABOVE the first markdown H1 so a finalized
-// playbook begins at its title; exported wrapper over stripPreamble for the
-// `finalize` subcommand (same logic the commit path applies before assembling the
-// front matter). Idempotent; a body with no H1 is returned unchanged.
-func StripPreamble(body string) string { return stripPreamble(body) }
-
-// firstHeading matches the first markdown H1 `# <title>` as a fallback title source.
-var firstHeading = regexp.MustCompile(`(?m)^#\s+(.+?)\s*$`)
-
-// slugNonWord collapses any run of non-alphanumeric characters to a single dash.
-var slugNonWord = regexp.MustCompile(`[^a-z0-9]+`)
-
-// stripPreamble removes any prose ABOVE the first markdown H1 (`# <title>`) so a
-// finalized playbook begins at its title. With no H1 the body is returned
-// unchanged (a transcript, not a playbook). Idempotent: a body already starting
-// at the H1 is unchanged.
-//
-// Limitation: the scan is a simple first-`^# ` match and does not skip `#` inside
-// fenced code blocks; a finalized playbook leads with its H1 before any fence, so
-// in practice the title is matched first.
-func stripPreamble(body string) string {
-	if loc := firstHeading.FindStringIndex(body); loc != nil {
-		return body[loc[0]:]
-	}
-	return body
-}
-
-// playbookSlug derives a filesystem-safe slug from the playbook body: the title in
-// the `# Playbook — <title>` heading (else the first H1), lowercased with non-word
-// runs collapsed to dashes and the ends trimmed. Falls back to the context hash, then
-// "playbook", when no usable title is present — so a file is always written.
-func playbookSlug(body, ctxHash string) string {
-	title := ""
-	if m := playbookTitle.FindStringSubmatch(body); m != nil {
-		title = m[1]
-	} else if m := firstHeading.FindStringSubmatch(body); m != nil {
-		title = m[1]
-	}
-	slug := slugNonWord.ReplaceAllString(strings.ToLower(title), "-")
-	slug = strings.Trim(slug, "-")
-	if slug == "" {
-		if ctxHash != "" {
-			return ctxHash
-		}
-		return "playbook"
-	}
-	return slug
-}
-
-// Followup re-engages the agent with the "your fix didn't work" prompt built from
-// the original request + the failed command's captured output, and returns the
-// revised-fix stream (ModeAppend — the ui appends the new section below the
-// existing playbook). It does NOT re-store the main playbook (matching
-// ai-assist-followup, which streams without persisting an artifact).
-func (o *Orchestrator) Followup(failedOutput string, constraints []string) (io.ReadCloser, <-chan string, StreamMode, error) {
-	if o.Reengage == nil {
-		return nil, nil, ModeAppend, ErrNotImplemented
-	}
-	re := o.Reengage
-
-	// EVENT PATH (preferred): stream the model's live reasoning + tool activity.
-	if re.Events != nil {
-		events, closeFn, err := re.Events(KindReengageFollowup, "", failedOutput, constraints)
-		if err == nil {
-			reader, activity, _ := agentstream.FanOut(events, closeFn, reengageActivityBuffer)
-			return reader, activity, ModeAppend, nil
-		}
-		// Fall through to the text path on a producer/start error.
-	}
-
-	// TEXT PATH (fallback).
-	if re.Agent == nil {
-		return nil, nil, ModeAppend, ErrNotImplemented
-	}
-	stream, err := author.Followup(re.Req, failedOutput, re.Agent)
-	if err != nil {
-		return nil, nil, ModeAppend, err
-	}
-	return stream, nil, ModeAppend, nil
 }
 
 // applyTimeout bounds a `git apply` run (small, local — far under the run default).
@@ -716,7 +257,7 @@ func (o *Orchestrator) applyDiff(diff string, reverse bool) driver.Result {
 	if reverse {
 		cmd += "--reverse "
 	}
-	cmd += "-- " + shquote(patch)
+	cmd += "-- " + driver.Shquote(patch)
 	return o.Drv.Run(cmd, applyTimeout)
 }
 
@@ -796,12 +337,6 @@ func writePatch(diff string) (string, error) {
 		return "", err
 	}
 	return name, nil
-}
-
-// shquote single-quotes s for safe inclusion in a shell command line (the driver
-// runs cmd through zsh). Matches driver.shquote semantics.
-func shquote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 // DriftVerdict classifies the relationship between a unified diff and its target
@@ -1007,56 +542,4 @@ func (o *Orchestrator) DriftTargetPath(patch string) (string, error) {
 		return rel, nil
 	}
 	return filepath.Join(o.projectRoot(), rel), nil
-}
-
-// DriftRegen asks the model for a fresh unified diff for a drifted patch, against the
-// CURRENT target file, and returns it as text. It does NOT touch the structured/lastPB
-// capture path. The empty string with a nil error means the model produced nothing.
-//
-// constraints carries the session's user-rejected-approach reasons (refuse-solution
-// spec §1: injected into ALL FOUR re-engagement kinds — the drift-regen button in the
-// authoring viewer is reachable after refusals, so this kind must carry them too).
-// A nil/empty list leaves the prompt byte-identical.
-func (o *Orchestrator) DriftRegen(patch string, constraints []string) (string, error) {
-	re := o.Reengage
-	if re == nil || re.Events == nil {
-		return "", errors.New("regenerate unavailable")
-	}
-	abs, err := o.DriftTargetPath(patch)
-	if err != nil {
-		return "", err
-	}
-	content, err := os.ReadFile(abs)
-	if err != nil {
-		return "", err
-	}
-	events, closeFn, err := re.Events(KindReengageDriftRegen, string(content), patch, constraints)
-	if err != nil {
-		return "", err
-	}
-	reader, _, fan := agentstream.FanOut(events, closeFn, 0)
-	if _, err := io.ReadAll(reader); err != nil { // drain to EOF
-		return "", err
-	}
-	return stripCodeFence(fan.Body()), nil
-}
-
-// stripCodeFence removes a single wrapping ```... / ``` pair if the body is fenced
-// (the drift-regen prompt forbids fences, but models sometimes add them).
-func stripCodeFence(s string) string {
-	t := strings.TrimSpace(s)
-	if !strings.HasPrefix(t, "```") {
-		return s
-	}
-	lines := strings.Split(t, "\n")
-	if len(lines) < 2 {
-		return s
-	}
-	// drop the opening ```[lang] line
-	lines = lines[1:]
-	// drop a trailing ``` line if present
-	if strings.TrimSpace(lines[len(lines)-1]) == "```" {
-		lines = lines[:len(lines)-1]
-	}
-	return strings.Join(lines, "\n")
 }

@@ -1,4 +1,4 @@
-package orchestrator
+package reengage
 
 import (
 	"bytes"
@@ -6,7 +6,7 @@ import (
 )
 
 // storeOnClose wraps a stream, buffering every byte read from it, and runs onDone
-// with the full buffered body when the stream is closed. It is the orchestrator's
+// with the full buffered body when the stream is closed. It is the re-engagement's
 // tee-on-completion seam for regenerate's re-store: the ui reads + renders the
 // stream, and once it Closes (EOF reached, process reaped), the captured body is
 // persisted to the cache. onDone runs exactly once.

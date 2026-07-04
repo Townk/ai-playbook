@@ -15,6 +15,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/reengage"
 )
 
 // StreamOptions configure RunStream — the in-process render+drive path that
@@ -43,7 +44,7 @@ type StreamOptions struct {
 	// its own driver (the pre-stage-5 behavior). A supplied Driver is OWNED by the
 	// caller: RunStream does NOT close it.
 	Driver   *driver.Driver
-	Reengage *orchestrator.Reengage // re-engagement context (regenerate/followup/finalplaybook); nil disables those kinds
+	Reengage *reengage.Reengage // re-engagement context (regenerate/followup/finalplaybook); nil disables those kinds
 	// Activity, when non-nil, is the agent's live tool-call feed (the session bridges
 	// the tools backend's OnActivity hook to it). The model subscribes and shows the
 	// latest summary next to the "Working…" spinner during the silent authoring wait.
@@ -138,6 +139,7 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 	// back to render-only (logged) rather than crashing. A caller-supplied driver
 	// is owned by the caller — we don't close it here.
 	var orch *orchestrator.Orchestrator
+	var reeng *reengage.Engine
 	d := opts.Driver
 	if d == nil {
 		runCwd := opts.Cwd
@@ -155,14 +157,16 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 	}
 	if d != nil {
 		orch = orchestrator.New(d, &cliMux{}).WithFloat(mux.Load())
-		if opts.Reengage != nil {
-			orch.WithReengage(opts.Reengage)
-		}
+		// The engine is nil when no re-engagement context is wired; DriftTargetPath is
+		// injected so the engine's drift-regenerate resolves paths without importing
+		// the executor.
+		reeng = reengage.New(opts.Reengage, orch.DriftTargetPath)
 	}
 
 	m := newModel(harness, "")
 	m.title = opts.Title
 	m.orch = orch
+	m.reeng = reeng
 	m.thinking = true
 	m.streaming = true
 	m.reader = bufio.NewReader(src)

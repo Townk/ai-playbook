@@ -23,8 +23,8 @@ import (
 	"github.com/Townk/ai-playbook/internal/frontmatter"
 	"github.com/Townk/ai-playbook/internal/kb"
 	"github.com/Townk/ai-playbook/internal/mux"
-	"github.com/Townk/ai-playbook/internal/orchestrator"
 	"github.com/Townk/ai-playbook/internal/playbook"
+	"github.com/Townk/ai-playbook/internal/reengage"
 	"github.com/Townk/ai-playbook/internal/tools"
 	"github.com/Townk/ai-playbook/internal/triage"
 	"github.com/Townk/ai-playbook/internal/ui"
@@ -424,7 +424,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 	// from cfg.GlobalStoreDir() — the single resolver that both the writer
 	// (CommitPlaybook) and the reader (store.Index) use, ensuring they never diverge.
 	cfg, _ := config.Load() // always non-nil (Default on error)
-	reengage := &orchestrator.Reengage{
+	reengage := &reengage.Reengage{
 		Req:         req,
 		Agent:       sess.authoringAgent(cfg),
 		Events:      buildReengageEvents(req, sess),
@@ -492,8 +492,8 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 // (submit_playbook) vs continuing the troubleshoot in markdown. Followup is
 // markdown continuation; FinalPlaybook + Regenerate produce a playbook.
 // DriftRegen returns a raw unified diff (text), not a structured playbook.
-func reengageStructured(kind orchestrator.ReengageKind) bool {
-	return kind != orchestrator.KindReengageFollowup && kind != orchestrator.KindReengageDriftRegen
+func reengageStructured(kind reengage.ReengageKind) bool {
+	return kind != reengage.KindReengageFollowup && kind != reengage.KindReengageDriftRegen
 }
 
 // reengagePrompts builds the (system, user) prompt pair for one re-engagement
@@ -505,17 +505,17 @@ func reengageStructured(kind orchestrator.ReengageKind) bool {
 // prompt byte-identical to the pre-feature output (characterization-tested). It is a
 // pure function (no session/process state) so the constraints injection is testable
 // without spawning the harness.
-func reengagePrompts(req capture.Request, kind orchestrator.ReengageKind, base, change string, constraints []string, cfg *config.Config) (sys, user string) {
+func reengagePrompts(req capture.Request, kind reengage.ReengageKind, base, change string, constraints []string, cfg *config.Config) (sys, user string) {
 	switch kind {
-	case orchestrator.KindReengageFollowup:
+	case reengage.KindReengageFollowup:
 		sys = author.FollowupPrompt(req, change) // change carries the failed output for followup
 		user = author.BuildUserMessage(req)
-	case orchestrator.KindReengageFinalPlaybook:
+	case reengage.KindReengageFinalPlaybook:
 		// FINAL-PLAYBOOK (stage 2): fresh when base=="" (change = the troubleshoot
 		// content to distill), amend when base!="" (fold change into the base).
 		sys = author.FinalPlaybookPrompt(req, base, change)
 		user = author.BuildUserMessage(req)
-	case orchestrator.KindReengageDriftRegen:
+	case reengage.KindReengageDriftRegen:
 		sys, user = author.DriftRegenPrompt(base, change) // base=current file, change=stale patch
 	default: // KindReengageRegenerate → the standard authoring prompt + folded KB
 		sys = author.SystemPrompt(req, author.KnowledgeBase(kb.Load(req.ProjectRoot)), driver.ResolveShellName(cfg.Driver.Shell))
@@ -524,7 +524,7 @@ func reengagePrompts(req capture.Request, kind orchestrator.ReengageKind, base, 
 	return author.WithConstraints(sys, constraints), user
 }
 
-// buildReengageEvents builds the orchestrator.EventsFunc that re-engagement
+// buildReengageEvents builds the reengage.EventsFunc that re-engagement
 // (regenerate/followup/finalplaybook) uses to stream the model's live reasoning +
 // tool activity, exactly like the initial authoring. It lives in main (which imports
 // author) so the orchestrator stays free of an author import on the event path.
@@ -540,8 +540,8 @@ func reengagePrompts(req capture.Request, kind orchestrator.ReengageKind, base, 
 // which still streams reasoning. Returns nil so the orchestrator falls back to the
 // text Agent only if config can't be loaded — otherwise the EventsFunc is always
 // returned and the orchestrator prefers it.
-func buildReengageEvents(req capture.Request, sess *session) orchestrator.EventsFunc {
-	return func(kind orchestrator.ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
+func buildReengageEvents(req capture.Request, sess *session) reengage.EventsFunc {
+	return func(kind reengage.ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
 		// Per-invocation mcp-config so the re-engaged agent reaches the live backend.
 		mcpPath, removeMCP := sess.writeMCPConfig()
 
@@ -569,16 +569,16 @@ func buildReengageEvents(req capture.Request, sess *session) orchestrator.Events
 	}
 }
 
-// buildMetadataSeam builds the orchestrator.Reengage.Metadata seam (spec §B):
+// buildMetadataSeam builds the reengage.Reengage.Metadata seam (spec §B):
 // CommitPlaybook calls it to classify the FINISHED playbook into description /
 // category / tags + per-var rationales. It lives in main (which imports author) so
 // the orchestrator stays free of an author import on the commit path. The mapping
-// flattens author.Metadata → orchestrator.PlaybookMeta, building EnvNotes
+// flattens author.Metadata → reengage.PlaybookMeta, building EnvNotes
 // (name → why) from ImportantEnvVars. A classification failure is returned as an
 // error; CommitPlaybook then persists with empty model fields (never fails the
 // commit).
-func buildMetadataSeam(sess *session) func(doc string) (orchestrator.PlaybookMeta, error) {
-	return func(doc string) (orchestrator.PlaybookMeta, error) {
+func buildMetadataSeam(sess *session) func(doc string) (reengage.PlaybookMeta, error) {
+	return func(doc string) (reengage.PlaybookMeta, error) {
 		cfg, _ := config.Load()
 		meta, err := author.PlaybookMetadata(doc, author.AuthorOptions{Cfg: cfg})
 		if err != nil {
@@ -586,7 +586,7 @@ func buildMetadataSeam(sess *session) func(doc string) (orchestrator.PlaybookMet
 			// env + provenance) rather than failing the commit. Log so a classifier
 			// outage is visible instead of silently dropping description/tags/category.
 			dbg("playbook metadata classification failed; persisting without model fields: %v", err)
-			return orchestrator.PlaybookMeta{}, err
+			return reengage.PlaybookMeta{}, err
 		}
 		notes := make(map[string]string, len(meta.ImportantEnvVars))
 		for _, ev := range meta.ImportantEnvVars {
@@ -594,7 +594,7 @@ func buildMetadataSeam(sess *session) func(doc string) (orchestrator.PlaybookMet
 				notes[ev.Name] = ev.Why
 			}
 		}
-		return orchestrator.PlaybookMeta{
+		return reengage.PlaybookMeta{
 			Description: meta.Description,
 			Category:    meta.Category,
 			Tags:        meta.Tags,
@@ -603,7 +603,7 @@ func buildMetadataSeam(sess *session) func(doc string) (orchestrator.PlaybookMet
 	}
 }
 
-// buildEnvLookup builds the orchestrator.Reengage.EnvLookup seam (spec §C): the
+// buildEnvLookup builds the reengage.Reengage.EnvLookup seam (spec §C): the
 // ground-truth environment lookup CommitPlaybook uses to fill (and redact) the
 // front-matter env values. It dumps the DRIVER shell's environment ONCE (lazily, on
 // first lookup) via `env` and caches the parsed map in the closure, so the snapshot
@@ -645,7 +645,7 @@ const DefaultEnvDumpTimeout = 10 * time.Second
 // io.ReadCloser-based author.Author (the text harness invocation) when the owned
 // AuthorEvents stream can't start (harness binary missing / unsupported). It tees
 // the produced playbook into a buffer for the cache, exactly as before part 2a.
-func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, reengage *orchestrator.Reengage, cwd string, sharedDrv *driver.Driver, title string, bridge *askbridge.Bridge, shell string) int {
+func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, reengage *reengage.Reengage, cwd string, sharedDrv *driver.Driver, title string, bridge *askbridge.Bridge, shell string) int {
 	stream, err := author.Author(req, reengage.Agent)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: author: %v\n", err)
@@ -802,11 +802,22 @@ func reengageReady(d triage.Decision, req capture.Request, sess *session, cwd st
 	// CommitPlaybook falls back to its dataRoot/playbooks default (back-compat). cfg
 	// also selects the harness for the text-fallback Agent (finding A5c).
 	cfg, _ := config.Load()
+	orch, eng := ui.BuildOrch(sess.drv, escalateReengage(d, req, sess, cfg))
+	return ui.OrchReady{Orch: orch, Reeng: eng, Asker: sess.asker(cwd)}
+}
+
+// escalateReengage builds the cached-replay re-engagement context (the escalate/
+// troubleshoot bundle) reengageReady hands to ui.BuildOrch. It is named (rather than
+// inlined) so the StoreDir wiring — the write/read convergence with store.Index — is
+// unit-testable without spawning the async ready goroutine. storeDir resolves to
+// cfg.GlobalStoreDir(); an empty cfg leaves it "" so CommitPlaybook falls back to its
+// dataRoot/playbooks default (back-compat).
+func escalateReengage(d triage.Decision, req capture.Request, sess *session, cfg *config.Config) *reengage.Reengage {
 	var storeDir string
 	if cfg != nil {
 		storeDir = cfg.GlobalStoreDir()
 	}
-	re := &orchestrator.Reengage{
+	return &reengage.Reengage{
 		Req:         req,
 		Agent:       sess.authoringAgent(cfg),
 		Events:      buildReengageEvents(req, sess),
@@ -819,7 +830,6 @@ func reengageReady(d triage.Decision, req capture.Request, sess *session, cwd st
 		EnvLookup:   buildEnvLookup(sess.drv),
 		StoreDir:    storeDir,
 	}
-	return ui.OrchReady{Orch: ui.BuildOrch(sess.drv, re), Asker: sess.asker(cwd)}
 }
 
 func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *session, title string, bridge *askbridge.Bridge, shell string) int {

@@ -3,7 +3,7 @@ package launcher
 import (
 	"testing"
 
-	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/reengage"
 )
 
 // TestDriftRegenReengage_DriftOnly verifies the run-viewer re-engagement is wired for
@@ -14,7 +14,7 @@ func TestDriftRegenReengage_DriftOnly(t *testing.T) {
 	if re == nil || !re.DriftRegenOnly || re.Events == nil {
 		t.Fatalf("driftRegenReengage must be DriftRegenOnly with Events wired; got %+v", re)
 	}
-	if _, _, err := re.Events(orchestrator.KindReengageFollowup, "", "", nil); err == nil {
+	if _, _, err := re.Events(reengage.KindReengageFollowup, "", "", nil); err == nil {
 		t.Error("drift-only Events must refuse a non-drift-regen kind")
 	}
 }
@@ -24,8 +24,8 @@ func TestDriftRegenReengage_DriftOnly(t *testing.T) {
 func TestRunViewer_WiresDriftRegenReengage(t *testing.T) {
 	origUI, origRE := uiMainFn, setReengageFn
 	t.Cleanup(func() { uiMainFn, setReengageFn = origUI, origRE })
-	var got *orchestrator.Reengage
-	setReengageFn = func(re *orchestrator.Reengage) { got = re }
+	var got *reengage.Reengage
+	setReengageFn = func(re *reengage.Reengage) { got = re }
 	uiMainFn = func() int { return 0 }
 	withArgs(t, []string{"ai-playbook", "run", "--file", "/x.md"})
 

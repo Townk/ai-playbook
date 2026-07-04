@@ -9,10 +9,10 @@ import (
 // bytes the pre-adapter runID emitted (the verbatim historical template). It is the
 // byte-identity oracle: zshAdapter{}.job must equal this for any inputs.
 func goldenZshJob(cmdline, o, e, cwdf, id, key, nonce string) string {
-	qcwd := shquote(cwdf)
+	qcwd := Shquote(cwdf)
 	trapBody := "builtin pwd >| " + qcwd
-	qo := shquote(o)
-	qe := shquote(e)
+	qo := Shquote(o)
+	qe := Shquote(e)
 	vp := "" +
 		"export LAST_EXCODE=${(q)__apb_rc}\n" +
 		"export LAST_STDOUT=${(q)\"$(<" + qo + ")\"}\n" +
@@ -23,7 +23,7 @@ func goldenZshJob(cmdline, o, e, cwdf, id, key, nonce string) string {
 			"export APB_ERR_" + key + "=${(q)\"$(<" + qe + ")\"}\n" +
 			"export APB_EXIT_" + key + "=${(q)__apb_rc}\n"
 	}
-	return "( trap " + shquote(trapBody) + " EXIT\n" + cmdline + "\n) </dev/null >" + o + " 2>" + e + "\n" +
+	return "( trap " + Shquote(trapBody) + " EXIT\n" + cmdline + "\n) </dev/null >" + o + " 2>" + e + "\n" +
 		"__apb_rc=$?\n" +
 		"if [[ $__apb_rc -eq 141 ]]; then __apb_rc=0; fi\n" +
 		"if [[ -s " + qcwd + " ]]; then builtin cd -- \"$(< " + qcwd + ")\" 2>/dev/null; fi\n" +

@@ -12,7 +12,7 @@ func (zshAdapter) spawnArgs() []string             { return []string{"-il"} }
 func (zshAdapter) jobExt() string                  { return "zsh" }
 func (zshAdapter) sourceCmd(jobPath string) string { return "source " + jobPath }
 func (zshAdapter) cdCmd(target string) string {
-	return "builtin cd -- " + shquote(target) + " 2>/dev/null"
+	return "builtin cd -- " + Shquote(target) + " 2>/dev/null"
 }
 
 // historyOff stops the driver's `source <job>` lines from being saved to the zsh
@@ -84,10 +84,10 @@ func (zshAdapter) sentinelEcho(nonce string) string {
 }
 
 func (zshAdapter) job(p jobParams) string {
-	qcwd := shquote(p.cwdf)
+	qcwd := Shquote(p.cwdf)
 	trapBody := "builtin pwd >| " + qcwd
-	qo := shquote(p.o)
-	qe := shquote(p.e)
+	qo := Shquote(p.o)
+	qe := Shquote(p.e)
 	vp := "" +
 		"export LAST_EXCODE=${(q)__apb_rc}\n" +
 		"export LAST_STDOUT=${(q)\"$(<" + qo + ")\"}\n" +
@@ -99,7 +99,7 @@ func (zshAdapter) job(p jobParams) string {
 			"export APB_ERR_" + key + "=${(q)\"$(<" + qe + ")\"}\n" +
 			"export APB_EXIT_" + key + "=${(q)__apb_rc}\n"
 	}
-	return "( trap " + shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) </dev/null >" + p.o + " 2>" + p.e + "\n" +
+	return "( trap " + Shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) </dev/null >" + p.o + " 2>" + p.e + "\n" +
 		"__apb_rc=$?\n" +
 		"if [[ $__apb_rc -eq 141 ]]; then __apb_rc=0; fi\n" +
 		"if [[ -s " + qcwd + " ]]; then builtin cd -- \"$(< " + qcwd + ")\" 2>/dev/null; fi\n" +

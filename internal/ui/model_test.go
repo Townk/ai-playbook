@@ -190,7 +190,7 @@ func TestHelpModalDocumentsWrapUp(t *testing.T) {
 // the model is wired with an orchestrator whose Reengage is set (canReengageInProc).
 func TestNonVerifyFailureDoesNotAutoFire(t *testing.T) {
 	m := newModel("T", "```bash {id=fix}\nmake build\n```\n")
-	m.orch = orchWithReengage(t) // reengage available → the manual followup button renders
+	m.reeng = reengWithFake(t) // reengage available → the manual followup button renders
 	m.width, m.height = 80, 24
 	m.reflow()
 

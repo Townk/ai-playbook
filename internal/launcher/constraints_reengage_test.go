@@ -9,7 +9,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/driver"
 	"github.com/Townk/ai-playbook/internal/kb"
-	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/reengage"
 )
 
 // reengagePrompts folds the session constraints into the per-kind system prompt via
@@ -33,27 +33,27 @@ func TestReengagePrompts_NilConstraintsByteIdentical(t *testing.T) {
 
 	cases := []struct {
 		name string
-		kind orchestrator.ReengageKind
+		kind reengage.ReengageKind
 		want string // the raw per-kind prompt the launcher used before this feature
 	}{
 		{
 			name: "regenerate",
-			kind: orchestrator.KindReengageRegenerate,
+			kind: reengage.KindReengageRegenerate,
 			want: author.SystemPrompt(req, author.KnowledgeBase(kb.Load(req.ProjectRoot)), driver.ResolveShellName(cfg.Driver.Shell)),
 		},
 		{
 			name: "followup",
-			kind: orchestrator.KindReengageFollowup,
+			kind: reengage.KindReengageFollowup,
 			want: author.FollowupPrompt(req, change),
 		},
 		{
 			name: "finalplaybook",
-			kind: orchestrator.KindReengageFinalPlaybook,
+			kind: reengage.KindReengageFinalPlaybook,
 			want: author.FinalPlaybookPrompt(req, base, change),
 		},
 		{
 			name: "driftregen",
-			kind: orchestrator.KindReengageDriftRegen,
+			kind: reengage.KindReengageDriftRegen,
 			want: func() string { sys, _ := author.DriftRegenPrompt(base, change); return sys }(),
 		},
 	}
@@ -77,11 +77,11 @@ func TestReengagePrompts_ConstraintsSectionInjectedAllKinds(t *testing.T) {
 	const heading = "## Constraints (user-rejected approaches)"
 	constraints := []string{"no docker"}
 
-	for _, kind := range []orchestrator.ReengageKind{
-		orchestrator.KindReengageRegenerate,
-		orchestrator.KindReengageFollowup,
-		orchestrator.KindReengageFinalPlaybook,
-		orchestrator.KindReengageDriftRegen,
+	for _, kind := range []reengage.ReengageKind{
+		reengage.KindReengageRegenerate,
+		reengage.KindReengageFollowup,
+		reengage.KindReengageFinalPlaybook,
+		reengage.KindReengageDriftRegen,
 	} {
 		sys, _ := reengagePrompts(req, kind, base, change, constraints, cfg)
 		if !strings.Contains(sys, heading) {

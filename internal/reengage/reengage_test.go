@@ -1,4 +1,4 @@
-package orchestrator
+package reengage
 
 import (
 	"io"
@@ -39,17 +39,25 @@ func sampleReq() capture.Request {
 	}
 }
 
+// New(nil, …) returns a nil Engine, and every method tolerates the nil receiver by
+// returning ErrNotImplemented — the split's equivalent of the old nil-Reengage guard.
+func TestNew_NilReengageIsNilEngine(t *testing.T) {
+	if e := New(nil, nil); e != nil {
+		t.Fatalf("New(nil, …) = %v, want nil engine", e)
+	}
+}
+
 // Regenerate returns the fake agent's fresh stream (ModeReplace) and was called
 // with the standard authoring prompt (cache-bypassed re-author).
 func TestRegenerate_StreamsAndMode(t *testing.T) {
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir()) // no KB folded in
 	fa := &fakeAgent{canned: "# Fresh playbook\n"}
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+	e := New(&Reengage{
 		Req:   sampleReq(),
 		Agent: fa.agent,
-	})
+	}, nil)
 
-	stream, _, mode, err := o.Regenerate(nil)
+	stream, _, mode, err := e.Regenerate(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,15 +86,15 @@ func TestRegenerate_ReStoresFreshPlaybook(t *testing.T) {
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
 	fa := &fakeAgent{canned: "# Regenerated body\n"}
 	c := cache.Open()
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+	e := New(&Reengage{
 		Req:     sampleReq(),
 		Agent:   fa.agent,
 		Cache:   c,
 		CtxHash: "ctxhash",
 		ReqHash: "reqhash",
-	})
+	}, nil)
 
-	stream, _, _, err := o.Regenerate(nil)
+	stream, _, _, err := e.Regenerate(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,13 +118,13 @@ func TestRegenerate_ReStoresFreshPlaybook(t *testing.T) {
 // includes the failed output.
 func TestFollowup_StreamsWithFailedOutput(t *testing.T) {
 	fa := &fakeAgent{canned: "# Revised fix\n"}
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+	e := New(&Reengage{
 		Req:   sampleReq(),
 		Agent: fa.agent,
-	})
+	}, nil)
 
 	const failed = "ld: symbol not found"
-	stream, _, mode, err := o.Followup(failed, nil)
+	stream, _, mode, err := e.Followup(failed, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,9 +141,9 @@ func TestFollowup_StreamsWithFailedOutput(t *testing.T) {
 	}
 }
 
-// CommitPlaybook (stage 3 / spec §E) cache-REPLACES this request's entry with the
-// finalized body AND saves it to <DataRoot>/playbooks/<slug>.md, the slug derived
-// from the `# Playbook — <title>` heading.
+// CommitPlaybook (spec §E) cache-REPLACES this request's entry with the finalized
+// body AND saves it to <DataRoot>/playbooks/<slug>.md, the slug derived from the
+// `# Playbook — <title>` heading.
 func TestCommitPlaybook_CacheReplaceAndFileSave(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
@@ -145,17 +153,17 @@ func TestCommitPlaybook_CacheReplaceAndFileSave(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+	e := New(&Reengage{
 		Req:         sampleReq(),
 		Cache:       c,
 		CtxHash:     "ctxhash",
 		ReqHash:     "reqhash",
 		RequestJSON: `{"command":"make build"}`,
 		DataRoot:    root,
-	})
+	}, nil)
 
 	body := "# Playbook — Compile an Android Project\n\nSet up the SDK.\n"
-	path, err := o.CommitPlaybook(body)
+	path, err := e.CommitPlaybook(body)
 	if err != nil {
 		t.Fatalf("CommitPlaybook: %v", err)
 	}
@@ -200,15 +208,15 @@ func TestCommitPlaybook_CacheReplaceAndFileSave(t *testing.T) {
 // the .md file, falling back to the context hash for the slug when there's no title.
 func TestCommitPlaybook_NoKeysSavesFileOnly(t *testing.T) {
 	root := t.TempDir()
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+	e := New(&Reengage{
 		Req:      sampleReq(),
 		CtxHash:  "fallbackctx", // present so the slug can fall back to it
 		DataRoot: root,
 		// No Cache / ReqHash → cache-replace skipped.
-	})
+	}, nil)
 
 	body := "no title here, just prose\n"
-	path, err := o.CommitPlaybook(body)
+	path, err := e.CommitPlaybook(body)
 	if err != nil {
 		t.Fatalf("CommitPlaybook: %v", err)
 	}
@@ -229,11 +237,11 @@ func TestCommitPlaybook_NoKeysSavesFileOnly(t *testing.T) {
 
 // CommitPlaybook errors on an empty body (nothing to commit) and without a Reengage.
 func TestCommitPlaybook_EmptyAndNoReengage(t *testing.T) {
-	o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{DataRoot: t.TempDir()})
-	if _, err := o.CommitPlaybook("   \n"); err == nil {
+	e := New(&Reengage{DataRoot: t.TempDir()}, nil)
+	if _, err := e.CommitPlaybook("   \n"); err == nil {
 		t.Error("CommitPlaybook with an empty body should error")
 	}
-	bare := New(newTestDriver(t), &recMux{})
+	bare := New(nil, nil) // nil engine (no Reengage context)
 	if _, err := bare.CommitPlaybook("# Playbook — x\n"); err == nil {
 		t.Error("CommitPlaybook without Reengage should error")
 	}
@@ -249,15 +257,15 @@ func TestCommitPlaybook_StripsPreambleIdempotent(t *testing.T) {
 		root = t.TempDir()
 		t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
 		c := cache.Open()
-		o := New(newTestDriver(t), &recMux{}).WithReengage(&Reengage{
+		e := New(&Reengage{
 			Req:         sampleReq(),
 			Cache:       c,
 			CtxHash:     "ctxhash",
 			ReqHash:     "reqhash",
 			RequestJSON: `{"command":"make build"}`,
 			DataRoot:    root,
-		})
-		p, err := o.CommitPlaybook(body)
+		}, nil)
+		p, err := e.CommitPlaybook(body)
 		if err != nil {
 			t.Fatalf("CommitPlaybook: %v", err)
 		}
@@ -300,11 +308,11 @@ func TestCommitPlaybook_StripsPreambleIdempotent(t *testing.T) {
 
 // Without a Reengage wired the re-engagement methods return ErrNotImplemented.
 func TestReengageMethods_NoReengage(t *testing.T) {
-	o := New(newTestDriver(t), &recMux{})
-	if _, _, _, err := o.Regenerate(nil); err == nil {
+	e := New(nil, nil) // nil engine
+	if _, _, _, err := e.Regenerate(nil); err == nil {
 		t.Error("Regenerate without Reengage should error")
 	}
-	if _, _, _, err := o.Followup("", nil); err == nil {
+	if _, _, _, err := e.Followup("", nil); err == nil {
 		t.Error("Followup without Reengage should error")
 	}
 }

@@ -105,7 +105,7 @@ func TestAutoEnvOnCd(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(envdir, ".tenv"), []byte("hooked"), 0644); err != nil {
 		t.Fatal(err)
 	}
-	d.Run("builtin cd -- "+shquote(envdir), 10*time.Second)
+	d.Run("builtin cd -- "+Shquote(envdir), 10*time.Second)
 	if r := d.Run("print -r -- ${TENV:-MISSING}", 10*time.Second); r.Out != "hooked" {
 		t.Errorf("auto-env on cd → %q (want hooked)", r.Out)
 	}
@@ -222,7 +222,7 @@ func TestForegroundPgrpIsRealPID(t *testing.T) {
 func TestCwdTracksCdAcrossRuns(t *testing.T) {
 	d := newTestDriver(t)
 	sub := t.TempDir()
-	d.Run("builtin cd -- "+shquote(sub), 10*time.Second)
+	d.Run("builtin cd -- "+Shquote(sub), 10*time.Second)
 	pwd := d.Run("pwd", 5*time.Second).Out
 	if pwd == "" {
 		t.Fatal("could not determine the shell's cwd after cd")
