@@ -15,9 +15,26 @@ type Block struct {
 	Command  string // ui.Block.Payload
 	Lang     string // fence language; drives the canonical payload assembly (script blocks self-invoke their interpreter)
 	Needs    []string
+	From     string // id of the block whose retained stdout feeds this one's stdin (from=<id>); "" if none. Folds into effectiveNeeds so --auto orders the producer first.
 	Rollback string // id of the block that undoes this one; "" if none
 	Static   bool
 	Kind     StepKind
+}
+
+// effectiveNeeds returns b's combined data+order dependency set: Needs plus From
+// (when non-empty and not already listed). from= implies needs= (ADR-0010), so
+// NextRunnable gates and orders a consumer behind its producer without the From id
+// having to be duplicated into Needs textually.
+func (b Block) effectiveNeeds() []string {
+	if b.From == "" {
+		return b.Needs
+	}
+	for _, n := range b.Needs {
+		if n == b.From {
+			return b.Needs
+		}
+	}
+	return append(append(make([]string, 0, len(b.Needs)+1), b.Needs...), b.From)
 }
 
 // Status string literals shared by value with internal/ui.blockRunState.Status.
@@ -61,9 +78,11 @@ func NextRunnable(blocks []Block, status map[string]string) (Block, bool) {
 			continue // Already run, skip.
 		}
 
-		// Check if all needs have StatusOK.
+		// Check if all effective needs (needs= ∪ from=) have StatusOK, so a from=
+		// producer is materialized before its consumer in the headless topological
+		// order exactly like a needs= edge.
 		allNeedsOK := true
-		for _, need := range b.Needs {
+		for _, need := range b.effectiveNeeds() {
 			if status[need] != StatusOK {
 				allNeedsOK = false
 				break

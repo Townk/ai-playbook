@@ -172,7 +172,21 @@ type model struct {
 	// finishes (→ mark rollbackFailedID's suffix).
 	rollbackFailedID string
 	rollbackPending  int
-	gateSatisfied    bool // the gate ran (or wasn't needed) this session
+	// chainQueue holds the from= producers (then the consumer) still to run in an
+	// in-flight materialization chain, in dependency order, minus the step already
+	// dispatched; chainStep is that dispatched step's id (the chain-active signal).
+	// When chainStep's OWN result lands ok the queue head is popped, dispatched,
+	// and becomes the new chainStep; a failed/stopped chain step clears both
+	// (downstream steps never start). Only chainStep's result moves the chain —
+	// runMu serializes runs, so an unrelated block's result CAN land mid-window
+	// and must neither advance nor clear it. While the chain is active every
+	// member (chainStep + queue) is inert to a new run click (chainMember /
+	// runOrChain's guard), so a double-click can never re-dispatch a running
+	// producer. Both are empty when no chain is active — an ordinary single run
+	// never sets them.
+	chainQueue    []string
+	chainStep     string
+	gateSatisfied bool // the gate ran (or wasn't needed) this session
 	// gate holds the in-progress pre-run confirmation state machine while the user
 	// steps through the confirm/customize overlays; nil when no gate is active.
 	gate *confirmGate

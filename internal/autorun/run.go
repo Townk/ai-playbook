@@ -159,9 +159,16 @@ func (r *orchRunner) RunStep(s Step) (exit int, outputPath string, cancelled boo
 		defer cleanup()
 	}
 
+	// Wire from= piping: feed the block's stdin from its producer's retained
+	// stdout capture. The topological NextRunnable order guarantees the producer
+	// ran (ok) before this consumer, so the capture exists — but resolve it by
+	// STAT (missing file ⇒ producer never ran ⇒ </dev/null), never trusting the
+	// path string alone.
+	stdinPath := r.resolveStdin(s.From)
+
 	doneCh := make(chan driver.Result, 1)
 	go func() {
-		res, _ := r.orch.Do(orchestrator.Action{Kind: kindFor(s.Kind), ID: s.ID, Payload: command})
+		res, _ := r.orch.Do(orchestrator.Action{Kind: kindFor(s.Kind), ID: s.ID, Payload: command, StdinPath: stdinPath})
 		doneCh <- res
 	}()
 
@@ -219,6 +226,26 @@ func (r *orchRunner) assemble(s Step) (string, func()) {
 		return s.Command, nil
 	}
 	return cmd, cleanup
+}
+
+// resolveStdin returns the filesystem path to feed as a consumer step's stdin —
+// the retained stdout capture of its from= producer — or "" when there is no
+// producer, no driver, or the capture file does not exist yet. The path comes
+// from the driver (which owns the retention layout) and is STAT-verified: a set
+// capture path is NOT a guarantee the file exists, so a missing file falls back
+// to </dev/null rather than trusting the path string.
+func (r *orchRunner) resolveStdin(fromID string) string {
+	if fromID == "" || r.orch == nil || r.orch.Drv == nil {
+		return ""
+	}
+	p := r.orch.Drv.CapturePath(fromID)
+	if p == "" {
+		return ""
+	}
+	if fi, err := os.Stat(p); err != nil || fi.IsDir() {
+		return ""
+	}
+	return p
 }
 
 // writeStepLog writes a step's captured stdout then stderr to a temp file and

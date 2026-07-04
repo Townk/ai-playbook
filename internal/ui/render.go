@@ -622,7 +622,11 @@ func (r *renderer) code(n ast.Node) {
 		// the rest red. Grey is the init so the switch only overrides the un-run states.
 		numColor := colSubtext
 		if r.states[blk.ID].Status == "" && !r.states[blk.ID].Resolved {
-			if !r.nextNumAssigned && len(unmet) == 0 {
+			// "Next to run" tracks EFFECTIVE needs (needs= ∪ from=): a consumer whose
+			// from= producer hasn't run is not the next atomic step (its producer is), so
+			// it stays red even though its run button is live (the chain materializes on
+			// click). Plain button gating below still uses `unmet` (needs= only).
+			if !r.nextNumAssigned && len(needsUnmet(blk.EffectiveNeeds(), r.states)) == 0 {
 				numColor = colGreen // the single "next to run"
 				r.nextNumAssigned = true
 			} else {
@@ -878,6 +882,13 @@ func (r *renderer) code(n ast.Node) {
 	if len(unmet) > 0 {
 		r.emitBlocked(unmet)
 	}
+	// from= data edge: annotate the consumer with its producer, beside the ⊘ needs
+	// indicator space. Unlike ⊘ it is never a blocker — the producer's capture
+	// serves (or the chain materializes it on run), so a satisfied producer shows
+	// this annotation and no blocker.
+	if blk.From != "" {
+		r.emitFrom(blk.From)
+	}
 
 	// Drift region: when the diff block's patch no longer applies, emit a warning
 	// message line + a [resolve manually] tag-button that opens the FC1 diff view.
@@ -1126,10 +1137,21 @@ func tailFile(path string, n int) []string {
 	return all[len(all)-n:]
 }
 
-// needsSatisfied returns the UNMET needs of blk (empty slice ⇔ all satisfied).
+// needsSatisfied returns the UNMET PLAIN needs of blk (empty slice ⇔ all
+// satisfied). It intentionally consults blk.Needs, NOT EffectiveNeeds: a from=
+// data edge never gates the run button (clicking a consumer materializes its
+// unrun producers as a chain), so from= is surfaced as the `⇐ from:` annotation
+// rather than as a ⊘ blocker. Plain needs= still gate exactly as before.
 func needsSatisfied(blk Block, states map[string]blockRunState) []string {
+	return needsUnmet(blk.Needs, states)
+}
+
+// needsUnmet returns the subset of ids whose block status is not "ok". Shared by
+// the plain-needs button gate (needsSatisfied) and the effective-needs "next to
+// run" green-number gate.
+func needsUnmet(ids []string, states map[string]blockRunState) []string {
 	var unmet []string
-	for _, n := range blk.Needs {
+	for _, n := range ids {
 		if states[n].Status != "ok" {
 			unmet = append(unmet, n)
 		}
@@ -1177,7 +1199,9 @@ func resetDependents(states map[string]blockRunState, blocks []Block, rootID str
 			if depend[b.ID] {
 				continue
 			}
-			for _, n := range b.Needs {
+			// EffectiveNeeds (needs= ∪ from=): undoing/rolling back a producer must
+			// re-lock a consumer that piped its output, not just needs= dependents.
+			for _, n := range b.EffectiveNeeds() {
 				if depend[n] {
 					depend[b.ID] = true
 					changed = true
@@ -1198,6 +1222,16 @@ func resetDependents(states map[string]blockRunState, blocks []Block, rootID str
 func (r *renderer) emitBlocked(unmet []string) {
 	sty := lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext))
 	text := sty.Render("⊘ needs: " + strings.Join(unmet, ", "))
+	r.lines = append(r.lines, Line{Text: " " + text, Wide: false, Code: true})
+}
+
+// emitFrom appends a single "⇐ from: <id>" annotation line for a consumer block,
+// styled like the ⊘ needs indicator (colSubtext, Code=true). It states the data
+// source (the producer whose stdout pipes into this block's stdin) without
+// gating: from= is a data edge, not a blocker.
+func (r *renderer) emitFrom(from string) {
+	sty := lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext))
+	text := sty.Render("⇐ from: " + from)
 	r.lines = append(r.lines, Line{Text: " " + text, Wide: false, Code: true})
 }
 

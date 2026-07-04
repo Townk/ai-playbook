@@ -29,6 +29,7 @@ func (m model) toAutorunBlocks() ([]autorun.Block, map[string]string) {
 			ID:       b.ID,
 			Command:  b.Payload,
 			Needs:    b.Needs,
+			From:     b.From,
 			Rollback: b.Rollback,
 			Static:   b.Static,
 			Kind:     autorun.KindRun,

@@ -109,6 +109,21 @@ func (d *Driver) Cwd() string {
 // to os.TempDir()).
 func (d *Driver) SessionDir() string { return d.sessionDir }
 
+// CapturePath returns the filesystem path where an identified run's retained
+// stdout is stored — out_<sanitizeKey(id)> under the session dir — WITHOUT
+// checking that the file exists. The retention layout stays driver-owned, so a
+// consumer resolving a from= producer's capture asks here for the path and then
+// STATs it: a set path string alone is NOT a guarantee the file exists (a run
+// killed before its redirect opened leaves none — see Result.OutPath), so a
+// missing file must be read as "producer never ran". Returns "" when id is empty
+// or retention is disabled (no session dir).
+func (d *Driver) CapturePath(id string) string {
+	if id == "" || d.sessionDir == "" {
+		return ""
+	}
+	return filepath.Join(d.sessionDir, "out_"+sanitizeKey(id))
+}
+
 // setCwd updates the live session cwd under mu.
 func (d *Driver) setCwd(p string) {
 	d.mu.Lock()

@@ -177,14 +177,19 @@ func (m model) orchCmd(b Button) tea.Cmd {
 	// verbatim. cleanup removes the script file once the run completes.
 	payload := b.Payload
 	var cleanup func()
+	var stdinPath string
 	if k == orchestrator.KindRun {
 		payload, cleanup = m.assembleRun(b.BlockID, b.Payload)
+		// Wire from= piping: feed the block's stdin from its producer's retained
+		// stdout capture. Resolved via the driver (which owns the retention layout)
+		// and STAT-verified — a missing capture ⇒ producer never ran ⇒ </dev/null.
+		stdinPath = m.resolveStdin(b.BlockID)
 	}
 	return func() tea.Msg {
 		if cleanup != nil {
 			defer cleanup()
 		}
-		res, err := orch.Do(orchestrator.Action{Kind: k, ID: b.BlockID, Payload: payload})
+		res, err := orch.Do(orchestrator.Action{Kind: k, ID: b.BlockID, Payload: payload, StdinPath: stdinPath})
 		if errors.Is(err, orchestrator.ErrMisrouted) {
 			// A re-engagement kind reached the executor — a wiring bug (the ui should
 			// have driven it through the reengage engine). Surface it distinctly so it
@@ -237,6 +242,35 @@ func (m model) assembleRun(id, raw string) (string, func()) {
 		return raw, nil
 	}
 	return cmd, cleanup
+}
+
+// resolveStdin returns the filesystem path to feed as block id's stdin — the
+// retained stdout capture of its from= producer — or "" when the block has no
+// from= edge, no driver, or the producer's capture file does not yet exist. The
+// path comes from the driver (which owns the retention layout) and is
+// STAT-verified: a set capture path is NOT a guarantee the file exists (a
+// producer killed before its redirect opened leaves none), so a missing file
+// means "producer never ran" and the block runs with </dev/null — the from-chain
+// materialization is what will have produced it by the time the consumer runs.
+func (m model) resolveStdin(id string) string {
+	blk, ok := m.blockByID(id)
+	if !ok || blk.From == "" || m.orch == nil || m.orch.Drv == nil {
+		return ""
+	}
+	return statCapture(m.orch.Drv.CapturePath(blk.From))
+}
+
+// statCapture returns path when it names an existing regular file, else "". A
+// retained capture is byte-exact on disk; a missing file means the producer never
+// actually ran, so callers fall back to </dev/null rather than trust the path.
+func statCapture(path string) string {
+	if path == "" {
+		return ""
+	}
+	if fi, err := os.Stat(path); err != nil || fi.IsDir() {
+		return ""
+	}
+	return path
 }
 
 // blockByID returns the currently-rendered block with the given id (m.blocks is

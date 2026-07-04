@@ -142,6 +142,12 @@ type Action struct {
 	Kind    Kind
 	ID      string
 	Payload string
+	// StdinPath, for a KindRun action, is the filesystem path fed to the block's
+	// stdin — the retained stdout capture of its from= producer (ADR-0010). Empty
+	// keeps the block's stdin at </dev/null exactly as before; the caller resolves
+	// it (producer id → driver.CapturePath → STAT) so the executor never re-derives
+	// the retention layout. Ignored by every non-run kind.
+	StdinPath string
 }
 
 // Orchestrator performs actions against a live shell Driver and a Mux.
@@ -189,8 +195,9 @@ func (o *Orchestrator) Do(a Action) (driver.Result, error) {
 	switch a.Kind {
 	case KindRun:
 		// Execute the block in the shell, value-passing APB_OUT_<id>/LAST_* so a
-		// later block can reference this one's output.
-		return o.Drv.RunID(a.ID, a.Payload, "", defaultTimeout), nil
+		// later block can reference this one's output. StdinPath (when set) pipes a
+		// prior block's retained capture into this block's stdin (from= piping).
+		return o.Drv.RunID(a.ID, a.Payload, a.StdinPath, defaultTimeout), nil
 	case KindStop:
 		// Interrupt the running block by killing its foreground process group.
 		o.Drv.Stop()

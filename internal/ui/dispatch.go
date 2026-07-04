@@ -37,15 +37,23 @@ func (m model) shellActionsReady() bool { return !m.driverPending }
 
 // buttonInert reports whether a button's dispatch is currently a swallowed no-op, so
 // it must not receive a hint label (F19) — otherwise a hint letter would select a
-// button that does nothing. Two cases: a DRIFTED block's apply-diff (you can't apply a
+// button that does nothing. Three cases: a DRIFTED block's apply-diff (you can't apply a
 // patch that no longer matches — the drift region's resolve/regenerate buttons are the
-// live paths), and any shell-action button during the async-startup window (the
-// orchestrator isn't open yet). Mirrors exactly what the two dispatch sites swallow.
+// live paths), any shell-action button during the async-startup window (the
+// orchestrator isn't open yet), and a run button on an in-flight from-chain member
+// (runOrChain's re-entrancy guard swallows it). Mirrors exactly what the dispatch
+// sites swallow.
 func (m model) buttonInert(b Button) bool {
 	if b.Kind == "apply-diff" && m.blockStates[b.BlockID].Drifted {
 		return true
 	}
 	if isShellActionKind(b.Kind) && !m.shellActionsReady() {
+		return true
+	}
+	// A run button on an in-flight materialization-chain member: the step is
+	// already dispatched or queued, so a second activation would be swallowed by
+	// runOrChain's re-entrancy guard — don't hand it a hint label.
+	if b.Kind == "run" && m.chainMember(b.BlockID) {
 		return true
 	}
 	return false
@@ -84,7 +92,7 @@ func (m model) activateButton(b Button) (model, tea.Cmd) {
 		return m, m.flashCmd()
 	case b.Kind == "run":
 		var ac tea.Cmd
-		m, ac = m.runOrGate(b)
+		m, ac = m.runOrChain(b)
 		m.reflow()
 		return m, tea.Batch(m.startTick(), m.flashCmd(), ac)
 	case b.Kind == "stop":
@@ -161,6 +169,91 @@ func (m model) activateButton(b Button) (model, tea.Cmd) {
 	ac := m.emitAction(b)
 	m.reflow()
 	return m, tea.Batch(m.flashCmd(), ac)
+}
+
+// runOrChain runs the block behind a clicked run button, first materializing any
+// of its from= producers that have not completed ok this session (ADR-0010). When
+// the block has no unrun producer the chain is just [block] and this reduces to a
+// plain runOrGate single run; otherwise the producers (in dependency order) and
+// finally the consumer are queued and run sequentially — each an ordinary block
+// run with its own status pill/log — the first step through runOrGate (so the
+// env-confirm gate still applies) and the rest advanced by handleResult as each
+// result lands ok. A step failing stops the chain.
+//
+// The default pager is the only caller: the assisted (GUIDED) cadence surfaces a
+// consumer as a ready step only once its producer has run (NextRunnable folds
+// from= into its effective needs), so its Run press never needs a multi-step
+// chain — assistedActivate keeps calling runOrGate directly.
+func (m model) runOrChain(b Button) (model, tea.Cmd) {
+	// Re-entrancy guard 1: while a chain is in flight, every member (the running
+	// chainStep + the queued steps, including the clicked consumer itself) is
+	// inert — a second click mid-window must not recompute the chain and
+	// re-dispatch the still-running producer (its side effects would run twice).
+	if m.chainMember(b.BlockID) {
+		return m, nil
+	}
+	chain := m.fromChain(b.BlockID)
+	// Re-entrancy guard 2: a chain member is already running — the producer was
+	// started standalone (or under another consumer's chain) and hasn't finished,
+	// so its capture isn't ready. fromChain sees "running" ≠ "ok" and would
+	// include (re-dispatch) it; refuse the click instead — once its result lands
+	// the capture serves and a fresh click chains normally.
+	for _, id := range chain {
+		if m.blockStates[id].Status == "running" {
+			return m, nil
+		}
+	}
+	if len(chain) <= 1 {
+		return m.runOrGate(b) // no producer to materialize → ordinary single run
+	}
+	m.chainQueue = chain[1:]
+	first := chain[0]
+	m.chainStep = first
+	return m.runOrGate(Button{Kind: "run", Payload: m.blockCommand(first), BlockID: first})
+}
+
+// chainMember reports whether block id belongs to the in-flight materialization
+// chain: it is the currently dispatched chainStep or one of the queued steps.
+// Chain members are inert to a new run click/hint for the whole chain window.
+func (m model) chainMember(id string) bool {
+	if id == "" {
+		return false
+	}
+	if id == m.chainStep {
+		return true
+	}
+	for _, q := range m.chainQueue {
+		if q == id {
+			return true
+		}
+	}
+	return false
+}
+
+// fromChain returns the ordered block ids to run so that consumer consumerID
+// receives its piped stdin: every transitive from= producer that has NOT
+// completed ok this session, in dependency order (producers before consumers),
+// followed by consumerID itself. A producer already ok this session is omitted —
+// its retained capture serves, so it is never re-run — but the walk still stops
+// there (its own upstream is already materialized). Returns just [consumerID]
+// when nothing upstream needs materializing. A visited set guards against a cycle
+// (validation rejects from= cycles, so this is defensive only).
+func (m model) fromChain(consumerID string) []string {
+	var order []string
+	seen := map[string]bool{}
+	var visit func(id string)
+	visit = func(id string) {
+		if seen[id] {
+			return
+		}
+		seen[id] = true
+		if blk, ok := m.blockByID(id); ok && blk.From != "" && m.blockStates[blk.From].Status != "ok" {
+			visit(blk.From) // materialize the unrun producer (and its own upstream) first
+		}
+		order = append(order, id)
+	}
+	visit(consumerID)
+	return order
 }
 
 // isShellActionKind reports whether a button kind needs the shell driver /

@@ -9,6 +9,7 @@ import (
 type Step struct {
 	ID, Command string
 	Lang        string // fence language; a script block's runner assembles its interpreter invocation from this
+	From        string // id of the from= producer whose retained stdout feeds this step's stdin; "" if none
 	Kind        StepKind
 }
 
@@ -44,7 +45,7 @@ func Execute(cfg Config, r StepRunner) int {
 		}
 
 		fmt.Fprintf(cfg.Out, "[%s] %s\n", b.ID, b.Command)
-		exit, out, cancelled := r.RunStep(Step{ID: b.ID, Command: b.Command, Lang: b.Lang, Kind: b.Kind})
+		exit, out, cancelled := r.RunStep(Step{ID: b.ID, Command: b.Command, Lang: b.Lang, From: b.From, Kind: b.Kind})
 		fmt.Fprintln(cfg.Out)
 
 		st := statusFor(exit)

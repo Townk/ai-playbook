@@ -133,6 +133,12 @@ func (m model) handleResult(msg resultMsg) (tea.Model, tea.Cmd) {
 		st.Stopped = false
 		m.blockStates[msg.ID] = st
 		dbg("result id=%s exit=%d STOPPED — no auto-followup", msg.ID, msg.Exit)
+		// Stopping the in-flight chain step ends the materialization chain: clear
+		// it here (this early return skips the chain-advance block below), or the
+		// queued members would stay inert forever.
+		if m.chainStep != "" && msg.ID == m.chainStep {
+			m.chainQueue, m.chainStep = nil, ""
+		}
 		m.reflow()
 		return m, nil
 	}
@@ -171,6 +177,32 @@ func (m model) handleResult(msg resultMsg) (tea.Model, tea.Cmd) {
 	}
 	m.blockStates[msg.ID] = st
 	dbg("result id=%s exit=%d action=%s status->%s", msg.ID, msg.Exit, prevAction, st.Status)
+	// From-chain advance: while a materialization chain is in flight (a consumer's
+	// unrun producers running before it), only the EXPECTED in-flight step's own
+	// run result moves the chain — msg.ID must match chainStep. runMu serializes
+	// runs but an UNRELATED block's result can still land mid-window; it must
+	// neither advance nor clear the chain. A rollback/apply/undo result for the
+	// same id (prevAction) never advances a from-chain either. chainStep ok →
+	// dispatch the next queued step (which becomes the new chainStep); the final
+	// step's ok clears the chain; a failed chain step stops it (downstream steps
+	// never start).
+	if m.chainStep != "" && msg.ID == m.chainStep &&
+		prevAction != "rollback" && prevAction != "apply" && prevAction != "undo" {
+		if st.Status == "ok" {
+			if len(m.chainQueue) > 0 {
+				next := m.chainQueue[0]
+				m.chainQueue = m.chainQueue[1:]
+				m.chainStep = next
+				m = m.markRunning(next)
+				ac := m.emitAction(Button{Kind: "run", Payload: m.blockCommand(next), BlockID: next})
+				m.reflow()
+				return m, tea.Batch(m.startTick(), ac)
+			}
+			m.chainStep = "" // the final chain step landed — chain complete
+		} else {
+			m.chainQueue, m.chainStep = nil, "" // a failed chain step stops the chain
+		}
+	}
 	// Assisted (GUIDED) advance hook: the readyID cursor only reacts to its OWN
 	// step's result (never a rollback target's — prevAction=="rollback" is that
 	// chain, handled below by the ordinary rollback bookkeeping instead).

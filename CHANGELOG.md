@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Pipe one block's output into the next with `from=<id>` (ADR-0010). A `shell`
+  or script (`run`) block tagged `{id=filter from=build}` receives the producer
+  block's stdout on its **stdin** — so a Python filter reading `sys.stdin`, or a
+  `cat`/`grep`/`jq` step, consumes the prior step raw, with no shell-quoting or
+  size limits. `from=` implies `needs=`, so ordering, gating, and dependent
+  invalidation all follow the data edge. Clicking a consumer whose producer
+  hasn't run yet **materializes the chain**: each upstream producer runs first as
+  an ordinary step (its own status pill and log), then the consumer — a failure
+  stops the chain, and a producer that already ran this session is not re-run
+  (its capture serves). `run --auto` and the guided `--assisted` walk pipe the
+  same way. Each identified block now also exports **`APB_OUT_FILE_<id>`** /
+  **`APB_ERR_FILE_<id>`** — the raw paths to its retained stdout/stderr — for the
+  args-passing idiom `--input "$(cat "$APB_OUT_FILE_build")"`.
+
 ### Fixed
 
 - `run --auto` (and the GUIDED/rollback run paths) now execute script blocks

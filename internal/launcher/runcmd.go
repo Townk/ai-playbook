@@ -339,6 +339,7 @@ func blocksFor(body string) []autorun.Block {
 			Command:  b.Payload,
 			Lang:     b.Lang,
 			Needs:    b.Needs,
+			From:     b.From,
 			Rollback: b.Rollback,
 			Static:   b.Static,
 			Kind:     kindFromType(b.Type),
