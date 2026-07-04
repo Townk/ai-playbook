@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   behind the session shell — they run instantly and never contend with an
   in-flight block.
 - A running block's spinner no longer re-renders the whole document 10×/second;
-  input dialogs stop rebuilding their styles every frame.
+  text-input fields stop rebuilding their textarea styles every frame.
 
 ## [0.7.0] - 2026-07-03
 

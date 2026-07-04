@@ -24,6 +24,8 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 - [ ] A5a-full: interactive/streaming AI calls (agentstream fan-out, DriftRegen) still have no cancellation/timeout plumbing — only classify/metadata are bounded (60s, internal/author/events.go:28); the same plumbing should surface stream truncation on the authoring paths, where FanOut discards closeFn's error so A5b-strict only protects triage (2026-07-03)
 - [ ] B11 residual: `run <slug>` still parses the playbook twice (loadParent + runFile); EnvMain/ValidateMain each double-load — thread the parsed node through dispatch (2026-07-03)
 - [ ] Consolidate the five fake-harness script writers in internal/author tests (writeFakeHarness/fakeStreamHarness/fakeMetadataHarness/writeStalledHarness/fakeArgvHarness) into one parameterized helper (2026-07-03)
+- [ ] `TestOpenProbesReadyWithoutIdleFloor` hard-asserts Open <900ms against a live zsh spawn — loosen or gate under CI IF it ever flakes (plan-blessed bound; don't fix pre-emptively) (2026-07-04)
+- [ ] `spinRow` (ui/model.go) hand-duplicates `runRegion`'s spinner-row construction (indent + `frame/10` seconds rule) — share a helper or add a frame-0 equality assertion so a format change can't desync the tick-regenerated row from the reflow-baked one (2026-07-04)
 
 ## Ideas
 
