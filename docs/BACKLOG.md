@@ -28,6 +28,16 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 - [ ] `TestStopInterruptsInflightRun`: the post-Stop liveness probe uses a 5s timeout that flaked on a loaded release runner (master CI green on the same SHA) — lengthen the recovery probe timeout (a longer bound costs nothing on the happy path, Run returns on sentinel) (2026-07-04)
 - [ ] Refuse-solution: the degraded TEXT fallbacks (orchestrator Regenerate/FinalPlaybook/Followup when the events producer fails to start) re-engage without constraints — thread them through author.Author/FinalPlaybookText/Followup, or keep the spec's degraded-mode exemption (2026-07-04)
 - [ ] The pager status line pads but never truncates (`padTo` in ui/scrollbar.go) — on very narrow terminals the hint + new constraints indicator overflow; add graceful truncation (pre-existing, worsened slightly by the indicator) (2026-07-04)
+- [ ] Extract the canonical playbook block parser out of `ui.Render` into `internal/playbook` (pure `ParseBlocks`) — today the schema's fence/block parser lives in the presentation layer and launcher/validate/autorun call the full styled renderer just to extract blocks (2026-07-04)
+- [ ] `ui.Run(Options)`: replace the 14 `pending*` package globals + os.Args reshaping that form the launcher↔ui contract — root cause of the launcher's 5k test lines, mirror seams, and serial-only tests (L) (2026-07-04)
+- [ ] Decompose ui/model.go (~3.6k lines, ~80-field struct, 7 orthogonal state machines) — split by concern (view/keys/stream/confirm/rollback/followup) + grouped sub-state structs; split the giant test files along the same seams (L, mechanical) (2026-07-04)
+- [ ] Split the AI re-engagement surface (Reengage/streams/cache re-store) out of the orchestrator so the executor core (run/rollback/deps/create/diff) is AI-free — plus the small dedupes: Regenerate/FinalPlaybook/Followup scaffold ×3, shquote export, Kind↔string double mapping (2026-07-04)
+- [ ] Launcher consolidation pass: three field-identical Reengage builders, four classify seams, three hand-rolled source resolvers, six temp-markdown writers, routeKind extraction (all S — one PR) (2026-07-04)
+- [ ] Input package: fold legacy confirmModel/chooseModel into the generic model; make the lipgloss Mantle-bleed fix a frame/field contract instead of per-site patches (M) (2026-07-04)
+- [ ] climeta guardrails: make the flag drift guard two-way and cover `create --template`; replace the finalize magic-string with an explicit Documented field so man and zsh generators agree (2026-07-04)
+- [ ] CI hardening batch: per-job cache keys + golangci-lint via go.mod `tool` directive; `concurrency` groups; dependabot (gomod+actions); `go mod tidy -diff` in CI (drop the GoReleaser hook); release-notes empty-file guard; a cheap macos-latest build+vet job (darwin-first releases, ubuntu-only CI) (2026-07-04)
+- [ ] Unify the two cell-width engines: app code measures with mattn/go-runewidth while the charm v2 stack renders with clipperhouse/displaywidth — EA/emoji width disagreements can misalign frames (2026-07-04)
+- [ ] Test hygiene: retire coverage_boost_test.go's symbol-pinning tests into behavioral per-file tests; add factories for the 124 copy-pasted `defaultTheme(), "default"` constructor calls; share the duplicated collectMsgs helper (2026-07-04)
 
 ## Ideas
 
