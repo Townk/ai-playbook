@@ -31,10 +31,10 @@ with the **project-local store** below.
 
 ## Path to 1.0 (proposed 2026-07-04)
 
-1.0 means: **stable public contracts** (the `pkg/` API, the `ask` CLI, the
-playbook schema), a **production-grade executor** (cancellation everywhere,
-CI-consumable output, loud errors), and **CI we trust** (fast, no separate
-race lane, darwin coverage). Proposed milestones:
+1.0 means the product is complete (owner's definition, 2026-07-04): **Phase 6
+(cross-block piping) + Phase 5 (knowledge base) + multi-harness support** —
+on top of stable public contracts (the `pkg/` API, the `ask` CLI, the playbook
+schema), a production-grade executor, and CI we trust. Milestones:
 
 - **v0.10 — the code matches the architecture.** ADR-0009 steps 4–5
   (`ui.Run(Options)`, the single `pkg/` promotion) plus the deep
@@ -47,11 +47,17 @@ race lane, darwin coverage). Proposed milestones:
 - **v0.12 — Phase 5, knowledge base** (AI layer, independent) plus A5a-full
   (cancellation/timeout for streaming AI calls, truncation surfaced on
   authoring paths).
-- **v1.0 — hardening + trust.** Shared-test-driver speedup (retires the race
-  lane), the CI hardening batch (macOS job, cache keys, dependabot,
-  tidy-diff, release-notes guard), coverage ~90%, width-engine unification,
-  Homebrew tap. Explicitly post-1.0: Windows/no-PTY portability, additional
-  harness adapters (pi/cursor — the seam is ready), GNU info pages.
+- **v0.13 — multi-harness.** Additional harness adapters (pi, cursor, …)
+  behind the `Harness` seam built 2026-07-04 (`internal/author/harness.go`) —
+  config-selected via `[agent] harness`, each adapter with its own argv/env/
+  stream-adapter arm and a conformance test suite so a new harness is a
+  bounded, testable addition.
+- **v1.0 — the complete product.** Phase 6 + Phase 5 + multi-harness shipped,
+  plus the hardening/trust batch distributed across the ride: shared-test-
+  driver speedup (retires the race lane), CI hardening (macOS job, cache
+  keys, dependabot, tidy-diff, release-notes guard), coverage ~90%,
+  width-engine unification, Homebrew tap. Explicitly post-1.0: Windows/no-PTY
+  portability, GNU info pages, kitty graphics.
 
 
 ## Command surface (target)
@@ -408,9 +414,9 @@ with `needs=`/`depends_on` ordering and `--auto` execution.
 
 ## Parked / deferred (intentionally, until the phases above land)
 
-- **Harness adapters (pi / cursor)** — explicitly deferred until the whole
-  project (all phases incl. KB) is complete. The harness layer is already
-  pluggable in design.
+- **Harness adapters (pi / cursor)** — PROMOTED to v0.13 (2026-07-04, the
+  1.0 definition): lands after Phases 5–6, before 1.0. The `Harness` seam
+  (`internal/author/harness.go`) is built and waiting.
 - **`create --template`** — manual playbook templates (the arg is reserved).
 - **Headless/CI niceties** beyond `run --auto` (e.g. a JUnit-style report) —
   revisit if CI usage materializes.
