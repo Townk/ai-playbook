@@ -2,6 +2,7 @@ package ui
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -363,5 +364,57 @@ func TestResetDependents_FollowsFromEdges(t *testing.T) {
 	}
 	if _, ok := states["down"]; ok {
 		t.Error("down (needs=cons) must be reset transitively through the from= edge")
+	}
+}
+
+// TestChain_ProducePythonFilterConsume_EndToEnd is the Phase 6 close-out
+// end-to-end pin (v0.11 P5): the flagship three-block pipeline — a shell
+// producer, a python filter reading sys.stdin, and a shell consumer — run
+// through the real fake-free viewer path (newInProcModel: a real orchestrator
+// over a real zsh, no fakes). Clicking the LAST block's run button must
+// materialize the whole from= chain in document-independent order (prod →
+// filter → cons), each step its own status, with the producer's raw bytes
+// reaching the python filter's stdin and the filter's transformed stdout
+// reaching the consumer's stdin in turn.
+func TestChain_ProducePythonFilterConsume_EndToEnd(t *testing.T) {
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not available")
+	}
+	m := newInProcModel(t)
+	m.md = "```bash {id=prod}\nprintf 'a\\nb\\nc'\n```\n\n" +
+		"```python {id=filter from=prod}\n" +
+		"import sys\n" +
+		"for line in sys.stdin:\n" +
+		"    print(line.strip().upper())\n" +
+		"```\n\n" +
+		"```bash {id=cons from=filter}\ncat\n```\n"
+	m.width, m.height = 80, 24
+	m.reflow()
+
+	m, cmd := m.runOrChain(Button{Kind: "run", BlockID: "cons", Payload: m.blockCommand("cons")})
+	if want := []string{"filter", "cons"}; len(m.chainQueue) != 2 || m.chainQueue[0] != want[0] || m.chainQueue[1] != want[1] {
+		t.Fatalf("chainQueue = %v, want %v (prod dispatched first, filter+cons queued)", m.chainQueue, want)
+	}
+	m = driveRun(t, m, cmd)
+
+	for _, id := range []string{"prod", "filter", "cons"} {
+		if got := m.blockStates[id].Status; got != "ok" {
+			t.Errorf("%s status = %q, want ok", id, got)
+		}
+	}
+	lp := m.blockStates["cons"].Logpath
+	if lp == "" {
+		t.Fatal("cons has no logpath")
+	}
+	b, err := os.ReadFile(lp)
+	if err != nil {
+		t.Fatalf("read cons log: %v", err)
+	}
+	_ = os.Remove(lp)
+	got := string(b)
+	for _, want := range []string{"A", "B", "C"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("consumer output = %q, want it to contain the filtered/uppercased %q", got, want)
+		}
 	}
 }

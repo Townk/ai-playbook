@@ -41,10 +41,12 @@ schema), a production-grade executor, and CI we trust. Milestones:
   consolidated; input wrappers folded + the frame-bg contract; `pkg/`
   promotion shipped for playbook/driver/store/dialog — `pkg/runner` deferred
   to its own design task (mux/diff coupling; see BACKLOG).
-- **v0.11 — Phase 6, cross-block output piping.** The largest remaining core
-  feature, designed against the now-settled schema owner and AI-free executor.
-  Rides with executor-grade polish: JUnit/XML `run --auto` report, the
-  ESC-audit sweep, status-line truncation.
+- **v0.11 — Phase 6, cross-block output piping.** Phase 6 itself is DONE
+  (2026-07-04): `from=<id>` pipes a producer's retained stdout into a
+  consumer's stdin (ADR-0010), designed against the now-settled schema owner
+  and AI-free executor. The milestone also rides with executor-grade polish,
+  still open: JUnit/XML `run --auto` report, the ESC-audit sweep, status-line
+  truncation (see `docs/BACKLOG.md`).
 - **v0.12 — Phase 5, knowledge base** (AI layer, independent) plus A5a-full
   (cancellation/timeout for streaming AI calls, truncation surfaced on
   authoring paths).
@@ -400,20 +402,21 @@ adds storage/browse/search + recall of relevant facts during
 
 ## Phase 6 — Cross-block output piping
 
-**Re-classified (ADR-0009, 2026-07-04): this is a CORE schema/executor feature,
-not an AI feature — sequence it AFTER the playbook-first layering extractions
-(canonical `ParseBlocks` owner + AI-free executor) so it is designed against
-the schema's owner, not the renderer.**
-
-**Goal:** let a runnable block consume a prior block's output — pipe the
-`{command, exit, output}` a step produced into a downstream step (beyond the
-existing `APB_OUT_<id>`/`APB_ERR_<id>`/`APB_EXIT_<id>` value-passing env vars),
-so a playbook can chain data between steps the way a shell pipeline does. This is
-the single largest remaining feature on the table (runme-parity and then some);
-**Status:** to be designed (own brainstorm → spec). Promoted from the backlog
-2026-07-03. Consider: named block outputs, an explicit `from=<id>` reference on
-the consuming block, streaming vs whole-capture semantics, and how it interacts
-with `needs=`/`depends_on` ordering and `--auto` execution.
+**DONE (2026-07-04, v0.11).** Checkpointed whole-capture dataflow, per
+[ADR-0010](architecture/adrs/0010-cross-block-data-flow.md) and
+[the spec](specifications/cross-block-piping.md): a new `from=<id>` fence
+attribute on `shell`/`run` blocks wires a producer's retained stdout to a
+consumer's stdin — raw bytes, no shell-quoting, no size limit — alongside the
+pre-existing quoted `APB_OUT_<id>`/`APB_ERR_<id>`/`APB_EXIT_<id>` vars and the
+new raw-path `APB_OUT_FILE_<id>`/`APB_ERR_FILE_<id>` vars. `from=` implies
+`needs=` over a combined graph; producers stay independently runnable; the
+viewer/`--assisted` auto-materialize an unrun `from=` chain on the consumer's
+run click (one already-`ok` producer this session is not re-run); `--auto`'s
+existing topological order already sequences producers before consumers.
+Payload assembly moved to the schema owner (`pkg/playbook.ExecCommand`),
+fixing a pre-existing `--auto` bug where script blocks ran their raw program
+text through the shell instead of their interpreter. Documented in
+`docs/specifications/playbook-schema.md`'s Value-passing section.
 
 ---
 

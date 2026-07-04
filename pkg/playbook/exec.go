@@ -23,6 +23,10 @@ import (
 // The prior renderer path wrapped scripts in a single-quoted (unexpanded)
 // `<<'__APB_RUN__'` heredoc; a script file invoked by its interpreter is exactly
 // equivalent — the body is never shell-expanded either way — but frees stdin.
+// It also incidentally fixes a payload/terminator collision the heredoc had: a
+// script whose text happened to contain the literal line `__APB_RUN__` closed
+// the heredoc early and corrupted the run. A file has no terminator to collide
+// with.
 //
 // scriptDir is where run-block scripts are written — pass the driver's session
 // dir so they survive until the session closes; the cleanup removes each file

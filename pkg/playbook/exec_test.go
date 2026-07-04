@@ -104,6 +104,41 @@ func TestExecCommand_SanitizesID(t *testing.T) {
 	}
 }
 
+// TestExecCommand_RerunOverwritesNotAccumulates: assembling the SAME block id
+// twice (a producer re-run, or a chain re-materializing) must truncate the
+// script file to the new payload, not append to the old one — the second run's
+// program text is what the interpreter should see, byte-exact.
+func TestExecCommand_RerunOverwritesNotAccumulates(t *testing.T) {
+	dir := t.TempDir()
+	blk := Block{ID: "blk", Type: "run", Lang: "python"}
+
+	blk.Payload = "print('first')\n"
+	_, cleanup1, err := ExecCommand(blk, dir)
+	if err != nil {
+		t.Fatalf("first assembly: unexpected err: %v", err)
+	}
+	cleanup1() // mirrors a completed run: the file is removed after use
+
+	blk.Payload = "print('second')\n"
+	cmd, cleanup2, err := ExecCommand(blk, dir)
+	if err != nil {
+		t.Fatalf("second assembly: unexpected err: %v", err)
+	}
+	defer cleanup2()
+
+	wantPath := dir + "/apb_block_blk.py"
+	got, rerr := os.ReadFile(wantPath)
+	if rerr != nil {
+		t.Fatalf("script file not written: %v", rerr)
+	}
+	if string(got) != blk.Payload {
+		t.Fatalf("re-run script content = %q, want ONLY the new payload %q (truncated, not accumulated)", got, blk.Payload)
+	}
+	if !strings.Contains(cmd, wantPath) {
+		t.Fatalf("cmd = %q, want it to reference %q", cmd, wantPath)
+	}
+}
+
 func TestExecCommand_NoScriptDirFallsBackToTemp(t *testing.T) {
 	// An empty scriptDir (retention degraded / no session dir) must still work: the
 	// script lands under os.TempDir() and the returned command is runnable.

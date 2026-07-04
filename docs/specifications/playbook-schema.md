@@ -34,7 +34,9 @@ runner keys run/diff/apply and success-detection on the `id`.
 |-----------------|--------------|---------|
 | `{id=<id>}`     | shipped      | A runnable step. An id is auto-assigned when absent. |
 | `{id=verify}`   | shipped      | The final whole-setup verification; success detection keys on this block. |
+| `{needs=<id>[,<id>...]}` | shipped | Gate: the block won't run — no run button in the viewer, skipped in `--auto` — until every listed id is `ok`. |
 | `{rollback=<id>}` | Phase 2    | The rollback for step `<id>`; on failure, completed steps' rollbacks run in REVERSE order. |
+| `{from=<id>}`   | Phase 6      | Data dependency (ADR-0010): wires the named producer's retained stdout to this block's **stdin**; implies `needs=<id>` for gating/ordering/invalidation. Only `shell`/`run` blocks may declare or be targeted by `from=`. See [Value-passing](#value-passing) below. |
 | `{static}`      | shipped      | A non-runnable block (no run button) — illustrative output, config samples, etc. |
 
 Only **top-level** fenced blocks carry block authority: a fence tag (`id=`,
@@ -46,6 +48,61 @@ nested `rollback=` tags before that).
 
 Multi-language steps run via interpreter heredocs — shell plus
 `python`/`node`/`ruby`/`perl`.
+
+## Value-passing
+
+A block can consume data a prior block produced two ways: session env vars
+(every identified run, always on) and a declared `from=` data edge (Phase 6,
+ADR-0010) that wires a producer's stdout to a consumer's stdin.
+
+### Env vars (every identified run)
+
+After each identified (`id=`-tagged) block runs, the live session shell gets:
+
+| Var | Content | Notes |
+|---|---|---|
+| `APB_OUT_<id>` / `APB_ERR_<id>` | full stdout/stderr, **shell-quoted** (`printf %q` form; zsh uses its `${(q)}` equivalent) | re-expands word-split- and glob-safely when consumed as shell text; awkward for raw or binary consumption |
+| `APB_EXIT_<id>` | exit code | |
+| `APB_OUT_FILE_<id>` / `APB_ERR_FILE_<id>` | **raw path** to the retained capture file — no quoting, no size limit | args-passing idiom: `--input "$(cat "$APB_OUT_FILE_<id>")"` |
+
+`<id>` is the block's id with any character outside `[A-Za-z0-9_]` replaced by
+`_`. The `FILE` vars point at files retained under the session directory,
+overwritten when the same id re-runs and removed when the session closes.
+
+### `from=<id>`
+
+New fence attribute on `shell` and `run` blocks (`run` = the script blocks —
+python/node/ruby/perl; a python consumer reading `sys.stdin` is the flagship
+case). `` {id=filter from=build} `` wires the `build` block's retained stdout
+directly to `filter`'s **stdin** — raw bytes, no shell-quoting and no size
+limit, unlike the `APB_OUT_<id>` env vars above.
+
+- **`from=` implies `needs=`**: the target joins the block's effective needs
+  set for gating, `--auto` ordering, and dependent invalidation, without being
+  added to the textual `needs=` attribute.
+- **Validation:** the target must exist and must not be the block itself; the
+  target must be a runnable `shell`/`run` block (`static`/`diff`/`create` have
+  no output and are rejected as either the producer or the consumer); only one
+  producer per block (a comma list is a validation error); ordering/cycle
+  checks run over the **combined** `needs= ∪ from=` graph.
+- **The producer stays independently runnable** — running it standalone
+  simply pre-materializes its capture for later consumers.
+- **Auto-materialization** (viewer and `--assisted`, `from=` chains only):
+  running a consumer whose upstream `from=` producer(s) haven't run this
+  session runs the whole chain in order first — each step is an ordinary
+  block run with its own status, log, and (in `--assisted`) its own
+  confirmation. A producer already `ok` this session is NOT re-run; a failing
+  step stops the chain and downstream steps never start. Plain `needs=`-only
+  dependencies still just gate — they never auto-run. `--auto` is unaffected:
+  topological order over the combined graph already materializes producers
+  before consumers.
+- **Out of scope in v1:** multiple producers per block (`from=a,b`), stream
+  selectors (`from=id.err`), streaming/concurrent pipes, cross-session capture
+  persistence.
+
+See [`cross-block-piping.md`](cross-block-piping.md) and
+[ADR-0010](../architecture/adrs/0010-cross-block-data-flow.md) for the full
+design.
 
 ## Example
 

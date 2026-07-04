@@ -136,6 +136,36 @@ from a playbook's declaration — resolving current values and leaving secrets
 empty. A playbook may also declare `depends_on: [slug, …]`: its transitive
 dependencies run headless, in topological order, before it.
 
+### Piping a block's output into the next step
+
+A `from=<id>` fence attribute wires a producer block's retained stdout
+straight into a consumer's **stdin** — no shell-quoting, no size limit, and it
+works for script (`run`) blocks too, so a Python filter can read `sys.stdin`
+directly:
+
+````markdown
+```bash {id=build}
+echo '{"count": 3}'
+```
+
+```python {id=filter from=build}
+import json, sys
+print(json.load(sys.stdin)["count"] * 2)
+```
+
+```bash {id=consume needs=filter}
+echo "doubled: $(cat "$APB_OUT_FILE_filter")"
+```
+````
+
+Running `consume` auto-materializes the whole chain: `build` and `filter` run
+first (each its own status/log), then `consume`. `from=` implies `needs=`, so
+ordering and gating follow the data edge; `$APB_OUT_FILE_<id>` (the raw path
+to a block's retained stdout) is the idiom for pulling a prior step's output
+into another step's *arguments* rather than its stdin. See
+[the playbook schema](docs/specifications/playbook-schema.md#value-passing)
+for the full contract.
+
 ## `ask` — themed dialogs for scripts
 
 `ask` is a standalone binary exposing ai-playbook's themed dialog widgets

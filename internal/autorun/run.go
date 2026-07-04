@@ -215,6 +215,10 @@ func (r *orchRunner) assemble(s Step) (string, func()) {
 	if r.orch != nil && r.orch.Drv != nil {
 		scriptDir = r.orch.Drv.SessionDir()
 	}
+	// static=false is safe here, not a shortcut: Execute only builds a Step from a
+	// Block that NextRunnable returned, and NextRunnable walks Sequence(blocks),
+	// which filters out every Static block before a Step exists — so a static
+	// block never reaches RunStep/assemble for ClassifyType to misclassify.
 	blk := playbook.Block{
 		ID:      s.ID,
 		Lang:    s.Lang,

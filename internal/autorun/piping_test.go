@@ -90,3 +90,38 @@ func TestRun_PipedPythonFilter_Integration(t *testing.T) {
 		t.Fatalf("python filter did not read producer's stdin:\n%s", out.String())
 	}
 }
+
+// TestRun_ProducePythonFilterConsume_EndToEnd is the Phase 6 close-out
+// end-to-end pin (v0.11 P5): the flagship three-block pipeline — produce →
+// python filter (reads sys.stdin) → consume — through the real headless
+// `--auto` path (autorun.Run: real driver, real zsh, no fakes). Proves the
+// FULL chain composes: the producer's raw bytes reach the python filter's
+// stdin, and the filter's transformed stdout in turn reaches the consumer's
+// stdin, entirely via from= edges and NextRunnable's topological ordering —
+// no explicit needs= anywhere in the document.
+func TestRun_ProducePythonFilterConsume_EndToEnd(t *testing.T) {
+	if testing.Short() {
+		t.Skip("opens a real driver")
+	}
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 not available")
+	}
+	var out strings.Builder
+	code := Run(RunConfig{
+		Blocks: []Block{
+			{ID: "prod", Kind: KindRun, Command: "printf 'a\\nb\\nc'"},
+			{ID: "filter", Kind: KindRun, Lang: "python", From: "prod",
+				Command: "import sys\nfor l in sys.stdin:\n    print(l.strip().upper())"},
+			{ID: "cons", Kind: KindRun, Command: "cat", From: "filter"},
+		},
+		Slug: "t", Out: &out, Now: func() string { return "STAMP" },
+	})
+	if code != 0 {
+		t.Fatalf("piped run exit = %d, want 0\n%s", code, out.String())
+	}
+	for _, want := range []string{"A", "B", "C"} {
+		if !strings.Contains(out.String(), want) {
+			t.Fatalf("consumer output missing filtered/uppercased %q:\n%s", want, out.String())
+		}
+	}
+}
