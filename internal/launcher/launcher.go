@@ -121,6 +121,15 @@ func requestHistoryPath() string {
 // to author.ClassifyRequest; tests inject a fake returning each kind.
 type classifyFunc func(req capture.Request, opts author.AuthorOptions) (author.Classification, error)
 
+// classifyFn is the SHARED package-level classify seam: every classify call site
+// that isn't per-call-injected (answerRegenFunc's cached-answer reload, runInline's
+// real-mux path, and inline_input.go's in-box/explicit-progress path) reads this one
+// var. It defaults to author.ClassifyRequest; tests save/restore it to inject a fake
+// without a live model call. `launch` (below) is the one seam that stays a PARAMETER
+// instead: its tests pass a distinct fake per call (dozens of call sites across
+// launcher_test.go, no save/restore), which a shared var can't express.
+var classifyFn classifyFunc = author.ClassifyRequest
+
 // launch is the testable launcher core (stage C). It spawns the request input
 // FLOAT (prefilled from the captured context) in --thinking mode, reads back the
 // submitted request, then CLASSIFIES it (cheap triage model) and routes three ways:
@@ -191,21 +200,14 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 			// THIS cached playbook (no re-author). The float is closed here only on a
 			// short-circuit; the fall-through lets the classify path close it as usual.
 			switch kind {
-			case "command":
+			case author.KindCommand:
 				closeFloat(out)
 				dbg("launch: hit route=command pane=%q bodyLen=%d", req.PaneID, len(body))
-				if terr := m.TypeInto(req.PaneID, body); terr != nil {
-					dbg("launch: TypeInto origin pane failed: %v", terr)
-					// The command must never vanish silently just because staging it
-					// into the origin pane failed — surface it so the user can still
-					// run it themselves. The assist itself succeeded, so exit 0.
-					fmt.Fprintf(os.Stderr, "suggested command: %s\n", body)
-				}
-				return 0
-			case "answer":
+				return routeKind(m, selfExe, req, kind, body, title, created)
+			case author.KindAnswer:
 				closeFloat(out)
 				dbg("launch: hit route=answer")
-				return spawnAnswer(m, selfExe, req, body, title, created)
+				return routeKind(m, selfExe, req, kind, body, title, created)
 			default: // playbook / unknown → re-classify (don't serve a frozen playbook)
 				dbg("launch: hit kind=%q not short-circuited; re-classifying", kind)
 			}
@@ -249,19 +251,7 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 				dbg("launch: cache store (command) failed: %v", serr)
 			}
 		}
-		// Stage the command into the ORIGIN pane with NO trailing CR (mux.TypeInto →
-		// `zellij action write-chars --pane-id <pane>`), so it lands at the prompt for
-		// the user to review and run. The explicit pane id makes the write
-		// focus-independent. No docked/floating pane is opened.
 		dbg("launch: route=command pane=%q contentLen=%d", req.PaneID, len(cls.Content))
-		if terr := m.TypeInto(req.PaneID, cls.Content); terr != nil {
-			dbg("launch: TypeInto origin pane failed: %v", terr)
-			// The command must never vanish silently just because staging it into
-			// the origin pane failed — surface it so the user can still run it
-			// themselves. The assist itself succeeded, so exit 0.
-			fmt.Fprintf(os.Stderr, "suggested command: %s\n", cls.Content)
-		}
-		return 0
 	case author.KindAnswer:
 		// Store the classified answer (carrying the title extra, when present) so the
 		// next identical request hits. Best-effort; store BEFORE the route.
@@ -274,13 +264,49 @@ func launch(m mux.Mux, selfExe string, req capture.Request, classify classifyFun
 				dbg("launch: cache store (answer) failed: %v", serr)
 			}
 		}
-		// Render the short prose answer in a docked pager (no run blocks → just prose).
 		// A freshly-classified answer is not cached-served, so no --cached badge.
 		dbg("launch: route=answer")
-		return spawnAnswer(m, selfExe, req, cls.Content, cls.Title, "")
 	default: // escalate (incl. empty/unknown kind) — the session writes the playbook entry
 		dbg("launch: route=escalate kind=%q", cls.Kind)
-		return spawnSession(m, selfExe, req, cls.Title)
+	}
+	return routeKind(m, selfExe, req, cls.Kind, cls.Content, cls.Title, "")
+}
+
+// routeKind performs the three-way route by a resolved kind ("command" → stage
+// the content into the ORIGIN pane, no CR; "answer" → a docked prose pager;
+// anything else, incl. "escalate"/empty/unknown → the full docked session pane).
+// It is the single routing decision `launch` used to duplicate across its
+// cache-hit short-circuit switch (kind read straight off the cached entry) and
+// its post-classify switch (kind from cls.Kind): both call this once they've
+// done their OWN pre-routing step (closeFloat for the cache-hit path; the
+// best-effort cache Store for the post-classify path). created carries a cached
+// entry's created_at for the answer pager's "cached Nm ago" badge — "" for a
+// freshly classified (never-cached) answer.
+//
+// The cache-hit caller never routes a "playbook"/unknown kind through here: that
+// case falls through to the classify path instead (a cached PLAYBOOK is
+// deliberately not served straight from a cache hit — see launch's comment), so
+// routeKind's escalate default is reachable ONLY from the post-classify caller.
+func routeKind(m mux.Mux, selfExe string, req capture.Request, kind, content, title, created string) int {
+	switch kind {
+	case author.KindCommand:
+		// Stage the command into the ORIGIN pane with NO trailing CR (mux.TypeInto →
+		// `zellij action write-chars --pane-id <pane>`), so it lands at the prompt for
+		// the user to review and run. The explicit pane id makes the write
+		// focus-independent. No docked/floating pane is opened.
+		if terr := m.TypeInto(req.PaneID, content); terr != nil {
+			dbg("routeKind: TypeInto origin pane failed: %v", terr)
+			// The command must never vanish silently just because staging it into
+			// the origin pane failed — surface it so the user can still run it
+			// themselves. The assist itself succeeded, so exit 0.
+			fmt.Fprintf(os.Stderr, "suggested command: %s\n", content)
+		}
+		return 0
+	case author.KindAnswer:
+		// Render the short prose answer in a docked pager (no run blocks → just prose).
+		return spawnAnswer(m, selfExe, req, content, title, created)
+	default: // escalate (incl. empty/unknown kind) — the session writes the playbook entry
+		return spawnSession(m, selfExe, req, title)
 	}
 }
 
@@ -475,24 +501,17 @@ func extractJSONContent(s string) string {
 // Both launcher answer routes (cache HIT and MISS) go through here; a freshly
 // classified answer has no --cached, so its badge only appears once re-cached.
 func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content, title, created string) int {
-	f, err := os.CreateTemp("", "apb-answer-*.md")
+	tmp, err := writeTempFile("apb-answer-*.md", content)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
 		return 1
 	}
-	if _, err := f.WriteString(content); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
-		return 1
-	}
-	f.Close()
 
 	cwd := req.ProjectRoot
 	if cwd == "" {
 		cwd = req.CWD
 	}
-	runCmd := []string{selfExe, "answer", "--request", requestJSON(req), "--content", f.Name()}
+	runCmd := []string{selfExe, "answer", "--request", requestJSON(req), "--content", tmp}
 	if title != "" {
 		// The classify-supplied short label becomes the pager header (overrides the
 		// H1/front-matter title, which a prose answer has none of).
@@ -506,25 +525,19 @@ func spawnAnswer(m mux.Mux, selfExe string, req capture.Request, content, title,
 	if cwd != "" {
 		runCmd = append(runCmd, "--cwd", cwd)
 	}
-	dbg("spawnAnswer: cwd=%q answerPath=%q cmd=%q", cwd, f.Name(), runCmd)
+	dbg("spawnAnswer: cwd=%q answerPath=%q cmd=%q", cwd, tmp, runCmd)
 	if err := m.SpawnDocked(mux.SpawnOptions{
 		Cmd:  runCmd,
 		Cwd:  cwd,
 		Name: "ai-playbook",
 	}); err != nil {
 		dbg("spawnAnswer: SpawnDocked FAILED err=%v", err)
-		os.Remove(f.Name())
+		os.Remove(tmp)
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: spawn answer pane: %v\n", err)
 		return 1
 	}
 	return 0
 }
-
-// answerClassify is the cached-answer regenerate seam: the cheap-model triage pass
-// the reload re-runs to refresh the prose. It defaults to author.ClassifyRequest;
-// tests inject a fake (the closure calls the live model otherwise, which a unit test
-// can't drive). Mirrors launch's classifyFunc seam.
-var answerClassify classifyFunc = author.ClassifyRequest
 
 // answerRegenFunc builds the cached-ANSWER regenerate closure handed to
 // ui.Options.AnswerRegen. When the reload pill is clicked it re-runs the cheap classify
@@ -535,7 +548,7 @@ var answerClassify classifyFunc = author.ClassifyRequest
 func answerRegenFunc(req capture.Request) func() (io.ReadCloser, error) {
 	return func() (io.ReadCloser, error) {
 		cfg, _ := config.Load()
-		cls, err := answerClassify(req, author.AuthorOptions{Cfg: cfg})
+		cls, err := classifyFn(req, author.AuthorOptions{Cfg: cfg})
 		if err != nil {
 			return nil, err
 		}
@@ -619,10 +632,6 @@ func AnswerMain() int {
 	return uiRunFn(opts)
 }
 
-// runInlineClassify is runInline's classify seam: tests inject a fake classifyFunc
-// to drive each route without calling the live model. Mirrors answerClassify.
-var runInlineClassify classifyFunc = author.ClassifyRequest
-
 // runInlineSessionFn is runInline's session seam: tests override this to assert the
 // escalate branch without starting a live driver.
 var runInlineSessionFn = runSession
@@ -635,7 +644,7 @@ var runInlineSessionFn = runSession
 // launcher already made (never re-loads it).
 func runInline(req capture.Request, m mux.Mux) int {
 	cfg, _ := config.Load()
-	cls, err := runInlineClassify(req, author.AuthorOptions{Cfg: cfg})
+	cls, err := classifyFn(req, author.AuthorOptions{Cfg: cfg})
 	if err != nil {
 		dbg("runInline: classify failed (%v); escalating", err)
 		cls = author.Classification{Kind: author.KindEscalate}
@@ -657,24 +666,17 @@ func runInline(req capture.Request, m mux.Mux) int {
 // launcher then exits — the docked pane is the session. The temp file is NOT
 // removed here (the spawned pane reads it asynchronously and removes it itself).
 func spawnSession(m mux.Mux, selfExe string, req capture.Request, title string) int {
-	f, err := os.CreateTemp("", "apb-request-*.json")
+	tmp, err := writeTempFile("apb-request-*.json", requestJSON(req))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
 		return 1
 	}
-	if _, err := f.WriteString(requestJSON(req)); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
-		return 1
-	}
-	f.Close()
 
 	cwd := req.ProjectRoot
 	if cwd == "" {
 		cwd = req.CWD
 	}
-	sessionCmd := []string{selfExe, "session", "--request", f.Name()}
+	sessionCmd := []string{selfExe, "session", "--request", tmp}
 	if title != "" {
 		// The classify-supplied short label becomes the docked session's working
 		// header (the pager seeds m.title; a finalized-playbook H1 may update it later).
@@ -686,14 +688,14 @@ func spawnSession(m mux.Mux, selfExe string, req capture.Request, title string) 
 		// not reach it.
 		sessionCmd = append(sessionCmd, "--debug-log", dbgPath)
 	}
-	dbg("spawnSession: cwd=%q jsonPath=%q cmd=%q", cwd, f.Name(), sessionCmd)
+	dbg("spawnSession: cwd=%q jsonPath=%q cmd=%q", cwd, tmp, sessionCmd)
 	if err := m.SpawnDocked(mux.SpawnOptions{
 		Cmd:  sessionCmd,
 		Cwd:  cwd,
 		Name: "ai-playbook",
 	}); err != nil {
 		dbg("spawnSession: SpawnDocked FAILED err=%v", err)
-		os.Remove(f.Name())
+		os.Remove(tmp)
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: spawn session pane: %v\n", err)
 		return 1
 	}

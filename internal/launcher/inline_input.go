@@ -17,9 +17,6 @@ import (
 	"github.com/Townk/ai-playbook/internal/ui"
 )
 
-// inlineClassifyFn is the in-box classify seam (tests inject a fake).
-var inlineClassifyFn classifyFunc = author.ClassifyRequest
-
 // routeInlineSessionFn / viewProseFn are the escalate / answer seams (tests
 // override them to avoid a live driver / TTY).
 var (
@@ -56,7 +53,7 @@ func reqCwd(req capture.Request) string {
 // thinkingTail helpers.
 func classifyInline(req capture.Request, onTail func(string)) (author.Classification, error) {
 	cfg, _ := config.Load()
-	return inlineClassifyFn(req, author.AuthorOptions{
+	return classifyFn(req, author.AuthorOptions{
 		Cfg: cfg,
 		OnText: func(acc string) {
 			onTail(thinkingTail(extractJSONContent(acc), thinkingTailRunes))
@@ -68,19 +65,11 @@ func classifyInline(req capture.Request, onTail func(string)) (author.Classifica
 // write it to a temp markdown file and hand it to ui.Run as the File (the same
 // viewer serveCachedPlaybook/AnswerMain use).
 func viewProse(content, title, cwd string) int {
-	f, err := os.CreateTemp("", "apb-inline-answer-*.md")
+	tmp, err := writeTempFile("apb-inline-answer-*.md", content)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook: %v\n", err)
 		return 1
 	}
-	tmp := f.Name()
-	if _, err := f.WriteString(content); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		fmt.Fprintf(os.Stderr, "ai-playbook: %v\n", err)
-		return 1
-	}
-	f.Close()
 	defer os.Remove(tmp)
 
 	// ui.Run opens its own driver for this prose file; honor the configured shell.

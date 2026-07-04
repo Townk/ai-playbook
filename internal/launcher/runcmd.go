@@ -449,42 +449,16 @@ func parseWithEnv(raw string) (map[string]string, error) {
 func resolveRunArgs(args []string) (runArgs, error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	var playbook, file, withEnv string
+	var withEnv string
 	var auto, autoMode, noAutoRollback, assisted bool
-	fs.StringVar(&playbook, "playbook", "", "slug of a saved playbook to run")
-	fs.StringVar(&file, "file", "", "path to a markdown file to run")
 	fs.BoolVar(&auto, "auto-rollback", false, "on a step failure, automatically roll back applied steps (else a manual button)")
 	fs.BoolVar(&autoMode, "auto", false, "run headless: execute every block in order with no viewer/driver pane")
 	fs.BoolVar(&noAutoRollback, "no-auto-rollback", false, "with --auto, do not roll back applied steps on a failure")
 	fs.BoolVar(&assisted, "assisted", false, "run GUIDED fullscreen: step-by-step confirmation in the same viewer/driver pane")
 	fs.StringVar(&withEnv, "with-env", "", "with --auto, supply env var values as inline JSON or a JSON file path")
-	if perr := fs.Parse(args); perr != nil {
-		return runArgs{}, perr
-	}
-	// The stdlib flag package stops at the FIRST non-flag token, so anything after a
-	// bare positional (e.g. `run build --file x`) lands here unparsed. Treat any
-	// leftover beyond the single positional as a conflict — the source must be
-	// unambiguous.
-	rest := fs.Args()
-	if len(rest) > 1 {
-		return runArgs{}, fmt.Errorf("specify exactly one of <slug>, --playbook, or --file")
-	}
-	positional := ""
-	if len(rest) == 1 {
-		positional = rest[0]
-	}
-
-	count := 0
-	for _, s := range []string{playbook, file, positional} {
-		if s != "" {
-			count++
-		}
-	}
-	switch {
-	case count == 0:
-		return runArgs{}, fmt.Errorf("specify a playbook: run <slug> | --playbook <slug> | --file <path>")
-	case count > 1:
-		return runArgs{}, fmt.Errorf("specify exactly one of <slug>, --playbook, or --file")
+	kind, value, serr := resolveSource(fs, args, "run", true)
+	if serr != nil {
+		return runArgs{}, serr
 	}
 
 	if noAutoRollback && !autoMode {
@@ -503,20 +477,12 @@ func resolveRunArgs(args []string) (runArgs, error) {
 		return runArgs{}, fmt.Errorf("--with-env is only valid with --auto")
 	}
 
-	ra := runArgs{AutoRollback: auto, NoAutoRollback: noAutoRollback}
+	ra := runArgs{Kind: kind, Value: value, AutoRollback: auto, NoAutoRollback: noAutoRollback}
 	switch {
 	case autoMode:
 		ra.Mode = modeAuto
 	case assisted:
 		ra.Mode = modeAssisted
-	}
-	switch {
-	case file != "":
-		ra.Kind, ra.Value = "file", file
-	case playbook != "":
-		ra.Kind, ra.Value = "playbook", playbook
-	default:
-		ra.Kind, ra.Value = "playbook", positional
 	}
 	if withEnv != "" {
 		overrides, perr := parseWithEnv(withEnv)

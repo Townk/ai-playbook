@@ -1033,12 +1033,12 @@ func TestDbgEnv_NoOpWhenUnset(t *testing.T) {
 
 // TestRunInline_CommandRoute asserts the command branch: the classified command is
 // printed to stdout (with a header) so the user can review it. Uses the
-// runInlineClassify seam so no live model is called.
+// classifyFn seam so no live model is called.
 func TestRunInline_CommandRoute(t *testing.T) {
 	isolateCache(t)
-	orig := runInlineClassify
-	t.Cleanup(func() { runInlineClassify = orig })
-	runInlineClassify = fakeClassify(author.Classification{Kind: author.KindCommand, Content: "git status"}, nil)
+	orig := classifyFn
+	t.Cleanup(func() { classifyFn = orig })
+	classifyFn = fakeClassify(author.Classification{Kind: author.KindCommand, Content: "git status"}, nil)
 
 	var code int
 	out := captureStdout(t, func() {
@@ -1057,12 +1057,12 @@ func TestRunInline_CommandRoute(t *testing.T) {
 }
 
 // TestRunInline_AnswerRoute asserts the answer branch: the prose answer is
-// printed to stdout. Uses the runInlineClassify seam.
+// printed to stdout. Uses the classifyFn seam.
 func TestRunInline_AnswerRoute(t *testing.T) {
 	isolateCache(t)
-	orig := runInlineClassify
-	t.Cleanup(func() { runInlineClassify = orig })
-	runInlineClassify = fakeClassify(author.Classification{
+	orig := classifyFn
+	t.Cleanup(func() { classifyFn = orig })
+	classifyFn = fakeClassify(author.Classification{
 		Kind:    author.KindAnswer,
 		Content: "HEAD is the current commit pointer.",
 	}, nil)
@@ -1085,13 +1085,13 @@ func TestRunInline_AnswerRoute(t *testing.T) {
 // driver/model is started.
 func TestRunInline_EscalateRoute(t *testing.T) {
 	isolateCache(t)
-	origCls := runInlineClassify
+	origCls := classifyFn
 	origSess := runInlineSessionFn
 	t.Cleanup(func() {
-		runInlineClassify = origCls
+		classifyFn = origCls
 		runInlineSessionFn = origSess
 	})
-	runInlineClassify = fakeClassify(author.Classification{Kind: author.KindEscalate}, nil)
+	classifyFn = fakeClassify(author.Classification{Kind: author.KindEscalate}, nil)
 	runInlineSessionFn = func(_ capture.Request, _ string, _ mux.Mux) int { return 42 }
 
 	code := runInline(capture.Request{CWD: "/proj"}, mux.Null())
@@ -1134,13 +1134,13 @@ func TestLauncherRoute(t *testing.T) {
 // escalate branch (the safe default), matching launch's behavior.
 func TestRunInline_ClassifyErrorEscalates(t *testing.T) {
 	isolateCache(t)
-	origCls := runInlineClassify
+	origCls := classifyFn
 	origSess := runInlineSessionFn
 	t.Cleanup(func() {
-		runInlineClassify = origCls
+		classifyFn = origCls
 		runInlineSessionFn = origSess
 	})
-	runInlineClassify = fakeClassify(author.Classification{}, os.ErrDeadlineExceeded)
+	classifyFn = fakeClassify(author.Classification{}, os.ErrDeadlineExceeded)
 	sessWasCalled := false
 	runInlineSessionFn = func(_ capture.Request, _ string, _ mux.Mux) int {
 		sessWasCalled = true

@@ -387,7 +387,7 @@ func TestCreate_StructuredRenderAndSeam(t *testing.T) {
 	}
 
 	// The create reengage Metadata seam returns the captured meta — NO model call.
-	re := newCreateReengage(capture.Request{}, triage.Decision{Disabled: true}, nil, true, sess, config.Default())
+	re := newAuthoringReengage(capture.Request{}, triage.Decision{Disabled: true}, nil, true, sess, config.Default())
 	meta, err := re.Metadata(body)
 	if err != nil {
 		t.Fatalf("seam err: %v", err)
@@ -401,9 +401,9 @@ func TestCreate_StructuredRenderAndSeam(t *testing.T) {
 }
 
 // TestReengageBody_RendersCapturedPlaybook asserts that Reengage.Body is set by
-// newCreateReengage and, after a submit_playbook tool call, returns a rendered body
+// newAuthoringReengage and, after a submit_playbook tool call, returns a rendered body
 // containing the submitted code. Mirrors the session-construction pattern of
-// TestCreate_StructuredRenderAndSeam; adapted to the real newCreateReengage signature.
+// TestCreate_StructuredRenderAndSeam; adapted to the real newAuthoringReengage signature.
 func TestReengageBody_RendersCapturedPlaybook(t *testing.T) {
 	minimalZDOTDIR(t)
 	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
@@ -418,7 +418,7 @@ func TestReengageBody_RendersCapturedPlaybook(t *testing.T) {
 	if err != nil || !res.OK {
 		t.Fatalf("submit_playbook: %+v err=%v", res, err)
 	}
-	re := newCreateReengage(capture.Request{}, triage.Decision{Disabled: true}, nil, true, sess, config.Default())
+	re := newAuthoringReengage(capture.Request{}, triage.Decision{Disabled: true}, nil, true, sess, config.Default())
 	if re.Body == nil {
 		t.Fatal("Reengage.Body must be set")
 	}

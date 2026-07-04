@@ -339,9 +339,9 @@ func TestWriteDoneFile_EmptyPath(t *testing.T) {
 // reload closure as an error (and never re-caches).
 func TestAnswerRegenFunc_ClassifyError(t *testing.T) {
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir())
-	orig := answerClassify
-	t.Cleanup(func() { answerClassify = orig })
-	answerClassify = func(capture.Request, author.AuthorOptions) (author.Classification, error) {
+	orig := classifyFn
+	t.Cleanup(func() { classifyFn = orig })
+	classifyFn = func(capture.Request, author.AuthorOptions) (author.Classification, error) {
 		return author.Classification{}, errors.New("classify boom")
 	}
 	if rc, err := answerRegenFunc(capture.Request{UserRequest: "q"})(); err == nil || rc != nil {

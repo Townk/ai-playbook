@@ -278,12 +278,17 @@ func structuredBody(sess *session, projectRoot, home string, fallback func() str
 // session's shell; tests override it to capture the body handed to the viewer.
 var createViewFn = createViewPlaybook
 
-// newCreateReengage builds the re-engagement context the create flow persists under
-// and threads into the phase-2 viewer (so the viewer's run blocks drive the session
-// shell and the `w`-key wrap-up CommitPlaybook writes the store file). create's newCreateReengage
-// and escalate's inline Reengage (session.go) are field-identical: StoreDir from cfg.GlobalStoreDir()
-// and the createDecision cache keys (only when the cache wasn't disabled/bypassed).
-func newCreateReengage(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, sess *session, cfg *config.Config) *reengage.Reengage {
+// newAuthoringReengage builds the re-engagement context an INITIAL-authoring path
+// (cache MISS) persists under and threads into its viewer (so the viewer's run
+// blocks drive the session shell and the `w`-key wrap-up CommitPlaybook writes the
+// store file). It is the single builder for create's phase-2 viewer
+// (createAuthorWithProgress) and troubleshoot's authorPlaybook — both are
+// field-identical: StoreDir from cfg.GlobalStoreDir() and the triage cache keys
+// (only when the cache wasn't disabled/bypassed). The cache-HIT replay path
+// (escalateReengage, session.go) builds a related but distinct context (its own
+// cache.Open(), unconditional cache keys, buildMetadataSeam instead of
+// capturedMetaSeam) and is intentionally NOT folded in here.
+func newAuthoringReengage(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, sess *session, cfg *config.Config) *reengage.Reengage {
 	var sharedDrv *driver.Driver
 	if sess != nil {
 		sharedDrv = sess.drv
@@ -358,7 +363,7 @@ func createAuthorWithProgress(req capture.Request, d triage.Decision, c *cache.C
 	if sess != nil {
 		sharedDrv = sess.drv
 	}
-	reengage := newCreateReengage(req, d, c, noCache, sess, cfg)
+	reengage := newAuthoringReengage(req, d, c, noCache, sess, cfg)
 
 	cs, err := createStreamFn(req, sess, cfg)
 	if err != nil {
@@ -400,19 +405,11 @@ func createAuthorWithProgress(req capture.Request, d triage.Decision, c *cache.C
 // ui.Options (no Cached → no badge), and call ui.Run. The temp file is cleaned up
 // after the viewer returns.
 func createViewPlaybook(body string, sess *session, re *reengage.Reengage, cfg *config.Config, req capture.Request) int {
-	f, err := os.CreateTemp("", "apb-create-*.md")
+	tmp, err := writeTempFile("apb-create-*.md", body)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook create: %v\n", err)
 		return 1
 	}
-	tmp := f.Name()
-	if _, err := f.WriteString(body); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		fmt.Fprintf(os.Stderr, "ai-playbook create: %v\n", err)
-		return 1
-	}
-	f.Close()
 	defer os.Remove(tmp)
 
 	cwd := reqCwd(req)

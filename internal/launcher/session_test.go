@@ -188,19 +188,19 @@ func TestServeCachedReadyLifecycle_NilSession(t *testing.T) {
 }
 
 // TestAnswerRegenReCachesAnswer exercises the cached-ANSWER reload closure
-// (answerRegenFunc): it re-runs the cheap classify (faked via the answerClassify
+// (answerRegenFunc): it re-runs the cheap classify (faked via the classifyFn
 // seam), streams the fresh prose back, AND re-caches it under the SAME (ctx,req)
 // keys with kind=answer. AI_PLAYBOOK_DATA_DIR isolates the store.
 //
-// NOTE: this uses the answerClassify package var as an injection seam so the closure
+// NOTE: this uses the classifyFn package var as an injection seam so the closure
 // can run without the live triage model (flag for review).
 func TestAnswerRegenReCachesAnswer(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", dir)
 
-	orig := answerClassify
-	t.Cleanup(func() { answerClassify = orig })
-	answerClassify = func(req capture.Request, opts author.AuthorOptions) (author.Classification, error) {
+	orig := classifyFn
+	t.Cleanup(func() { classifyFn = orig })
+	classifyFn = func(req capture.Request, opts author.AuthorOptions) (author.Classification, error) {
 		return author.Classification{Kind: author.KindAnswer, Content: "FRESH PROSE ANSWER", Title: "Fresh Title"}, nil
 	}
 

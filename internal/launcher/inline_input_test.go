@@ -13,9 +13,9 @@ import (
 
 func TestExplicitProgress_ClassifiesAndRoutes(t *testing.T) {
 	isolateCache(t)
-	origCls, origSess := inlineClassifyFn, routeInlineSessionFn
-	t.Cleanup(func() { inlineClassifyFn, routeInlineSessionFn = origCls, origSess })
-	inlineClassifyFn = fakeClassify(author.Classification{Kind: author.KindEscalate}, nil)
+	origCls, origSess := classifyFn, routeInlineSessionFn
+	t.Cleanup(func() { classifyFn, routeInlineSessionFn = origCls, origSess })
+	classifyFn = fakeClassify(author.Classification{Kind: author.KindEscalate}, nil)
 	routeInlineSessionFn = func(_ capture.Request, _ string, _ mux.Mux) int { return 9 }
 
 	if code := explicitProgress(capture.Request{CWD: "/p", UserRequest: "why did it crash"}, mux.Null()); code != 9 {
@@ -25,9 +25,9 @@ func TestExplicitProgress_ClassifiesAndRoutes(t *testing.T) {
 
 func TestExplicitProgress_ClassifyErrorEscalates(t *testing.T) {
 	isolateCache(t)
-	origCls, origSess := inlineClassifyFn, routeInlineSessionFn
-	t.Cleanup(func() { inlineClassifyFn, routeInlineSessionFn = origCls, origSess })
-	inlineClassifyFn = fakeClassify(author.Classification{}, os.ErrDeadlineExceeded)
+	origCls, origSess := classifyFn, routeInlineSessionFn
+	t.Cleanup(func() { classifyFn, routeInlineSessionFn = origCls, origSess })
+	classifyFn = fakeClassify(author.Classification{}, os.ErrDeadlineExceeded)
 	called := false
 	routeInlineSessionFn = func(_ capture.Request, _ string, _ mux.Mux) int { called = true; return 0 }
 
@@ -82,9 +82,9 @@ func TestRouteInline_Escalate_RunsSession(t *testing.T) {
 
 func TestClassifyInline_StreamsContentTail(t *testing.T) {
 	isolateCache(t)
-	orig := inlineClassifyFn
-	t.Cleanup(func() { inlineClassifyFn = orig })
-	inlineClassifyFn = func(_ capture.Request, opts author.AuthorOptions) (author.Classification, error) {
+	orig := classifyFn
+	t.Cleanup(func() { classifyFn = orig })
+	classifyFn = func(_ capture.Request, opts author.AuthorOptions) (author.Classification, error) {
 		if opts.OnText != nil {
 			opts.OnText(`{"kind":"command","content":"git st`)
 		}
@@ -107,11 +107,11 @@ func TestClassifyInline_StreamsContentTail(t *testing.T) {
 // seam (NOT the float launch, NOT the stdin read). We assert via the seam.
 func TestInlineInput_SubmitRoutesClassification(t *testing.T) {
 	isolateCache(t)
-	origRun, origCls, origSess := inlineRunFn, inlineClassifyFn, routeInlineSessionFn
+	origRun, origCls, origSess := inlineRunFn, classifyFn, routeInlineSessionFn
 	t.Cleanup(func() {
-		inlineRunFn, inlineClassifyFn, routeInlineSessionFn = origRun, origCls, origSess
+		inlineRunFn, classifyFn, routeInlineSessionFn = origRun, origCls, origSess
 	})
-	inlineClassifyFn = fakeClassify(author.Classification{Kind: author.KindEscalate}, nil)
+	classifyFn = fakeClassify(author.Classification{Kind: author.KindEscalate}, nil)
 	routeInlineSessionFn = func(_ capture.Request, _ string, _ mux.Mux) int { return 7 }
 	// Fake the inline runner: drive onSubmit (so the classify goroutine runs),
 	// drain it, and report a submit.
@@ -138,11 +138,11 @@ func TestInlineInput_SubmitRoutesClassification(t *testing.T) {
 // input.inlineResultFromModel conversion — see internal/input/inline_test.go).
 func TestInlineInput_CancelDuringThinkingDoesNotRoute(t *testing.T) {
 	isolateCache(t)
-	origRun, origCls, origSess := inlineRunFn, inlineClassifyFn, routeInlineSessionFn
+	origRun, origCls, origSess := inlineRunFn, classifyFn, routeInlineSessionFn
 	t.Cleanup(func() {
-		inlineRunFn, inlineClassifyFn, routeInlineSessionFn = origRun, origCls, origSess
+		inlineRunFn, classifyFn, routeInlineSessionFn = origRun, origCls, origSess
 	})
-	inlineClassifyFn = fakeClassify(author.Classification{Kind: author.KindEscalate}, nil)
+	classifyFn = fakeClassify(author.Classification{Kind: author.KindEscalate}, nil)
 	routed := false
 	routeInlineSessionFn = func(_ capture.Request, _ string, _ mux.Mux) int { routed = true; return 7 }
 	// Fake the inline runner: drive onSubmit (so the classify goroutine runs and

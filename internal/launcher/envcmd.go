@@ -45,35 +45,11 @@ type envArgs struct {
 func resolveEnvArgs(args []string) (envArgs, error) {
 	fs := flag.NewFlagSet("env", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	var file string
-	fs.StringVar(&file, "file", "", "path to a markdown file")
-	if perr := fs.Parse(args); perr != nil {
-		return envArgs{}, perr
+	kind, value, err := resolveSource(fs, args, "env", false)
+	if err != nil {
+		return envArgs{}, err
 	}
-	rest := fs.Args()
-	if len(rest) > 1 {
-		return envArgs{}, fmt.Errorf("specify exactly one of <slug> or --file")
-	}
-	positional := ""
-	if len(rest) == 1 {
-		positional = rest[0]
-	}
-	count := 0
-	for _, s := range []string{file, positional} {
-		if s != "" {
-			count++
-		}
-	}
-	switch {
-	case count == 0:
-		return envArgs{}, fmt.Errorf("specify a playbook: env <slug> | --file <path>")
-	case count > 1:
-		return envArgs{}, fmt.Errorf("specify exactly one of <slug> or --file")
-	}
-	if file != "" {
-		return envArgs{Kind: "file", Value: file}, nil
-	}
-	return envArgs{Kind: "playbook", Value: positional}, nil
+	return envArgs{Kind: kind, Value: value}, nil
 }
 
 // resolveEnvJSON resolves each declared var against getenv (env value when set,

@@ -424,25 +424,11 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 	// from cfg.GlobalStoreDir() — the single resolver that both the writer
 	// (CommitPlaybook) and the reader (store.Index) use, ensuring they never diverge.
 	cfg, _ := config.Load() // always non-nil (Default on error)
-	reengage := &reengage.Reengage{
-		Req:         req,
-		Agent:       sess.authoringAgent(cfg),
-		Events:      buildReengageEvents(req, sess),
-		Cache:       c,
-		RequestJSON: requestJSON(req),
-		Body:        reengageBody(sess, req),
-		// Structured authoring folds classification into the single submit_playbook
-		// call, so the captured pb's Meta drives the saved front matter + project_bound
-		// (capturedMetaSeam, mirroring create's newCreateReengage) — NO metadata model
-		// pass. Falls back to the model classifier only when nothing was submitted.
-		Metadata:  capturedMetaSeam(sess),
-		EnvLookup: buildEnvLookup(sharedDrv),
-		StoreDir:  cfg.GlobalStoreDir(),
-	}
-	if !d.Disabled && !noCache {
-		reengage.CtxHash = d.CtxHash
-		reengage.ReqHash = d.ReqHash
-	}
+	// Structured authoring folds classification into the single submit_playbook call,
+	// so the captured pb's Meta drives the saved front matter + project_bound
+	// (capturedMetaSeam, folded into newAuthoringReengage) — NO metadata model pass.
+	// Falls back to the model classifier only when nothing was submitted.
+	reengage := newAuthoringReengage(req, d, c, noCache, sess, cfg)
 
 	// INITIAL authoring runs the SHARED structured-authoring core (structuredStream):
 	// the OWNED claude stream-json invocation (AuthorEvents, Structured: true) is fanned
@@ -858,19 +844,11 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *
 	body := cache.Body(content)
 	created, _ := cache.Field(content, "created_at")
 
-	f, err := os.CreateTemp("", "apb-cached-*.md")
+	tmp, err := writeTempFile("apb-cached-*.md", body)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
 		return 1
 	}
-	tmp := f.Name()
-	if _, err := f.WriteString(body); err != nil {
-		f.Close()
-		os.Remove(tmp)
-		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: %v\n", err)
-		return 1
-	}
-	f.Close()
 	defer os.Remove(tmp)
 
 	cwd := req.ProjectRoot

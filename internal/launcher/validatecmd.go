@@ -327,40 +327,13 @@ type validateArgs struct {
 func resolveValidateArgs(args []string) (validateArgs, error) {
 	fs := flag.NewFlagSet("validate", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	var file string
 	var noAI, plain, quiet bool
-	fs.StringVar(&file, "file", "", "path to a markdown file to validate")
 	fs.BoolVar(&noAI, "no-ai", false, "skip the AI review pass (structural check only)")
 	fs.BoolVar(&plain, "plain", false, "use plain dot progress instead of the spinner (default when not attached to a terminal)")
 	fs.BoolVar(&quiet, "quiet", false, "suppress all output; report the result only via the exit code")
-	if perr := fs.Parse(args); perr != nil {
-		return validateArgs{}, perr
+	kind, value, err := resolveSource(fs, args, "validate", false)
+	if err != nil {
+		return validateArgs{}, err
 	}
-
-	rest := fs.Args()
-	if len(rest) > 1 {
-		return validateArgs{}, fmt.Errorf("specify exactly one of <slug> or --file")
-	}
-	positional := ""
-	if len(rest) == 1 {
-		positional = rest[0]
-	}
-
-	count := 0
-	for _, s := range []string{file, positional} {
-		if s != "" {
-			count++
-		}
-	}
-	switch {
-	case count == 0:
-		return validateArgs{}, fmt.Errorf("specify a playbook: validate <slug> | --file <path>")
-	case count > 1:
-		return validateArgs{}, fmt.Errorf("specify exactly one of <slug> or --file")
-	}
-
-	if file != "" {
-		return validateArgs{Kind: "file", Value: file, NoAI: noAI, Plain: plain, Quiet: quiet}, nil
-	}
-	return validateArgs{Kind: "playbook", Value: positional, NoAI: noAI, Plain: plain, Quiet: quiet}, nil
+	return validateArgs{Kind: kind, Value: value, NoAI: noAI, Plain: plain, Quiet: quiet}, nil
 }
