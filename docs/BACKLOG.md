@@ -39,6 +39,8 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 
 - [ ] `ui.Main` is a tested-but-dead ~50-line shim (zero production callers since ui.Run(Options); its doc claims an argv contract launcher.RunMain now owns) — delete it and its argv-parsing tests, or re-document it as deliberate compat surface (2026-07-04)
 
+- [ ] `--auto` never applies the interpreter-heredoc wrapping to `run` (script) blocks — payload assembly lives in the renderer, so headless python/node/ruby/perl blocks execute raw through the shell; FIX LANDS WITH Phase 6 (payload assembly moves to pkg/playbook per ADR-0010) (2026-07-04)
+
 ## Ideas
 
 - [ ] (low priority) E2E/integration tests for the integration entry points (`launcher` entry points, `cmd` `selftest`/`mcpMain`) — spawn the real binary + drive a TUI/PTY. These render via live mux/model/TUI/driver so they're not unit-testable; coverage there is intentionally low. Would push total coverage 80%→~90% (2026-06-27)
