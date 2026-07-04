@@ -27,6 +27,17 @@ type textField struct {
 	histIdx int
 	draft   string
 
+	// lastStyleKey / styleCached memoize the last inputs applied to the underlying
+	// textarea (foreground/background + width/height) so viewWith can skip the
+	// per-frame rebuild — textarea.DefaultDarkStyles() + ~8 lipgloss styles +
+	// SetStyles/SetWidth/SetHeight — when nothing that feeds them changed (every
+	// blink/wave tick and keypress re-renders otherwise). The applied ta state is
+	// identical whether we rebuild or reuse, so output stays byte-for-byte the same.
+	// setWidth invalidates the cache (styleCached=false) because it resizes the
+	// textarea outside viewWith.
+	lastStyleKey taStyleKey
+	styleCached  bool
+
 	// boxBG is the box-interior background view() uses (via viewWith's taStyle.bg).
 	// Default "" keeps the interior bg-less — correct for the inline (no-mux)
 	// layout, which composites on the pane/terminal background. A FRAMED host
@@ -49,6 +60,17 @@ type taStyle struct {
 	text        string // textarea text foreground
 	bg          string // box interior background ("" = none/terminal default)
 	placeholder bool   // show the placeholder when the field is empty
+}
+
+// taStyleKey is the memo key for viewWith's textarea-style rebuild: it captures
+// exactly the inputs the cached block consumes — the text/background colors (which
+// drive SetStyles) and the width/height (which drive SetWidth/SetHeight). st.icon,
+// st.border, and st.placeholder are NOT here: they feed the icon column, the box
+// border, and the placeholder toggle respectively, all rebuilt every frame outside
+// the cache. Comparable, so equality is a plain ==.
+type taStyleKey struct {
+	text, bg string
+	w, h     int
 }
 
 // newTextField constructs a textField. value is the initial text; placeholder
@@ -115,6 +137,8 @@ func (f *textField) setWidth(innerW int) {
 	}
 	f.ta.SetWidth(taW)
 	f.ta.SetHeight(f.taHeight)
+	// The textarea was resized outside viewWith's memo, so drop the cached style key.
+	f.styleCached = false
 }
 
 // handle processes one message while the field is focused, returning the
@@ -203,17 +227,6 @@ func (f *textField) viewWith(innerW int, st taStyle) string {
 	if taW < 1 {
 		taW = 1
 	}
-	f.ta.SetWidth(taW)
-	f.ta.SetHeight(f.taHeight)
-
-	// Toggle the placeholder (restored before return).
-	saved := f.ta.Placeholder
-	if st.placeholder {
-		f.ta.Placeholder = f.placeholder
-	} else {
-		f.ta.Placeholder = ""
-	}
-	defer func() { f.ta.Placeholder = saved }()
 
 	// withBg adds st.bg as the background when one is requested. Used on every
 	// inner piece so no cell is left with the terminal-default background.
@@ -224,28 +237,51 @@ func (f *textField) viewWith(innerW int, st taStyle) string {
 		return s
 	}
 
-	// Apply the requested text foreground (and background, if any). Base is
-	// inherited by Text/Placeholder/CursorLine/EndOfBuffer, so setting its
-	// background fills the whole textarea (including empty rows).
-	s := textarea.DefaultDarkStyles()
-	base := withBg(lipgloss.NewStyle())
-	textStyle := withBg(lipgloss.NewStyle().Foreground(lipgloss.Color(st.text)))
-	s.Focused.Base = base
-	s.Blurred.Base = base
-	s.Focused.Text = textStyle
-	s.Blurred.Text = textStyle
-	// The line under the cursor is drawn with CursorLine, not Text, so it must
-	// carry the same foreground — otherwise the typed text on the active line
-	// loses st.text and renders in an indeterminate default colour.
-	s.Focused.CursorLine = textStyle
-	s.Blurred.CursorLine = textStyle
-	s.Focused.Placeholder = withBg(s.Focused.Placeholder)
-	s.Blurred.Placeholder = withBg(s.Blurred.Placeholder)
-	if st.bg != "" {
-		// Make the (virtual) cursor visible against the selected background.
-		s.Cursor.Color = lipgloss.Color(st.text)
+	// Rebuild+apply the textarea styles and size only when an input changed. The
+	// applied ta state is identical whether we rebuild or reuse the last one, so
+	// skipping the churn on unchanged frames (blink/wave ticks, keypresses) keeps
+	// the output byte-for-byte while dropping ~8 style allocs + SetStyles/SetWidth.
+	key := taStyleKey{text: st.text, bg: st.bg, w: taW, h: f.taHeight}
+	if !f.styleCached || f.lastStyleKey != key {
+		f.ta.SetWidth(taW)
+		f.ta.SetHeight(f.taHeight)
+
+		// Apply the requested text foreground (and background, if any). Base is
+		// inherited by Text/Placeholder/CursorLine/EndOfBuffer, so setting its
+		// background fills the whole textarea (including empty rows).
+		s := textarea.DefaultDarkStyles()
+		base := withBg(lipgloss.NewStyle())
+		textStyle := withBg(lipgloss.NewStyle().Foreground(lipgloss.Color(st.text)))
+		s.Focused.Base = base
+		s.Blurred.Base = base
+		s.Focused.Text = textStyle
+		s.Blurred.Text = textStyle
+		// The line under the cursor is drawn with CursorLine, not Text, so it must
+		// carry the same foreground — otherwise the typed text on the active line
+		// loses st.text and renders in an indeterminate default colour.
+		s.Focused.CursorLine = textStyle
+		s.Blurred.CursorLine = textStyle
+		s.Focused.Placeholder = withBg(s.Focused.Placeholder)
+		s.Blurred.Placeholder = withBg(s.Blurred.Placeholder)
+		if st.bg != "" {
+			// Make the (virtual) cursor visible against the selected background.
+			s.Cursor.Color = lipgloss.Color(st.text)
+		}
+		f.ta.SetStyles(s)
+
+		f.lastStyleKey = key
+		f.styleCached = true
 	}
-	f.ta.SetStyles(s)
+
+	// Toggle the placeholder (restored before return). Kept outside the style memo:
+	// it mutates f.ta.Placeholder (not the styles) and must apply every frame.
+	saved := f.ta.Placeholder
+	if st.placeholder {
+		f.ta.Placeholder = f.placeholder
+	} else {
+		f.ta.Placeholder = ""
+	}
+	defer func() { f.ta.Placeholder = saved }()
 
 	body := lipgloss.JoinHorizontal(lipgloss.Top, iconColumnColored(f.ta.Height(), f.iconGlyph, st.icon, st.bg), f.ta.View())
 	if !f.singleLine {

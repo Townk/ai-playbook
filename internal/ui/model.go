@@ -1298,9 +1298,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.tickRunning = false
 			return m, nil
 		}
-		if running {
-			m.reflow()
-		}
+		// B1c: advancing SpinFrame above is enough — the run-region spinner is
+		// regenerated from the current frame at View time (spinRow), so a spin tick
+		// no longer triggers a full-document reflow/Render just to move one glyph. A
+		// real state change (block finishes, drift, etc.) still reflows on its own
+		// message. The thinking spinner likewise overlays at View (progress widget).
 		// Re-assert the hide-cursor on every live tick: the spinner/wave diff this
 		// tick paints is exactly the renderer activity that makes zellij re-show the
 		// hardware cursor. Idempotent, so it never flickers (see reassertHideCursor).
@@ -3059,6 +3061,7 @@ func (m model) viewString() string {
 		}
 		for i, row := range rows {
 			idx := m.yOff + i
+			row = m.spinRow(idx, row) // advance any run spinner at View time (B1c)
 			var base string
 			if idx >= 0 && idx < len(m.lines) && m.lines[idx].Code {
 				base = hintCodeRow(row, cw, buttonColsByRow[idx]) // fill + dark-red button cells
@@ -3135,6 +3138,24 @@ func (m model) viewString() string {
 // normalLines renders the standard document view as m.height lines, each padded
 // to the full pane width. It is the base layer both for normal mode and for the
 // help overlay (which composites the modal box over these lines).
+// spinRow returns the View-time text for the document line at idx. For a run-region
+// spinner line (SpinID set) it regenerates the row from the block's CURRENT SpinFrame
+// so the glyph and elapsed seconds advance without a reflow (B1c); the "  " prefix
+// mirrors the runRegion indent baked into the original Line.Text. Any other line is
+// returned unchanged. This is the whole no-reflow-per-tick mechanism: a spinTick only
+// bumps SpinFrame, and the next View paints the advanced glyph here.
+func (m model) spinRow(idx int, row string) string {
+	if idx < 0 || idx >= len(m.lines) {
+		return row
+	}
+	ln := m.lines[idx]
+	if ln.SpinID == "" {
+		return row
+	}
+	frame := m.blockStates[ln.SpinID].SpinFrame
+	return "  " + spinnerLine(frame, ln.SpinLabel, frame/10)
+}
+
 func (m model) normalLines() []string {
 	cw := m.contentWidth()
 	rows := Window(m.lines, m.xOff, m.yOff, cw, m.body())
@@ -3208,6 +3229,8 @@ func (m model) normalLines() []string {
 			idx := m.yOff + i
 			if idx >= 0 && idx < len(m.lines) && m.lines[idx].HBar > 0 {
 				row = hscrollbarRow(m.lines[idx].HBar, m.xOff, cw, colCodeBg)
+			} else {
+				row = m.spinRow(idx, row)
 			}
 			out = append(out, pad("  "+padTo(row, cw)+vscrollCell(i, pos, size)))
 		} else {

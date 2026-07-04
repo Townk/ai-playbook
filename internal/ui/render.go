@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 
 	"charm.land/lipgloss/v2"
 	"charm.land/lipgloss/v2/table"
@@ -37,6 +38,11 @@ type admon struct {
 // every render — reflow fires on every spinner/stream/flash tick. The only
 // configuration is the GFM extension bundle, which is call-state independent.
 var goldmarkMD = goldmark.New(goldmark.WithExtensions(extension.GFM))
+
+// renderCalls counts Render invocations. It exists solely as a test seam for the
+// B1c no-reflow-per-spin-tick guarantee (a spinTick must not call Render); tests
+// snapshot it around a tick. Production reads it never.
+var renderCalls atomic.Int64
 
 var admonitions = map[string]admon{
 	"note":      {"Note", "󰋽", colBlue},
@@ -190,6 +196,7 @@ type RenderOpts struct {
 // the run states, flash key, and render flags — see RenderOpts for defaults.
 // Callers that don't need blocks can discard the third value with _.
 func Render(md string, width int, opts RenderOpts) ([]Line, []Button, []Block) {
+	renderCalls.Add(1) // test seam: pins B1c's "spin ticks cause zero Render calls"
 	if width < 1 {
 		width = 1
 	}
@@ -1067,10 +1074,10 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 		r.lines = append(r.lines, Line{Text: indentStr + sty.Render("⟳ Reviewing… (annotate in the hunk window)"), Wide: false, Code: true})
 	case "running":
 		sl := spinnerLine(st.SpinFrame, "running…", st.SpinFrame/10)
-		r.lines = append(r.lines, Line{Text: indentStr + sl, Wide: false, Code: true})
+		r.lines = append(r.lines, Line{Text: indentStr + sl, Wide: false, Code: true, SpinID: id, SpinLabel: "running…"})
 	case "regenerating":
 		sl := spinnerLine(st.SpinFrame, "regenerating…", st.SpinFrame/10)
-		r.lines = append(r.lines, Line{Text: indentStr + sl, Wide: false, Code: true})
+		r.lines = append(r.lines, Line{Text: indentStr + sl, Wide: false, Code: true, SpinID: id, SpinLabel: "regenerating…"})
 	case "ok", "failed", "stopped", "rolledback", "skipped":
 		rawToggle := "▸"
 		if st.Expanded {
@@ -1170,7 +1177,7 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 		// under the failure so the automatic undo has a stated cause.
 		if st.RollingBack {
 			sl := spinnerLine(st.SpinFrame, "rolling back applied steps…", st.SpinFrame/10)
-			r.lines = append(r.lines, Line{Text: indentStr + sl, Wide: false, Code: true})
+			r.lines = append(r.lines, Line{Text: indentStr + sl, Wide: false, Code: true, SpinID: id, SpinLabel: "rolling back applied steps…"})
 		}
 		if st.Expanded {
 			tail := tailFile(st.Logpath, 50)
@@ -1266,6 +1273,29 @@ func needsSatisfied(blk Block, states map[string]blockRunState) []string {
 		}
 	}
 	return unmet
+}
+
+// countBlocks returns exactly the number of code blocks Render would enumerate
+// into its Block list — i.e. every top-level fenced or indented code block — WITHOUT
+// running the full styled render. It mirrors Render's traversal precisely: it
+// normalizes fences (so a malformed closer is repaired identically), parses with the
+// shared goldmark instance, and counts the document's DIRECT FencedCodeBlock/CodeBlock
+// children (block() only descends into lists/quotes for prose, so code nested there is
+// not a Block — and must not be counted here either). Used by the block-count validity
+// checks (isValidPlaybook via ValidatePlaybook and commitPlaybookCmd) so they no longer
+// pay a full Render just to learn "how many blocks". The count rule is kept identical to
+// Render's — TestCountBlocksMatchesRender pins the equality across a fixture corpus.
+func countBlocks(md string) int {
+	src := []byte(normalizeFences(md))
+	doc := goldmarkMD.Parser().Parse(text.NewReader(src))
+	n := 0
+	for c := doc.FirstChild(); c != nil; c = c.NextSibling() {
+		switch c.(type) {
+		case *ast.FencedCodeBlock, *ast.CodeBlock:
+			n++
+		}
+	}
+	return n
 }
 
 // collectRollbackTargets pre-scans the parsed document for every fenced block's

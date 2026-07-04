@@ -17,4 +17,13 @@ type Line struct {
 	// tone; in hint mode they are dimmed while preserving their fill rather than
 	// stripped to plain text (which would read as a badly-framed floating line).
 	Callout bool
+	// SpinID / SpinLabel mark a run-region spinner row (running / regenerating /
+	// rolling-back). SpinID is the owning block's id and SpinLabel the phrase
+	// ("running…", …); when SpinID != "" the View regenerates this row's text from
+	// the block's CURRENT SpinFrame instead of the (now-frozen) baked Text, so the
+	// spinner glyph and elapsed seconds advance on each spinTick WITHOUT a reflow
+	// (B1c). Text still holds the frame emitted at reflow time (the correct initial
+	// frame and the value any non-View reader sees).
+	SpinID    string
+	SpinLabel string
 }
