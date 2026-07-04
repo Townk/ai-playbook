@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - New `ask` binary: the themed dialog widgets (confirm/line/text/choose/form)
   as a standalone tool for scripts — subcommand CLI, exit-code answers
   (0 submit/affirmative, 1 confirm-negative, 130 cancel, 2 usage/spec error),
-  `ASK_*` env theming, and JSON form specs.
+  `ASK_*` env theming, and JSON form specs. Ships with a `man ask` page, a
+  `_ask` zsh completion, and its own GoReleaser build/archive entry alongside
+  `ai-playbook`/`apb`.
 
 ### Fixed
 

@@ -1,0 +1,212 @@
+.TH ASK 1 "" "ask" "User Commands"
+.SH NAME
+ask \- themed terminal dialogs for scripts (confirm/line/text/choose/form)
+.SH SYNOPSIS
+\fBask\fR \fICOMMAND\fR [\fIARGS\fR ...] [\fIFLAGS\fR ...]
+.SH DESCRIPTION
+ask exposes ai\-playbook's themed dialog widgets as a standalone tool for
+shell scripts. Its contract is pure I/O: the submitted value (if any) goes
+to stdout and nothing else, diagnostics go to stderr, and the exit code
+reports the outcome — see EXIT CODES below.
+.SH COMMANDS
+.SS "ask confirm"
+.PP
+\fBask confirm "Prompt" [flags]\fR
+.PP
+yes/no dialog; the exit code is the answer (0 yes, 1 no, 130 cancel)
+.TP
+\fB\-\-danger\fR
+danger variant (forces default=negative)
+.TP
+\fB\-\-warning\fR
+warning variant
+.TP
+\fB\-\-affirmative\fR \fI<label>\fR
+affirmative button label (default Yes)
+.TP
+\fB\-\-negative\fR \fI<label>\fR
+negative button label (default No)
+.TP
+\fB\-\-default\fR \fIaffirmative|negative\fR
+default focus (default affirmative)
+.TP
+\fB\-\-print\fR
+also print yes/no to stdout
+.SS "ask line"
+.PP
+\fBask line "Prompt" [flags]\fR
+.PP
+one\-line input; the submitted value is printed to stdout
+.TP
+\fB\-\-value\fR \fI<v>\fR
+initial value
+.TP
+\fB\-\-placeholder\fR \fI<p>\fR
+placeholder text
+.TP
+\fB\-\-icon\fR \fI<glyph>\fR
+prompt\-column glyph override
+.SS "ask text"
+.PP
+\fBask text "Prompt" [flags]\fR
+.PP
+multi\-line editor; the submitted value is printed to stdout
+.TP
+\fB\-\-value\fR \fI<v>\fR
+initial value
+.TP
+\fB\-\-height\fR \fI<rows>\fR
+editor viewport rows (default 10)
+.TP
+\fB\-\-icon\fR \fI<glyph>\fR
+prompt\-column glyph override
+.SS "ask choose"
+.PP
+\fBask choose "Prompt" <item>... [flags]\fR
+.PP
+select from items; selection printed to stdout (\-\-multi one per line)
+.TP
+\fB\-\-multi\fR
+allow multiple selections (one per line)
+.TP
+\fB\-\-other\fR \fI<label>\fR
+enable a free\-text entry row
+.SS "ask form"
+.PP
+\fBask form [flags]\fR
+.PP
+multi\-field form from a JSON spec; key=value lines (or \-\-json)
+.TP
+\fB\-\-spec\fR \fI<file>\fR
+JSON spec file; omit to read stdin
+.TP
+\fB\-\-json\fR
+emit one JSON object instead of key=value lines
+.SH "FLAGS (every subcommand)"
+.PP
+Every subcommand additionally accepts:
+.TP
+\fB\-\-title\fR \fI<t>\fR
+modal title
+.TP
+\fB\-\-width\fR \fI<cols>\fR
+pane width for measurement/sizing
+.TP
+\fB\-\-padding\fR \fI<rows>\fR
+frame vertical padding rows
+.TP
+\fB\-\-inset\fR \fI<rows>\fR
+frame inter\-section blank rows
+.TP
+\fB\-\-measure\fR
+print the rendered height and exit (no TUI)
+.SH THEMING
+.PP
+Every \-\-theme\-* flag has an ASK_<FLAG> environment fallback, so a script can
+export the palette once instead of passing it on every invocation.
+.PP
+Precedence: flag > ASK_<FLAG> environment variable > built\-in default.
+.PP
+A SET\-but\-empty ASK_<FLAG> variable deliberately overrides the default with
+the empty string: presence wins, not non\-emptiness. Exporting
+\&'ASK_THEME_ACCENT=""' intentionally blanks that color; leaving the variable
+unset (not exported at all) keeps the built\-in default.
+.TP
+\fB\-\-theme\-accent\fR \fI<hex>\fR
+title accent color (hex) (environment fallback: ASK_THEME_ACCENT)
+.TP
+\fB\-\-theme\-border\fR \fI<hex>\fR
+default border/focus color (hex) (environment fallback: ASK_THEME_BORDER)
+.TP
+\fB\-\-theme\-danger\fR \fI<hex>\fR
+danger variant color (hex) (environment fallback: ASK_THEME_DANGER)
+.TP
+\fB\-\-theme\-warning\fR \fI<hex>\fR
+warning variant color (hex) (environment fallback: ASK_THEME_WARNING)
+.TP
+\fB\-\-theme\-base\fR \fI<hex>\fR
+dark fg for warning focused button (hex) (environment fallback: ASK_THEME_BASE)
+.TP
+\fB\-\-theme\-text\fR \fI<hex>\fR
+body text color (hex) (environment fallback: ASK_THEME_TEXT)
+.TP
+\fB\-\-theme\-muted\fR \fI<hex>\fR
+hint words / comment color (hex) (environment fallback: ASK_THEME_MUTED)
+.TP
+\fB\-\-theme\-rule\fR \fI<hex>\fR
+title rule / scroll track color (hex) (environment fallback: ASK_THEME_RULE)
+.TP
+\fB\-\-theme\-key\fR \fI<hex>\fR
+hint key\-binding color (hex) (environment fallback: ASK_THEME_KEY)
+.TP
+\fB\-\-theme\-field\-border\fR \fI<hex>\fR
+inner input box border (hex) (environment fallback: ASK_THEME_FIELD_BORDER)
+.TP
+\fB\-\-theme\-button\-bg\fR \fI<hex>\fR
+unselected button bg (hex) (environment fallback: ASK_THEME_BUTTON_BG)
+.TP
+\fB\-\-theme\-button\-fg\fR \fI<hex>\fR
+unselected button fg (hex) (environment fallback: ASK_THEME_BUTTON_FG)
+.TP
+\fB\-\-theme\-button\-sel\-bg\fR \fI<hex>\fR
+selected button bg (hex) (environment fallback: ASK_THEME_BUTTON_SEL_BG)
+.TP
+\fB\-\-theme\-button\-sel\-fg\fR \fI<hex>\fR
+selected button fg (hex) (environment fallback: ASK_THEME_BUTTON_SEL_FG)
+.TP
+\fB\-\-theme\-scroll\-thumb\fR \fI<hex>\fR
+scroll thumb color (hex) (environment fallback: ASK_THEME_SCROLL_THUMB)
+.SH "FLAG PARSING"
+.PP
+Flags may appear before OR after a subcommand's positional argument(s) —
+e.g. both 'ask confirm \-\-danger "Delete?"' and 'ask confirm "Delete?"
+\-\-danger' are equivalent.
+.PP
+A bare '\-\-' terminates flag parsing: everything after the FIRST '\-\-' is
+taken verbatim as positional arguments and never re\-parsed as a flag.
+.PP
+A flag that needs a value which itself starts with '\-' (or is exactly
+\&'\-\-') MUST use the '\-\-flag=value' form, e.g. '\-\-negative=\-\-weird'. The
+space form ('\-\-flag \-value') does NOT work — the dashed word is parsed as
+its own flag (or positional) and the command errors loudly.
+.SH "EXIT CODES"
+.TP
+\fB0\fR
+Submit / affirmative answer.
+.TP
+\fB1\fR
+confirm's negative answer, OR any other non\-usage runtime widget failure —
+the two are indistinguishable by exit code alone (a runtime failure reuses
+exit 1 rather than inventing a new code). This is the safe
+direction for shell idioms like 'if ask confirm "..."; then': both a
+genuine "No" and an unexpected failure take the same false branch. A
+script that must tell them apart should check stderr.
+.TP
+\fB130\fR
+Cancelled (Esc / Ctrl\-C).
+.TP
+\fB2\fR
+Usage error (unknown subcommand/flag, malformed \-\-spec/stdin JSON form
+spec), or no controlling terminal is reachable.
+.SH EXAMPLES
+.nf
+ask confirm "Delete the branch?" \-\-danger
+.fi
+.PP
+.nf
+name=$(ask line "Your name" \-\-value "$USER")
+.fi
+.PP
+.nf
+notes=$(ask text "Release notes")
+.fi
+.PP
+.nf
+env=$(ask choose "Target environment" staging production)
+.fi
+.PP
+.nf
+ask form \-\-spec ./fields.json \-\-json
+.fi
+.SH "SEE ALSO"
+\fBai\-playbook\fR(1)

@@ -15,24 +15,24 @@ import (
 // files must never churn just because time passed.
 const manDate = ""
 
-// escapeInline escapes roff special characters for use within a single
+// EscapeInline escapes roff special characters for use within a single
 // line of running text: backslash becomes the roff escape \e, and every
 // hyphen-minus becomes \- (the man-pages(7)-recommended literal-hyphen
 // escape, distinguishing it from a hyphenation point). It must run before
-// any leading-dot/quote check (escapeLine) since it never introduces a new
+// any leading-dot/quote check (EscapeLine) since it never introduces a new
 // leading dot or apostrophe.
-func escapeInline(s string) string {
+func EscapeInline(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\e`)
 	s = strings.ReplaceAll(s, "-", `\-`)
 	return s
 }
 
-// escapeLine escapes s (via escapeInline) and, if the result begins with a
+// EscapeLine escapes s (via EscapeInline) and, if the result begins with a
 // dot or an apostrophe — which roff would otherwise parse as a
 // request/macro invocation — prefixes it with the zero-width \& escape so
 // it renders as literal text.
-func escapeLine(s string) string {
-	s = escapeInline(s)
+func EscapeLine(s string) string {
+	s = EscapeInline(s)
 	if strings.HasPrefix(s, ".") || strings.HasPrefix(s, "'") {
 		s = `\&` + s
 	}
@@ -68,7 +68,7 @@ func renderDescription(long string) string {
 			b.WriteString(".PP\n")
 		}
 		for _, line := range strings.Split(para, "\n") {
-			b.WriteString(escapeLine(line))
+			b.WriteString(EscapeLine(line))
 			b.WriteString("\n")
 		}
 	}
@@ -88,13 +88,13 @@ func renderOptions(flags []Flag) string {
 	}
 	for _, f := range flags {
 		b.WriteString(".TP\n")
-		tag := `\fB\-\-` + escapeInline(f.Name) + `\fR`
+		tag := `\fB\-\-` + EscapeInline(f.Name) + `\fR`
 		if !f.Bool && f.Placeholder != "" {
-			tag += ` \fI` + escapeInline(f.Placeholder) + `\fR`
+			tag += ` \fI` + EscapeInline(f.Placeholder) + `\fR`
 		}
 		b.WriteString(tag)
 		b.WriteString("\n")
-		b.WriteString(escapeLine(f.Desc))
+		b.WriteString(EscapeLine(f.Desc))
 		b.WriteString("\n")
 	}
 	return b.String()
@@ -114,7 +114,7 @@ func renderExamples(examples []string) string {
 			b.WriteString(".PP\n")
 		}
 		b.WriteString(".nf\n")
-		b.WriteString(escapeLine(ex))
+		b.WriteString(EscapeLine(ex))
 		b.WriteString("\n.fi\n")
 	}
 	return b.String()
@@ -130,10 +130,10 @@ func Man(c Command) string {
 	fmt.Fprintf(&b, ".TH %s 1 \"%s\" \"ai-playbook\" \"User Commands\"\n", title, manDate)
 
 	b.WriteString(".SH NAME\n")
-	b.WriteString(escapeInline("ai-playbook-"+c.Name+" - "+c.Summary) + "\n")
+	b.WriteString(EscapeInline("ai-playbook-"+c.Name+" - "+c.Summary) + "\n")
 
 	b.WriteString(".SH SYNOPSIS\n")
-	fmt.Fprintf(&b, "\\fBai\\-playbook\\fR %s\n", escapeInline(c.Synopsis))
+	fmt.Fprintf(&b, "\\fBai\\-playbook\\fR %s\n", EscapeInline(c.Synopsis))
 
 	b.WriteString(renderDescription(c.Long))
 	b.WriteString(renderOptions(c.Flags))
@@ -155,7 +155,7 @@ func ManOverview() string {
 	fmt.Fprintf(&b, ".TH AI-PLAYBOOK 1 \"%s\" \"ai-playbook\" \"User Commands\"\n", manDate)
 
 	b.WriteString(".SH NAME\n")
-	b.WriteString(escapeInline("ai-playbook - capture, author, and run terminal playbooks") + "\n")
+	b.WriteString(EscapeInline("ai-playbook - capture, author, and run terminal playbooks") + "\n")
 
 	b.WriteString(".SH SYNOPSIS\n")
 	b.WriteString(`\fBai\-playbook\fR \fICOMMAND\fR [\fIARGS\fR ...]` + "\n")
@@ -171,14 +171,14 @@ func ManOverview() string {
 	b.WriteString(".SH COMMANDS\n")
 	for _, cmd := range docs {
 		b.WriteString(".TP\n")
-		b.WriteString(`\fB` + escapeInline(cmd.Name) + `\fR` + "\n")
-		b.WriteString(escapeLine(cmd.Summary) + "\n")
+		b.WriteString(`\fB` + EscapeInline(cmd.Name) + `\fR` + "\n")
+		b.WriteString(EscapeLine(cmd.Summary) + "\n")
 	}
 
 	b.WriteString(".SH \"SEE ALSO\"\n")
 	refs := make([]string, len(docs))
 	for i, cmd := range docs {
-		refs[i] = `\fBai\-playbook\-` + escapeInline(cmd.Name) + `\fR(1)`
+		refs[i] = `\fBai\-playbook\-` + EscapeInline(cmd.Name) + `\fR(1)`
 	}
 	b.WriteString(strings.Join(refs, ", ") + "\n")
 

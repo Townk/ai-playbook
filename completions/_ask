@@ -1,0 +1,190 @@
+#compdef ask
+
+_ask_commands() {
+  local -a commands
+  commands=(
+    'confirm:yes/no dialog; the exit code is the answer (0 yes, 1 no, 130 cancel)'
+    'line:one-line input; the submitted value is printed to stdout'
+    'text:multi-line editor; the submitted value is printed to stdout'
+    'choose:select from items; selection printed to stdout (--multi one per line)'
+    'form:multi-field form from a JSON spec; key=value lines (or --json)'
+  )
+  _describe -t commands 'command' commands
+}
+
+_ask_cmd_confirm() {
+  _arguments \
+    '1::prompt:' \
+    '--danger[danger variant (forces default=negative)]' \
+    '--warning[warning variant]' \
+    '--affirmative[affirmative button label (default Yes)]:label:' \
+    '--negative[negative button label (default No)]:label:' \
+    '--default[default focus (default affirmative)]:affirmative|negative:' \
+    '--print[also print yes/no to stdout]' \
+    '--title[modal title]:t:' \
+    '--width[pane width for measurement/sizing]:cols:' \
+    '--padding[frame vertical padding rows]:rows:' \
+    '--inset[frame inter-section blank rows]:rows:' \
+    '--measure[print the rendered height and exit (no TUI)]' \
+    '--theme-accent[title accent color (hex) (env ASK_THEME_ACCENT)]:hex:' \
+    '--theme-border[default border/focus color (hex) (env ASK_THEME_BORDER)]:hex:' \
+    '--theme-danger[danger variant color (hex) (env ASK_THEME_DANGER)]:hex:' \
+    '--theme-warning[warning variant color (hex) (env ASK_THEME_WARNING)]:hex:' \
+    '--theme-base[dark fg for warning focused button (hex) (env ASK_THEME_BASE)]:hex:' \
+    '--theme-text[body text color (hex) (env ASK_THEME_TEXT)]:hex:' \
+    '--theme-muted[hint words / comment color (hex) (env ASK_THEME_MUTED)]:hex:' \
+    '--theme-rule[title rule / scroll track color (hex) (env ASK_THEME_RULE)]:hex:' \
+    '--theme-key[hint key-binding color (hex) (env ASK_THEME_KEY)]:hex:' \
+    '--theme-field-border[inner input box border (hex) (env ASK_THEME_FIELD_BORDER)]:hex:' \
+    '--theme-button-bg[unselected button bg (hex) (env ASK_THEME_BUTTON_BG)]:hex:' \
+    '--theme-button-fg[unselected button fg (hex) (env ASK_THEME_BUTTON_FG)]:hex:' \
+    '--theme-button-sel-bg[selected button bg (hex) (env ASK_THEME_BUTTON_SEL_BG)]:hex:' \
+    '--theme-button-sel-fg[selected button fg (hex) (env ASK_THEME_BUTTON_SEL_FG)]:hex:' \
+    '--theme-scroll-thumb[scroll thumb color (hex) (env ASK_THEME_SCROLL_THUMB)]:hex:'
+}
+
+_ask_cmd_line() {
+  _arguments \
+    '1::prompt:' \
+    '--value[initial value]:v:' \
+    '--placeholder[placeholder text]:p:' \
+    '--icon[prompt-column glyph override]:glyph:' \
+    '--title[modal title]:t:' \
+    '--width[pane width for measurement/sizing]:cols:' \
+    '--padding[frame vertical padding rows]:rows:' \
+    '--inset[frame inter-section blank rows]:rows:' \
+    '--measure[print the rendered height and exit (no TUI)]' \
+    '--theme-accent[title accent color (hex) (env ASK_THEME_ACCENT)]:hex:' \
+    '--theme-border[default border/focus color (hex) (env ASK_THEME_BORDER)]:hex:' \
+    '--theme-danger[danger variant color (hex) (env ASK_THEME_DANGER)]:hex:' \
+    '--theme-warning[warning variant color (hex) (env ASK_THEME_WARNING)]:hex:' \
+    '--theme-base[dark fg for warning focused button (hex) (env ASK_THEME_BASE)]:hex:' \
+    '--theme-text[body text color (hex) (env ASK_THEME_TEXT)]:hex:' \
+    '--theme-muted[hint words / comment color (hex) (env ASK_THEME_MUTED)]:hex:' \
+    '--theme-rule[title rule / scroll track color (hex) (env ASK_THEME_RULE)]:hex:' \
+    '--theme-key[hint key-binding color (hex) (env ASK_THEME_KEY)]:hex:' \
+    '--theme-field-border[inner input box border (hex) (env ASK_THEME_FIELD_BORDER)]:hex:' \
+    '--theme-button-bg[unselected button bg (hex) (env ASK_THEME_BUTTON_BG)]:hex:' \
+    '--theme-button-fg[unselected button fg (hex) (env ASK_THEME_BUTTON_FG)]:hex:' \
+    '--theme-button-sel-bg[selected button bg (hex) (env ASK_THEME_BUTTON_SEL_BG)]:hex:' \
+    '--theme-button-sel-fg[selected button fg (hex) (env ASK_THEME_BUTTON_SEL_FG)]:hex:' \
+    '--theme-scroll-thumb[scroll thumb color (hex) (env ASK_THEME_SCROLL_THUMB)]:hex:'
+}
+
+_ask_cmd_text() {
+  _arguments \
+    '1::prompt:' \
+    '--value[initial value]:v:' \
+    '--height[editor viewport rows (default 10)]:rows:' \
+    '--icon[prompt-column glyph override]:glyph:' \
+    '--title[modal title]:t:' \
+    '--width[pane width for measurement/sizing]:cols:' \
+    '--padding[frame vertical padding rows]:rows:' \
+    '--inset[frame inter-section blank rows]:rows:' \
+    '--measure[print the rendered height and exit (no TUI)]' \
+    '--theme-accent[title accent color (hex) (env ASK_THEME_ACCENT)]:hex:' \
+    '--theme-border[default border/focus color (hex) (env ASK_THEME_BORDER)]:hex:' \
+    '--theme-danger[danger variant color (hex) (env ASK_THEME_DANGER)]:hex:' \
+    '--theme-warning[warning variant color (hex) (env ASK_THEME_WARNING)]:hex:' \
+    '--theme-base[dark fg for warning focused button (hex) (env ASK_THEME_BASE)]:hex:' \
+    '--theme-text[body text color (hex) (env ASK_THEME_TEXT)]:hex:' \
+    '--theme-muted[hint words / comment color (hex) (env ASK_THEME_MUTED)]:hex:' \
+    '--theme-rule[title rule / scroll track color (hex) (env ASK_THEME_RULE)]:hex:' \
+    '--theme-key[hint key-binding color (hex) (env ASK_THEME_KEY)]:hex:' \
+    '--theme-field-border[inner input box border (hex) (env ASK_THEME_FIELD_BORDER)]:hex:' \
+    '--theme-button-bg[unselected button bg (hex) (env ASK_THEME_BUTTON_BG)]:hex:' \
+    '--theme-button-fg[unselected button fg (hex) (env ASK_THEME_BUTTON_FG)]:hex:' \
+    '--theme-button-sel-bg[selected button bg (hex) (env ASK_THEME_BUTTON_SEL_BG)]:hex:' \
+    '--theme-button-sel-fg[selected button fg (hex) (env ASK_THEME_BUTTON_SEL_FG)]:hex:' \
+    '--theme-scroll-thumb[scroll thumb color (hex) (env ASK_THEME_SCROLL_THUMB)]:hex:'
+}
+
+_ask_cmd_choose() {
+  _arguments \
+    '1::prompt:' \
+    '*::item:' \
+    '--multi[allow multiple selections (one per line)]' \
+    '--other[enable a free-text entry row]:label:' \
+    '--title[modal title]:t:' \
+    '--width[pane width for measurement/sizing]:cols:' \
+    '--padding[frame vertical padding rows]:rows:' \
+    '--inset[frame inter-section blank rows]:rows:' \
+    '--measure[print the rendered height and exit (no TUI)]' \
+    '--theme-accent[title accent color (hex) (env ASK_THEME_ACCENT)]:hex:' \
+    '--theme-border[default border/focus color (hex) (env ASK_THEME_BORDER)]:hex:' \
+    '--theme-danger[danger variant color (hex) (env ASK_THEME_DANGER)]:hex:' \
+    '--theme-warning[warning variant color (hex) (env ASK_THEME_WARNING)]:hex:' \
+    '--theme-base[dark fg for warning focused button (hex) (env ASK_THEME_BASE)]:hex:' \
+    '--theme-text[body text color (hex) (env ASK_THEME_TEXT)]:hex:' \
+    '--theme-muted[hint words / comment color (hex) (env ASK_THEME_MUTED)]:hex:' \
+    '--theme-rule[title rule / scroll track color (hex) (env ASK_THEME_RULE)]:hex:' \
+    '--theme-key[hint key-binding color (hex) (env ASK_THEME_KEY)]:hex:' \
+    '--theme-field-border[inner input box border (hex) (env ASK_THEME_FIELD_BORDER)]:hex:' \
+    '--theme-button-bg[unselected button bg (hex) (env ASK_THEME_BUTTON_BG)]:hex:' \
+    '--theme-button-fg[unselected button fg (hex) (env ASK_THEME_BUTTON_FG)]:hex:' \
+    '--theme-button-sel-bg[selected button bg (hex) (env ASK_THEME_BUTTON_SEL_BG)]:hex:' \
+    '--theme-button-sel-fg[selected button fg (hex) (env ASK_THEME_BUTTON_SEL_FG)]:hex:' \
+    '--theme-scroll-thumb[scroll thumb color (hex) (env ASK_THEME_SCROLL_THUMB)]:hex:'
+}
+
+_ask_cmd_form() {
+  _arguments \
+    '--spec[JSON spec file; omit to read stdin]:file:_files' \
+    '--json[emit one JSON object instead of key=value lines]' \
+    '--title[modal title]:t:' \
+    '--width[pane width for measurement/sizing]:cols:' \
+    '--padding[frame vertical padding rows]:rows:' \
+    '--inset[frame inter-section blank rows]:rows:' \
+    '--measure[print the rendered height and exit (no TUI)]' \
+    '--theme-accent[title accent color (hex) (env ASK_THEME_ACCENT)]:hex:' \
+    '--theme-border[default border/focus color (hex) (env ASK_THEME_BORDER)]:hex:' \
+    '--theme-danger[danger variant color (hex) (env ASK_THEME_DANGER)]:hex:' \
+    '--theme-warning[warning variant color (hex) (env ASK_THEME_WARNING)]:hex:' \
+    '--theme-base[dark fg for warning focused button (hex) (env ASK_THEME_BASE)]:hex:' \
+    '--theme-text[body text color (hex) (env ASK_THEME_TEXT)]:hex:' \
+    '--theme-muted[hint words / comment color (hex) (env ASK_THEME_MUTED)]:hex:' \
+    '--theme-rule[title rule / scroll track color (hex) (env ASK_THEME_RULE)]:hex:' \
+    '--theme-key[hint key-binding color (hex) (env ASK_THEME_KEY)]:hex:' \
+    '--theme-field-border[inner input box border (hex) (env ASK_THEME_FIELD_BORDER)]:hex:' \
+    '--theme-button-bg[unselected button bg (hex) (env ASK_THEME_BUTTON_BG)]:hex:' \
+    '--theme-button-fg[unselected button fg (hex) (env ASK_THEME_BUTTON_FG)]:hex:' \
+    '--theme-button-sel-bg[selected button bg (hex) (env ASK_THEME_BUTTON_SEL_BG)]:hex:' \
+    '--theme-button-sel-fg[selected button fg (hex) (env ASK_THEME_BUTTON_SEL_FG)]:hex:' \
+    '--theme-scroll-thumb[scroll thumb color (hex) (env ASK_THEME_SCROLL_THUMB)]:hex:'
+}
+
+_ask() {
+  local curcontext="$curcontext" state line
+  typeset -A opt_args
+
+  _arguments -C \
+    '1: :->cmd' \
+    '*::arg:->args'
+
+  case $state in
+    cmd)
+      _ask_commands
+      ;;
+    args)
+      case $words[1] in
+        confirm)
+          _ask_cmd_confirm
+          ;;
+        line)
+          _ask_cmd_line
+          ;;
+        text)
+          _ask_cmd_text
+          ;;
+        choose)
+          _ask_cmd_choose
+          ;;
+        form)
+          _ask_cmd_form
+          ;;
+      esac
+      ;;
+  esac
+}
+
+_ask "$@"

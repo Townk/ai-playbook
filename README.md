@@ -50,16 +50,24 @@ Every release archive ships the `apb` binary alongside `ai-playbook`, so you
 can grab it from [Releases](https://github.com/Townk/ai-playbook/releases)
 too. `apb --help` reads "apb" throughout.
 
+A third binary, **`ask`**, exposes the same themed dialog widgets
+(confirm/line/text/choose/form) as a standalone tool for shell scripts — see
+[`ask` — themed dialogs for scripts](#ask--themed-dialogs-for-scripts) below.
+
+```sh
+go install github.com/Townk/ai-playbook/cmd/ask@latest
+```
+
 ### Shell completion & man pages
 
 Every release archive also ships a zsh completion script, `_ai-playbook`
 (subcommands, flags, and dynamic completion of your saved playbook slugs for
-`run`/`show`/`edit`/`validate`/`env`). Copy it into a directory on your
-`fpath` and let `compinit` pick it up:
+`run`/`show`/`edit`/`validate`/`env`) plus `_ask` for the `ask` binary. Copy
+them into a directory on your `fpath` and let `compinit` pick them up:
 
 ```sh
 mkdir -p ~/.zsh/completions
-cp _ai-playbook ~/.zsh/completions/
+cp _ai-playbook _ask ~/.zsh/completions/
 ```
 
 ```sh
@@ -69,13 +77,15 @@ autoload -U compinit && compinit
 ```
 
 The same archive ships generated man pages under `docs/man/ai-playbook*.1`
-(one per command). Copy them into a `man1` directory on your `MANPATH`:
+(one per command) plus a single `docs/man/ask.1` covering every `ask`
+subcommand. Copy them into a `man1` directory on your `MANPATH`:
 
 ```sh
 mkdir -p ~/.local/share/man/man1
-cp docs/man/ai-playbook*.1 ~/.local/share/man/man1/
+cp docs/man/ai-playbook*.1 docs/man/ask.1 ~/.local/share/man/man1/
 man ai-playbook
 man ai-playbook-run
+man ask
 ```
 
 For quick reference without leaving the terminal, every command also has
@@ -125,6 +135,41 @@ supplies declared `env:` values on the CLI, and `env <slug>` scaffolds that JSON
 from a playbook's declaration — resolving current values and leaving secrets
 empty. A playbook may also declare `depends_on: [slug, …]`: its transitive
 dependencies run headless, in topological order, before it.
+
+## `ask` — themed dialogs for scripts
+
+`ask` is a standalone binary exposing ai-playbook's themed dialog widgets
+(confirm/line/text/choose/form) as a pure-I/O tool for shell scripts: a
+submitted value (if any) on stdout, diagnostics on stderr, and the outcome
+encoded in the exit code — no ai-playbook store, playbook, or session
+required. One example per widget:
+
+```sh
+ask confirm "Delete the branch?" --danger      # exit code IS the answer
+name=$(ask line "Your name" --value "$USER")
+notes=$(ask text "Release notes")
+env=$(ask choose "Target environment" staging production)
+ask form --spec ./fields.json --json           # JSON spec in, JSON object out
+```
+
+**Exit codes:** `0` submit/affirmative, `130` cancel (Esc/Ctrl-C), `2` usage
+error (bad flags, malformed JSON form spec, or no terminal reachable). `1` is
+confirm's negative answer, but also **any other non-usage runtime widget
+failure** — the two are indistinguishable by exit code alone. That's the
+safe direction for `if ask confirm "..."; then …`: both a genuine "No" and an
+unexpected failure take the same false branch; a script that must tell them
+apart should check stderr.
+
+**Theming:** every `--theme-*` flag has an `ASK_<FLAG>` environment fallback
+(e.g. `--theme-accent` / `ASK_THEME_ACCENT`), so a script can export the
+palette once instead of passing it on every call. Precedence is flag > env >
+built-in default. A **set-but-empty** `ASK_<FLAG>` variable deliberately
+overrides the default with the empty string — presence wins, not
+non-emptiness — so `export ASK_THEME_ACCENT=` intentionally blanks that
+color, while leaving the variable unset entirely keeps the default.
+
+See `ask --help`, `ask <command> --help`, or `man ask` for the full flag
+reference.
 
 ## Documentation
 

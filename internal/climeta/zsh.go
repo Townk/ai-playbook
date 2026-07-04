@@ -39,12 +39,12 @@ const zshSlugsHelper = `_ai-playbook_slugs() {
 }
 `
 
-// zshEscapeBracket escapes s for use inside a zsh _arguments bracket spec
+// ZshEscapeBracket escapes s for use inside a zsh _arguments bracket spec
 // ('--name[DESC]...'): backslash is doubled first (so the escapes below
 // aren't themselves re-escaped), then '[', ']' and ':' are backslash-escaped
 // so they can't prematurely close the bracket or be misread as an
 // option/message/action field separator.
-func zshEscapeBracket(s string) string {
+func ZshEscapeBracket(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `[`, `\[`)
 	s = strings.ReplaceAll(s, `]`, `\]`)
@@ -52,29 +52,29 @@ func zshEscapeBracket(s string) string {
 	return s
 }
 
-// zshEscapeDescribe escapes s for use as the description half of a
+// ZshEscapeDescribe escapes s for use as the description half of a
 // _describe "value:description" array entry: backslash is doubled first,
 // then ':' is backslash-escaped so an embedded colon isn't parsed as an
 // additional field separator.
-func zshEscapeDescribe(s string) string {
+func ZshEscapeDescribe(s string) string {
 	s = strings.ReplaceAll(s, `\`, `\\`)
 	s = strings.ReplaceAll(s, `:`, `\:`)
 	return s
 }
 
-// zshSingleQuote wraps s in single quotes for embedding in the generated
+// ZshSingleQuote wraps s in single quotes for embedding in the generated
 // script, escaping any embedded single quote using the standard shell
 // technique: close the quoted string, emit a backslash-escaped literal
 // quote, then reopen the quoted string. It must run last — after any
 // bracket/describe-field escaping — since those never touch single quotes
 // themselves.
-func zshSingleQuote(s string) string {
+func ZshSingleQuote(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
-// zshDescribeEntry renders one _describe array entry for name/desc.
-func zshDescribeEntry(name, desc string) string {
-	return zshSingleQuote(name + ":" + zshEscapeDescribe(desc))
+// ZshDescribeEntry renders one _describe array entry for name/desc.
+func ZshDescribeEntry(name, desc string) string {
+	return ZshSingleQuote(name + ":" + ZshEscapeDescribe(desc))
 }
 
 // zshFlagAction returns the completion action for a value flag (the part
@@ -113,11 +113,11 @@ func zshFlagMessage(f Flag) string {
 // '--name[desc]' for a boolean switch, or '--name[desc]:msg:action' for a
 // value flag.
 func zshFlagSpec(cmd Command, f Flag) string {
-	spec := "--" + f.Name + "[" + zshEscapeBracket(f.Desc) + "]"
+	spec := "--" + f.Name + "[" + ZshEscapeBracket(f.Desc) + "]"
 	if !f.Bool {
 		spec += ":" + zshFlagMessage(f) + ":" + zshFlagAction(cmd, f)
 	}
-	return zshSingleQuote(spec)
+	return ZshSingleQuote(spec)
 }
 
 // zshCommandFunc renders cmd's per-command completion function
@@ -126,7 +126,7 @@ func zshFlagSpec(cmd Command, f Flag) string {
 func zshCommandFunc(cmd Command) string {
 	var specs []string
 	if cmd.SlugArg {
-		specs = append(specs, zshSingleQuote("1:playbook:_ai-playbook_slugs"))
+		specs = append(specs, ZshSingleQuote("1:playbook:_ai-playbook_slugs"))
 	}
 	for _, f := range cmd.Flags {
 		specs = append(specs, zshFlagSpec(cmd, f))
@@ -164,9 +164,9 @@ func Zsh() string {
 	b.WriteString("  local -a commands\n")
 	b.WriteString("  commands=(\n")
 	for _, cmd := range Commands {
-		b.WriteString("    " + zshDescribeEntry(cmd.Name, cmd.Summary) + "\n")
+		b.WriteString("    " + ZshDescribeEntry(cmd.Name, cmd.Summary) + "\n")
 		for _, alias := range cmd.Aliases {
-			b.WriteString("    " + zshDescribeEntry(alias, cmd.Summary) + "\n")
+			b.WriteString("    " + ZshDescribeEntry(alias, cmd.Summary) + "\n")
 		}
 	}
 	b.WriteString("  )\n")

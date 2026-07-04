@@ -43,6 +43,23 @@ builds:
     ldflags:
       - -s -w -X github.com/Townk/ai-playbook/internal/cli.Version={{ .Version }}
 
+  - id: ask
+    main: ./cmd/ask
+    binary: ask
+    env:
+      - CGO_ENABLED=0
+    # Unix-only: the widgets run through bubbletea's /dev/tty handling, which
+    # this repo only exercises on Unix. This is a terminal/zsh-native tool.
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    mod_timestamp: "{{ .CommitTimestamp }}"
+    ldflags:
+      - -s -w -X github.com/Townk/ai-playbook/internal/askcli.Version={{ .Version }}
+
 archives:
   - id: ai-playbook
     formats: [tar.gz]
@@ -54,6 +71,7 @@ archives:
     files:
       - docs/man/*.1
       - completions/_ai-playbook
+      - completions/_ask
       - README.md
       - LICENSE
 
