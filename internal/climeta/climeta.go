@@ -64,6 +64,7 @@ type Command struct {
 //   - show      → ShowMain, internal/launcher/storecmd.go
 //   - edit      → EditMain, internal/launcher/storecmd.go
 //   - kb        → KBMain, internal/launcher/kbcmd.go
+//   - skill     → Main/run, internal/skillcmd/skillcmd.go
 //   - assist    → Assist, internal/launcher/launcher.go (alias: troubleshoot)
 //   - finalize  → finalize, cmd/ai-playbook/finalize.go
 //   - session   → SessionMain, internal/launcher/session.go
@@ -192,6 +193,33 @@ var Commands = []Command{
 			"ai-playbook kb edit --global",
 			"ai-playbook kb search --all \"docker compose\"",
 			"ai-playbook kb list",
+		},
+	},
+	{
+		Name:     "skill",
+		Summary:  "Print or install the playbook-authoring skill",
+		Synopsis: "skill <show|install> [--to <dir>] [--force]",
+		Long: "skill ships the embedded playbook-authoring SKILL (the harness-agnostic\n" +
+			"authoring guide derived from docs/specifications/playbook-authoring.md:\n" +
+			"schema quick-reference, the nine-rule quality rubric, a worked example,\n" +
+			"and the validate iteration loop).\n\n" +
+			"skill show\n" +
+			"    Print the SKILL markdown to stdout (pipe it anywhere).\n\n" +
+			"skill install [--to <dir>] [--force]\n" +
+			"    Write the SKILL to <dir>/playbook-authoring/SKILL.md, creating\n" +
+			"    directories as needed. Default <dir>: ~/.claude/skills (the Claude\n" +
+			"    Code personal skills directory). An existing file is never\n" +
+			"    overwritten without --force. Prints the installed path on success.",
+		Args:        "<show|install>",
+		Subcommands: []string{"show", "install"},
+		Flags: []Flag{
+			{Name: "to", Placeholder: "<dir>", Desc: "install under this skills directory instead of ~/.claude/skills (install)"},
+			{Name: "force", Bool: true, Desc: "overwrite an already-installed SKILL.md (install)"},
+		},
+		Examples: []string{
+			"ai-playbook skill show",
+			"ai-playbook skill install",
+			"ai-playbook skill install --to ./.claude/skills --force",
 		},
 	},
 	{

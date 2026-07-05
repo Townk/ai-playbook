@@ -127,6 +127,9 @@ env    [<slug> | --file <path>]        print declared env as --with-env JSON
 
 kb     <show|edit|search|list>         browse/edit/search the knowledge base
                                        (see "Knowledge base" below)
+
+skill  <show|install>                  print or install the playbook-authoring
+       [--to <dir>] [--force]          skill (see "Authoring quality" below)
 ```
 
 Run modes (mutually exclusive): the default is an interactive pager (free-form),
@@ -168,6 +171,26 @@ to a block's retained stdout) is the idiom for pulling a prior step's output
 into another step's *arguments* rather than its stdin. See
 [the playbook schema](docs/specifications/playbook-schema.md#value-passing)
 for the full contract.
+
+## Authoring quality (the rubric)
+
+What separates a runnable-but-poor playbook from a good one — atomic steps,
+`file=` create blocks instead of heredocs, a rollback per mutating step, a
+final `verify` block, declared `env:` — is codified as a nine-rule rubric in
+[`docs/specifications/playbook-authoring.md`](docs/specifications/playbook-authoring.md).
+The tool teaches it everywhere authoring happens: the AI authoring prompts
+embed it, and `ai-playbook validate` reports rubric violations as advisory
+warnings (missing verify, missing rollbacks, heredoc file writes, undeclared
+env vars) plus an AI review pass that judges against the same rubric.
+
+For authoring playbooks with an external agent, the same guidance ships as a
+portable skill:
+
+```sh
+ai-playbook skill install        # → ~/.claude/skills/… (Claude Code)
+ai-playbook skill install --to <dir>   # any other harness's skills root
+ai-playbook skill show           # print the SKILL markdown; pipe it anywhere
+```
 
 ## Knowledge base (remember / recall)
 

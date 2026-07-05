@@ -1,0 +1,40 @@
+.TH AI-PLAYBOOK-SKILL 1 "" "ai-playbook" "User Commands"
+.SH NAME
+ai\-playbook\-skill \- Print or install the playbook\-authoring skill
+.SH SYNOPSIS
+\fBai\-playbook\fR skill <show|install> [\-\-to <dir>] [\-\-force]
+.SH DESCRIPTION
+skill ships the embedded playbook\-authoring SKILL (the harness\-agnostic
+authoring guide derived from docs/specifications/playbook\-authoring.md:
+schema quick\-reference, the nine\-rule quality rubric, a worked example,
+and the validate iteration loop).
+.PP
+skill show
+    Print the SKILL markdown to stdout (pipe it anywhere).
+.PP
+skill install [\-\-to <dir>] [\-\-force]
+    Write the SKILL to <dir>/playbook\-authoring/SKILL.md, creating
+    directories as needed. Default <dir>: ~/.claude/skills (the Claude
+    Code personal skills directory). An existing file is never
+    overwritten without \-\-force. Prints the installed path on success.
+.SH OPTIONS
+.TP
+\fB\-\-to\fR \fI<dir>\fR
+install under this skills directory instead of ~/.claude/skills (install)
+.TP
+\fB\-\-force\fR
+overwrite an already\-installed SKILL.md (install)
+.SH EXAMPLES
+.nf
+ai\-playbook skill show
+.fi
+.PP
+.nf
+ai\-playbook skill install
+.fi
+.PP
+.nf
+ai\-playbook skill install \-\-to ./.claude/skills \-\-force
+.fi
+.SH "SEE ALSO"
+\fBai\-playbook\fR(1)

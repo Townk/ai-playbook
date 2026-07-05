@@ -19,11 +19,12 @@ A leading `---` … `---` block. Fields:
 | `category`    | string       | shipped      | Grouping label (e.g. `git`, `docker`). |
 | `tags`        | list[string] | shipped      | Search/filter keywords. |
 | `env`         | list/map     | shipped      | Environment variables the playbook expects. |
+| `created`     | string       | shipped      | Creation date, ISO `YYYY-MM-DD` by convention; `validate` requires it non-empty (the format is not enforced). |
 | `workdir`     | string       | Phase 1      | Target directory the playbook applies to; adapt-on-run resolves it (and asks if absent/stale). Home paths normalize to `~`. |
 | `depends_on`  | list[slug]   | Phase 3      | Playbooks to run fully, in topological order, before this one. |
 
-`name`/`description`/`category`/`tags`/`env` are assembled jointly by ai-playbook
-and the model; `finalize` backfills front matter onto older playbooks.
+`name`/`description`/`category`/`tags`/`env`/`created` are assembled jointly by
+ai-playbook and the model; `finalize` backfills front matter onto older playbooks.
 
 ## Fenced-block tags
 

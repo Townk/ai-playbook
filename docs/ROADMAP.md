@@ -3,7 +3,7 @@
 Durable single source of truth for the feature roadmap. Each phase lists its
 goal, status, settled decisions, and open questions. Per-phase, step-by-step
 implementation plans are written just-in-time when a phase starts (they're
-ephemeral; this doc is not). Last updated: 2026-07-05 (v0.12.0).
+ephemeral; this doc is not). Last updated: 2026-07-05 (v0.12.1).
 
 ## Vision
 
@@ -52,6 +52,14 @@ schema), a production-grade executor, and CI we trust. Milestones:
   over-budget compaction, whole-file recall in every authoring-shaped call,
   and the public `kb` verb. A5a-full (cancellation/timeout for streaming AI
   calls, truncation surfaced on authoring paths) is still open.
+- **v0.12.1 — authoring quality (mini-milestone).** DONE (2026-07-05): the
+  nine-rule authoring rubric
+  ([`specifications/playbook-authoring.md`](specifications/playbook-authoring.md))
+  single-sourced across its three surfaces — the shared prompt fragment both
+  authoring paths embed, four conservative `validate` quality warnings
+  (verify/rollback/file-block/env-decl) plus a rubric-fed AI review pass, and
+  the embedded `playbook-authoring` SKILL with the public `skill show|install`
+  verb (shipped in release archives).
 - **v0.13 — multi-harness.** Additional harness adapters (pi, cursor, …)
   behind the `Harness` seam built 2026-07-04 (`internal/author/harness.go`) —
   config-selected via `[agent] harness`, each adapter with its own argv/env/

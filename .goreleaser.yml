@@ -72,6 +72,7 @@ archives:
       - docs/man/*.1
       - completions/_ai-playbook
       - completions/_ask
+      - skills/playbook-authoring/SKILL.md
       - README.md
       - LICENSE
 

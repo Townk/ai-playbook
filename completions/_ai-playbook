@@ -17,6 +17,7 @@ _ai-playbook_commands() {
     'show:Render a saved playbook read-only'
     'edit:Open a saved playbook in $EDITOR'
     'kb:Browse, search, and edit the two-set knowledge base'
+    'skill:Print or install the playbook-authoring skill'
     'run:Run a playbook (interactive, headless, or guided)'
     'validate:Check a playbook'\''s structure and (optionally) get an AI review'
     'env:Print a playbook'\''s declared env vars, resolved and redacted'
@@ -67,6 +68,13 @@ _ai-playbook_cmd_kb() {
     '--project[target this project path instead of the cwd'\''s project root; with show (and no --global) ONLY that project'\''s set is printed (show/edit)]:path:' \
     '--global[narrow to the global knowledge set (show), or edit the global file (edit)]' \
     '--all[search every project'\''s knowledge file, not just the cwd'\''s (search)]'
+}
+
+_ai-playbook_cmd_skill() {
+  _arguments \
+    '1:subcommand:(show install)' \
+    '--to[install under this skills directory instead of ~/.claude/skills (install)]:dir:' \
+    '--force[overwrite an already-installed SKILL.md (install)]'
 }
 
 _ai-playbook_cmd_run() {
@@ -130,6 +138,9 @@ _ai-playbook() {
           ;;
         kb)
           _ai-playbook_cmd_kb
+          ;;
+        skill)
+          _ai-playbook_cmd_skill
           ;;
         run)
           _ai-playbook_cmd_run

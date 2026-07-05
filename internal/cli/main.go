@@ -28,6 +28,7 @@ import (
 	diffpkg "github.com/Townk/ai-playbook/internal/diff"
 	"github.com/Townk/ai-playbook/internal/launcher"
 	"github.com/Townk/ai-playbook/internal/mcpserver"
+	"github.com/Townk/ai-playbook/internal/skillcmd"
 	"github.com/Townk/ai-playbook/pkg/dialog"
 	"github.com/Townk/ai-playbook/pkg/driver"
 )
@@ -85,6 +86,7 @@ var dispatch = map[string]func(prog string) int{
 	"show":         func(string) int { return launcher.ShowMain() },
 	"edit":         func(string) int { return launcher.EditMain() },
 	"kb":           func(string) int { return launcher.KBMain() },
+	"skill":        func(string) int { return skillcmd.Main() },
 	"session":      func(string) int { return launcher.SessionMain() },
 	// RunMain owns config loading + the configured-shell hand-off and resolves
 	// the --playbook/--file/bare argument before rendering via ui.Run.

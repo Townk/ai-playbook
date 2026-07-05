@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Playbook authoring quality — the rubric, taught everywhere.** A nine-rule
+  authoring rubric (atomic one-step blocks, `file=` create blocks instead of
+  heredocs, diff blocks for edits, a `rollback=` companion per state-mutating
+  step, a final `verify` block, real `needs=`/`from=` dependencies, `{static}`
+  illustration, declared `env:` + portability, danger callouts — see
+  `docs/specifications/playbook-authoring.md`) is now single-sourced across
+  the tool. The AI authoring prompts (both the markdown and the structured
+  create paths) embed the rubric, so authored playbooks are held to it from
+  the start. `ai-playbook validate` reports rubric violations as four new
+  advisory **warnings** — no `{id=verify}` block, a multi-step playbook with
+  zero `rollback=` blocks, a shell block writing a file via heredoc, and a
+  runnable block referencing `${VAR}` undeclared in `env:` — without ever
+  affecting the exit code, and its AI review pass now judges against the same
+  rubric explicitly. For authoring with an external agent, the same guidance
+  ships as a portable `playbook-authoring` SKILL, embedded in the binary and
+  included in release archives, behind a new public `skill` verb:
+  `skill show` prints the SKILL markdown to stdout, and `skill install
+  [--to <dir>] [--force]` installs it (default: `~/.claude/skills/`, the
+  Claude Code personal skills directory), refusing to overwrite an existing
+  install without `--force`.
+
 ## [0.12.0] - 2026-07-05
 
 ### Added
