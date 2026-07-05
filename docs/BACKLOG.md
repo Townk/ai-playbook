@@ -45,6 +45,8 @@ _(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends
 
 - [ ] `resultMsg` drops `Result.TimedOut` — a timed-out run reads as a plain failure in the viewer (pre-existing, all run paths); surface it (e.g. status text) (2026-07-04)
 - [ ] Test the rollback×from-chain interleave (assisted failure footer: start a materialization chain, press Roll back mid-chain) — audited safe (prevAction guard + runMu) but untested (2026-07-04)
+- [ ] Parameterize the draft↔file-validator round-trip test across lang/type classes — one fixture guards it today, but the divergence class it protects (draft rules vs `pkg/playbook/validate` agreeing) occurred once; a table over the lang/type classes would catch the next drift (2026-07-04)
+- [ ] Cross-equality test pinning `internal/autorun`'s `effectiveNeeds` against `playbook.Block.EffectiveNeeds` — the two carry verbatim-duplicated `needs= ∪ from=` semantics (inherent to the DTO split), so a change to one must not silently diverge from the other (2026-07-04)
 
 ## Ideas
 

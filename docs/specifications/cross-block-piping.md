@@ -82,9 +82,13 @@ driver-level session-scoped retention with raw-path env vars.
 
 ## Execution semantics
 
-- **Gating/ordering:** `from=` participates exactly like a `needs=` edge —
-  run-button gating in the viewer, `NextRunnable` ordering in `--auto`,
-  `resetDependents` invalidation on undo/rollback.
+- **Ordering/invalidation:** `from=` orders and invalidates exactly like a
+  `needs=` edge — `NextRunnable` ordering in `--auto`, `resetDependents`
+  invalidation on undo/rollback. It never withholds the run button, though: a
+  `from=` edge does **not** gate the viewer's run button — the click
+  materializes the chain (see Auto-materialization). This is deliberate; the UX
+  section says the same (a satisfied producer shows no blocker, and an unrun one
+  auto-runs on click).
 - **Auto-materialization (viewer + assisted, `from=` chains only):** running a
   consumer whose transitive `from=` producers have not run this session runs
   the chain in order. Each chain step is an ordinary block run: own status
