@@ -150,12 +150,15 @@ func compactFile(cfg *config.Config, path string, budget int) {
 	}
 }
 
-// rejectCompaction applies the FOUR guards (spec "Fill and compact"): reject an
-// empty result, a result that is NOT smaller than the input (>= — an identical
+// rejectCompaction applies the four CONTENT guards (spec "Fill and compact"): reject
+// an empty result, a result that is NOT smaller than the input (>= — an identical
 // rewrite is pointless to persist), a result that drops any `## ` section heading
 // the input had, or a result that drops the input's `<!-- meta: project-root -->`
 // line (kb list/search resolve project names through it). A rejected result leaves
 // the file untouched (and no .bak is written). reason is a short note for stderr.
+// These are the four guards over the compaction RESULT; a fifth, distinct check —
+// the pre-replace cross-session race abort — lives in compactFile (it re-reads the
+// file immediately before replacing and aborts if it changed under us).
 func rejectCompaction(input, result string) (reason string, reject bool) {
 	if strings.TrimSpace(result) == "" {
 		return "empty result", true

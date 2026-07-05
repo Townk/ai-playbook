@@ -12,7 +12,7 @@ done/stale entries. Phase work lives in the roadmap, not here.
 
 ## Bugs
 
-_(none — the stored-parent `fm.Env` drop was fixed 2026-07-02 with the depends_on work.)_
+- [ ] Global knowledge.md concurrent-remember read-modify-write can lose a fact across sessions (unlocked; the compaction race guard narrows only compaction) — consider O_APPEND-safe append or file locking (2026-07-05)
 
 ## Tasks
 

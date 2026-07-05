@@ -36,7 +36,10 @@ where it lives, how it stays small, and how it comes back?
 2. **Write-time curation, not read-time filtering.** Exact/near-duplicate
    facts are skipped at write. At **solution completion** (the wrap-up path)
    the model is instructed to remember the session's durable lessons — filling
-   happens through the existing tool inside the existing call. Then, ONLY if a
+   happens through the existing tool inside the existing call. (Amended
+   2026-07-05: per the reconciled spec, the fill instruction attaches to EVERY
+   MCP-wired FinalPlaybook-kind generation — the wrap-up and the
+   follow-up/regenerate refine/amend paths — not the wrap-up alone.) Then, ONLY if a
    file exceeds its size budget (`[kb] budget`, generous default), a dedicated
    **compaction pass** (one small AI call per oversized file) rewrites it:
    merge near-duplicates, generalize, drop stale entries, preserve structure.
@@ -73,7 +76,10 @@ where it lives, how it stays small, and how it comes back?
 ## Consequences
 
 - Wrap-up gains a memory-fill instruction; completion gains an occasional
-  compaction call (only when a file is over budget).
+  compaction call (only when a file is over budget). (Amended 2026-07-05: the
+  fill instruction rides every MCP-wired FinalPlaybook-kind generation — wrap-up
+  plus the follow-up/regenerate refine/amend paths — so durable lessons are
+  captured wherever a final playbook is produced, not only at wrap-up.)
 - Legacy flat project files migrate lazily: unsectioned bullets read as
   `## Environment` until the first sectioned write.
 - Recall coverage widens to the three re-engagement prompt builders.
