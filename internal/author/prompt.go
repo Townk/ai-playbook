@@ -88,11 +88,12 @@ func kbFold(global, project KnowledgeBase) string {
 }
 
 // SystemPrompt assembles the standing literate-playbook authoring prompt for the
-// given request, faithfully porting assist::system_prompt. The text is verbatim
-// from the shell heredoc; the failure-vs-general branch, the {id/needs}/{static}
-// block schema, the $APB_OUT/$APB_ERR/$APB_EXIT value-passing refs, and the C3a
-// "verify re-runs the original failed command in a SEPARATE block" instruction
-// are all preserved.
+// given request, faithfully porting assist::system_prompt. The failure-vs-general
+// branch, the block-id schema, and the C3a "verify re-runs the original failed
+// command in a SEPARATE block" instruction are preserved. The authoring quality
+// bar — atomicity, file=/diff/rollback/static/verify/needs/from/env/callouts —
+// is folded in from the shared authoringRubric (the single source both authoring
+// paths embed; see rubric.go) rather than restated inline.
 //
 // B8: the failed command, scrollback, and the user's request are NOT
 // interpolated here — they live ONLY in BuildUserMessage's output. Every
@@ -195,27 +196,12 @@ unique short id, e.g. a bash block tagged {id=fix} — the runner keys run/diff/
 apply, output capture, and needs-gating on that id. Use:
   - bash/sh/zsh blocks for shell steps (the user can run them in their shell or
     the assistant's),
-  - python/node/etc. blocks for scripts,
-  - diff blocks for file changes (the user views/applies them). A diff block
-    MUST be a complete, applyable unified diff — include the `+"`--- a/<path>`"+`
-    and `+"`+++ b/<path>`"+` file headers and at least one `+"`@@ … @@`"+` hunk header,
-    with paths relative to the project root (a leading
-    `+"`diff --git a/<path> b/<path>`"+` line is ideal). It must be valid for
-    `+"`git apply`"+`. Do NOT emit a bare fragment of changed lines, and do NOT put
-    the target filename only in prose — the file headers ARE how the viewer and
-    apply know the target.
-  - `+"`file=<path>`"+` blocks to CREATE a new file — the fenced block body is the new
-    file's FULL content, and the `+"`file=<path>`"+` annotation names the target (relative
-    to the project root). Use `+"`file=`"+` ONLY for files that do not exist yet — to
-    edit an existing file use a diff block instead.
+  - python/node/etc. blocks for scripts.
 %sShell blocks run under `+"`set -e`"+`: a block FAILS at its FIRST failing command, so
 a later command cannot mask an earlier failure. If a non-zero exit is expected
 (a probe like `+"`command -v foo`"+` or `+"`grep …`"+`), guard it with `+"`|| true`"+`.
-If a step uses a previous step's output, tag it {id=next needs=fix} and reference
-the earlier output via $APB_OUT_fix / $APB_ERR_fix / $APB_EXIT_fix.
-Show captured error output or sample output as a console block (or tag it
-{static}) so it is NOT treated as runnable.
-For example, an illustrative block starts with: `+"```"+`console {static}
+
+`+authoringRubric+`
 
 Do NOT apply changes yourself — the user reviews and runs each step from the
 playbook. The document MUST begin with the `+"`# Playbook — <task>`"+` H1 title as its

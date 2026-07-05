@@ -22,8 +22,9 @@ steps** that a person (or `--auto`) can run, verify, and undo. The rules:
    `tee`. The create block is previewable, undoable, and diffable; the
    heredoc is none of those.
 3. **Diff blocks for edits.** Changing an existing file uses a diff block
-   (complete, `git apply`-able unified diff) — not `sed -i` one-liners when
-   the change is structural, and never a rewrite-the-whole-file heredoc.
+   (complete, `git apply`-able unified diff, paths relative to the project
+   root) — not `sed -i` one-liners when the change is structural, and never a
+   rewrite-the-whole-file heredoc.
 4. **Rollback discipline.** Every step that MUTATES state (installs, writes,
    enables, registers) pairs with a `{rollback=<that-id>}` block restoring the
    pre-step state. On failure, completed steps' rollbacks run in REVERSE

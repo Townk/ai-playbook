@@ -33,6 +33,15 @@ import (
 //
 // global and project are the two recall sets folded in via kbFold (empty ⇒ the
 // prompt is byte-identical to the pre-recall output — characterization contract).
+//
+// DELIBERATE: the shared authoringRubric (embedded by SystemPrompt and
+// StructuredToolInstruction — the two authoring paths the spec's Surface 1
+// targets) is NOT folded in here. This prompt does not AUTHOR a playbook from a
+// request; it re-shapes an EXISTING resolved session (fresh) or an already-served
+// playbook (amend) whose blocks already exist, so it keeps its lighter,
+// preservation-focused convention restatement (block-tag + verify) instead. Per
+// the spec (playbook-authoring.md, Surface 1), embedding the full rubric here is
+// optional and skipping it keeps this prompt's characterization goldens stable.
 func FinalPlaybookPrompt(req capture.Request, base, context string, global, project KnowledgeBase) string {
 	task := req.UserRequest
 	if task == "" {

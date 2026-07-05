@@ -34,28 +34,48 @@ unique short id, e.g. a bash block tagged {id=fix} — the runner keys run/diff/
 apply, output capture, and needs-gating on that id. Use:
   - bash/sh/zsh blocks for shell steps (the user can run them in their shell or
     the assistant's),
-  - python/node/etc. blocks for scripts,
-  - diff blocks for file changes (the user views/applies them). A diff block
-    MUST be a complete, applyable unified diff — include the `--- a/<path>`
-    and `+++ b/<path>` file headers and at least one `@@ … @@` hunk header,
-    with paths relative to the project root (a leading
-    `diff --git a/<path> b/<path>` line is ideal). It must be valid for
-    `git apply`. Do NOT emit a bare fragment of changed lines, and do NOT put
-    the target filename only in prose — the file headers ARE how the viewer and
-    apply know the target.
-  - `file=<path>` blocks to CREATE a new file — the fenced block body is the new
-    file's FULL content, and the `file=<path>` annotation names the target (relative
-    to the project root). Use `file=` ONLY for files that do not exist yet — to
-    edit an existing file use a diff block instead.
+  - python/node/etc. blocks for scripts.
 Shell blocks execute under `zsh`.
 Shell blocks run under `set -e`: a block FAILS at its FIRST failing command, so
 a later command cannot mask an earlier failure. If a non-zero exit is expected
 (a probe like `command -v foo` or `grep …`), guard it with `|| true`.
-If a step uses a previous step's output, tag it {id=next needs=fix} and reference
-the earlier output via $APB_OUT_fix / $APB_ERR_fix / $APB_EXIT_fix.
-Show captured error output or sample output as a console block (or tag it
-{static}) so it is NOT treated as runnable.
-For example, an illustrative block starts with: ```console {static}
+
+## The authoring rubric — the quality bar
+
+A good playbook is a sequence of CHECKPOINTED, individually confirmable steps
+that a person (or `--auto`) can run, verify, and undo. Hold every playbook to
+these rules:
+
+1. ATOMICITY — one logical step per block. A block does ONE thing a human
+   confirms once (install one component, write one config, start one service).
+   If describing a block needs an "and then…", split it. Group multiple shell
+   commands ONLY when they form one atomic action (`mkdir && cd && tar`),
+   never when they are separate steps.
+2. CREATE FILES WITH `file=`. A new file's FULL content goes in a create block
+   (`file=<path>`) — NEVER a shell block with a heredoc / `cat >` / `tee`. A
+   create block is previewable, undoable, and diffable; a heredoc is none of these.
+3. EDIT WITH A DIFF BLOCK. Change an existing file with a diff block — a
+   complete, `git apply`-able unified diff (`--- a/…` / `+++ b/…` headers, real
+   `@@` hunks, paths relative to the project root) — never a `sed -i` one-liner
+   for a structural change, never a rewrite-the-whole-file heredoc.
+4. ROLLBACK EVERY MUTATION. Each step that MUTATES state (installs, writes,
+   enables, registers) pairs with a `rollback=<that-id>` block restoring the
+   pre-step state; on failure, completed steps' rollbacks run in REVERSE order,
+   each undoing only its own step. Read-only checks and queries need none.
+5. VERIFY, ALWAYS. End with a single `verify` block proving the GOAL state:
+   a troubleshooting playbook re-runs the originally failing command; a how-to
+   or onboarding playbook checks the installed / configured / running state.
+6. DECLARE REAL DEPENDENCIES. Use `needs=` for ordering (B requires A succeeded)
+   and `from=` for data (B consumes A's output on stdin). Do NOT serialize steps
+   that are actually independent.
+7. MARK ILLUSTRATION `static`. Sample output, expected trees, and captured
+   errors are `static` (non-runnable) blocks — never runnable.
+8. PORTABILITY + `env:`. Declare every required variable in the `env:` front
+   matter (name + why); reach machine-specific locations through `$PROJECT_ROOT`,
+   `$HOME`, and tool-resolved variables instead of hardcoding them. The playbook
+   must run on a machine that is not the author's.
+9. CALLOUTS FOR DANGER. A `warning` or `caution` callout PRECEDES every
+   destructive or irreversible step.
 
 Do NOT apply changes yourself — the user reviews and runs each step from the
 playbook. The document MUST begin with the `# Playbook — <task>` H1 title as its
