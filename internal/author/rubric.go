@@ -36,8 +36,10 @@ these rules:
    a troubleshooting playbook re-runs the originally failing command; a how-to
    or onboarding playbook checks the installed / configured / running state.
 6. DECLARE REAL DEPENDENCIES. Use ` + "`needs=`" + ` for ordering (B requires A succeeded)
-   and ` + "`from=`" + ` for data (B consumes A's output on stdin). Do NOT serialize steps
-   that are actually independent.
+   and ` + "`from=`" + ` for data (B consumes A's output on stdin); for argument-style
+   access to a prior step's output, the session provides the quoted
+   ` + "`$APB_OUT_<id>`" + ` env var and the raw capture path ` + "`$APB_OUT_FILE_<id>`" + `.
+   Do NOT serialize steps that are actually independent.
 7. MARK ILLUSTRATION ` + "`static`" + `. Sample output, expected trees, and captured
    errors are ` + "`static`" + ` (non-runnable) blocks — never runnable.
 8. PORTABILITY + ` + "`env:`" + `. Declare every required variable in the ` + "`env:`" + ` front

@@ -53,6 +53,8 @@ done/stale entries. Phase work lives in the roadmap, not here.
 - [ ] validate `verify` quality warning is ID-only: a `{static}` or `create` block with `id=verify` silences the warning even though it can't prove the goal state — consider requiring the verify id on a runnable block (2026-07-05)
 - [ ] validate `rollback` quality warning: a `rollback=` attr on a `{static}` block suppresses the warning even though a static block never runs — count rollback declarations only on runnable blocks (2026-07-05)
 
+- [ ] validate `env-decl` quality warning false-positives on single-quoted braced literals (`echo '${DOC_VAR}'` warns) — quote-aware scanning or documented as accepted (2026-07-05)
+
 ## Ideas
 
 - [ ] (low priority) E2E/integration tests for the integration entry points (`launcher` entry points, `cmd` `selftest`/`mcpMain`) — spawn the real binary + drive a TUI/PTY. These render via live mux/model/TUI/driver so they're not unit-testable; coverage there is intentionally low. Would push total coverage 80%→~90% (2026-06-27)

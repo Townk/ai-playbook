@@ -24,6 +24,7 @@ A leading `---` … `---` YAML block:
 | `category` | grouping label (e.g. `git`, `docker`, `setup`) |
 | `tags` | search/filter keywords (list) |
 | `env` | environment variables the playbook expects: a map of `NAME: {value, why}` |
+| `created` | creation date; required non-empty, ISO `YYYY-MM-DD` by convention |
 | `workdir` | target directory the playbook applies to (planned — not yet parsed) |
 | `depends_on` | slugs of playbooks to run fully, in order, before this one |
 
