@@ -95,6 +95,85 @@ func TestRetainsCaptureOnFailure(t *testing.T) {
 	}
 }
 
+// openNoclobberShell opens a driver for one crossShell row whose INTERACTIVE rc
+// turns noclobber ON in the shell that sources job scripts (zsh `setopt noclobber`,
+// bash `set -o noclobber`, dash `set -C`). The retained capture redirect must
+// survive it on a re-run — RED against a plain `>`/`2>`, GREEN with `>|`/`2>|`.
+func openNoclobberShell(t *testing.T, cs crossShell) *Driver {
+	t.Helper()
+	if _, err := exec.LookPath(cs.sel); err != nil {
+		t.Skipf("%s not found on PATH; skipping", cs.sel)
+	}
+	dir := t.TempDir()
+	var files []rcFileSpec
+	switch cs.sel {
+	case "zsh":
+		files = []rcFileSpec{{".zshrc", "setopt noclobber\n"}}
+	case "bash":
+		files = []rcFileSpec{
+			{".bashrc", "set -o noclobber\n"},
+			{".bash_profile", "[ -r ~/.bashrc ] && . ~/.bashrc\n"},
+		}
+	case "sh":
+		files = []rcFileSpec{{"env.sh", "set -C\n"}}
+	}
+	for _, f := range files {
+		if err := os.WriteFile(filepath.Join(dir, f.name), []byte(f.content), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	d, err := Open(Options{Shell: cs.sel, Env: envWith(os.Environ(), cs.rcEnv(dir))})
+	if err != nil {
+		t.Fatalf("Open(%s): %v", cs.sel, err)
+	}
+	t.Cleanup(func() { d.Close() })
+	return d
+}
+
+// TestReRunSurvivesNoclobber is the noclobber matrix (zsh/bash/sh). Under the
+// user's `noclobber`/`set -C`, the session-dir capture target already EXISTS on a
+// re-run, so a plain `>` redirect fails ("file exists", rc=1) and the capture keeps
+// the STALE first-run bytes. This asserts the fixed contract — the second run exits
+// 0 and the capture holds the SECOND run's bytes — which is RED against the old
+// `>`/`2>` and GREEN with `>|`/`2>|`. A portable probe first confirms noclobber is
+// actually in effect (otherwise the test would pass vacuously).
+func TestReRunSurvivesNoclobber(t *testing.T) {
+	const to = 10 * time.Second
+	for _, cs := range crossShells {
+		cs := cs
+		t.Run(cs.sel, func(t *testing.T) {
+			d := openNoclobberShell(t, cs)
+
+			// Sanity: noclobber IS active in the sourcing shell. `>|` always
+			// truncates; a following plain `>` to that existing file must be blocked
+			// (the `if` sees the redirect's non-zero status). Portable to all three.
+			probe := d.Run(`t=$(mktemp); printf x >| "$t"; if printf y > "$t" 2>/dev/null; then printf CLOBBER_OK; else printf CLOBBER_BLOCKED; fi; rm -f "$t"`, to)
+			if probe.Out != "CLOBBER_BLOCKED" {
+				t.Fatalf("[%s] noclobber not in effect (probe=%q) — test would be vacuous", cs.sel, probe.Out)
+			}
+
+			first := d.RunID("nc", "printf 'first-run-longer\\n'", "", to)
+			if first.Exit != 0 {
+				t.Fatalf("[%s] first run exited %d, want 0", cs.sel, first.Exit)
+			}
+			second := d.RunID("nc", "printf 'second\\n'", "", to)
+			if second.Exit != 0 {
+				t.Errorf("[%s] re-run under noclobber exited %d, want 0 (capture redirect must use >|)", cs.sel, second.Exit)
+			}
+			if first.OutPath != second.OutPath {
+				t.Fatalf("[%s] re-run OutPath changed: %q vs %q", cs.sel, first.OutPath, second.OutPath)
+			}
+			got, err := os.ReadFile(second.OutPath)
+			if err != nil {
+				t.Fatalf("[%s] read OutPath: %v", cs.sel, err)
+			}
+			if string(got) != "second\n" {
+				t.Errorf("[%s] capture after re-run = %q, want %q (stale first-run bytes ⇒ noclobber blocked the clobber)", cs.sel, got, "second\n")
+			}
+		})
+	}
+}
+
 // TestReRunOverwritesCapture: re-running the same id overwrites (truncates) its
 // retained capture — the second run's bytes fully replace the first's.
 func TestReRunOverwritesCapture(t *testing.T) {

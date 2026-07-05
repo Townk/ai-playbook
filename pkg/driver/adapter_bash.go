@@ -57,11 +57,17 @@ func (bashAdapter) job(p jobParams) string {
 		vp += "" +
 			"export APB_OUT_" + key + "=\"$(printf %q \"$(<" + qo + ")\")\"" + "\n" +
 			"export APB_ERR_" + key + "=\"$(printf %q \"$(<" + qe + ")\")\"" + "\n" +
-			"export APB_EXIT_" + key + "=$__apb_rc\n" +
-			"export APB_OUT_FILE_" + key + "=" + qo + "\n" +
-			"export APB_ERR_FILE_" + key + "=" + qe + "\n"
+			"export APB_EXIT_" + key + "=$__apb_rc\n"
+		if p.retain {
+			vp += "" +
+				"export APB_OUT_FILE_" + key + "=" + qo + "\n" +
+				"export APB_ERR_FILE_" + key + "=" + qe + "\n"
+		}
 	}
-	return "( trap " + Shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) <" + stdinRedir(p) + " >" + p.o + " 2>" + p.e + "\n" +
+	// >|/2>| force the capture redirect through `set -o noclobber` — on a re-run
+	// the session-dir target already exists, and a plain `>` would fail under
+	// noclobber (leaving the stale first-run bytes). Matches the cwd trap's >|.
+	return "( trap " + Shquote(trapBody) + " EXIT\n" + p.cmdline + "\n) <" + stdinRedir(p) + " >|" + p.o + " 2>|" + p.e + "\n" +
 		"__apb_rc=$?\n" +
 		"if [ $__apb_rc -eq 141 ]; then __apb_rc=0; fi\n" +
 		"if [ -s " + qcwd + " ]; then builtin cd -- \"$(< " + qcwd + ")\" 2>/dev/null; fi\n" +

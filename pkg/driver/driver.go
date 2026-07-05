@@ -573,8 +573,9 @@ func (d *Driver) runID(id, cmdline, stdinPath string, timeout time.Duration) Res
 	// live under the session dir (out_<key>/err_<key>) so they survive this run —
 	// overwritten when the same id re-runs, removed at Close. Otherwise (id=="" or
 	// no session dir) they stay in the per-run temp dir and vanish with it. The
-	// `>`/`2>` redirects write raw bytes, so the retained files are byte-exact even
-	// for binary / no-trailing-newline output.
+	// `>|`/`2>|` redirects write raw bytes (and force past a user's noclobber on a
+	// re-run, when the target already exists), so the retained files are byte-exact
+	// even for binary / no-trailing-newline output.
 	key := sanitizeKey(id)
 	retain := id != "" && d.sessionDir != ""
 	var o, e string
@@ -617,6 +618,7 @@ func (d *Driver) runID(id, cmdline, stdinPath string, timeout time.Duration) Res
 		key:       key,
 		nonce:     nonce,
 		stdinPath: stdinPath,
+		retain:    retain,
 	})), 0644)
 	d.clearBuf()
 	d.setStopped(false)
@@ -624,7 +626,7 @@ func (d *Driver) runID(id, cmdline, stdinPath string, timeout time.Duration) Res
 
 	res := Result{Exit: -1}
 	if retain {
-		// The subshell's `>`/`2>` create these files at block start, so they exist
+		// The subshell's `>|`/`2>|` create these files at block start, so they exist
 		// (possibly partial) even on failure or timeout — retention is not gated on
 		// success. Set the paths unconditionally for an identified retained run.
 		res.OutPath = o

@@ -7,10 +7,15 @@ package driver
 // per-run random token woven into the sentinel (__APB__<nonce>_<rc>__APB__) so a
 // stale sentinel from another run can never satisfy this run's wait. stdinPath, when
 // non-empty, is the file the block's subshell reads stdin from (a prior block's
-// retained capture); empty means </dev/null. All paths are driver-chosen (temp /
-// session dir) and space-free, but the adapters single-quote them defensively.
+// retained capture); empty means </dev/null. retain is true only when this run's
+// o/e are the session-dir capture files that survive the run (identified run +
+// retention active) — it gates the APB_OUT_FILE_/APB_ERR_FILE_ path exports so
+// degraded mode (no session dir) never exports a path that vanishes with the
+// per-run temp dir. All paths are driver-chosen (temp / session dir) and
+// space-free, but the adapters single-quote them defensively.
 type jobParams struct {
 	cmdline, o, e, cwdf, id, key, nonce, stdinPath string
+	retain                                         bool
 }
 
 // stdinRedir returns the subshell's stdin source token for p: /dev/null when no

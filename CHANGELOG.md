@@ -25,6 +25,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Re-running an identified block now works under shell `noclobber` (`setopt
+  noclobber` / `set -o noclobber` / `set -C`): the retained stdout/stderr capture
+  is redirected with `>|`/`2>|`, so the second run overwrites its capture instead
+  of failing with "file exists" and keeping the stale first-run bytes.
 - `run --auto` (and the GUIDED/rollback run paths) now execute script blocks
   (python/node/ruby/perl) through their interpreter instead of feeding the raw
   program text to the shell — the assisted and rollback paths carried the
