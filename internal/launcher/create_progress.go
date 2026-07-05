@@ -296,6 +296,7 @@ func newAuthoringReengage(req capture.Request, d triage.Decision, c *cache.Cache
 	re := &reengage.Reengage{
 		Req:         req,
 		Agent:       sess.authoringAgent(cfg),
+		Cfg:         cfg,
 		Events:      buildReengageEvents(req, sess),
 		Cache:       c,
 		RequestJSON: requestJSON(req),

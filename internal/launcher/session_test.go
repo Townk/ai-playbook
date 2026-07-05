@@ -16,6 +16,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/draft"
 	"github.com/Townk/ai-playbook/internal/floatinput"
+	"github.com/Townk/ai-playbook/internal/kb"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/reengage"
 	"github.com/Townk/ai-playbook/internal/tools"
@@ -64,7 +65,7 @@ func TestBridgeAskFunc_CarriesChoices(t *testing.T) {
 // cached-render path can proceed without blocking on the shell's blank-pane startup.
 func TestOpenSessionAsync_DeliversOnce(t *testing.T) {
 	minimalZDOTDIR(t)
-	ch := openSessionAsync(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	ch := openSessionAsync(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "", "")
 	if c := cap(ch); c != 1 {
 		t.Errorf("openSessionAsync channel cap = %d, want 1 (buffered so the goroutine never blocks)", c)
 	}
@@ -104,7 +105,7 @@ func TestReengageReady_NilSession_Degraded(t *testing.T) {
 func TestReengageReady_LiveSession_BuildsOrch(t *testing.T) {
 	minimalZDOTDIR(t)
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir())
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, &launchMux{}, nil, "")
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, &launchMux{}, nil, "", "")
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -132,7 +133,7 @@ func TestReengageReady_StoreDirWired(t *testing.T) {
 	}
 	wantDir := cfg.GlobalStoreDir()
 
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, &launchMux{}, nil, "")
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, &launchMux{}, nil, "", "")
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -259,7 +260,7 @@ func minimalZDOTDIR(t *testing.T) {
 // for the `f` keybind — both seams must be consistently unavailable off-mux.
 func TestOpenSession_AskUnavailableOffMux(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "", "")
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -281,7 +282,7 @@ func TestOpenSession_AskUnavailableOffMux(t *testing.T) {
 // agent and the playbook drive the same shell.
 func TestOpenSession_SharedDriverAndToolsBackend(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "", "")
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -307,6 +308,53 @@ func TestOpenSession_SharedDriverAndToolsBackend(t *testing.T) {
 	}
 	if res.Out != "/tmp" {
 		t.Errorf("tools backend run pwd = %q, want %q (backend must drive the shared session driver)", res.Out, "/tmp")
+	}
+}
+
+// TestOpenSession_RememberHonorsKBRootOverride proves the [kb] dir override reaches
+// the WRITE path: a fact remembered through the tools socket lands under the session's
+// kbRoot (cfg.KBDir()), NOT under kb.DefaultRoot, and recall reads it back from that
+// same root — the write/read convergence docs/configuration.md promises "dir governs".
+// Regression (the reviewer proved this broken): openSession omitted Deps.KBRoot, so
+// remember fell back to DefaultRoot while recall honored the override, splitting the
+// agent's writes from its reads.
+func TestOpenSession_RememberHonorsKBRootOverride(t *testing.T) {
+	minimalZDOTDIR(t)
+	// Point the DEFAULT root at a distinct temp so a regression (a write to
+	// DefaultRoot) is detectable AND never pollutes the real data dir.
+	defaultRoot := t.TempDir()
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", defaultRoot)
+	kbRoot := t.TempDir() // the [kb] dir override
+
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "", kbRoot)
+	if sess == nil {
+		t.Fatal("openSession returned nil (driver/tools setup failed)")
+	}
+	defer sess.close()
+
+	const fact = "prefers ripgrep over grep"
+	res, err := tools.Dial(sess.socket, tools.Call{Tool: "remember", Kind: "user", Fact: fact})
+	if err != nil {
+		t.Fatalf("dial remember: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("remember ok = false, err = %q", res.Error)
+	}
+
+	// WRITE: the fact landed under the override root...
+	if got := string(kb.LoadGlobal(kbRoot)); !strings.Contains(got, fact) {
+		t.Errorf("global KB under override root missing the remembered fact\nroot=%s\ngot:\n%s", kbRoot, got)
+	}
+	// ...and NOT under the default root (the split the regression caused).
+	if got := string(kb.LoadGlobal(defaultRoot)); strings.Contains(got, fact) {
+		t.Errorf("remembered fact leaked into the DEFAULT root %s — write ignored the [kb] dir override:\n%s", defaultRoot, got)
+	}
+
+	// READ: recall (the reengage/author read path, keyed on cfg.KBDir()) reads it
+	// back from the same override root — the round-trip the reviewer proved broken.
+	global, _ := author.LoadRecall(kbRoot, "", config.Default().KB.Budget)
+	if !strings.Contains(string(global), fact) {
+		t.Errorf("recall from the override root did not read back the remembered fact:\n%s", global)
 	}
 }
 
@@ -338,7 +386,7 @@ func TestAuthoringAgent_InvokesClaudeWithMCPConfig(t *testing.T) {
 	cfg := config.Default()
 	cfg.Agent.Bin = fakeClaude(t, argvFile)
 
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "", "")
 	if sess == nil {
 		t.Fatal("openSession returned nil")
 	}
@@ -430,7 +478,7 @@ func TestWriteMCPConfig_NoSelfExe(t *testing.T) {
 // resolved selfExe writes a valid config file and the remove func cleans it up.
 func TestWriteMCPConfig_LiveSession(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "", "")
 	if sess == nil {
 		t.Fatal("openSession returned nil")
 	}
@@ -507,7 +555,7 @@ func TestStrippedAmendBase(t *testing.T) {
 // TestCreate_StructuredRenderAndSeam harness (real openSession + tools.Serve).
 func TestEscalate_AuthorsStructured(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "", "")
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}

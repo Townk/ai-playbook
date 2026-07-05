@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/config"
 )
 
 // FinalPlaybookPrompt assembles the FINAL-PLAYBOOK system prompt (spec §B/§C/§D):
@@ -116,8 +117,8 @@ func FinalPlaybookPrompt(req capture.Request, base, context string, global, proj
 // FinalPlaybookPrompt(req, base, context) and runs it through the injected text
 // Agent. Used by the orchestrator when the owned event stream can't start (and in
 // tests with a fake Agent). base=="" → fresh; base!="" → amend.
-func FinalPlaybookText(req capture.Request, base, context string, agent Agent) (io.ReadCloser, error) {
-	global, project := recallFor(req.ProjectRoot, nil)
+func FinalPlaybookText(req capture.Request, base, context string, cfg *config.Config, agent Agent) (io.ReadCloser, error) {
+	global, project := recallFor(req.ProjectRoot, cfg)
 	sys := FinalPlaybookPrompt(req, base, context, global, project)
 	user := BuildUserMessage(req)
 	return agent(sys, user)

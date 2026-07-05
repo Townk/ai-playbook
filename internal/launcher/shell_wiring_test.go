@@ -41,7 +41,7 @@ func TestOpenSession_ThreadsConfiguredShell(t *testing.T) {
 			}
 			defer func() { driverOpen = orig }()
 
-			sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, tc.shell)
+			sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, tc.shell, "")
 			if sess != nil {
 				t.Fatal("openSession should degrade to nil when driverOpen errors")
 			}

@@ -24,6 +24,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
@@ -105,6 +106,13 @@ type Reengage struct {
 	Req    capture.Request
 	Agent  author.Agent
 	Events EventsFunc
+	// Cfg is the caller's resolved config, threaded so the TEXT-path fallback
+	// (Regenerate/FinalPlaybook/Followup → author.Author/FinalPlaybookText/Followup)
+	// recalls the KB under the configured [kb] dir/budget, matching the event path
+	// (which threads cfg via AuthorOptions). nil is safe — recall falls back to
+	// config.Default() — and is expected for the DriftRegenOnly context (it never
+	// takes the text-fallback path) and for tests that don't exercise the KB.
+	Cfg *config.Config
 	// DriftRegenOnly marks a re-engagement context that supports ONLY the
 	// drift-regenerate action (a `run --file` viewer wired to the harness for that one
 	// thing), not a full authoring/troubleshoot session. The viewer keeps its followup
@@ -289,7 +297,7 @@ func (e *Engine) Regenerate(constraints []string) (io.ReadCloser, <-chan string,
 	}
 
 	return e.streamOne(KindReengageRegenerate, "", "", ModeReplace, constraints, restore, func() (io.ReadCloser, error) {
-		return author.Author(re.Req, re.Agent)
+		return author.Author(re.Req, re.Cfg, re.Agent)
 	})
 }
 
@@ -306,7 +314,7 @@ func (e *Engine) FinalPlaybook(base, change string, constraints []string) (io.Re
 	}
 	re := e.re
 	return e.streamOne(KindReengageFinalPlaybook, base, change, ModeReplace, constraints, nil, func() (io.ReadCloser, error) {
-		return author.FinalPlaybookText(re.Req, base, change, re.Agent)
+		return author.FinalPlaybookText(re.Req, base, change, re.Cfg, re.Agent)
 	})
 }
 
@@ -321,7 +329,7 @@ func (e *Engine) Followup(failedOutput string, constraints []string) (io.ReadClo
 	}
 	re := e.re
 	return e.streamOne(KindReengageFollowup, "", failedOutput, ModeAppend, constraints, nil, func() (io.ReadCloser, error) {
-		return author.Followup(re.Req, failedOutput, re.Agent)
+		return author.Followup(re.Req, failedOutput, re.Cfg, re.Agent)
 	})
 }
 

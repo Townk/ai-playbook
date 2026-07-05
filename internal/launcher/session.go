@@ -120,7 +120,7 @@ func runSession(req capture.Request, title string, m mux.Mux) int {
 	if mux.IsNull(m) {
 		bridge = askbridge.New()
 	}
-	sessCh := openSessionAsync(req, m, bridge, shell)
+	sessCh := openSessionAsync(req, m, bridge, shell, cfg.KBDir())
 
 	switch d.Outcome {
 	case triage.Hit:
@@ -150,9 +150,9 @@ func runSession(req capture.Request, title string, m mux.Mux) int {
 // ui.Run via the done latch), so there's no leak.
 // m is threaded from the caller (never re-loaded) so all paths agree on null-vs-templated.
 // shell is the configured selector (cfg.Driver.Shell) threaded to openSession's driver.
-func openSessionAsync(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell string) <-chan *session {
+func openSessionAsync(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell, kbRoot string) <-chan *session {
 	ch := make(chan *session, 1)
-	go func() { ch <- openSession(req, m, bridge, shell) }()
+	go func() { ch <- openSession(req, m, bridge, shell, kbRoot) }()
 	return ch
 }
 
@@ -216,14 +216,17 @@ var driverOpen = driver.Open
 // openSession creates the shared driver and starts the tools backend on a temp
 // unix socket. The driver's cwd is the request's project root (else its cwd).
 // shell is the configured selector (cfg.Driver.Shell) threaded from runSession;
-// "" preserves the zsh default. Returns nil on any failure (driver open, socket
+// "" preserves the zsh default. kbRoot is the resolved KB data-dir root
+// (cfg.KBDir(), honoring the [kb] dir override) threaded into the tools backend so
+// the agent's `remember` and the wrap-up fill WRITE to the same root recall READS
+// from; "" → kb.DefaultRoot(). Returns nil on any failure (driver open, socket
 // dir, or Serve) so the caller degrades to no-tools authoring rather than aborting.
 //
 // m is the already-selected mux (threaded from the launcher / SessionMain): when
 // m is a real mux, the float ask is wired as before. When m is the null mux (no
 // multiplexer) and a bridge is supplied, the agent's `ask` tool is routed to the
 // in-viewer overlay via the bridge (the float can't be hosted without a mux).
-func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell string) *session {
+func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell, kbRoot string) *session {
 	cwd := req.ProjectRoot
 	if cwd == "" {
 		cwd = req.CWD
@@ -276,6 +279,7 @@ func openSession(req capture.Request, m mux.Mux, bridge *askbridge.Bridge, shell
 	srv, err := tools.Serve(socket, tools.Deps{
 		Driver:             drv,
 		ProjectRoot:        req.ProjectRoot,
+		KBRoot:             kbRoot,
 		Cwd:                cwd,
 		Ask:                ask,
 		OnPlaybook:         onPlaybook,
@@ -662,7 +666,7 @@ const DefaultEnvDumpTimeout = 10 * time.Second
 // AuthorEvents stream can't start (harness binary missing / unsupported). It tees
 // the produced playbook into a buffer for the cache, exactly as before part 2a.
 func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, noCache bool, reengage *reengage.Reengage, cwd string, sharedDrv *driver.Driver, title string, bridge *askbridge.Bridge, shell string) int {
-	stream, err := author.Author(req, reengage.Agent)
+	stream, err := author.Author(req, reengage.Cfg, reengage.Agent)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook troubleshoot: author: %v\n", err)
 		return 1
@@ -852,6 +856,7 @@ func escalateReengage(d triage.Decision, req capture.Request, sess *session, cfg
 	return &reengage.Reengage{
 		Req:         req,
 		Agent:       sess.authoringAgent(cfg),
+		Cfg:         cfg,
 		Events:      buildReengageEvents(req, sess),
 		Cache:       cache.Open(),
 		CtxHash:     d.CtxHash,

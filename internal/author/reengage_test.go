@@ -43,7 +43,7 @@ func TestFollowup_CallsAgentWithPromptAndMessage(t *testing.T) {
 	const failed = "boom: it failed"
 	fa := &fakeAgent{canned: "# Revised fix\n\n```bash {id=fix2}\nmake -B\n```\n"}
 
-	r, err := Followup(req, failed, fa.agent)
+	r, err := Followup(req, failed, nil, fa.agent)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -8,6 +8,7 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
@@ -59,10 +60,11 @@ type Agent func(systemPrompt, userMessage string) (io.ReadCloser, error)
 // Both knowledge sets (global + project) are loaded from disk via LoadRecall
 // keyed on req.ProjectRoot and folded into the system prompt's "## What we already
 // know about this project" section (global under "### About this machine and
-// user", project under "### About this project"). This text path has no cfg, so
-// recall uses config.Default()'s [kb] settings.
-func Author(req capture.Request, agent Agent) (io.ReadCloser, error) {
-	global, project := recallFor(req.ProjectRoot, nil)
+// user", project under "### About this project"). cfg carries the caller's resolved
+// config so recall honors the [kb] dir/budget override on this fallback path too; a
+// nil cfg falls back to config.Default() (unit tests that don't exercise the KB).
+func Author(req capture.Request, cfg *config.Config, agent Agent) (io.ReadCloser, error) {
+	global, project := recallFor(req.ProjectRoot, cfg)
 	sys := SystemPrompt(req, global, project, driver.ResolveShellName(""))
 	user := BuildUserMessage(req)
 	return agent(sys, user)

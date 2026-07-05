@@ -88,7 +88,7 @@ func TestAuthor_UsesEmbeddedPromptAndAssembledMessage(t *testing.T) {
 	req := sampleFailure()
 	fa := &fakeAgent{canned: "# Fix your build\n\n```bash {id=fix}\nmake clean\n```\n"}
 
-	r, err := Author(req, fa.agent)
+	r, err := Author(req, nil, fa.agent)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func TestAuthor_FoldsInOnDiskKB(t *testing.T) {
 	}
 
 	fa := &fakeAgent{canned: "ok\n"}
-	r, err := Author(req, fa.agent)
+	r, err := Author(req, nil, fa.agent)
 	if err != nil {
 		t.Fatal(err)
 	}

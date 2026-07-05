@@ -284,7 +284,7 @@ func TestRealCreateAuthor_NullMuxReachesStreamSeam(t *testing.T) {
 // tools.Dial before capturedMetaSeam is called.
 func TestCapturedMetaSeam_MapsEnv(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "", "")
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -322,7 +322,7 @@ func mustRead(t *testing.T, path string) string {
 // before render: the absolute project path is replaced with $PROJECT_ROOT.
 func TestStructuredBody_PortabilizesProjectBound(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "", "")
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -357,7 +357,7 @@ func TestStructuredBody_PortabilizesProjectBound(t *testing.T) {
 // whose Deps.OnPlaybook stores into sess.lastPB / sess.pb).
 func TestCreate_StructuredRenderAndSeam(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "", "")
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}
@@ -406,7 +406,7 @@ func TestCreate_StructuredRenderAndSeam(t *testing.T) {
 // TestCreate_StructuredRenderAndSeam; adapted to the real newAuthoringReengage signature.
 func TestReengageBody_RendersCapturedPlaybook(t *testing.T) {
 	minimalZDOTDIR(t)
-	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "")
+	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "", "")
 	if sess == nil {
 		t.Fatal("openSession returned nil (driver/tools setup failed)")
 	}

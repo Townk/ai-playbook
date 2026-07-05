@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Townk/ai-playbook/internal/capture"
+	"github.com/Townk/ai-playbook/internal/config"
 )
 
 // Followup is the Go port of ai-assist-followup: the "your fix didn't work"
@@ -23,8 +24,8 @@ import (
 // failedOutput is the captured output of the failed command (the shell read it
 // from the run log's logpath, capped to 4000 bytes; the ui caps it the same way
 // before calling). req.Command is the failed verify command.
-func Followup(req capture.Request, failedOutput string, agent Agent) (io.ReadCloser, error) {
-	global, project := recallFor(req.ProjectRoot, nil)
+func Followup(req capture.Request, failedOutput string, cfg *config.Config, agent Agent) (io.ReadCloser, error) {
+	global, project := recallFor(req.ProjectRoot, cfg)
 	sys := FollowupPrompt(req, failedOutput, global, project)
 	user := BuildUserMessage(req)
 	return agent(sys, user)

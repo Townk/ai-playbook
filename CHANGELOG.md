@@ -32,6 +32,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   over facts, grouped by set/project), and `kb list` (every knowledge file's
   size and fact count).
 
+### Fixed
+
+- With `[kb] dir` set, facts saved via `remember` (and the end-of-session
+  wrap-up fill) now land under the configured knowledge root instead of the
+  default data directory. The write path was ignoring the override while recall
+  honored it, so remembered facts were written where recall would never read
+  them back.
+
 ## [0.11.0] - 2026-07-04
 
 ### Added

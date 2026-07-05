@@ -176,7 +176,7 @@ func realCreateAuthor(req capture.Request, m mux.Mux) int {
 	if mux.IsNull(m) {
 		bridge = askbridge.New()
 	}
-	sess := openSession(req, m, bridge, shell)
+	sess := openSession(req, m, bridge, shell, cfg.KBDir())
 	if sess != nil {
 		defer sess.close()
 	}
