@@ -35,7 +35,7 @@ runner keys run/diff/apply and success-detection on the `id`.
 | `{id=<id>}`     | shipped      | A runnable step. An id is auto-assigned when absent. |
 | `{id=verify}`   | shipped      | The final whole-setup verification; success detection keys on this block. |
 | `{needs=<id>[,<id>...]}` | shipped | Gate: the block won't run — no run button in the viewer, skipped in `--auto` — until every listed id is `ok`. |
-| `{rollback=<id>}` | Phase 2    | The rollback for step `<id>`; on failure, completed steps' rollbacks run in REVERSE order. |
+| `{rollback=<id>}` | Phase 2    | On a runnable step, names the block (by id) that undoes it; the named block renders as that step's rollback, not a numbered step. On failure, completed steps' rollbacks run in REVERSE order. |
 | `{from=<id>}`   | Phase 6      | Data dependency (ADR-0010): wires the named producer's retained stdout to this block's **stdin**; implies `needs=<id>` for gating/ordering/invalidation. Only `shell`/`run` blocks may declare or be targeted by `from=`. See [Value-passing](#value-passing) below. |
 | `{static}`      | shipped      | A non-runnable block (no run button) — illustrative output, config samples, etc. |
 

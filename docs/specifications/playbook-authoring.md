@@ -26,10 +26,10 @@ steps** that a person (or `--auto`) can run, verify, and undo. The rules:
    root) — not `sed -i` one-liners when the change is structural, and never a
    rewrite-the-whole-file heredoc.
 4. **Rollback discipline.** Every step that MUTATES state (installs, writes,
-   enables, registers) pairs with a `{rollback=<that-id>}` block restoring the
-   pre-step state. On failure, completed steps' rollbacks run in REVERSE
-   order — each rollback only undoes its own step. Read-only steps
-   (checks, queries) need none.
+   enables, registers) declares `rollback=<undo-id>` in its fence tag, naming
+   a companion `{id=<undo-id>}` block that restores the pre-step state. On
+   failure, completed steps' rollbacks run in REVERSE order — each rollback
+   only undoes its own step. Read-only steps (checks, queries) need none.
 5. **Verify, always.** Every playbook ends with `{id=verify needs=<last-step>}`
    proving the GOAL state: troubleshooting → re-run the originally failing
    command; how-to/onboarding → check the installed/configured/running state.

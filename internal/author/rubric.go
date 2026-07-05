@@ -28,9 +28,10 @@ these rules:
    ` + "`@@`" + ` hunks, paths relative to the project root) — never a ` + "`sed -i`" + ` one-liner
    for a structural change, never a rewrite-the-whole-file heredoc.
 4. ROLLBACK EVERY MUTATION. Each step that MUTATES state (installs, writes,
-   enables, registers) pairs with a ` + "`rollback=<that-id>`" + ` block restoring the
-   pre-step state; on failure, completed steps' rollbacks run in REVERSE order,
-   each undoing only its own step. Read-only checks and queries need none.
+   enables, registers) declares ` + "`rollback=<undo-id>`" + ` in its fence tag, naming a
+   companion ` + "`{id=<undo-id>}`" + ` block that restores the pre-step state; on
+   failure, completed steps' rollbacks run in REVERSE order, each undoing only
+   its own step. Read-only checks and queries need none.
 5. VERIFY, ALWAYS. End with a single ` + "`verify`" + ` block proving the GOAL state:
    a troubleshooting playbook re-runs the originally failing command; a how-to
    or onboarding playbook checks the installed / configured / running state.
