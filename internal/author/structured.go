@@ -11,7 +11,10 @@ func StructuredToolInstruction() string {
 		"You have MCP tools `run`, `remember`, `ask`, and `submit_playbook`.\n" +
 		"- Use `run` ONLY to DIAGNOSE (reproduce the situation, inspect cwd/files/versions). " +
 		"It runs in the USER's real shell — keep it READ-ONLY; do NOT apply changes with it.\n" +
-		"- Use `ask` to get input from the user and `remember` for a durable project fact.\n" +
+		"- Use `ask` to get input from the user and `remember` to save a durable fact, " +
+		"classified with `kind` by how closely it is tied to the topic at hand: `system` " +
+		"for machine/tooling truths, `user` for who the user is or prefers, `environment` " +
+		"for this project's setup, `topic` (with a `topic` name) for a domain-specific lesson.\n" +
 		"- Your DELIVERABLE is a single `submit_playbook` call; do NOT write the playbook as " +
 		"markdown in your reply — call `submit_playbook` with the structured object. The host " +
 		"renders the markdown deterministically.\n" +

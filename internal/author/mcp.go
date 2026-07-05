@@ -27,7 +27,10 @@ const ToolInstruction = "\n\n" +
 	"summarize what you did, and NEVER merely describe the steps in prose; emit the " +
 	"ACTUAL runnable code blocks. A reply with no `{id=fix}`/`{id=verify}` blocks is " +
 	"a failure.\n" +
-	"- Use `remember` for a durable project fact and `ask` to get input from the user.\n"
+	"- Use `remember` to save a durable fact, classified with `kind` by how closely it " +
+	"is tied to the topic at hand: `system` for machine/tooling truths, `user` for who " +
+	"the user is or prefers, `environment` for this project's setup, `topic` (with a " +
+	"`topic` name) for a domain-specific lesson. Use `ask` to get input from the user.\n"
 
 // mcpConfig is the claude --mcp-config document shape: a map of server name → an
 // stdio server spec (command + args) claude launches and speaks MCP to over its

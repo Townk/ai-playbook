@@ -7,7 +7,7 @@ package tools
 //   - dialError.Error   (0 %)
 //   - Server.Close      idempotent double-close branch (77.8 %)
 //   - Serve             net.Listen failure path (88.9 %)
-//   - doRemember        kb.AppendTo error path (77.8 %)
+//   - doRemember        kb.Append error path (77.8 %)
 //   - doAsk             Ask func returns error (87.5 %)
 //   - handleConn        empty-line skip + bad-JSON error reply (76.9 %)
 //   - Dial              DialTimeout failure, errNoReply, bad-JSON reply (63.2 %)
@@ -57,9 +57,9 @@ func TestServe_ListenError(t *testing.T) {
 	}
 }
 
-// TestServe_DoRememberError exercises the kb.AppendTo error path in doRemember.
-// Placing a regular file at KBRoot/projects blocks os.MkdirAll, which causes
-// AppendTo to return an error that must propagate as a reply.Error.
+// TestServe_DoRememberError exercises the kb.Append disk-error path in
+// doRemember. Placing a regular file at KBRoot/projects blocks os.MkdirAll,
+// which causes Append to return an error that must propagate as a reply.Error.
 func TestServe_DoRememberError(t *testing.T) {
 	d := newTestDriver(t)
 	root := t.TempDir()
@@ -69,7 +69,7 @@ func TestServe_DoRememberError(t *testing.T) {
 	}
 	socket := serveTest(t, Deps{Driver: d, ProjectRoot: "/some/proj", KBRoot: root})
 
-	res, err := Dial(socket, Call{Tool: "remember", Fact: "something important"})
+	res, err := Dial(socket, Call{Tool: "remember", Kind: "environment", Fact: "something important"})
 	if err != nil {
 		t.Fatalf("Dial remember: %v", err)
 	}

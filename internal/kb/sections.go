@@ -128,7 +128,7 @@ func route(kind Kind, topic, projectRoot string) (global bool, heading string, e
 	case KindTopic:
 		global, heading = false, secTopics
 	default:
-		return false, "", fmt.Errorf("kb: unknown kind %q", kind)
+		return false, "", fmt.Errorf("kb: unknown kind %q, want one of: system, user, environment, topic", kind)
 	}
 	if kind == KindTopic {
 		if strings.TrimSpace(topic) == "" {

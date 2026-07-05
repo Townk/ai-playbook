@@ -26,7 +26,8 @@
 // Tools:
 //   - run      — execute a command in the session shell via *driver.Driver.RunID;
 //     the load-bearing one (the agent runs `gg build` etc. in the user's env).
-//   - remember — append a distilled fact to the project KB (kb.AppendTo).
+//   - remember — classify a distilled fact into the two-set taxonomy (kb.Append):
+//     system/user → the global KB; environment/topic → the project KB.
 //   - ask      — the user-input channel. When the session wired an Asker (the
 //     float plumbing — selfExe + mux), `ask` spawns an input FLOAT and returns
 //     the user's submitted answer; on cancel it returns the unavailable sentinel
@@ -67,7 +68,7 @@ type AskFunc func(req floatinput.Request) (floatinput.Result, error)
 
 // Deps carry what the backend needs to service tool calls: the session's live
 // shell driver (RunID for `run`), the project root (the KB key + the default
-// `remember` target), the KB data-dir root (kb.AppendTo target; empty →
+// `remember` target), the KB data-dir root (kb.Append target; empty →
 // kb.DefaultRoot, the real data dir), the cwd ask-floats open in, and the Ask
 // seam (nil → ask is unavailable).
 type Deps struct {
@@ -92,8 +93,10 @@ type request struct {
 	Tool        string          `json:"tool"`
 	ID          string          `json:"id,omitempty"`          // run: block id for value-passing (APB_OUT_<id>)
 	Cmd         string          `json:"cmd,omitempty"`         // run: the command line
+	Kind        string          `json:"kind,omitempty"`        // remember: system|user|environment|topic
+	Topic       string          `json:"topic,omitempty"`       // remember: required iff kind=topic
 	Fact        string          `json:"fact,omitempty"`        // remember: the distilled fact
-	ProjectRoot string          `json:"projectRoot,omitempty"` // remember: override target (else Deps.ProjectRoot)
+	ProjectRoot string          `json:"projectRoot,omitempty"` // remember: override target (else Deps.ProjectRoot); global kinds reject a non-empty override
 	Prompt      string          `json:"prompt,omitempty"`      // ask: the question
 	Type        string          `json:"type,omitempty"`        // ask: free|line|confirm|choose
 	Playbook    json.RawMessage `json:"playbook,omitempty"`    // submit_playbook: the structured playbook
@@ -225,11 +228,28 @@ func (s *Server) doRun(req request) reply {
 	return reply{Out: res.Out, Err: res.Err, Exit: res.Exit}
 }
 
-// doRemember appends a distilled fact to the project KB (kb.AppendTo). The target
-// project root is the request override, else Deps.ProjectRoot; the data-dir root
-// is Deps.KBRoot, else kb.DefaultRoot. An empty fact is a no-op success (matching
-// kb.AppendTo). Reply {ok:true} on success.
+// doRemember classifies a distilled fact into the two-set taxonomy and routes it
+// via kb.Append: system/user land in the global KB, environment/topic in the
+// project KB (the request's projectRoot override, else Deps.ProjectRoot). The
+// data-dir root is Deps.KBRoot, else kb.DefaultRoot.
+//
+// The MCP jsonschema layer enforces `kind` as a required field (see
+// mcpserver.rememberInput), but it cannot express the rest of the spec's
+// contract — an unknown kind value, a topic required/rejected depending on
+// kind, and a projectRoot override that is only valid for project kinds — so
+// those are enforced here and reported as one-line tool errors:
+//   - an unrecognized kind, a topic without kind=topic, or kind=topic without a
+//     topic all surface as kb.Append's own contract-violation errors;
+//   - a non-empty projectRoot override on a global kind (system/user) is
+//     rejected before ever reaching kb.Append.
+//
+// Write-dedup (kb.Append) makes a repeated identical fact a silent no-op that
+// still replies {ok:true}. An empty fact is likewise a no-op success.
 func (s *Server) doRemember(req request) reply {
+	kind := kb.Kind(req.Kind)
+	if (kind == kb.KindSystem || kind == kb.KindUser) && req.ProjectRoot != "" {
+		return reply{Error: "remember: projectRoot is only valid with kind=environment or kind=topic"}
+	}
 	root := s.deps.KBRoot
 	if root == "" {
 		root = kb.DefaultRoot()
@@ -238,7 +258,7 @@ func (s *Server) doRemember(req request) reply {
 	if proj == "" {
 		proj = s.deps.ProjectRoot
 	}
-	if err := kb.AppendTo(root, proj, req.Fact); err != nil {
+	if err := kb.Append(root, proj, kind, req.Topic, req.Fact); err != nil {
 		return reply{Error: err.Error()}
 	}
 	return reply{OK: true}

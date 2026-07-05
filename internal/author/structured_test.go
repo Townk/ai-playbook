@@ -13,6 +13,25 @@ func TestStructuredToolInstruction_FileChangeVocabulary(t *testing.T) {
 	}
 }
 
+// TestStructuredToolInstruction_TeachesRememberClassification asserts the
+// structured tool instruction teaches the kind taxonomy (K2): lessons are
+// classified by closeness to the topic at hand across the four kinds.
+func TestStructuredToolInstruction_TeachesRememberClassification(t *testing.T) {
+	s := StructuredToolInstruction()
+	for _, want := range []string{
+		"`kind`",
+		"topic at hand",
+		"`system`",
+		"`user`",
+		"`environment`",
+		"`topic`",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("structured instruction missing remember-classification guidance %q", want)
+		}
+	}
+}
+
 func TestStructuredToolInstruction_MandatesSubmit(t *testing.T) {
 	s := StructuredToolInstruction()
 	for _, want := range []string{

@@ -51,6 +51,24 @@ func argAfter(args []string, key string) string {
 	return ""
 }
 
+// TestToolInstruction_TeachesRememberClassification asserts the (markdown-authoring)
+// tool instruction teaches the kind taxonomy (K2): lessons are classified by
+// closeness to the topic at hand across the four kinds.
+func TestToolInstruction_TeachesRememberClassification(t *testing.T) {
+	for _, want := range []string{
+		"`kind`",
+		"topic at hand",
+		"`system`",
+		"`user`",
+		"`environment`",
+		"`topic`",
+	} {
+		if !strings.Contains(ToolInstruction, want) {
+			t.Errorf("tool instruction missing remember-classification guidance %q", want)
+		}
+	}
+}
+
 // TestHarnessAgentWithMCP_WiresMCPConfigAndToolInstruction asserts the tools-wired
 // production Agent routes through the events path: the OWNED argv carries
 // --mcp-config <tempfile> (pointing at our mcp subcommand) and the system prompt

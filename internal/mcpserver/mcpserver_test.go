@@ -203,6 +203,71 @@ func TestSubmitPlaybook_SchemaShape(t *testing.T) {
 	}
 }
 
+// TestRememberTool_SchemaShape asserts the `remember` tool's input schema
+// carries the kind/topic taxonomy fields and marks `kind` required (fields
+// without `omitempty` are inferred required by the jsonschema-go generator);
+// `topic` and `projectRoot` stay optional since their requiredness is
+// conditional (kind=topic) and enforced in doRemember instead.
+func TestRememberTool_SchemaShape(t *testing.T) {
+	ctx := context.Background()
+	srv := newServer("/tmp/unused.sock")
+	st, ct := mcp.NewInMemoryTransports()
+	if _, err := srv.Connect(ctx, st, nil); err != nil {
+		t.Fatalf("server.Connect: %v", err)
+	}
+	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1.0"}, nil)
+	cs, err := client.Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatalf("client.Connect: %v", err)
+	}
+	defer cs.Close()
+
+	result, err := cs.ListTools(ctx, &mcp.ListToolsParams{})
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	var rem *mcp.Tool
+	for _, tl := range result.Tools {
+		if tl.Name == "remember" {
+			rem = tl
+			break
+		}
+	}
+	if rem == nil {
+		t.Fatal("remember tool not registered")
+	}
+
+	// The description teaches the classification taxonomy.
+	for _, want := range []string{"system", "user", "environment", "topic"} {
+		if !strings.Contains(rem.Description, want) {
+			t.Errorf("remember tool description missing kind %q:\n%s", want, rem.Description)
+		}
+	}
+
+	schema, _ := json.Marshal(rem.InputSchema)
+	for _, want := range []string{"kind", "topic", "fact", "projectRoot"} {
+		if !strings.Contains(string(schema), want) {
+			t.Errorf("remember input schema missing %q:\n%s", want, schema)
+		}
+	}
+
+	var parsed struct {
+		Required []string `json:"required"`
+	}
+	if err := json.Unmarshal(schema, &parsed); err != nil {
+		t.Fatalf("unmarshal remember input schema: %v", err)
+	}
+	found := false
+	for _, r := range parsed.Required {
+		if r == "kind" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("remember input schema required list = %v, want it to include %q", parsed.Required, "kind")
+	}
+}
+
 // contentText extracts the first text content block from a tool result.
 func contentText(t *testing.T, res *mcp.CallToolResult) string {
 	t.Helper()

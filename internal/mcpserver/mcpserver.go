@@ -29,11 +29,17 @@ type runInput struct {
 	ID  string `json:"id,omitempty" jsonschema:"optional short id; exports APB_OUT_<id>/APB_ERR_<id>/APB_EXIT_<id> so a later call can reference this command's output"`
 }
 
-// rememberInput is the `remember` tool's arguments: a distilled fact to persist
-// for this project, with an optional project-root override.
+// rememberInput is the `remember` tool's arguments: a distilled fact classified
+// into the two-set taxonomy (kind, required) plus the fact text. Topic is
+// required when kind=topic and rejected otherwise; the projectRoot override is
+// only valid for the project kinds (environment/topic) — those two conditional
+// rules can't be expressed in JSON schema, so doRemember enforces them and
+// returns a one-line tool error.
 type rememberInput struct {
-	Fact        string `json:"fact" jsonschema:"a durable, distilled fact about this project to save for future requests; never secrets or env dumps"`
-	ProjectRoot string `json:"projectRoot,omitempty" jsonschema:"optional project root override; defaults to the session's project root"`
+	Kind        string `json:"kind" jsonschema:"classifies the fact by how closely it is tied to the topic at hand: 'system' for machine/tooling truths, 'user' for who the user is or prefers, 'environment' for this project's setup, 'topic' for a domain-specific lesson (requires topic). One of: system, user, environment, topic."`
+	Topic       string `json:"topic,omitempty" jsonschema:"the topic name; required when kind=topic, invalid for any other kind"`
+	Fact        string `json:"fact" jsonschema:"a durable, distilled fact to save for future requests; never secrets or env dumps"`
+	ProjectRoot string `json:"projectRoot,omitempty" jsonschema:"optional project root override; only valid when kind is environment or topic (defaults to the session's project root)"`
 }
 
 // askInput is the `ask` tool's arguments: a question for the user.
@@ -65,8 +71,12 @@ func newServer(socketPath string) *mcp.Server {
 	}, runHandler(socketPath))
 
 	mcp.AddTool(server, &mcp.Tool{
-		Name:        "remember",
-		Description: "Save a durable, distilled fact about this project for future requests.",
+		Name: "remember",
+		Description: "Save a durable, distilled fact for future requests, classified by kind: " +
+			"'system' (machine/tooling truths), 'user' (who the user is or prefers), " +
+			"'environment' (this project's setup), or 'topic' (a domain-specific lesson, " +
+			"with a topic name) — classify by how closely the fact is tied to the topic at " +
+			"hand. Never save secrets or raw environment dumps.",
 	}, rememberHandler(socketPath))
 
 	mcp.AddTool(server, &mcp.Tool{
@@ -150,7 +160,7 @@ func runHandler(socketPath string) mcp.ToolHandlerFor[runInput, any] {
 
 func rememberHandler(socketPath string) mcp.ToolHandlerFor[rememberInput, any] {
 	return func(_ context.Context, _ *mcp.CallToolRequest, in rememberInput) (*mcp.CallToolResult, any, error) {
-		r, err := forward(socketPath, tools.Call{Tool: "remember", Fact: in.Fact, ProjectRoot: in.ProjectRoot})
+		r, err := forward(socketPath, tools.Call{Tool: "remember", Kind: in.Kind, Topic: in.Topic, Fact: in.Fact, ProjectRoot: in.ProjectRoot})
 		return r, nil, err
 	}
 }

@@ -281,17 +281,18 @@ func TestAppend_ContractViolations(t *testing.T) {
 		topic       string
 		fact        string
 		wantErr     bool
+		wantErrPart string // substring the error message must carry ("" = any)
 	}{
-		{"unknown kind", "/p", Kind("bogus"), "", "f", true},
-		{"empty kind", "/p", Kind(""), "", "f", true},
-		{"topic with non-topic kind", "/p", KindEnvironment, "db", "f", true},
-		{"topic with system kind", "", KindSystem, "db", "f", true},
-		{"missing topic for topic kind", "/p", KindTopic, "", "f", true},
-		{"project kind without project root", "", KindEnvironment, "", "f", true},
-		{"topic kind without project root", "", KindTopic, "db", "f", true},
-		{"global kind allows empty project root", "", KindSystem, "", "f", false},
-		{"valid environment", "/p", KindEnvironment, "", "f", false},
-		{"valid topic", "/p", KindTopic, "db", "f", false},
+		{"unknown kind", "/p", Kind("bogus"), "", "f", true, "want one of: system, user, environment, topic"},
+		{"empty kind", "/p", Kind(""), "", "f", true, "want one of: system, user, environment, topic"},
+		{"topic with non-topic kind", "/p", KindEnvironment, "db", "f", true, ""},
+		{"topic with system kind", "", KindSystem, "db", "f", true, ""},
+		{"missing topic for topic kind", "/p", KindTopic, "", "f", true, ""},
+		{"project kind without project root", "", KindEnvironment, "", "f", true, ""},
+		{"topic kind without project root", "", KindTopic, "db", "f", true, ""},
+		{"global kind allows empty project root", "", KindSystem, "", "f", false, ""},
+		{"valid environment", "/p", KindEnvironment, "", "f", false, ""},
+		{"valid topic", "/p", KindTopic, "db", "f", false, ""},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -299,7 +300,34 @@ func TestAppend_ContractViolations(t *testing.T) {
 			if (err != nil) != c.wantErr {
 				t.Fatalf("Append err = %v, wantErr = %v", err, c.wantErr)
 			}
+			if c.wantErrPart != "" && !strings.Contains(err.Error(), c.wantErrPart) {
+				t.Errorf("Append err = %q, want it to contain %q", err, c.wantErrPart)
+			}
 		})
+	}
+}
+
+// TestAppend_FlattensEmbeddedNewlines locks the newline-hygiene contract: a fact
+// carrying embedded newlines is stored as ONE flattened bullet, never as raw
+// multi-line text whose continuation lines would parse back as un-prefixed
+// (non-bullet) lines and corrupt the section on the next write.
+func TestAppend_FlattensEmbeddedNewlines(t *testing.T) {
+	root := t.TempDir()
+	if err := Append(root, "/p", KindEnvironment, "", "uses bazel\nfor all builds"); err != nil {
+		t.Fatal(err)
+	}
+	want := "<!-- meta: project-root: /p -->\n\n## Environment\n- uses bazel for all builds\n"
+	if got := string(LoadProject(root, "/p")); got != want {
+		t.Fatalf("KB after multi-line fact = %q, want one flattened bullet %q", got, want)
+	}
+	// The file parses back cleanly: a second write round-trips through parseDoc
+	// without dropping or duplicating the flattened bullet.
+	if err := Append(root, "/p", KindEnvironment, "", "second fact"); err != nil {
+		t.Fatal(err)
+	}
+	want = "<!-- meta: project-root: /p -->\n\n## Environment\n- uses bazel for all builds\n- second fact\n"
+	if got := string(LoadProject(root, "/p")); got != want {
+		t.Errorf("KB after second write = %q, want %q", got, want)
 	}
 }
 

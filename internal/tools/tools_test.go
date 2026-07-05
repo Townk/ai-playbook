@@ -103,7 +103,7 @@ func TestServe_Remember(t *testing.T) {
 	projectRoot := "/some/project"
 	socket := serveTest(t, Deps{Driver: d, ProjectRoot: projectRoot, KBRoot: root})
 
-	res, err := Dial(socket, Call{Tool: "remember", Fact: "deploys via fly.io"})
+	res, err := Dial(socket, Call{Tool: "remember", Kind: "environment", Fact: "deploys via fly.io"})
 	if err != nil {
 		t.Fatalf("Dial remember: %v", err)
 	}
@@ -111,10 +111,11 @@ func TestServe_Remember(t *testing.T) {
 		t.Errorf("remember ok = %v, want true (err=%q)", res.OK, res.Error)
 	}
 
-	// The fact landed in the project KB under the backend's data root.
-	got := kb.LoadFrom(root, projectRoot)
-	if string(got) != "- deploys via fly.io\n" {
-		t.Errorf("KB contents = %q, want %q", got, "- deploys via fly.io\n")
+	// The fact landed in the project KB, sectioned under ## Environment, under
+	// the backend's data root.
+	want := "<!-- meta: project-root: " + projectRoot + " -->\n\n## Environment\n- deploys via fly.io\n"
+	if got := kb.LoadProject(root, projectRoot); string(got) != want {
+		t.Errorf("KB contents = %q, want %q", got, want)
 	}
 }
 
@@ -124,14 +125,149 @@ func TestServe_RememberProjectOverride(t *testing.T) {
 	socket := serveTest(t, Deps{Driver: d, ProjectRoot: "/default", KBRoot: root})
 
 	// An explicit projectRoot in the call overrides Deps.ProjectRoot.
-	if _, err := Dial(socket, Call{Tool: "remember", Fact: "uses bazel", ProjectRoot: "/other"}); err != nil {
+	if _, err := Dial(socket, Call{Tool: "remember", Kind: "environment", Fact: "uses bazel", ProjectRoot: "/other"}); err != nil {
 		t.Fatalf("Dial remember override: %v", err)
 	}
-	if got := kb.LoadFrom(root, "/other"); string(got) != "- uses bazel\n" {
-		t.Errorf("override KB = %q, want %q", got, "- uses bazel\n")
+	want := "<!-- meta: project-root: /other -->\n\n## Environment\n- uses bazel\n"
+	if got := kb.LoadProject(root, "/other"); string(got) != want {
+		t.Errorf("override KB = %q, want %q", got, want)
 	}
-	if got := kb.LoadFrom(root, "/default"); got != "" {
+	if got := kb.LoadProject(root, "/default"); got != "" {
 		t.Errorf("default KB should be empty, got %q", got)
+	}
+}
+
+// TestServe_RememberKindValidation exercises the spec's kind validation matrix
+// through the socket seam: each violation is a tool error (res.Error non-empty,
+// res.OK false), not a written fact.
+func TestServe_RememberKindValidation(t *testing.T) {
+	d := newTestDriver(t)
+	root := t.TempDir()
+	socket := serveTest(t, Deps{Driver: d, ProjectRoot: "/p", KBRoot: root})
+
+	cases := []struct {
+		name    string
+		call    Call
+		wantErr string // substring the tool error must carry
+	}{
+		{"missing kind", Call{Tool: "remember", Fact: "x"}, "want one of: system, user, environment, topic"},
+		{"unknown kind", Call{Tool: "remember", Kind: "bogus", Fact: "x"}, "want one of: system, user, environment, topic"},
+		{"topic without kind=topic", Call{Tool: "remember", Kind: "environment", Topic: "db", Fact: "x"}, "only valid with kind=topic"},
+		{"topic missing when kind=topic", Call{Tool: "remember", Kind: "topic", Fact: "x"}, "requires a topic"},
+		{"projectRoot with global kind", Call{Tool: "remember", Kind: "system", ProjectRoot: "/p", Fact: "x"}, "projectRoot is only valid"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res, err := Dial(socket, tc.call)
+			if err != nil {
+				t.Fatalf("Dial: %v", err)
+			}
+			if res.OK {
+				t.Errorf("%s: ok = true, want a tool error", tc.name)
+			}
+			if !strings.Contains(res.Error, tc.wantErr) {
+				t.Errorf("%s: error = %q, want it to contain %q", tc.name, res.Error, tc.wantErr)
+			}
+		})
+	}
+}
+
+// TestServe_RememberRoutingAllKinds asserts each of the four kinds routes to the
+// right file + section through the socket seam.
+func TestServe_RememberRoutingAllKinds(t *testing.T) {
+	d := newTestDriver(t)
+	root := t.TempDir()
+	projectRoot := "/routing/project"
+	socket := serveTest(t, Deps{Driver: d, ProjectRoot: projectRoot, KBRoot: root})
+
+	send := func(call Call) {
+		t.Helper()
+		res, err := Dial(socket, call)
+		if err != nil {
+			t.Fatalf("Dial: %v", err)
+		}
+		if !res.OK {
+			t.Fatalf("remember %+v: ok = false, err = %q", call, res.Error)
+		}
+	}
+
+	send(Call{Tool: "remember", Kind: "system", Fact: "ripgrep is installed"})
+	send(Call{Tool: "remember", Kind: "user", Fact: "prefers vim"})
+	send(Call{Tool: "remember", Kind: "environment", Fact: "uses bazel"})
+	send(Call{Tool: "remember", Kind: "topic", Topic: "Database", Fact: "pg needs PGPASSWORD"})
+
+	global := string(kb.LoadGlobal(root))
+	if !strings.Contains(global, "## System\n- ripgrep is installed") {
+		t.Errorf("global KB missing system fact: %q", global)
+	}
+	if !strings.Contains(global, "## User\n- prefers vim") {
+		t.Errorf("global KB missing user fact: %q", global)
+	}
+
+	project := string(kb.LoadProject(root, projectRoot))
+	if !strings.Contains(project, "## Environment\n- uses bazel") {
+		t.Errorf("project KB missing environment fact: %q", project)
+	}
+	if !strings.Contains(project, "## Topics\n### Database\n- pg needs PGPASSWORD") {
+		t.Errorf("project KB missing topic fact: %q", project)
+	}
+}
+
+// TestServe_RememberDedupIdempotent asserts a duplicate fact submitted twice
+// through the socket is a silent no-op the second time (write-dedup).
+func TestServe_RememberDedupIdempotent(t *testing.T) {
+	d := newTestDriver(t)
+	root := t.TempDir()
+	projectRoot := "/dedup/project"
+	socket := serveTest(t, Deps{Driver: d, ProjectRoot: projectRoot, KBRoot: root})
+
+	call := Call{Tool: "remember", Kind: "environment", Fact: "uses bazel"}
+	for i := 0; i < 2; i++ {
+		res, err := Dial(socket, call)
+		if err != nil {
+			t.Fatalf("Dial #%d: %v", i, err)
+		}
+		if !res.OK {
+			t.Fatalf("Dial #%d: ok = false, err = %q", i, res.Error)
+		}
+	}
+
+	want := "<!-- meta: project-root: " + projectRoot + " -->\n\n## Environment\n- uses bazel\n"
+	if got := kb.LoadProject(root, projectRoot); string(got) != want {
+		t.Errorf("KB contents after dup = %q, want %q (one bullet only)", got, want)
+	}
+}
+
+// TestServe_RememberFlattensEmbeddedNewlines locks newline hygiene through the
+// socket seam: a fact carrying embedded newlines must round-trip as ONE
+// flattened bullet — never raw multi-line text whose continuation lines would
+// parse back as un-prefixed (non-bullet) lines and corrupt the section.
+func TestServe_RememberFlattensEmbeddedNewlines(t *testing.T) {
+	d := newTestDriver(t)
+	root := t.TempDir()
+	projectRoot := "/newline/project"
+	socket := serveTest(t, Deps{Driver: d, ProjectRoot: projectRoot, KBRoot: root})
+
+	res, err := Dial(socket, Call{Tool: "remember", Kind: "environment", Fact: "uses bazel\nfor all builds"})
+	if err != nil {
+		t.Fatalf("Dial remember: %v", err)
+	}
+	if !res.OK {
+		t.Fatalf("remember ok = false, err = %q", res.Error)
+	}
+	want := "<!-- meta: project-root: " + projectRoot + " -->\n\n## Environment\n- uses bazel for all builds\n"
+	if got := kb.LoadProject(root, projectRoot); string(got) != want {
+		t.Fatalf("KB after multi-line fact = %q, want one flattened bullet %q", got, want)
+	}
+
+	// The file parses back cleanly: a follow-up write round-trips without
+	// dropping or duplicating the flattened bullet.
+	if res, err := Dial(socket, Call{Tool: "remember", Kind: "environment", Fact: "second fact"}); err != nil || !res.OK {
+		t.Fatalf("second remember: err = %v, res = %+v", err, res)
+	}
+	want = "<!-- meta: project-root: " + projectRoot + " -->\n\n## Environment\n- uses bazel for all builds\n- second fact\n"
+	if got := kb.LoadProject(root, projectRoot); string(got) != want {
+		t.Errorf("KB after second write = %q, want %q", got, want)
 	}
 }
 

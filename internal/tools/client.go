@@ -14,6 +14,8 @@ type Call struct {
 	Tool        string          `json:"tool"`
 	ID          string          `json:"id,omitempty"`
 	Cmd         string          `json:"cmd,omitempty"`
+	Kind        string          `json:"kind,omitempty"`  // remember: system|user|environment|topic
+	Topic       string          `json:"topic,omitempty"` // remember: required iff kind=topic
 	Fact        string          `json:"fact,omitempty"`
 	ProjectRoot string          `json:"projectRoot,omitempty"`
 	Prompt      string          `json:"prompt,omitempty"`

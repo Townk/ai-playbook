@@ -141,19 +141,19 @@ func TestRunHandler_ForwardsToBackend(t *testing.T) {
 }
 
 // TestRememberHandler_ForwardsToBackend exercises the closure returned by
-// rememberHandler: fact and optional projectRoot are forwarded verbatim.
+// rememberHandler: kind, topic, fact, and projectRoot are forwarded verbatim.
 func TestRememberHandler_ForwardsToBackend(t *testing.T) {
 	fb := startFakeBackend(t, tools.Result{OK: true})
 	h := rememberHandler(fb.socket)
 
-	res, _, err := h(context.Background(), nil, rememberInput{Fact: "uses bazel", ProjectRoot: "/proj"})
+	res, _, err := h(context.Background(), nil, rememberInput{Kind: "topic", Topic: "db", Fact: "uses bazel", ProjectRoot: "/proj"})
 	if err != nil {
 		t.Fatalf("rememberHandler: %v", err)
 	}
 
 	got := fb.lastCall()
-	if got.Tool != "remember" || got.Fact != "uses bazel" || got.ProjectRoot != "/proj" {
-		t.Errorf("backend got %+v, want remember/uses bazel//proj", got)
+	if got.Tool != "remember" || got.Kind != "topic" || got.Topic != "db" || got.Fact != "uses bazel" || got.ProjectRoot != "/proj" {
+		t.Errorf("backend got %+v, want remember/topic/db/uses bazel//proj", got)
 	}
 	if text := contentText(t, res); text != "saved" {
 		t.Errorf("rememberHandler text = %q, want %q", text, "saved")
