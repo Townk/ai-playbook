@@ -330,3 +330,57 @@ func TestProjectStoreDir_Default(t *testing.T) {
 		t.Fatalf("ProjectStoreDir default = %q, want %q", got, want)
 	}
 }
+
+// ── [kb] section ──────────────────────────────────────────────────────────────
+
+// The baked-in defaults: budget 4096, dir "" (derive from the shared data root).
+func TestKB_Defaults(t *testing.T) {
+	def := Default()
+	if def.KB.Budget != 4096 {
+		t.Fatalf("KB.Budget default = %d, want 4096", def.KB.Budget)
+	}
+	if def.KB.Dir != "" {
+		t.Fatalf("KB.Dir default = %q, want \"\"", def.KB.Dir)
+	}
+}
+
+// KBDir default derives from AI_PLAYBOOK_DATA_DIR (the shared data root).
+func TestKBDir_Default(t *testing.T) {
+	tmp := t.TempDir()
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", tmp)
+	if got := Default().KBDir(); got != tmp {
+		t.Fatalf("KBDir default = %q, want %q", got, tmp)
+	}
+}
+
+// A [kb] block's keys override the defaults; this is the loadFrom-merge-line
+// regression guard (a new field must be added to the hand-written merge).
+func TestKB_MergeOverrides(t *testing.T) {
+	data := []byte("[kb]\nbudget = 8192\ndir = \"~/kb\"\n")
+	cfg, err := loadFrom(Default(), "test.toml", data)
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.KB.Budget != 8192 {
+		t.Fatalf("KB.Budget override = %d, want 8192", cfg.KB.Budget)
+	}
+	home, _ := os.UserHomeDir()
+	want := filepath.Join(home, "kb")
+	if got := cfg.KBDir(); got != want {
+		t.Fatalf("KBDir tilde = %q, want %q", got, want)
+	}
+}
+
+// An absent [kb] block keeps the defaults (budget 4096, dir "").
+func TestKB_AbsentKeepsDefaults(t *testing.T) {
+	cfg, err := loadFrom(Default(), "test.toml", []byte("[agent]\nharness = \"pi\"\n"))
+	if err != nil {
+		t.Fatalf("loadFrom: %v", err)
+	}
+	if cfg.KB.Budget != 4096 {
+		t.Fatalf("KB.Budget should keep default: %d", cfg.KB.Budget)
+	}
+	if cfg.KB.Dir != "" {
+		t.Fatalf("KB.Dir should keep default: %q", cfg.KB.Dir)
+	}
+}

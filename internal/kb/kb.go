@@ -22,25 +22,20 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Townk/ai-playbook/internal/cache"
 )
 
-// KnowledgeBase is the per-project distilled-facts text, verbatim from the KB
-// file. Empty when the project has no KB file or the file is empty.
+// KnowledgeBase is distilled-facts text, verbatim from a KB file. Empty when the
+// file is missing or empty.
 type KnowledgeBase string
 
-// DefaultRoot resolves the data-dir root: AI_PLAYBOOK_DATA_DIR, else
-// ${XDG_DATA_HOME:-$HOME/.local/share}/ai-playbook. It matches cache.DefaultRoot
-// so the cache and KB live under the same tree.
+// DefaultRoot resolves the data-dir root shared by the cache and the KB:
+// AI_PLAYBOOK_DATA_DIR, else ${XDG_DATA_HOME:-$HOME/.local/share}/ai-playbook.
+// It delegates to cache.DefaultRoot — the one shared resolver — so the two
+// packages can never drift.
 func DefaultRoot() string {
-	if v := os.Getenv("AI_PLAYBOOK_DATA_DIR"); v != "" {
-		return v
-	}
-	xdg := os.Getenv("XDG_DATA_HOME")
-	if xdg == "" {
-		home, _ := os.UserHomeDir()
-		xdg = filepath.Join(home, ".local", "share")
-	}
-	return filepath.Join(xdg, "ai-playbook")
+	return cache.DefaultRoot()
 }
 
 // projectKey reproduces assist::project_key: the lowercase hex SHA-1 of the
@@ -50,23 +45,62 @@ func projectKey(projectRoot string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// Path returns the KB file path for projectRoot under the given root, mirroring
-// assist::kb_path: $root/projects/<project_key>/knowledge.md.
+// Path returns the PROJECT KB file path for projectRoot under the given root,
+// mirroring assist::kb_path: $root/projects/<project_key>/knowledge.md.
 func Path(root, projectRoot string) string {
 	return filepath.Join(root, "projects", projectKey(projectRoot), "knowledge.md")
 }
 
-// Load reads the per-project KB for projectRoot from the default data dir and
-// returns its contents. Missing or empty file → "" (the shell only folds the KB
-// block in when the file is non-empty: `[[ -s "$kb_path" ]]`). Unreadable file
-// is treated as empty (best-effort, never fatal — matches the shell never
-// crashing on a missing KB). A trailing newline is preserved verbatim, as the
-// shell's `cat` would emit it.
+// GlobalPath returns the GLOBAL KB file path under the given root:
+// $root/knowledge.md (sections ## System / ## User).
+func GlobalPath(root string) string {
+	return filepath.Join(root, "knowledge.md")
+}
+
+// LoadGlobal reads the global KB file (root/knowledge.md) verbatim. A missing or
+// unreadable file → "" (best-effort, never fatal). The global file is always
+// sectioned (## System / ## User) and carries no meta line.
+func LoadGlobal(root string) KnowledgeBase {
+	b, err := os.ReadFile(GlobalPath(root))
+	if err != nil {
+		return ""
+	}
+	return KnowledgeBase(b)
+}
+
+// LoadProject reads the per-project KB for projectRoot verbatim, performing the
+// LAZY MIGRATION READ: a legacy (unsectioned) file is presented as if its
+// bullets lived under a ## Environment section, so recall sees the taxonomy even
+// before the first sectioned write rewrites the file on disk. An already
+// sectioned file is returned verbatim. Missing/empty/unreadable → "".
+func LoadProject(root, projectRoot string) KnowledgeBase {
+	b, err := os.ReadFile(Path(root, projectRoot))
+	if err != nil {
+		return ""
+	}
+	content := string(b)
+	if strings.TrimSpace(content) == "" {
+		return ""
+	}
+	if isSectioned(content) {
+		return KnowledgeBase(content)
+	}
+	return KnowledgeBase(secEnvironment + "\n" + content)
+}
+
+// Load reads the per-project KB for projectRoot from the default data dir,
+// verbatim (no migration transform).
+//
+// Legacy: this verbatim reader is kept so the pre-v0.12 recall call sites keep
+// compiling unchanged; K3 migrates those call sites to LoadProject
+// (migration-aware) and LoadGlobal. New code should use LoadProject.
 func Load(projectRoot string) KnowledgeBase {
 	return LoadFrom(DefaultRoot(), projectRoot)
 }
 
 // LoadFrom is Load against an explicit root (for tests / non-default data dirs).
+//
+// Legacy: verbatim reader; see Load. K3 moves callers to LoadProject.
 func LoadFrom(root, projectRoot string) KnowledgeBase {
 	b, err := os.ReadFile(Path(root, projectRoot))
 	if err != nil {
@@ -75,8 +109,13 @@ func LoadFrom(root, projectRoot string) KnowledgeBase {
 	return KnowledgeBase(b)
 }
 
-// AppendTo appends a distilled fact to the per-project knowledge base under an
-// explicit root (for tests / non-default data dirs).
+// AppendTo appends a distilled fact as a flat "- <fact>" bullet to the
+// per-project knowledge base under an explicit root.
+//
+// Legacy: the flat (unsectioned) writer, kept so doRemember keeps compiling. K2
+// replaces the call site with Append(root, projectRoot, KindEnvironment, "",
+// fact) and the two-set taxonomy; the flat files this still produces migrate
+// lazily via LoadProject / the first sectioned Append. New code should use Append.
 func AppendTo(root, projectRoot, fact string) error {
 	fact = strings.TrimSpace(fact)
 	if fact == "" {

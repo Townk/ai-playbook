@@ -93,12 +93,27 @@ type Store struct {
 	Project string `toml:"project"`
 }
 
+// KB holds the knowledge-base configuration (ADR-0011).
+//
+// Budget: the per-file size budget in bytes (default 4096). A file over budget
+// triggers ONE compaction pass at solution completion (K4); recall's hard
+// tail-cap is a multiple of this value.
+//
+// Dir: a root override for the knowledge files. An empty string (the default)
+// means "derive from the shared data root" (cache.DefaultRoot()), so
+// AI_PLAYBOOK_DATA_DIR still wins. A "~" or "~/" prefix is home-expanded.
+type KB struct {
+	Budget int    `toml:"budget"`
+	Dir    string `toml:"dir"`
+}
+
 // Config is the merged ai-playbook configuration.
 type Config struct {
 	Mux    Mux    `toml:"mux"`
 	Agent  Agent  `toml:"agent"`
 	Driver Driver `toml:"driver"`
 	Store  Store  `toml:"store"`
+	KB     KB     `toml:"kb"`
 }
 
 // Default returns a fresh copy of the baked-in default profile. The multiplexer
@@ -143,6 +158,9 @@ func Default() *Config {
 		// Global left empty so the resolver derives it from cache.DefaultRoot() at
 		// call time, honouring AI_PLAYBOOK_DATA_DIR without baking a literal path.
 		Store: Store{Project: ".ai-playbook/playbooks"},
+		// Dir left empty so KBDir derives it from cache.DefaultRoot() at call time
+		// (the shared data root); budget defaults to a generous 4096 bytes per file.
+		KB: KB{Budget: 4096},
 	}
 }
 
@@ -211,12 +229,22 @@ func loadFrom(base *Config, path string, data []byte) (*Config, error) {
 	mergeStr(&base.Driver.Shell, user.Driver.Shell)
 	mergeStr(&base.Store.Global, user.Store.Global)
 	mergeStr(&base.Store.Project, user.Store.Project)
+	mergeInt(&base.KB.Budget, user.KB.Budget)
+	mergeStr(&base.KB.Dir, user.KB.Dir)
 	return base, nil
 }
 
 // mergeStr overwrites *dst with v only when v is non-empty.
 func mergeStr(dst *string, v string) {
 	if v != "" {
+		*dst = v
+	}
+}
+
+// mergeInt overwrites *dst with v only when v is non-zero (an unset TOML int
+// decodes to 0, which must not blank the default).
+func mergeInt(dst *int, v int) {
+	if v != 0 {
 		*dst = v
 	}
 }
@@ -266,6 +294,17 @@ func (c *Config) ProjectStoreDir(projectRoot string) string {
 		return p
 	}
 	return filepath.Join(projectRoot, p)
+}
+
+// KBDir returns the resolved root for the knowledge files. If KB.Dir is
+// non-empty it is tilde-expanded and returned verbatim; otherwise the default is
+// cache.DefaultRoot(), which honours AI_PLAYBOOK_DATA_DIR without baking a
+// literal home-dir path. It mirrors GlobalStoreDir's resolution.
+func (c *Config) KBDir() string {
+	if c.KB.Dir != "" {
+		return expandTilde(c.KB.Dir)
+	}
+	return cache.DefaultRoot()
 }
 
 // Subst is the set of placeholder values for a single template expansion. A
