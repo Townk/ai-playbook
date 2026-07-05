@@ -144,6 +144,14 @@ type Reengage struct {
 	// falls back to <dataRoot>/playbooks for back-compat (the pre-Task-4 behaviour).
 	// This package does NOT import config — the launcher injects the resolved dir.
 	StoreDir string
+
+	// Compact is the over-budget knowledge-compaction hook (ADR-0011 / K4). It fires
+	// AFTER CommitPlaybook saves the solution artifact — the wrap-up's durable close —
+	// so the facts the wrap-up just `remember`ed are compacted when a KB file now
+	// exceeds budget. The launcher wires it to author.CompactOversized (root + budget +
+	// the CompactKB call); this package stays config-free. nil-safe: a nil hook is a
+	// no-op, and the hook is best-effort (it never fails the commit).
+	Compact func()
 }
 
 // PlaybookMeta is the re-engagement-local mirror of the model's four classification
@@ -401,6 +409,14 @@ func (e *Engine) CommitPlaybook(body string) (string, error) {
 	// (2) Save the .md file (FM + body) at the resolved path.
 	if err := os.WriteFile(path, []byte(full), 0o644); err != nil {
 		return "", err
+	}
+
+	// (3) Over-budget knowledge compaction (spec "Fill and compact"): the wrap-up's
+	// solution-artifact is now durable, so fire the injected hook to compact any KB
+	// file the wrap-up's `remember` fill pushed over budget. Best-effort and nil-safe
+	// — it manages its own failures/guards and never fails the commit.
+	if re.Compact != nil {
+		re.Compact()
 	}
 	return path, nil
 }

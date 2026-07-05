@@ -56,7 +56,13 @@ write-time curation (write-dedup + wrap-up fill + over-budget compaction with
 - **Fill**: the wrap-up flow's prompt gains one instruction: before finishing,
   `remember` the session's durable lessons (classified per the taxonomy).
   This uses the existing tool inside the existing call — no extra round trip.
-  Only wrap-up gets the instruction (not every authoring call).
+  The instruction attaches to every FinalPlaybook-kind generation (the `w`
+  wrap-up and the `f`/`r` refine/amend — the code does not distinguish them at
+  the prompt level), MCP-gated (omitted when the tools backend isn't wired, so
+  the model is never pointed at an unavailable tool); it never attaches to
+  initial authoring, follow-up, or drift-regen. Repeated refines cost only
+  deduped, idempotent `remember` calls; compaction stays commit-only (ADR-0011
+  — the one sanctioned rewrite fires at the solution-artifact save).
 - **Compact**: after the wrap-up completes, each KB file whose size exceeds
   `[kb] budget` gets ONE compaction call (a quick structured call, same
   invocation class as classify/metadata: bounded timeout, no MCP): the model
@@ -64,11 +70,16 @@ write-time curation (write-dedup + wrap-up fill + over-budget compaction with
   generalize overlapping facts, drop stale topic entries, PRESERVE the section
   structure and the meta comment. The result replaces the file; the prior
   content is written to `knowledge.md.bak` first (one level, overwritten each
-  compaction). A compaction result that is empty, larger than the input, or
-  missing the required sections is REJECTED (file untouched, stderr note) —
-  the model cannot destroy knowledge through a bad compaction.
+  compaction). A compaction result that is empty, not smaller than the input
+  (>= — an identical rewrite is pointless to persist), missing a required
+  section, or dropping the input's meta line is REJECTED (file untouched, no
+  .bak, stderr note) — the model cannot destroy knowledge through a bad
+  compaction.
 - Under budget ⇒ no call, no cost. Failures (timeout, harness error) leave the
-  file untouched (stderr note; wrap-up itself is unaffected).
+  file untouched (stderr note; wrap-up itself is unaffected). A file changed by
+  another session during the compaction window is detected by a pre-replace
+  re-read and skipped (untouched, no .bak, stderr note) — a concurrent
+  `remember` is never clobbered.
 
 ## Recall
 
@@ -117,13 +128,16 @@ write-time curation (write-dedup + wrap-up fill + over-budget compaction with
   kind=topic, projectRoot with global kind → tool errors); routing end-to-end
   through the MCP socket seam.
 - **Compaction**: trigger gating (under budget = no call — fake harness
-  asserts zero invocations); rejection guards (empty/larger/section-missing
-  results leave the file + write no .bak); `.bak` written before replace;
-  failure tolerance (timeout leaves file untouched, wrap-up unaffected).
+  asserts zero invocations); rejection guards (empty/not-smaller incl. the
+  equal-size boundary/section-missing/meta-dropped results leave the file +
+  write no .bak); `.bak` written before replace; failure tolerance (timeout
+  leaves file untouched, wrap-up unaffected); the cross-session race abort
+  (a write landing in the compaction window survives — no replace, no .bak).
 - **Recall**: characterization — no KB ⇒ byte-identical prompts for all four
   call shapes; with both files ⇒ global-then-project order under the heading;
   tail-cap on an oversized file.
-- **Fill**: the wrap-up prompt contains the memory-fill instruction (golden);
-  non-wrap-up prompts do NOT.
+- **Fill**: the MCP-wired FinalPlaybook (wrap-up/refine) prompt contains the
+  memory-fill instruction (golden); the unwired FinalPlaybook prompt and every
+  other prompt shape do NOT.
 - **CLI**: table tests per subcommand incl. name resolution from the meta
   line and the sha1 fallback; docs-check green (new man/completion).

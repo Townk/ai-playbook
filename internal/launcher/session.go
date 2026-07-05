@@ -490,7 +490,7 @@ func reengageStructured(kind reengage.ReengageKind) bool {
 // prompt byte-identical to the pre-feature output (characterization-tested). It is a
 // pure function (no session/process state) so the constraints injection is testable
 // without spawning the harness.
-func reengagePrompts(req capture.Request, kind reengage.ReengageKind, base, change string, constraints []string, cfg *config.Config) (sys, user string) {
+func reengagePrompts(req capture.Request, kind reengage.ReengageKind, base, change string, constraints []string, cfg *config.Config, mcpWired bool) (sys, user string) {
 	// Load BOTH knowledge sets ONCE (tail-capped at the load boundary) and thread
 	// them into whichever builder this kind uses, so every re-engagement recalls
 	// identically. Empty KB ⇒ byte-identical prompts (characterization contract).
@@ -501,8 +501,16 @@ func reengagePrompts(req capture.Request, kind reengage.ReengageKind, base, chan
 		user = author.BuildUserMessage(req)
 	case reengage.KindReengageFinalPlaybook:
 		// FINAL-PLAYBOOK (stage 2): fresh when base=="" (change = the troubleshoot
-		// content to distill), amend when base!="" (fold change into the base).
+		// content to distill), amend when base!="" (fold change into the base). This is
+		// the WRAP-UP prompt (ADR-0011 / K4): when the MCP tools backend is wired
+		// (mcpWired), fold in the ONE memory-fill instruction so the model `remember`s
+		// the session's durable lessons before finishing. Without MCP the `remember`
+		// tool is unavailable, so the instruction is omitted (byte-identical to the
+		// plain final prompt) — this is the ONLY prompt shape that gets it.
 		sys = author.FinalPlaybookPrompt(req, base, change, global, project)
+		if mcpWired {
+			sys = author.WithMemoryFill(sys)
+		}
 		user = author.BuildUserMessage(req)
 	case reengage.KindReengageDriftRegen:
 		sys, user = author.DriftRegenPrompt(base, change, global, project) // base=current file, change=stale patch
@@ -536,7 +544,10 @@ func buildReengageEvents(req capture.Request, sess *session) reengage.EventsFunc
 
 		cfg, _ := config.Load()
 
-		sys, user := reengagePrompts(req, kind, base, change, constraints, cfg)
+		// mcpPath != "" ⇒ the session's run/ask/remember backend is wired, so the
+		// wrap-up prompt may carry the memory-fill instruction (the `remember` tool
+		// exists). An unwired session omits it (the tool would be unavailable).
+		sys, user := reengagePrompts(req, kind, base, change, constraints, cfg, mcpPath != "")
 
 		// cfg already loaded above.
 		events, wait, err := author.RunHarnessEvents(sys, user, author.AuthorOptions{
@@ -589,6 +600,22 @@ func buildMetadataSeam(sess *session) func(doc string) (reengage.PlaybookMeta, e
 			Tags:        meta.Tags,
 			EnvNotes:    notes,
 		}, nil
+	}
+}
+
+// buildCompactionHook builds the reengage.Reengage.Compact seam (ADR-0011 / K4):
+// the over-budget knowledge-compaction pass CommitPlaybook fires after the wrap-up's
+// solution artifact is saved. It captures cfg (the resolved [kb] root + budget) and
+// the request's project root, so author.CompactOversized compacts BOTH knowledge
+// files (global + this project) whenever the wrap-up's `remember` fill pushed one
+// over budget. It lives in the launcher (which imports author + config) so reengage
+// stays config-free. Best-effort: CompactOversized handles its own failures/guards.
+func buildCompactionHook(req capture.Request, cfg *config.Config) func() {
+	if cfg == nil {
+		cfg = config.Default()
+	}
+	return func() {
+		author.CompactOversized(cfg, cfg.KBDir(), req.ProjectRoot, cfg.KB.Budget)
 	}
 }
 
@@ -834,6 +861,7 @@ func escalateReengage(d triage.Decision, req capture.Request, sess *session, cfg
 		Metadata:    buildMetadataSeam(sess),
 		EnvLookup:   buildEnvLookup(sess.drv),
 		StoreDir:    storeDir,
+		Compact:     buildCompactionHook(req, cfg),
 	}
 }
 

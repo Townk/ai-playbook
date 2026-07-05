@@ -63,7 +63,7 @@ func TestReengagePrompts_NilConstraintsByteIdentical(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sys, _ := reengagePrompts(req, tc.kind, base, change, nil, cfg)
+			sys, _ := reengagePrompts(req, tc.kind, base, change, nil, cfg, false)
 			if sys != tc.want {
 				t.Errorf("nil-constraints system prompt is not byte-identical to the raw author prompt\n--- got ---\n%s\n--- want ---\n%s", sys, tc.want)
 			}
@@ -118,7 +118,7 @@ func TestReengagePrompts_KBFoldAndConstraintsOrdering(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			sys, _ := reengagePrompts(req, tc.kind, base, change, constraints, cfg)
+			sys, _ := reengagePrompts(req, tc.kind, base, change, constraints, cfg, false)
 			iBase := strings.Index(sys, tc.baseMarker)
 			iKB := strings.Index(sys, kbHeading)
 			iCon := strings.Index(sys, constraintsHeading)
@@ -153,12 +153,49 @@ func TestReengagePrompts_ConstraintsSectionInjectedAllKinds(t *testing.T) {
 		reengage.KindReengageFinalPlaybook,
 		reengage.KindReengageDriftRegen,
 	} {
-		sys, _ := reengagePrompts(req, kind, base, change, constraints, cfg)
+		sys, _ := reengagePrompts(req, kind, base, change, constraints, cfg, false)
 		if !strings.Contains(sys, heading) {
 			t.Errorf("kind %v: constraints section missing\n%s", kind, sys)
 		}
 		if !strings.Contains(sys, "- no docker") {
 			t.Errorf("kind %v: constraint bullet missing\n%s", kind, sys)
+		}
+	}
+}
+
+// TestReengagePrompts_MemoryFillMCPGated pins the K4 fill placement: the wrap-up
+// (FinalPlaybook) prompt carries the memory-fill instruction ONLY when MCP is wired
+// (mcpWired=true); an unwired wrap-up and every other kind omit it, MCP-wired or not.
+func TestReengagePrompts_MemoryFillMCPGated(t *testing.T) {
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir()) // empty KB ⇒ deterministic
+	cfg := config.Default()
+	req := capture.Request{Kind: "error", Command: "make build", Exit: "2", UserRequest: "fix my broken build"}
+	const base = "# Playbook — set up the build\n\n```bash {id=verify}\nmake build\n```\n"
+	const change = "the resolved troubleshoot content"
+
+	// The sentinel matches author.WithMemoryFill's instruction (case-insensitive).
+	const sentinel = "before you finish, save the session's durable lessons"
+	has := func(kind reengage.ReengageKind, mcpWired bool) bool {
+		sys, _ := reengagePrompts(req, kind, base, change, nil, cfg, mcpWired)
+		return strings.Contains(strings.ToLower(sys), sentinel)
+	}
+
+	// PRESENT: the wrap-up prompt with MCP wired.
+	if !has(reengage.KindReengageFinalPlaybook, true) {
+		t.Errorf("MCP-wired wrap-up prompt must carry the memory-fill instruction")
+	}
+	// ABSENT: the wrap-up prompt without MCP (the `remember` tool is unavailable).
+	if has(reengage.KindReengageFinalPlaybook, false) {
+		t.Errorf("unwired wrap-up prompt must NOT carry the memory-fill instruction")
+	}
+	// ABSENT: every other kind, MCP wired or not.
+	for _, kind := range []reengage.ReengageKind{
+		reengage.KindReengageRegenerate,
+		reengage.KindReengageFollowup,
+		reengage.KindReengageDriftRegen,
+	} {
+		if has(kind, true) {
+			t.Errorf("kind %v must NOT carry the memory-fill instruction (only wrap-up does)", kind)
 		}
 	}
 }

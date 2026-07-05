@@ -303,6 +303,7 @@ func newAuthoringReengage(req capture.Request, d triage.Decision, c *cache.Cache
 		Metadata:    capturedMetaSeam(sess),
 		EnvLookup:   buildEnvLookup(sharedDrv),
 		StoreDir:    cfg.GlobalStoreDir(),
+		Compact:     buildCompactionHook(req, cfg),
 	}
 	if !d.Disabled && !noCache {
 		re.CtxHash = d.CtxHash

@@ -53,6 +53,48 @@ func splitFM(t *testing.T, content string) (parsedFM, string) {
 	return fm, body
 }
 
+// CommitPlaybook fires the injected Compact hook (ADR-0011 / K4) AFTER the solution
+// artifact is saved — the wrap-up's durable close — exactly once. A nil hook is a
+// safe no-op.
+func TestCommitPlaybook_FiresCompactHook(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
+
+	fired := 0
+	var savedWhenFired bool
+	e := New(&Reengage{
+		Req:      sampleReq(),
+		DataRoot: root,
+		Compact: func() {
+			fired++
+			// The artifact is saved BEFORE the hook runs: a playbook file already exists.
+			entries, _ := os.ReadDir(filepath.Join(root, "playbooks"))
+			savedWhenFired = len(entries) > 0
+		},
+	}, nil)
+
+	body := "# Playbook — X\n\n```bash {id=verify}\ntrue\n```\n"
+	if _, err := e.CommitPlaybook(body); err != nil {
+		t.Fatalf("CommitPlaybook: %v", err)
+	}
+	if fired != 1 {
+		t.Errorf("Compact hook fired %d times, want exactly 1", fired)
+	}
+	if !savedWhenFired {
+		t.Errorf("Compact hook must fire AFTER the artifact is saved")
+	}
+}
+
+func TestCommitPlaybook_NilCompactHookNoOp(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
+	e := New(&Reengage{Req: sampleReq(), DataRoot: root}, nil) // no Compact seam
+	body := "# Playbook — X\n\n```bash {id=verify}\ntrue\n```\n"
+	if _, err := e.CommitPlaybook(body); err != nil {
+		t.Fatalf("CommitPlaybook with a nil Compact hook must not fail: %v", err)
+	}
+}
+
 // CommitPlaybook assembles + persists the §C/§E front matter: the saved file AND the
 // cache entry begin with a ---…--- block carrying the name, the model
 // description/category/tags, and an env map with the referenced var's value (+ why
