@@ -237,6 +237,41 @@ func TestCompactFile_AbortsWhenFileChangesDuringCall(t *testing.T) {
 	}
 }
 
+// Re-read failure: a file that becomes UNREADABLE inside the compaction window
+// (simulated by deleting it via the compactPreReplace seam) aborts with the
+// dedicated "re-read failed" note — NOT the "changed during compaction" note (an
+// unreadable file must not claim it changed) — and writes no .bak.
+func TestCompactFile_ReReadError_DistinctNote(t *testing.T) {
+	const result = "## System\n- merged\n\n## User\n- pref a\n"
+	root := t.TempDir()
+	gpath := writeGlobalKB(t, root, compactInput)
+	bin := fakeMetadataHarness(t, result)
+	setCompactProcess(t, bin, nil)
+
+	prev := compactPreReplace
+	compactPreReplace = func(path string) {
+		if err := os.Remove(path); err != nil {
+			t.Errorf("remove inside the compaction window: %v", err)
+		}
+	}
+	t.Cleanup(func() { compactPreReplace = prev })
+
+	note := captureStderr(t, func() { CompactOversized(claudeCfg(), root, "", 10) })
+
+	if _, err := os.Stat(gpath); err == nil {
+		t.Errorf("re-read-failure abort must not resurrect the file via a replace")
+	}
+	if _, err := os.Stat(gpath + ".bak"); err == nil {
+		t.Errorf("re-read-failure abort must NOT write a .bak")
+	}
+	if !strings.Contains(note, "re-read failed") {
+		t.Errorf("re-read failure must write the dedicated stderr note, got %q", note)
+	}
+	if strings.Contains(note, "changed during compaction") {
+		t.Errorf("an unreadable file must not claim it changed, got %q", note)
+	}
+}
+
 // captureStderr runs f and returns whatever it wrote to os.Stderr (the same
 // pipe-swap pattern the kb suite uses for Capped's truncation note).
 func captureStderr(t *testing.T, f func()) string {

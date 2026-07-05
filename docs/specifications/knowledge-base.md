@@ -78,8 +78,9 @@ write-time curation (write-dedup + wrap-up fill + over-budget compaction with
 - Under budget ⇒ no call, no cost. Failures (timeout, harness error) leave the
   file untouched (stderr note; wrap-up itself is unaffected). A file changed by
   another session during the compaction window is detected by a pre-replace
-  re-read and skipped (untouched, no .bak, stderr note) — a concurrent
-  `remember` is never clobbered.
+  re-read and skipped (untouched, no .bak, stderr note) — not clobbered by a
+  compaction-window write; a write landing between the re-read and the
+  replace remains theoretically exposed.
 
 ## Recall
 

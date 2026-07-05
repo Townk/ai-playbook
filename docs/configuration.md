@@ -62,6 +62,18 @@ The template defaults are the zellij commands from `config.Default()`; see
 `config/config.go` for the exact strings and the placeholder/argv-safety contract.
 An empty template value after merge means that action is unconfigured.
 
+### `[kb]`
+
+Controls the two-set knowledge base (ADR-0011): the GLOBAL file
+(`## System`/`## User`, shared across projects) and each project's file
+(`## Environment`/`## Topics`) that `remember`/`recall` and the `kb` CLI verb
+read and write.
+
+| Key      | Default | Meaning |
+|----------|---------|---------|
+| `budget` | `4096`  | Per-file size budget in bytes. A knowledge file over budget gets ONE compaction pass at solution completion (merge/generalize/drop-stale, `.bak` written first); recall's hard read-time tail-cap is a multiple of this value. |
+| `dir`    | `""`    | Root override for the knowledge files. Empty (the default) derives the root from the shared data dir (`AI_PLAYBOOK_DATA_DIR`, else the XDG data home). A `~`/`~/` prefix is home-expanded. |
+
 Example:
 
 ```toml
@@ -78,6 +90,10 @@ shell = "bash"   # pin bash; omit (or "") to auto-honor $SHELL
 backend = "zellij"   # opt in to the multiplexer (off by default)
 # tier-2: override a single action only if you are not on the default zellij setup
 dump-screen = "tmux capture-pane -p {panearg}"
+
+[kb]
+budget = 4096   # per-file byte budget before wrap-up compaction kicks in
+dir = ""        # "" derives from the shared data dir; set to override
 ```
 
 ## Environment variables

@@ -34,18 +34,22 @@ type Flag struct {
 // minimally (Summary + Synopsis + key flags only — see the Commands doc
 // comment for which flags are "key" on each internal command). SlugArg marks
 // a command whose positional resolves a playbook store <slug> (for
-// completion wiring in a later task).
+// completion wiring in a later task). Subcommands names a fixed enum of
+// sub-subcommand tokens the command's FIRST positional accepts (e.g. kb's
+// show/edit/search/list); zsh completion offers them in first position.
+// Empty means no fixed-enum positional (every other command today).
 type Command struct {
-	Name     string
-	Aliases  []string
-	Summary  string
-	Synopsis string
-	Long     string
-	Args     string
-	Flags    []Flag
-	Examples []string
-	Internal bool
-	SlugArg  bool
+	Name        string
+	Aliases     []string
+	Summary     string
+	Synopsis    string
+	Long        string
+	Args        string
+	Flags       []Flag
+	Examples    []string
+	Internal    bool
+	SlugArg     bool
+	Subcommands []string
 }
 
 // Commands is the full CLI command registry, populated verbatim from each
@@ -59,6 +63,7 @@ type Command struct {
 //   - create    → CreateMain/parseCreateArgs, internal/launcher/createcmd.go
 //   - show      → ShowMain, internal/launcher/storecmd.go
 //   - edit      → EditMain, internal/launcher/storecmd.go
+//   - kb        → KBMain, internal/launcher/kbcmd.go
 //   - assist    → Assist, internal/launcher/launcher.go (alias: troubleshoot)
 //   - finalize  → finalize, cmd/ai-playbook/finalize.go
 //   - session   → SessionMain, internal/launcher/session.go
@@ -148,6 +153,45 @@ var Commands = []Command{
 		SlugArg:  true,
 		Examples: []string{
 			"ai-playbook edit deploy-staging",
+		},
+	},
+	{
+		Name:     "kb",
+		Summary:  "Browse, search, and edit the two-set knowledge base",
+		Synopsis: "kb <show|edit|search|list> [flags]",
+		Long: "kb browses the two knowledge sets remember/recall use: the GLOBAL file\n" +
+			"(## System / ## User — the machine and the user, shared across projects) and\n" +
+			"each PROJECT's file (## Environment / ## Topics — this project's setup and\n" +
+			"domain-specific lessons).\n\n" +
+			"kb show [--project <path>] [--global]\n" +
+			"    Print the knowledge sets. Default: both, exactly what recall sees for\n" +
+			"    the cwd's project (global then project); --global narrows to the\n" +
+			"    global set; --project <path> alone shows ONLY that project's set\n" +
+			"    (the global set is suppressed unless --global is also given).\n\n" +
+			"kb edit [--project <path>] [--global]\n" +
+			"    Open a knowledge file in $EDITOR. Default: the cwd's project file;\n" +
+			"    --global edits the global file instead; --project <path> edits\n" +
+			"    another project's file. --global and --project are mutually exclusive.\n\n" +
+			"kb search [--all] <query>\n" +
+			"    Case-insensitive substring search over fact bullets. Default: the\n" +
+			"    global file plus the cwd's project file; --all spans every project's\n" +
+			"    file. Results are grouped by set/project (a resolved project name,\n" +
+			"    else its storage key).\n\n" +
+			"kb list\n" +
+			"    The global file (size, fact count) plus every project that has a\n" +
+			"    knowledge file (name, path, size, fact count).",
+		Args:        "<show|edit|search|list>",
+		Subcommands: []string{"show", "edit", "search", "list"},
+		Flags: []Flag{
+			{Name: "project", Placeholder: "<path>", Desc: "target this project path instead of the cwd's project root; with show (and no --global) ONLY that project's set is printed (show/edit)"},
+			{Name: "global", Bool: true, Desc: "narrow to the global knowledge set (show), or edit the global file (edit)"},
+			{Name: "all", Bool: true, Desc: "search every project's knowledge file, not just the cwd's (search)"},
+		},
+		Examples: []string{
+			"ai-playbook kb show",
+			"ai-playbook kb edit --global",
+			"ai-playbook kb search --all \"docker compose\"",
+			"ai-playbook kb list",
 		},
 	},
 	{

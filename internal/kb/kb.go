@@ -1,19 +1,32 @@
-// Package kb is the Go port of the shell knowledge-base reader
-// (assist::kb_path / assist::kb_ensure in assist-agent-common.zsh): a per-project
-// file of distilled facts the producer folds into the system prompt as the
-// "## What we already know about this project" section.
+// Package kb is the two-set knowledge-base store (ADR-0011): distilled facts
+// the `remember` tool writes and every authoring-shaped call recalls.
 //
-// The on-disk layout mirrors the shell exactly so a Go reader and the legacy
-// shell writer (the deferred `remember` tool) agree on the path:
+// Two knowledge sets, four kinds (Kind / KindSystem / KindUser /
+// KindEnvironment / KindTopic):
 //
-//	$root/projects/<project_key>/knowledge.md
+//   - GLOBAL — one file shared across every project, sectioned "## System"
+//     (machine/tooling truths) and "## User" (who the user is / prefers):
 //
-// where project_key = SHA-1 (lowercase hex) of the project-root path string and
-// $root is the same data dir the cache uses: AI_PLAYBOOK_DATA_DIR, else
-// ${XDG_DATA_HOME:-$HOME/.local/share}/ai-playbook.
+//     $root/knowledge.md
 //
-// Append appends a distilled "- <fact>" line to the per-project knowledge.md
-// (the `remember` tool's KB write).
+//   - PROJECT — one file per project, sectioned "## Environment" (this
+//     project's setup) and "## Topics" (domain-specific lessons, each a
+//     "### <topic>" subsection):
+//
+//     $root/projects/<project_key>/knowledge.md
+//
+// where project_key = SHA-1 (lowercase hex) of the project-root path string
+// and $root is the same data dir the cache uses: AI_PLAYBOOK_DATA_DIR, else
+// ${XDG_DATA_HOME:-$HOME/.local/share}/ai-playbook. Each project file also
+// carries a `<!-- meta: project-root: <path> -->` line (sections.go) so a
+// browser (`kb list`/`search`) can show the real project path instead of the
+// opaque key.
+//
+// Append (sections.go) routes a fact to its file + section by Kind, with
+// write-dedup (an exact-normalized duplicate within the target
+// section/subsection is a silent no-op) and lazy migration (migrate.go): a
+// pre-K1 flat, unsectioned file is read as if its bullets lived under
+// "## Environment", and the first sectioned write rewrites it in place.
 package kb
 
 import (

@@ -3,7 +3,7 @@
 Durable single source of truth for the feature roadmap. Each phase lists its
 goal, status, settled decisions, and open questions. Per-phase, step-by-step
 implementation plans are written just-in-time when a phase starts (they're
-ephemeral; this doc is not). Last updated: 2026-07-04 (v0.11.0).
+ephemeral; this doc is not). Last updated: 2026-07-05 (Phase 5 done, v0.12).
 
 ## Vision
 
@@ -47,9 +47,11 @@ schema), a production-grade executor, and CI we trust. Milestones:
   and AI-free executor. The milestone also rides with executor-grade polish,
   still open: JUnit/XML `run --auto` report, the ESC-audit sweep, status-line
   truncation (see `docs/BACKLOG.md`).
-- **v0.12 — Phase 5, knowledge base** (AI layer, independent) plus A5a-full
-  (cancellation/timeout for streaming AI calls, truncation surfaced on
-  authoring paths).
+- **v0.12 — Phase 5, knowledge base.** Phase 5 itself is DONE (2026-07-05):
+  two-set sectioned storage, `remember` v2 kind-routing, wrap-up fill +
+  over-budget compaction, whole-file recall in every authoring-shaped call,
+  and the public `kb` verb. A5a-full (cancellation/timeout for streaming AI
+  calls, truncation surfaced on authoring paths) is still open.
 - **v0.13 — multi-harness.** Additional harness adapters (pi, cursor, …)
   behind the `Harness` seam built 2026-07-04 (`internal/author/harness.go`) —
   config-selected via `[agent] harness`, each adapter with its own argv/env/
@@ -389,14 +391,17 @@ the same frame-background bleed and want the same treatment.
 
 ## Phase 5 — Knowledge base (remember / recall)
 
-**Layer note (ADR-0009): a pure AI-layer feature — independent of the
-playbook-first extractions; may proceed in parallel at any time.**
-
-**Goal:** turn the agent's `remember` facts into a usable, recalled KB so
-authoring gets smarter per project over time. **Status:** to be designed (own
-brainstorm → spec). The `remember` MCP tool already persists facts; this phase
-adds storage/browse/search + recall of relevant facts during
-`assist`/`create`/adapt.
+**DONE (2026-07-05, v0.12).** Per [ADR-0011](architecture/adrs/0011-knowledge-memory-architecture.md)
+and [the spec](specifications/knowledge-base.md): two knowledge sets — a
+GLOBAL file (`## System`/`## User`, shared across every project) and a
+per-project file (`## Environment`/`## Topics`) — with write-time curation
+(write-dedup, wrap-up memory fill, over-budget compaction with a `.bak`
+backup) and whole-file recall folded into every authoring-shaped call
+(initial authoring, follow-up, final-playbook/wrap-up, drift regen). The
+`remember` tool takes a required `kind` (`system`/`user`/`environment`/
+`topic`) that routes and classifies the fact. The public `kb` verb
+(`show`/`edit`/`search`/`list`) browses, edits, and searches both sets from
+the CLI.
 
 ---
 

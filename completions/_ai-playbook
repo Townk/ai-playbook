@@ -16,6 +16,7 @@ _ai-playbook_commands() {
     'search:Search saved playbooks by substring'
     'show:Render a saved playbook read-only'
     'edit:Open a saved playbook in $EDITOR'
+    'kb:Browse, search, and edit the two-set knowledge base'
     'run:Run a playbook (interactive, headless, or guided)'
     'validate:Check a playbook'\''s structure and (optionally) get an AI review'
     'env:Print a playbook'\''s declared env vars, resolved and redacted'
@@ -58,6 +59,14 @@ _ai-playbook_cmd_show() {
 _ai-playbook_cmd_edit() {
   _arguments \
     '1:playbook:_ai-playbook_slugs'
+}
+
+_ai-playbook_cmd_kb() {
+  _arguments \
+    '1:subcommand:(show edit search list)' \
+    '--project[target this project path instead of the cwd'\''s project root; with show (and no --global) ONLY that project'\''s set is printed (show/edit)]:path:' \
+    '--global[narrow to the global knowledge set (show), or edit the global file (edit)]' \
+    '--all[search every project'\''s knowledge file, not just the cwd'\''s (search)]'
 }
 
 _ai-playbook_cmd_run() {
@@ -118,6 +127,9 @@ _ai-playbook() {
           ;;
         edit)
           _ai-playbook_cmd_edit
+          ;;
+        kb)
+          _ai-playbook_cmd_kb
           ;;
         run)
           _ai-playbook_cmd_run

@@ -1,0 +1,59 @@
+.TH AI-PLAYBOOK-KB 1 "" "ai-playbook" "User Commands"
+.SH NAME
+ai\-playbook\-kb \- Browse, search, and edit the two\-set knowledge base
+.SH SYNOPSIS
+\fBai\-playbook\fR kb <show|edit|search|list> [flags]
+.SH DESCRIPTION
+kb browses the two knowledge sets remember/recall use: the GLOBAL file
+(## System / ## User — the machine and the user, shared across projects) and
+each PROJECT's file (## Environment / ## Topics — this project's setup and
+domain\-specific lessons).
+.PP
+kb show [\-\-project <path>] [\-\-global]
+    Print the knowledge sets. Default: both, exactly what recall sees for
+    the cwd's project (global then project); \-\-global narrows to the
+    global set; \-\-project <path> alone shows ONLY that project's set
+    (the global set is suppressed unless \-\-global is also given).
+.PP
+kb edit [\-\-project <path>] [\-\-global]
+    Open a knowledge file in $EDITOR. Default: the cwd's project file;
+    \-\-global edits the global file instead; \-\-project <path> edits
+    another project's file. \-\-global and \-\-project are mutually exclusive.
+.PP
+kb search [\-\-all] <query>
+    Case\-insensitive substring search over fact bullets. Default: the
+    global file plus the cwd's project file; \-\-all spans every project's
+    file. Results are grouped by set/project (a resolved project name,
+    else its storage key).
+.PP
+kb list
+    The global file (size, fact count) plus every project that has a
+    knowledge file (name, path, size, fact count).
+.SH OPTIONS
+.TP
+\fB\-\-project\fR \fI<path>\fR
+target this project path instead of the cwd's project root; with show (and no \-\-global) ONLY that project's set is printed (show/edit)
+.TP
+\fB\-\-global\fR
+narrow to the global knowledge set (show), or edit the global file (edit)
+.TP
+\fB\-\-all\fR
+search every project's knowledge file, not just the cwd's (search)
+.SH EXAMPLES
+.nf
+ai\-playbook kb show
+.fi
+.PP
+.nf
+ai\-playbook kb edit \-\-global
+.fi
+.PP
+.nf
+ai\-playbook kb search \-\-all "docker compose"
+.fi
+.PP
+.nf
+ai\-playbook kb list
+.fi
+.SH "SEE ALSO"
+\fBai\-playbook\fR(1)

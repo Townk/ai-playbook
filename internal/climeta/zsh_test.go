@@ -112,6 +112,46 @@ func TestZsh_SlugArgCommandsWireHelper(t *testing.T) {
 	}
 }
 
+// TestZsh_SubcommandEnumCompletion pins the fixed-enum first-position
+// completer emitted for every command that declares Subcommands (kb's
+// show/edit/search/list today): the per-command function must contain a
+// '1:subcommand:(<names>)' spec listing the names space-joined, in order.
+func TestZsh_SubcommandEnumCompletion(t *testing.T) {
+	out := Zsh()
+	tested := false
+	for _, cmd := range Commands {
+		if cmd.Internal || len(cmd.Subcommands) == 0 {
+			continue
+		}
+		tested = true
+		marker := "_ai-playbook_cmd_" + cmd.Name + "()"
+		idx := strings.Index(out, marker)
+		if idx < 0 {
+			t.Errorf("Zsh() missing per-command function %q", marker)
+			continue
+		}
+		end := idx + 400
+		if end > len(out) {
+			end = len(out)
+		}
+		want := "'1:subcommand:(" + strings.Join(cmd.Subcommands, " ") + ")'"
+		if !strings.Contains(out[idx:end], want) {
+			t.Errorf("Zsh() per-command function %q missing the subcommand enum spec %s", marker, want)
+		}
+	}
+	if !tested {
+		t.Fatal("no non-Internal command declares Subcommands — kb should")
+	}
+}
+
+// TestZsh_KBSubcommands pins kb's concrete enum so a subcommand added to
+// KBMain without a registry update fails here, not in a user's shell.
+func TestZsh_KBSubcommands(t *testing.T) {
+	if !strings.Contains(Zsh(), "'1:subcommand:(show edit search list)'") {
+		t.Error(`Zsh() missing kb's '1:subcommand:(show edit search list)' completer`)
+	}
+}
+
 // TestZsh_Deterministic asserts Zsh() is byte-stable across calls, so
 // regenerating completions/_ai-playbook never produces a diff by itself.
 func TestZsh_Deterministic(t *testing.T) {

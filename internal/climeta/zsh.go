@@ -121,12 +121,18 @@ func zshFlagSpec(cmd Command, f Flag) string {
 }
 
 // zshCommandFunc renders cmd's per-command completion function
-// (_ai-playbook_cmd_<name>): a positional slug completer first (when
-// cmd.SlugArg), then one spec per flag.
+// (_ai-playbook_cmd_<name>): a first-position completer when the command has
+// one — the dynamic slug completer (cmd.SlugArg) or the fixed subcommand-name
+// enum (cmd.Subcommands, e.g. kb's show/edit/search/list) — then one spec per
+// flag. A command with neither emits no positional spec (zero behavior
+// change for every command that predates Subcommands).
 func zshCommandFunc(cmd Command) string {
 	var specs []string
 	if cmd.SlugArg {
 		specs = append(specs, ZshSingleQuote("1:playbook:_ai-playbook_slugs"))
+	}
+	if len(cmd.Subcommands) > 0 {
+		specs = append(specs, ZshSingleQuote("1:subcommand:("+strings.Join(cmd.Subcommands, " ")+")"))
 	}
 	for _, f := range cmd.Flags {
 		specs = append(specs, zshFlagSpec(cmd, f))

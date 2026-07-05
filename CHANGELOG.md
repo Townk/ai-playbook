@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A real, curated knowledge base** for `remember`/recall (ADR-0011, Phase 5).
+  Facts now file into two sets instead of one flat per-project scratchpad: a
+  **global** file (`## System` for machine/tooling truths, `## User` for who
+  you are and prefer) shared across every project, and a **project** file
+  (`## Environment` for this project's setup, `## Topics` for domain-specific
+  lessons under `### <topic>` subsections). `remember` takes a required
+  `kind` (`system`/`user`/`environment`/`topic`) that routes and classifies
+  each fact, with an exact-duplicate write silently skipped (idempotent). At
+  the end of a session, the wrap-up flow is now prompted to distill and
+  `remember` its durable lessons before finishing, and any knowledge file that
+  grows past its size budget (default 4096 bytes, `[kb] budget`) gets ONE
+  compaction pass — merging near-duplicates, generalizing overlaps, dropping
+  stale topics — with the prior content backed up to `knowledge.md.bak` first;
+  a bad or unsafe compaction result is rejected outright and the file is left
+  untouched. Recall now folds BOTH sets into every authoring-shaped call
+  (initial authoring, follow-ups, final playbook/wrap-up, and drift
+  regeneration), not just the first. A new public `ai-playbook kb` verb
+  browses the result directly: `kb show` (both sets, or narrowed via
+  `--global`/`--project <path>`), `kb edit` (opens the resolved file in
+  `$EDITOR`), `kb search [--all] <query>` (case-insensitive substring search
+  over facts, grouped by set/project), and `kb list` (every knowledge file's
+  size and fact count).
+
 ## [0.11.0] - 2026-07-04
 
 ### Added

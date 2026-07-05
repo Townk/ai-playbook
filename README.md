@@ -124,6 +124,9 @@ validate [<slug> | --file <path>]      AI + structural review of a playbook
 env    [<slug> | --file <path>]        print declared env as --with-env JSON
                                        (resolved from the environment; secrets
                                        redacted)
+
+kb     <show|edit|search|list>         browse/edit/search the knowledge base
+                                       (see "Knowledge base" below)
 ```
 
 Run modes (mutually exclusive): the default is an interactive pager (free-form),
@@ -165,6 +168,30 @@ to a block's retained stdout) is the idiom for pulling a prior step's output
 into another step's *arguments* rather than its stdin. See
 [the playbook schema](docs/specifications/playbook-schema.md#value-passing)
 for the full contract.
+
+## Knowledge base (remember / recall)
+
+Every authoring call can distill durable lessons via the `remember` tool, filed
+into two knowledge sets: a **global** file (`## System` tooling/machine truths,
+`## User` who you are/prefer) shared across every project, and a per-project
+file (`## Environment` this project's setup, `## Topics` domain-specific
+lessons). Both files fold back into every authoring-shaped call — assist,
+create, follow-ups, and drift regeneration all see what was learned before,
+without a second round trip. Oversized files get compacted (merged/
+generalized/trimmed, with a `.bak` backup) automatically at solution
+completion.
+
+The `kb` verb browses and edits that state directly:
+
+```sh
+ai-playbook kb show                        # global + this project's facts
+ai-playbook kb edit --global               # open the global file in $EDITOR
+ai-playbook kb search --all "docker"       # substring search across all projects
+ai-playbook kb list                        # every knowledge file, size + fact count
+```
+
+See [`docs/specifications/knowledge-base.md`](docs/specifications/knowledge-base.md)
+for the full storage/routing contract.
 
 ## `ask` — themed dialogs for scripts
 

@@ -129,7 +129,12 @@ func compactFile(cfg *config.Config, path string, budget int) {
 	// would clobber its fact into neither the result nor the .bak. Re-read
 	// immediately before the replace and ABORT if the file changed (no replace,
 	// no .bak); the next over-budget wrap-up simply compacts the fresh content.
-	if cur, err := os.ReadFile(path); err != nil || !bytes.Equal(cur, raw) {
+	cur, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook: re-read failed for %s during compaction (%v); skipped (file left unchanged)\n", path, err)
+		return
+	}
+	if !bytes.Equal(cur, raw) {
 		fmt.Fprintf(os.Stderr, "ai-playbook: kb changed during compaction — skipped %s (file left unchanged)\n", path)
 		return
 	}
