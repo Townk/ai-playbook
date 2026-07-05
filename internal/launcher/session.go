@@ -20,7 +20,6 @@ import (
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/draft"
 	"github.com/Townk/ai-playbook/internal/floatinput"
-	"github.com/Townk/ai-playbook/internal/kb"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/reengage"
 	"github.com/Townk/ai-playbook/internal/tools"
@@ -492,19 +491,23 @@ func reengageStructured(kind reengage.ReengageKind) bool {
 // pure function (no session/process state) so the constraints injection is testable
 // without spawning the harness.
 func reengagePrompts(req capture.Request, kind reengage.ReengageKind, base, change string, constraints []string, cfg *config.Config) (sys, user string) {
+	// Load BOTH knowledge sets ONCE (tail-capped at the load boundary) and thread
+	// them into whichever builder this kind uses, so every re-engagement recalls
+	// identically. Empty KB ⇒ byte-identical prompts (characterization contract).
+	global, project := author.LoadRecall(cfg.KBDir(), req.ProjectRoot, cfg.KB.Budget)
 	switch kind {
 	case reengage.KindReengageFollowup:
-		sys = author.FollowupPrompt(req, change) // change carries the failed output for followup
+		sys = author.FollowupPrompt(req, change, global, project) // change carries the failed output for followup
 		user = author.BuildUserMessage(req)
 	case reengage.KindReengageFinalPlaybook:
 		// FINAL-PLAYBOOK (stage 2): fresh when base=="" (change = the troubleshoot
 		// content to distill), amend when base!="" (fold change into the base).
-		sys = author.FinalPlaybookPrompt(req, base, change)
+		sys = author.FinalPlaybookPrompt(req, base, change, global, project)
 		user = author.BuildUserMessage(req)
 	case reengage.KindReengageDriftRegen:
-		sys, user = author.DriftRegenPrompt(base, change) // base=current file, change=stale patch
+		sys, user = author.DriftRegenPrompt(base, change, global, project) // base=current file, change=stale patch
 	default: // KindReengageRegenerate → the standard authoring prompt + folded KB
-		sys = author.SystemPrompt(req, author.KnowledgeBase(kb.Load(req.ProjectRoot)), driver.ResolveShellName(cfg.Driver.Shell))
+		sys = author.SystemPrompt(req, global, project, driver.ResolveShellName(cfg.Driver.Shell))
 		user = author.BuildUserMessage(req)
 	}
 	return author.WithConstraints(sys, constraints), user

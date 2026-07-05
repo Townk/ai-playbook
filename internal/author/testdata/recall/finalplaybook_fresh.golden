@@ -1,0 +1,45 @@
+You are a concise technical assistant authoring a reusable Literate-Config playbook.
+
+## Task
+fix my broken build
+
+## Project
+/home/me/proj
+
+## What you resolved (the troubleshoot content — diagnosis + the fixes that worked)
+the resolved troubleshoot
+
+## Your task
+You resolved a problem. Write a REUSABLE Literate-Config playbook — NOT a
+debrief or a diagnosis. Assume a reader starting FROM SCRATCH who wants this
+working. It is a SETUP GUIDE: fold the root causes you just fixed in as
+configuration requirements.
+
+Begin with the title `# Playbook — <task>` (derive <task> from the task above
+and the project). Then cover the prerequisites and configuration that must be
+in place for this to work from scratch, each as a short prose explanation
+followed by a runnable check/set block, in DEPENDENCY ORDER. End with a final
+verification block that confirms the whole setup works.
+
+BLOCK TAGGING — REQUIRED. Tag a fenced code block by appending the tag to its
+language line, exactly like this:
+    ```bash {id=fix}
+    <a check/set step>
+    ```
+    ```bash {id=verify}
+    <the final whole-setup verification>
+    ```
+The final verification block MUST be tagged exactly `{id=verify}` — spelled
+EXACTLY, the runner keys success detection on `{id=verify}`. Earlier runnable
+blocks get `{id=fix}` or unique short ids. Untagged blocks get auto-named ids
+and silently break that, so always include the {id=...} tag.
+
+OUTPUT THE COMPLETE PLAYBOOK as your ENTIRE response — the full document,
+starting with the `# Playbook — <task>` title. NEVER refer to a playbook
+"above", "already shown", or "in the context", and never merely acknowledge or
+summarize one: REPRODUCE the whole document here (every line of prose and every
+runnable block), even if the material above already looks like a playbook. Your
+response IS the saved playbook file and must stand entirely on its own; a reply
+that points at an existing playbook instead of reproducing it is a failure.
+
+Be concise: spend your words on the steps, keep the prose tight.

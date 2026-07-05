@@ -51,15 +51,41 @@ func shellGuidance(shell string) string {
 	}
 }
 
-// KnowledgeBase is the per-project distilled-facts block the shell interpolates
-// as "## What we already know about this project". Author loads it from disk via
-// kb.Load (the Go port of assist::kb_path/kb_ensure) keyed on req.ProjectRoot;
-// SystemPrompt folds it in verbatim, exactly like assist::system_prompt did with
-// $kb_path. The package kb type and this one carry the same text.
-//
-// NOTE(stage 4c-i): only the KB READ path is wired. The KB WRITE/remember path
-// (the remember tool appending a distilled fact) is DEFERRED to a later stage.
+// KnowledgeBase is one distilled-facts blob folded into an authoring-shaped
+// prompt. Recall carries TWO sets (ADR-0011): the GLOBAL set (this machine + the
+// user, shared across projects) and the PROJECT set (this project's environment +
+// its problem-domain topics). Every authoring-shaped call folds both — global
+// first, then project — under the "## What we already know about this project"
+// heading (see kbFold). Callers load them from disk via LoadRecall (the two-set,
+// tail-capped read boundary); empty blobs fold to nothing.
 type KnowledgeBase string
+
+// kbFold renders the two-set recall block: global facts under the
+// "### About this machine and user" subheading, project facts under
+// "### About this project", both inside the "## What we already know about this
+// project" heading — global first, then project (the stable→specific order that
+// the read-time tail-cap also relies on). An empty set omits its subheading; when
+// BOTH are empty the whole block is "" so the surrounding prompt is byte-identical
+// to the pre-recall output (the characterization contract for all authoring-shaped
+// calls). The leading "\n\n" lets callers append it directly after prose.
+func kbFold(global, project KnowledgeBase) string {
+	g := strings.TrimSpace(string(global))
+	p := strings.TrimSpace(string(project))
+	if g == "" && p == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("\n\n## What we already know about this project")
+	if g != "" {
+		b.WriteString("\n\n### About this machine and user\n\n")
+		b.WriteString(g)
+	}
+	if p != "" {
+		b.WriteString("\n\n### About this project\n\n")
+		b.WriteString(p)
+	}
+	return b.String()
+}
 
 // SystemPrompt assembles the standing literate-playbook authoring prompt for the
 // given request, faithfully porting assist::system_prompt. The text is verbatim
@@ -83,8 +109,11 @@ type KnowledgeBase string
 // For "bash"/"zsh" it names the shell without extra restrictions. For an empty or
 // unknown value no shell identification is emitted (safe fallback).
 //
-// kb is the optional knowledge-base block (empty when none — see KnowledgeBase).
-func SystemPrompt(req capture.Request, kb KnowledgeBase, shell string) string {
+// global and project are the two optional knowledge-base sets (empty when none —
+// see KnowledgeBase); they fold in via kbFold under the "## What we already know
+// about this project" heading. Both empty ⇒ the prompt is byte-identical to the
+// pre-recall output (characterization contract).
+func SystemPrompt(req capture.Request, global, project KnowledgeBase, shell string) string {
 	// Project display fields mirror the shell's REQ_* fallbacks.
 	projectName := req.Project.Name
 	if projectName == "" {
@@ -102,10 +131,7 @@ func SystemPrompt(req capture.Request, kb KnowledgeBase, shell string) string {
 		branchSuffix = " on branch " + req.Project.Branch
 	}
 
-	kbBlock := ""
-	if strings.TrimSpace(string(kb)) != "" {
-		kbBlock = "\n\n## What we already know about this project\n\n" + string(kb)
-	}
+	kbBlock := kbFold(global, project)
 
 	// Failure vs general request. ONLY a non-zero last-command exit is a failure
 	// to diagnose. A successful or absent last command means this is a general

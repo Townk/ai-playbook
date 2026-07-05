@@ -19,6 +19,7 @@ package kb
 import (
 	"crypto/sha1"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -88,49 +89,29 @@ func LoadProject(root, projectRoot string) KnowledgeBase {
 	return KnowledgeBase(secEnvironment + "\n" + content)
 }
 
-// Load reads the per-project KB for projectRoot from the default data dir,
-// verbatim (no migration transform).
+// Capped enforces the hard read-time tail-cap on a single knowledge blob: when
+// content exceeds limit bytes it is truncated at a LINE (bullet) boundary — never
+// mid-line — and a one-line note is written to stderr. This is the vestigial
+// safety against a pathologically large hand-edited file, NOT the budget
+// mechanism (that is write-time compaction, K4); limit is 8× the per-file budget
+// so a normal file never trips it.
 //
-// Legacy: this verbatim reader is kept so the pre-v0.12 recall call sites keep
-// compiling unchanged; K3 migrates those call sites to LoadProject
-// (migration-aware) and LoadGlobal. New code should use LoadProject.
-func Load(projectRoot string) KnowledgeBase {
-	return LoadFrom(DefaultRoot(), projectRoot)
-}
-
-// LoadFrom is Load against an explicit root (for tests / non-default data dirs).
-//
-// Legacy: verbatim reader; see Load. K3 moves callers to LoadProject.
-func LoadFrom(root, projectRoot string) KnowledgeBase {
-	b, err := os.ReadFile(Path(root, projectRoot))
-	if err != nil {
-		return ""
+// The HEAD is kept, not the tail: both files are section-ordered (global
+// System→User, project Environment→Topics), so the head preserves the stable,
+// foundational sets and drops the long, most-likely-stale tail. A limit <= 0 (or
+// content already within limit) returns content unchanged and writes nothing.
+func Capped(content KnowledgeBase, limit int) KnowledgeBase {
+	if limit <= 0 || len(content) <= limit {
+		return content
 	}
-	return KnowledgeBase(b)
-}
-
-// AppendTo appends a distilled fact as a flat "- <fact>" bullet to the
-// per-project knowledge base under an explicit root.
-//
-// Legacy: the flat (unsectioned) writer, kept so doRemember keeps compiling. K2
-// replaces the call site with Append(root, projectRoot, KindEnvironment, "",
-// fact) and the two-set taxonomy; the flat files this still produces migrate
-// lazily via LoadProject / the first sectioned Append. New code should use Append.
-func AppendTo(root, projectRoot, fact string) error {
-	fact = strings.TrimSpace(fact)
-	if fact == "" {
-		return nil
+	s := string(content)
+	// Cut at the last newline at or before the limit so a whole bullet/line is
+	// never split. If there is no earlier newline (one pathological long line),
+	// fall back to a hard byte cut.
+	cut := strings.LastIndexByte(s[:limit], '\n')
+	if cut <= 0 {
+		cut = limit
 	}
-	fact = strings.ReplaceAll(fact, "\n", " ")
-	p := Path(root, projectRoot)
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		return err
-	}
-	f, err := os.OpenFile(p, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	_, err = f.WriteString("- " + fact + "\n")
-	return err
+	fmt.Fprintf(os.Stderr, "ai-playbook: knowledge file exceeds the %d-byte read cap; truncated at recall (kept head)\n", limit)
+	return KnowledgeBase(strings.TrimRight(s[:cut], "\n") + "\n")
 }

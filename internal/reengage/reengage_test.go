@@ -74,7 +74,7 @@ func TestRegenerate_StreamsAndMode(t *testing.T) {
 	}
 	// Author auto-resolves the shell from $SHELL; mirror that here so the
 	// comparison is environment-portable (both sides use the same resolution).
-	if fa.gotSystem != author.SystemPrompt(sampleReq(), "", driver.ResolveShellName("")) {
+	if fa.gotSystem != author.SystemPrompt(sampleReq(), "", "", driver.ResolveShellName("")) {
 		t.Errorf("regenerate did not use the standard authoring prompt")
 	}
 }

@@ -1,8 +1,10 @@
 package kb
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -34,82 +36,105 @@ func TestPath_ShellLayout(t *testing.T) {
 	}
 }
 
-func TestLoadFrom_MissingIsEmpty(t *testing.T) {
-	if kb := LoadFrom(t.TempDir(), "/some/project"); kb != "" {
+// TestLoadProject_MissingIsEmpty preserves the retired LoadFrom "missing → empty"
+// coverage on the migration-aware reader.
+func TestLoadProject_MissingIsEmpty(t *testing.T) {
+	if kb := LoadProject(t.TempDir(), "/some/project"); kb != "" {
 		t.Fatalf("missing KB should be empty, got %q", kb)
 	}
 }
 
-func TestLoadFrom_ReadsFile(t *testing.T) {
-	root := t.TempDir()
-	const project = "/Users/me/proj"
-	const facts = "uses bazel, not make\nrun via ./x.sh\n"
-	p := Path(root, project)
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(p, []byte(facts), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := LoadFrom(root, project); string(got) != facts {
-		t.Fatalf("LoadFrom = %q, want %q", got, facts)
+// TestLoadGlobal_MissingIsEmpty preserves the same "missing → empty" contract for
+// the global reader.
+func TestLoadGlobal_MissingIsEmpty(t *testing.T) {
+	if kb := LoadGlobal(t.TempDir()); kb != "" {
+		t.Fatalf("missing global KB should be empty, got %q", kb)
 	}
 }
 
-func TestLoad_DefaultRootRoundTrip(t *testing.T) {
-	root := t.TempDir()
-	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
-	const project = "/Users/me/widget"
-	p := Path(root, project)
-	if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(p, []byte("fact one"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	if got := Load(project); string(got) != "fact one" {
-		t.Fatalf("Load = %q, want %q", got, "fact one")
-	}
-}
-
-func TestAppendTo_WritesBullet(t *testing.T) {
-	root := t.TempDir()
-	const project = "/Users/me/proj"
-	if err := AppendTo(root, project, "PGPASSWORD=test is required"); err != nil {
-		t.Fatal(err)
-	}
-	b, err := os.ReadFile(Path(root, project))
+// captureStderr runs f and returns whatever it wrote to os.Stderr.
+func captureStderr(t *testing.T, f func()) string {
+	t.Helper()
+	old := os.Stderr
+	r, w, err := os.Pipe()
 	if err != nil {
-		t.Fatalf("read kb: %v", err)
+		t.Fatal(err)
 	}
-	if got := string(b); got != "- PGPASSWORD=test is required\n" {
-		t.Fatalf("kb = %q, want a single bullet line", got)
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+	f()
+	w.Close()
+	var b strings.Builder
+	buf := make([]byte, 4096)
+	for {
+		n, rerr := r.Read(buf)
+		b.Write(buf[:n])
+		if rerr != nil {
+			break
+		}
+	}
+	return b.String()
+}
+
+func TestCapped_UnderLimitUnchangedNoNote(t *testing.T) {
+	const content KnowledgeBase = "## System\n- a\n- b\n"
+	var got KnowledgeBase
+	note := captureStderr(t, func() { got = Capped(content, 4096) })
+	if got != content {
+		t.Fatalf("Capped mutated under-limit content: %q", got)
+	}
+	if note != "" {
+		t.Fatalf("Capped wrote a note for under-limit content: %q", note)
 	}
 }
 
-func TestAppendTo_AppendsAndFlattensNewlines(t *testing.T) {
-	root := t.TempDir()
-	const project = "/p"
-	if err := AppendTo(root, project, "first"); err != nil {
-		t.Fatal(err)
-	}
-	if err := AppendTo(root, project, "second\nwith newline"); err != nil {
-		t.Fatal(err)
-	}
-	b, _ := os.ReadFile(Path(root, project))
-	want := "- first\n- second with newline\n"
-	if string(b) != want {
-		t.Fatalf("kb = %q, want %q", b, want)
+func TestCapped_ZeroLimitDisabled(t *testing.T) {
+	content := KnowledgeBase(strings.Repeat("- fact\n", 1000))
+	note := captureStderr(t, func() {
+		if got := Capped(content, 0); got != content {
+			t.Fatalf("limit<=0 must disable the cap")
+		}
+	})
+	if note != "" {
+		t.Fatalf("disabled cap must not write a note: %q", note)
 	}
 }
 
-func TestAppendTo_EmptyFactIsNoop(t *testing.T) {
-	root := t.TempDir()
-	const project = "/p"
-	if err := AppendTo(root, project, "   \n"); err != nil {
-		t.Fatal(err)
+// TestCapped_TruncatesAtBulletBoundary: an oversized file is cut at a line
+// boundary (never mid-bullet), keeps the HEAD, ends in a single newline, and
+// emits the stderr note.
+func TestCapped_TruncatesAtBulletBoundary(t *testing.T) {
+	// 20 bullets of a fixed width; each line is "- bullet NN\n".
+	var sb strings.Builder
+	for i := 0; i < 20; i++ {
+		fmt.Fprintf(&sb, "- bullet %02d\n", i)
 	}
-	if _, err := os.Stat(Path(root, project)); !os.IsNotExist(err) {
-		t.Fatalf("empty fact should not create a kb file (err=%v)", err)
+	content := KnowledgeBase(sb.String())
+	// A limit that lands mid-line: 5 whole lines is 60 bytes ("- bullet 00\n"=12).
+	const limit = 65
+	var got KnowledgeBase
+	note := captureStderr(t, func() { got = Capped(content, limit) })
+
+	if note == "" {
+		t.Fatalf("oversized file must emit a stderr note")
+	}
+	if len(got) > limit {
+		t.Fatalf("truncated content %d bytes exceeds limit %d", len(got), limit)
+	}
+	// Head kept: first bullet present, and no partial line survived.
+	if !strings.HasPrefix(string(got), "- bullet 00\n") {
+		t.Fatalf("head not kept: %q", got)
+	}
+	for _, ln := range strings.Split(strings.TrimRight(string(got), "\n"), "\n") {
+		if ln != "" && !strings.HasPrefix(ln, "- bullet ") {
+			t.Fatalf("a line was split mid-bullet: %q", ln)
+		}
+	}
+	if !strings.HasSuffix(string(got), "\n") {
+		t.Fatalf("truncated content must end in a newline: %q", got)
+	}
+	// The tail (last bullet) was dropped.
+	if strings.Contains(string(got), "- bullet 19") {
+		t.Fatalf("tail bullet should have been dropped: %q", got)
 	}
 }

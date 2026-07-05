@@ -1,0 +1,1 @@
+You previously produced a patch that no longer applies to its target file (the file changed). Produce a FRESH unified diff that achieves the same intent against the CURRENT file content. Output ONLY the unified diff (--- /+++ /@@ …), no prose, no fences.

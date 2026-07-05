@@ -82,8 +82,8 @@ func (f *fakeAgent) agent(systemPrompt, userMessage string) (io.ReadCloser, erro
 }
 
 func TestAuthor_UsesEmbeddedPromptAndAssembledMessage(t *testing.T) {
-	// Point the KB data dir at an empty temp dir so kb.Load (called inside Author)
-	// returns no KB and the system prompt is deterministic for this assertion.
+	// Point the KB data dir at an empty temp dir so the recall load (both sets,
+	// via LoadRecall inside Author) is empty and the system prompt deterministic.
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir())
 	req := sampleFailure()
 	fa := &fakeAgent{canned: "# Fix your build\n\n```bash {id=fix}\nmake clean\n```\n"}
@@ -107,7 +107,7 @@ func TestAuthor_UsesEmbeddedPromptAndAssembledMessage(t *testing.T) {
 	// It was called with the embedded system prompt + the assembled user message.
 	// With no KB file present, the folded-in KB is empty.
 	// Author auto-resolves the shell from $SHELL; mirror that here.
-	wantSys := SystemPrompt(req, "", driver.ResolveShellName(""))
+	wantSys := SystemPrompt(req, "", "", driver.ResolveShellName(""))
 	if fa.gotSystem != wantSys {
 		t.Errorf("agent system prompt did not match SystemPrompt(req)\n--- got ---\n%s", fa.gotSystem)
 	}
@@ -117,9 +117,10 @@ func TestAuthor_UsesEmbeddedPromptAndAssembledMessage(t *testing.T) {
 	}
 }
 
-// TestAuthor_FoldsInOnDiskKB exercises the kb.Load wiring end-to-end: a KB file
-// written under the data dir for the request's project root is folded into the
-// system prompt Author hands the agent (the "## What we already know" section).
+// TestAuthor_FoldsInOnDiskKB exercises the recall wiring end-to-end: a project KB
+// file written under the data dir for the request's project root is loaded (via
+// LoadRecall inside Author) and folded into the system prompt Author hands the
+// agent (the "## What we already know" section).
 func TestAuthor_FoldsInOnDiskKB(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("AI_PLAYBOOK_DATA_DIR", root)
@@ -152,7 +153,7 @@ func TestAuthor_FoldsInOnDiskKB(t *testing.T) {
 // must contain the load-bearing instructions (block schema, value-passing refs,
 // the verify-fold-in rule) so a botched port is caught.
 func TestSystemPrompt_LoadBearingSections(t *testing.T) {
-	sys := SystemPrompt(sampleFailure(), "", "zsh")
+	sys := SystemPrompt(sampleFailure(), "", "", "zsh")
 	wants := []string{
 		"LITERATE TROUBLESHOOTING PLAYBOOK",           // failure structure
 		"{id=fix}",                                    // block-schema id marker
@@ -174,7 +175,7 @@ func TestSystemPrompt_LoadBearingSections(t *testing.T) {
 
 func TestSystemPrompt_GeneralBranch(t *testing.T) {
 	req := capture.Request{Kind: "question", Exit: "0", UserRequest: "q", ProjectRoot: "/p", Project: capture.Project{Name: "p"}}
-	sys := SystemPrompt(req, "", "zsh")
+	sys := SystemPrompt(req, "", "", "zsh")
 	if !strings.Contains(sys, "LITERATE HOW-TO PLAYBOOK") {
 		t.Errorf("general branch must use the HOW-TO structure:\n%s", sys)
 	}
@@ -193,7 +194,7 @@ func TestSystemPrompt_GeneralBranch(t *testing.T) {
 // its token cost twice for no benefit).
 func TestSystemPrompt_OmitsPerRequestContext(t *testing.T) {
 	req := sampleFailure()
-	sys := SystemPrompt(req, "", "zsh")
+	sys := SystemPrompt(req, "", "", "zsh")
 	for _, dup := range []string{req.Command, req.UserRequest, "no input files"} {
 		if strings.Contains(sys, dup) {
 			t.Errorf("SystemPrompt must not duplicate per-request context %q\n--- prompt ---\n%s", dup, sys)
@@ -209,7 +210,7 @@ func TestSystemPrompt_OmitsPerRequestContext(t *testing.T) {
 }
 
 func TestSystemPrompt_KBFoldedIn(t *testing.T) {
-	sys := SystemPrompt(sampleFailure(), "uses bazel, not make", "zsh")
+	sys := SystemPrompt(sampleFailure(), "", "uses bazel, not make", "zsh")
 	if !strings.Contains(sys, "## What we already know about this project") {
 		t.Errorf("KB header missing when KB non-empty")
 	}
@@ -221,7 +222,7 @@ func TestSystemPrompt_KBFoldedIn(t *testing.T) {
 // TestSystemPrompt_ShellAwareness_SH verifies that a `sh`-targeted prompt names
 // sh explicitly and includes POSIX-only restrictions (mentioning [[ as forbidden).
 func TestSystemPrompt_ShellAwareness_SH(t *testing.T) {
-	sys := SystemPrompt(sampleFailure(), "", "sh")
+	sys := SystemPrompt(sampleFailure(), "", "", "sh")
 
 	// Must identify the shell explicitly.
 	if !strings.Contains(sys, "execute under `sh` (POSIX shell)") {
@@ -247,7 +248,7 @@ func TestSystemPrompt_ShellAwareness_SH(t *testing.T) {
 // TestSystemPrompt_ShellAwareness_Zsh verifies that a zsh-targeted prompt names
 // zsh and does NOT impose the POSIX-only restriction.
 func TestSystemPrompt_ShellAwareness_Zsh(t *testing.T) {
-	sys := SystemPrompt(sampleFailure(), "", "zsh")
+	sys := SystemPrompt(sampleFailure(), "", "", "zsh")
 
 	if !strings.Contains(sys, "execute under `zsh`") {
 		t.Errorf("zsh prompt missing shell identification\n--- prompt ---\n%s", sys)
@@ -261,7 +262,7 @@ func TestSystemPrompt_ShellAwareness_Zsh(t *testing.T) {
 // TestSystemPrompt_ShellAwareness_Bash verifies that a bash-targeted prompt names
 // bash and does NOT impose the POSIX-only restriction.
 func TestSystemPrompt_ShellAwareness_Bash(t *testing.T) {
-	sys := SystemPrompt(sampleFailure(), "", "bash")
+	sys := SystemPrompt(sampleFailure(), "", "", "bash")
 
 	if !strings.Contains(sys, "execute under `bash`") {
 		t.Errorf("bash prompt missing shell identification\n--- prompt ---\n%s", sys)

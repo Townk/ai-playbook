@@ -29,7 +29,10 @@ import (
 // on it), fix-style blocks `{id=fix}` / unique ids. The tagging syntax is shown
 // (```bash {id=verify}) like FollowupPrompt does. Empty req fields fall back to the
 // <unknown>/(unknown) placeholders the other prompts use.
-func FinalPlaybookPrompt(req capture.Request, base, context string) string {
+//
+// global and project are the two recall sets folded in via kbFold (empty ⇒ the
+// prompt is byte-identical to the pre-recall output — characterization contract).
+func FinalPlaybookPrompt(req capture.Request, base, context string, global, project KnowledgeBase) string {
 	task := req.UserRequest
 	if task == "" {
 		task = req.Project.Name
@@ -104,6 +107,7 @@ func FinalPlaybookPrompt(req capture.Request, base, context string) string {
 	b.WriteString("response IS the saved playbook file and must stand entirely on its own; a reply\n")
 	b.WriteString("that points at an existing playbook instead of reproducing it is a failure.\n\n")
 	b.WriteString("Be concise: spend your words on the steps, keep the prose tight.\n")
+	b.WriteString(kbFold(global, project))
 	return b.String()
 }
 
@@ -113,7 +117,8 @@ func FinalPlaybookPrompt(req capture.Request, base, context string) string {
 // Agent. Used by the orchestrator when the owned event stream can't start (and in
 // tests with a fake Agent). base=="" → fresh; base!="" → amend.
 func FinalPlaybookText(req capture.Request, base, context string, agent Agent) (io.ReadCloser, error) {
-	sys := FinalPlaybookPrompt(req, base, context)
+	global, project := recallFor(req.ProjectRoot, nil)
+	sys := FinalPlaybookPrompt(req, base, context, global, project)
 	user := BuildUserMessage(req)
 	return agent(sys, user)
 }

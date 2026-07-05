@@ -24,7 +24,8 @@ import (
 // from the run log's logpath, capped to 4000 bytes; the ui caps it the same way
 // before calling). req.Command is the failed verify command.
 func Followup(req capture.Request, failedOutput string, agent Agent) (io.ReadCloser, error) {
-	sys := FollowupPrompt(req, failedOutput)
+	global, project := recallFor(req.ProjectRoot, nil)
+	sys := FollowupPrompt(req, failedOutput, global, project)
 	user := BuildUserMessage(req)
 	return agent(sys, user)
 }
@@ -32,7 +33,10 @@ func Followup(req capture.Request, failedOutput string, agent Agent) (io.ReadClo
 // FollowupPrompt assembles the follow-up system prompt, faithfully porting the
 // heredoc in ai-assist-followup: original request + project + failed command +
 // its output + the "try a DIFFERENT fix; keep a separate verify block" task.
-func FollowupPrompt(req capture.Request, failedOutput string) string {
+//
+// global and project are the two recall sets folded in via kbFold (empty ⇒ the
+// prompt is byte-identical to the pre-recall output — characterization contract).
+func FollowupPrompt(req capture.Request, failedOutput string, global, project KnowledgeBase) string {
 	userRequest := req.UserRequest
 	if userRequest == "" {
 		userRequest = "<unknown>"
@@ -83,5 +87,6 @@ func FollowupPrompt(req capture.Request, failedOutput string) string {
 	b.WriteString("the fix yourself via `run` and then merely describe what you did. A reply with\n")
 	b.WriteString("no runnable {id=fix}/{id=verify} blocks is a failure.\n\n")
 	b.WriteString("Be concise. Do not re-diagnose the original error; focus on why the fix did not work.\n")
+	b.WriteString(kbFold(global, project))
 	return b.String()
 }

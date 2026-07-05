@@ -386,7 +386,9 @@ func resolveProjectRoot(declared string) string {
 func runViewer(file, cwd string, opts ui.Options) int {
 	opts.File = file
 	opts.Cwd = cwd
-	opts.Reengage = driftRegenReengage()
+	// Thread the resolved project root (set by runFile for a project_bound
+	// source, "" otherwise) so drift regen recalls the project knowledge set too.
+	opts.Reengage = driftRegenReengage(opts.ProjectRoot)
 	return uiRunFn(opts)
 }
 

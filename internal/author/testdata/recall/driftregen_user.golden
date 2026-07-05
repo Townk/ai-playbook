@@ -1,0 +1,9 @@
+The stale patch (no longer applies):
+
+stale patch content
+
+The CURRENT content of the target file:
+
+current file content
+
+Return the corrected unified diff.

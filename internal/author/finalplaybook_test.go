@@ -15,7 +15,7 @@ import (
 func TestFinalPlaybookPrompt_Fresh(t *testing.T) {
 	req := sampleFailure() // UserRequest "fix my broken build"
 	const ctx = "Root cause: missing gcc. Fix: install build-essential and pin CC."
-	sys := FinalPlaybookPrompt(req, "", ctx)
+	sys := FinalPlaybookPrompt(req, "", ctx, "", "")
 
 	wants := []string{
 		"# Playbook —",     // the title directive
@@ -49,7 +49,7 @@ func TestFinalPlaybookPrompt_Amend(t *testing.T) {
 	req := sampleFailure()
 	const base = "# Playbook — set up the build\n\n```bash {id=verify}\nmake build\n```\n"
 	const change = "Also configure the NDK path before building."
-	sys := FinalPlaybookPrompt(req, base, change)
+	sys := FinalPlaybookPrompt(req, base, change, "", "")
 
 	wants := []string{
 		base,               // the base playbook is interpolated
@@ -76,12 +76,12 @@ func TestFinalPlaybookPrompt_AmendDiscardInstruction(t *testing.T) {
 	const discard = "if the change note rejects the current approach outright, discard the base playbook and re-author from scratch honoring the note — do not patch the rejected approach"
 
 	const base = "# Playbook — set up the build\n\n```bash {id=verify}\nmake build\n```\n"
-	amend := FinalPlaybookPrompt(req, base, "use podman instead of docker")
+	amend := FinalPlaybookPrompt(req, base, "use podman instead of docker", "", "")
 	if !strings.Contains(amend, discard) {
 		t.Errorf("amend prompt missing the discard-if-rejected instruction %q\n--- prompt ---\n%s", discard, amend)
 	}
 
-	fresh := FinalPlaybookPrompt(req, "", "the resolved troubleshoot")
+	fresh := FinalPlaybookPrompt(req, "", "the resolved troubleshoot", "", "")
 	if strings.Contains(fresh, discard) {
 		t.Errorf("fresh prompt must NOT carry the discard-if-rejected instruction:\n%s", fresh)
 	}
@@ -89,7 +89,7 @@ func TestFinalPlaybookPrompt_AmendDiscardInstruction(t *testing.T) {
 
 // Empty req fields fall back to the placeholders the other prompts use.
 func TestFinalPlaybookPrompt_EmptyRequest(t *testing.T) {
-	sys := FinalPlaybookPrompt(capture.Request{}, "", "")
+	sys := FinalPlaybookPrompt(capture.Request{}, "", "", "", "")
 	if !strings.Contains(sys, "<unknown>") {
 		t.Errorf("empty request should fall back to <unknown> for the task:\n%s", sys)
 	}

@@ -13,7 +13,6 @@ import (
 	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
-	"github.com/Townk/ai-playbook/internal/kb"
 	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
@@ -190,7 +189,8 @@ func AuthorEvents(req capture.Request, opts AuthorOptions) (<-chan agentstream.E
 		cfg = config.Default()
 	}
 	shell := driver.ResolveShellName(cfg.Driver.Shell)
-	sys := SystemPrompt(req, KnowledgeBase(kb.Load(req.ProjectRoot)), shell)
+	global, project := recallFor(req.ProjectRoot, cfg)
+	sys := SystemPrompt(req, global, project, shell)
 	user := BuildUserMessage(req)
 	return RunHarnessEvents(sys, user, opts)
 }

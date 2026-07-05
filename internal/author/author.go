@@ -8,7 +8,6 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/capture"
-	"github.com/Townk/ai-playbook/internal/kb"
 	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
@@ -57,12 +56,14 @@ type Agent func(systemPrompt, userMessage string) (io.ReadCloser, error)
 // stdout stream. The agent is injected (HarnessAgent in production; a fake in
 // tests) so this function is deterministic to unit-test.
 //
-// The per-project knowledge base is loaded from disk (kb.Load) keyed on
-// req.ProjectRoot and folded into the system prompt's "## What we already know
-// about this project" section, exactly as assist::system_prompt did with the
-// $kb_path file. (The KB WRITE/remember path is deferred — see package kb.)
+// Both knowledge sets (global + project) are loaded from disk via LoadRecall
+// keyed on req.ProjectRoot and folded into the system prompt's "## What we already
+// know about this project" section (global under "### About this machine and
+// user", project under "### About this project"). This text path has no cfg, so
+// recall uses config.Default()'s [kb] settings.
 func Author(req capture.Request, agent Agent) (io.ReadCloser, error) {
-	sys := SystemPrompt(req, KnowledgeBase(kb.Load(req.ProjectRoot)), driver.ResolveShellName(""))
+	global, project := recallFor(req.ProjectRoot, nil)
+	sys := SystemPrompt(req, global, project, driver.ResolveShellName(""))
 	user := BuildUserMessage(req)
 	return agent(sys, user)
 }

@@ -9,7 +9,7 @@ import (
 func TestFollowupPrompt_CarriesFailedOutputAndTask(t *testing.T) {
 	req := sampleFailure() // Command "make build", exit "2"
 	const failed = "ld: symbol(s) not found for architecture arm64"
-	sys := FollowupPrompt(req, failed)
+	sys := FollowupPrompt(req, failed, "", "")
 
 	wants := []string{
 		"did not work",          // the "fix didn't work" framing
@@ -30,13 +30,15 @@ func TestFollowupPrompt_CarriesFailedOutputAndTask(t *testing.T) {
 }
 
 func TestFollowupPrompt_NoOutputCaptured(t *testing.T) {
-	sys := FollowupPrompt(sampleFailure(), "")
+	sys := FollowupPrompt(sampleFailure(), "", "", "")
 	if !strings.Contains(sys, "(no output captured)") {
 		t.Errorf("empty failed output must render the no-output placeholder:\n%s", sys)
 	}
 }
 
 func TestFollowup_CallsAgentWithPromptAndMessage(t *testing.T) {
+	// Empty KB dir so Followup's internal recall is deterministic (no fold).
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir())
 	req := sampleFailure()
 	const failed = "boom: it failed"
 	fa := &fakeAgent{canned: "# Revised fix\n\n```bash {id=fix2}\nmake -B\n```\n"}
@@ -53,7 +55,7 @@ func TestFollowup_CallsAgentWithPromptAndMessage(t *testing.T) {
 	if got, _ := io.ReadAll(r); string(got) != fa.canned {
 		t.Errorf("stream = %q, want canned", got)
 	}
-	if fa.gotSystem != FollowupPrompt(req, failed) {
+	if fa.gotSystem != FollowupPrompt(req, failed, "", "") {
 		t.Errorf("agent system prompt != FollowupPrompt\n--- got ---\n%s", fa.gotSystem)
 	}
 	if fa.gotUser != BuildUserMessage(req) {

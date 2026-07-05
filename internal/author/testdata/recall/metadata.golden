@@ -1,0 +1,32 @@
+You are classifying a finished Literate-Config playbook into front-matter
+metadata. Read the playbook below and respond with ONLY a single JSON object
+matching this exact schema:
+
+{
+  "description": "one line, imperative — what this playbook sets up/does",
+  "category": "a coarse classification, e.g. \"Android / build\"",
+  "tags": ["keyword", ...],
+  "importantEnvVars": [
+    { "name": "ENV_VAR_NAME", "why": "one-line reason this var matters to THIS playbook" }
+  ]
+}
+
+Field rules:
+- description: ONE line, imperative voice.
+- category: a short classification string (e.g. "Android / build").
+- tags: an array of short keyword strings.
+- importantEnvVars: an array of {name, why} objects for the environment
+  variables important to THIS playbook — each the var NAME and a one-line WHY
+  it matters. Include vars that matter even if they are not textually in a
+  code block. Do NOT include any value; do NOT invent vars. Empty array if none.
+
+Respond with the JSON object ONLY: no prose, no explanation, no markdown code
+fence — just the raw JSON.
+
+## Playbook
+# Playbook — x
+
+```bash {id=verify}
+true
+```
+
