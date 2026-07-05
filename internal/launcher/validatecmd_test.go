@@ -10,6 +10,7 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/askbridge"
+	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/pkg/store"
 )
@@ -340,6 +341,38 @@ func TestValidateMain_StoredSlug_ReadsFullFile(t *testing.T) {
 	}
 	if !strings.Contains(out, "depends_on") || !strings.Contains(out, `"ghost" does not exist in the store`) {
 		t.Fatalf("missing depends_on finding in report (front matter must be parsed to see depends_on at all):\n%s", out)
+	}
+}
+
+// ---- reviewSystemPrompt: rubric-fed AI review ----
+
+// TestValidateMain_ReviewPromptCarriesRubric pins the AI review pass to the
+// authoring rubric: the system prompt ValidateMain hands the review stream
+// embeds author.AuthoringRubric() byte-identical (the review judges against
+// the SAME quality bar the authoring prompts teach — single source, no
+// drift), asks for the judgment calls the mechanical quality checks
+// deliberately skip (atomicity/coarseness, per-step rollback need), and keeps
+// the brevity/no-nitpicks instruction.
+func TestValidateMain_ReviewPromptCarriesRubric(t *testing.T) {
+	var gotSys string
+	defer swap(&reviewStreamFn, func(_ *config.Config, sysPrompt, _ string) (<-chan agentstream.Event, func() error, error) {
+		gotSys = sysPrompt
+		return canned("looks good"), noopClose, nil
+	})()
+	defer swap(&runCreateProgressFn, func(_ <-chan string, _ *askbridge.Bridge, done <-chan struct{}) { <-done })()
+
+	clean := "---\nname: N\ndescription: D\ncategory: C\ncreated: 2026-01-01\n---\n\n# T\n\n```bash {id=a}\ntrue\n```\n"
+	cleanPath := writeValidateTemp(t, "clean.md", clean)
+	withArgs(t, []string{"ai-playbook", "validate", "--file", cleanPath})
+	captureStdout(t, func() { ValidateMain() })
+
+	if !strings.Contains(gotSys, author.AuthoringRubric()) {
+		t.Errorf("review system prompt must embed author.AuthoringRubric() verbatim:\n%s", gotSys)
+	}
+	for _, want := range []string{"atomic", "rollback", "coarse", "inventing nitpicks"} {
+		if !strings.Contains(gotSys, want) {
+			t.Errorf("review system prompt missing %q:\n%s", want, gotSys)
+		}
 	}
 }
 

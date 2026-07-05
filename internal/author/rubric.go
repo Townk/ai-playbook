@@ -45,3 +45,10 @@ these rules:
    must run on a machine that is not the author's.
 9. CALLOUTS FOR DANGER. A ` + "`warning`" + ` or ` + "`caution`" + ` callout PRECEDES every
    destructive or irreversible step.`
+
+// AuthoringRubric returns the shared rubric fragment (the nine rules of
+// docs/specifications/playbook-authoring.md in prompt voice) for consumers
+// outside the authoring compositions — the launcher's AI review pass embeds
+// it so review judges against the exact quality bar the authoring prompts
+// teach.
+func AuthoringRubric() string { return authoringRubric }

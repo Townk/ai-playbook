@@ -45,12 +45,22 @@ import (
 var reviewStreamFn = author.ReviewStream
 
 // reviewSystemPrompt is the AI review pass's system prompt: a concise reviewer
-// instruction, not a rewrite request.
-const reviewSystemPrompt = "You are reviewing a playbook (a runnable markdown document) for quality. " +
-	"Point out prose inconsistencies, missing or needed callouts, and any " +
+// instruction (not a rewrite request) that embeds the shared authoring rubric
+// (author.AuthoringRubric — the same single-source fragment the authoring
+// prompts teach) and asks for judgment AGAINST it: the calls the mechanical
+// quality checks deliberately do not make (is a block truly one atomic step
+// or too coarse, does a given mutating step need the rollback it lacks),
+// while keeping the brevity/no-nitpicks contract.
+var reviewSystemPrompt = "You are reviewing a playbook (a runnable markdown document) for quality. " +
+	"Judge it against the authoring rubric below, focusing on the judgment calls " +
+	"mechanical validation cannot make: whether each block is truly ONE atomic step " +
+	"or too coarse, whether each state-mutating step has the rollback it needs, and " +
+	"whether the verify block actually proves the goal state. " +
+	"Also point out prose inconsistencies, missing or needed callouts, and any " +
 	"non-idempotent, destructive, or non-reversible steps that lack a warning. " +
 	"Be brief — a few bullet points at most. If the playbook looks good, say so " +
-	"plainly instead of inventing nitpicks."
+	"plainly instead of inventing nitpicks.\n\n" +
+	author.AuthoringRubric()
 
 // aiSkipNote is printed in place of the AI review's text when no model backend
 // is available (F24-style degrade, never an abort).
@@ -105,12 +115,14 @@ func ValidateMain() int {
 	blocks := make([]validate.Block, 0, len(pbBlocks))
 	for _, b := range pbBlocks {
 		blocks = append(blocks, validate.Block{
-			ID:     b.ID,
-			Type:   b.Type,
-			Lang:   b.Lang,
-			Needs:  b.Needs,
-			Static: b.Static,
-			From:   b.From,
+			ID:       b.ID,
+			Type:     b.Type,
+			Lang:     b.Lang,
+			Needs:    b.Needs,
+			Static:   b.Static,
+			From:     b.From,
+			Rollback: b.Rollback,
+			Payload:  b.Payload,
 		})
 	}
 

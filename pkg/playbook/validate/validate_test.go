@@ -154,8 +154,16 @@ func TestCheck_Warnings(t *testing.T) {
 	}
 }
 
+// TestCheck_Clean pins the zero-findings case: a playbook that is both
+// structurally clean AND rubric-clean (a rollback= step, an undo block, a
+// verify block) yields no findings at all — not even quality warnings.
 func TestCheck_Clean(t *testing.T) {
-	blocks := []Block{{ID: "a", Type: "shell", Lang: "bash"}, {ID: "b", Type: "shell", Lang: "bash", Needs: []string{"a"}}}
+	blocks := []Block{
+		{ID: "a", Type: "shell", Lang: "bash", Rollback: "undo-a", Payload: "true"},
+		{ID: "undo-a", Type: "shell", Lang: "bash", Payload: "true"},
+		{ID: "b", Type: "shell", Lang: "bash", Needs: []string{"a"}, Payload: "true"},
+		{ID: "verify", Type: "shell", Lang: "bash", Needs: []string{"b"}, Payload: "true"},
+	}
 	if fs := Check("", fm("N", "D", "C", "x"), true, blocks, 0); len(fs) != 0 {
 		t.Fatalf("clean playbook must have no findings; got %+v", fs)
 	}

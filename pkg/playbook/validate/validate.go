@@ -28,7 +28,7 @@ const (
 // Finding is one structural problem detected by Check.
 type Finding struct {
 	Severity Severity
-	Check    string // "front-matter"|"duplicate-id"|"needs"|"from"|"cycle"|"fence"|"runnable"|"lang"
+	Check    string // "front-matter"|"duplicate-id"|"needs"|"from"|"cycle"|"fence"|"runnable"|"lang"|"verify"|"rollback"|"file-block"|"env-decl"
 	Message  string
 	Where    string // block id | "line N" | "front matter"
 }
@@ -37,12 +37,14 @@ type Finding struct {
 // ui.Block into this (validate never imports ui, keeping this package a pure
 // leaf).
 type Block struct {
-	ID     string
-	Type   string // "shell"|"run"|"diff"|"static"|"create"
-	Lang   string
-	Needs  []string
-	Static bool
-	From   string // id of the block whose retained stdout feeds this one's stdin (from=<id>, ADR-0010); "" if none
+	ID       string
+	Type     string // "shell"|"run"|"diff"|"static"|"create"
+	Lang     string
+	Needs    []string
+	Static   bool
+	From     string // id of the block whose retained stdout feeds this one's stdin (from=<id>, ADR-0010); "" if none
+	Rollback string // id of the block that undoes this one (rollback=<id>); "" if none
+	Payload  string // the block's code content (the quality checks scan it; "" is fine for structural-only callers)
 }
 
 // Check runs every deterministic check and returns findings (nil ⇔
@@ -165,6 +167,11 @@ func Check(rawBody string, fm frontmatter.FrontMatter, fmOK bool, blocks []Block
 
 	// fence balance: added in Task 2
 	findings = append(findings, fenceFindings(rawBody, bodyLineOffset)...)
+
+	// quality (all Warning): the authoring-rubric checks — verify presence,
+	// rollback coverage, heredoc file writes, undeclared env references. See
+	// quality.go; none of these can flip HasError.
+	findings = append(findings, qualityFindings(fm, blocks)...)
 
 	return findings
 }
