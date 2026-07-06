@@ -63,12 +63,12 @@ const compactTrigger = "Rewrite the file above, smaller. Return only the rewritt
 // anything — CompactKB itself neither reads nor writes files.
 func CompactKB(cfg *config.Config, content string) (string, error) {
 	opts := AuthorOptions{
-		Cfg:           cfg,
-		MCPConfigPath: "", // a compaction call needs no tools backend
-		Bare:          true,
-		NoThinking:    true,
-		Timeout:       defaultCallTimeout,
-		Command:       compactProcess,
+		Cfg:        cfg,
+		ToolArgv:   nil, // a compaction call needs no tools backend
+		Bare:       true,
+		NoThinking: true,
+		Timeout:    defaultCallTimeout,
+		Command:    compactProcess,
 	}
 	out, err := runMetadataOnce(CompactPrompt(content), compactTrigger, opts)
 	if err != nil {

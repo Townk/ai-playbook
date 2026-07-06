@@ -1,9 +1,7 @@
 package author
 
 import (
-	"encoding/json"
 	"io"
-	"os"
 
 	"github.com/Townk/ai-playbook/internal/config"
 )
@@ -32,90 +30,52 @@ const ToolInstruction = "\n\n" +
 	"the user is or prefers, `environment` for this project's setup, `topic` (with a " +
 	"`topic` name) for a domain-specific lesson. Use `ask` to get input from the user.\n"
 
-// mcpConfig is the claude --mcp-config document shape: a map of server name → an
-// stdio server spec (command + args) claude launches and speaks MCP to over its
-// stdio. Our server is `ai-playbook mcp --socket <path>`, which forwards tool
-// calls to the session's tools backend.
-type mcpConfig struct {
-	McpServers map[string]mcpServerSpec `json:"mcpServers"`
-}
-
-type mcpServerSpec struct {
-	Command string   `json:"command"`
-	Args    []string `json:"args"`
-}
-
-// WriteMCPConfig writes a claude --mcp-config JSON to a temp file pointing claude
-// at `<selfExe> mcp --socket <socketPath>` (the MCP adapter, package mcpserver),
-// and returns the file path. The caller passes the path to claude via
-// --mcp-config and removes it when authoring is done. selfExe is the running
-// ai-playbook binary (os.Executable).
-func WriteMCPConfig(selfExe, socketPath string) (string, error) {
-	doc := mcpConfig{McpServers: map[string]mcpServerSpec{
-		"ai-playbook": {
-			Command: selfExe,
-			Args:    []string{"mcp", "--socket", socketPath},
-		},
-	}}
-	b, err := json.Marshal(doc)
-	if err != nil {
-		return "", err
-	}
-	f, err := os.CreateTemp("", "ai-playbook-mcp-*.json")
-	if err != nil {
-		return "", err
-	}
-	name := f.Name()
-	if _, err := f.Write(b); err != nil {
-		f.Close()
-		os.Remove(name)
-		return "", err
-	}
-	if err := f.Close(); err != nil {
-		os.Remove(name)
-		return "", err
-	}
-	return name, nil
-}
-
-// HarnessAgentWithMCP is the tools-wired production Agent: per call it writes a
-// fresh --mcp-config pointing at `<selfExe> mcp --socket <socketPath>` and runs the
-// CONFIGURED harness via RunHarnessEvents, which wires --mcp-config into the argv
-// AND appends the tool instruction to the system prompt (so the agent reaches
-// run/ask/remember in the user's real shell). The temp config is removed when the
-// returned stream closes.
+// HarnessAgentWithMCP is the tools-wired production Agent: per call it asks the
+// CONFIGURED harness's ToolTransport for a fresh transport artifact pointing at
+// `<selfExe> mcp --socket <socketPath>` (claude: the --mcp-config JSON) and runs
+// the harness via RunHarnessEvents, which splices the transport argv into the
+// invocation AND appends the tool instruction to the system prompt (so the agent
+// reaches run/ask/remember in the user's real shell). The transport artifact is
+// removed when the returned stream closes.
 //
 // It routes through the SAME events path as the initial authoring, so the harness
 // selection ([agent].harness) is honored — replacing the retired claude-only
 // ClaudeAgentWithMCP, whose own runner + duplicate tool-instruction fold are gone
-// (the events path owns both now). On a config-write failure it authors WITHOUT
-// tools (plain harness call) so a backend/config hiccup never blocks authoring.
+// (the events path owns both now). A BASIC harness (no tool loop) and a
+// transport-write failure both author WITHOUT tools (plain harness call) so a
+// missing capability or a backend/config hiccup never blocks authoring; an
+// UNKNOWN harness falls through to the plain call, which surfaces the same clear
+// not-yet-supported error the events path reports.
 func HarnessAgentWithMCP(cfg *config.Config, selfExe, socketPath string) Agent {
 	return func(systemPrompt, userMessage string) (io.ReadCloser, error) {
-		path, err := WriteMCPConfig(selfExe, socketPath)
+		h, err := ConfiguredHarness(cfg)
+		if err != nil || !h.Capabilities().Tools {
+			return runHarnessText(systemPrompt, userMessage, AuthorOptions{Cfg: cfg})
+		}
+		argv, cleanup, err := WriteToolTransport(h, selfExe, socketPath)
 		if err != nil {
 			// Fallback: author as before (no tools) rather than fail the session.
 			return runHarnessText(systemPrompt, userMessage, AuthorOptions{Cfg: cfg})
 		}
-		stream, rerr := runHarnessText(systemPrompt, userMessage, AuthorOptions{Cfg: cfg, MCPConfigPath: path})
+		stream, rerr := runHarnessText(systemPrompt, userMessage, AuthorOptions{Cfg: cfg, ToolArgv: argv})
 		if rerr != nil {
-			os.Remove(path)
+			cleanup()
 			return nil, rerr
 		}
-		// Remove the temp config when the stream closes (the process has exited).
-		return &removeOnClose{ReadCloser: stream, path: path}, nil
+		// Remove the transport artifact when the stream closes (the process exited).
+		return &cleanupOnClose{ReadCloser: stream, cleanup: cleanup}, nil
 	}
 }
 
-// removeOnClose removes path after the wrapped stream is closed (the mcp-config
-// temp file is needed only for claude's lifetime).
-type removeOnClose struct {
+// cleanupOnClose runs cleanup after the wrapped stream is closed (the transport
+// artifact is needed only for the harness process's lifetime).
+type cleanupOnClose struct {
 	io.ReadCloser
-	path string
+	cleanup func()
 }
 
-func (r *removeOnClose) Close() error {
+func (r *cleanupOnClose) Close() error {
 	err := r.ReadCloser.Close()
-	os.Remove(r.path)
+	r.cleanup()
 	return err
 }

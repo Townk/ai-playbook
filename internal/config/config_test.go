@@ -40,27 +40,19 @@ func TestLoad_NoFile_Defaults(t *testing.T) {
 	if !strings.HasPrefix(cfg.Mux.DumpScreen, "zellij action dump-screen") {
 		t.Fatalf("dump-screen default = %q", cfg.Mux.DumpScreen)
 	}
-	// The agent defaults: harness "claude", everything else empty.
+	// The agent defaults are ALL empty (ADR-0012): "" selects the compiled-in
+	// default harness, and model/triage_model/thinking resolve per harness
+	// through author.HarnessDefaults — never baked into the flat profile.
 	if cfg.Agent != def.Agent {
 		t.Fatalf("agent defaults differ:\n got %+v\nwant %+v", cfg.Agent, def.Agent)
 	}
-	if cfg.Agent.Harness != "claude" {
-		t.Fatalf("agent.harness default = %q, want claude", cfg.Agent.Harness)
-	}
-	if cfg.Agent.Model != "" || cfg.Agent.Bin != "" {
-		t.Fatalf("agent model/bin defaults should be empty: %+v", cfg.Agent)
-	}
-	if cfg.Agent.Thinking != "medium" {
-		t.Fatalf("agent.thinking default = %q, want medium", cfg.Agent.Thinking)
-	}
-	// The cheap classify pass defaults to the "haiku" model alias.
-	if cfg.Agent.TriageModel != "haiku" {
-		t.Fatalf("agent.triage_model default = %q, want haiku", cfg.Agent.TriageModel)
+	if cfg.Agent != (Agent{}) {
+		t.Fatalf("agent defaults should all be empty (per-harness resolution): %+v", cfg.Agent)
 	}
 }
 
-// triage_model is parsed from a present [agent] block; an absent key keeps the
-// "haiku" default.
+// triage_model is parsed from a present [agent] block; an absent key stays
+// empty (the per-harness default applies at resolution time, not here).
 func TestMerge_TriageModel(t *testing.T) {
 	data := []byte("[agent]\ntriage_model = \"claude-3-5-haiku-latest\"\n")
 	cfg, err := loadFrom(Default(), "test.toml", data)
@@ -71,13 +63,13 @@ func TestMerge_TriageModel(t *testing.T) {
 		t.Fatalf("agent.triage_model override: %q", cfg.Agent.TriageModel)
 	}
 
-	// Absent → keep the default.
+	// Absent → stays empty (per-harness resolution downstream).
 	cfg2, err := loadFrom(Default(), "test.toml", []byte("[agent]\nmodel = \"opus\"\n"))
 	if err != nil {
 		t.Fatalf("loadFrom: %v", err)
 	}
-	if cfg2.Agent.TriageModel != "haiku" {
-		t.Fatalf("agent.triage_model should keep default: %q", cfg2.Agent.TriageModel)
+	if cfg2.Agent.TriageModel != "" {
+		t.Fatalf("agent.triage_model should stay empty when absent: %q", cfg2.Agent.TriageModel)
 	}
 }
 
@@ -126,11 +118,11 @@ func TestMerge_OnlyOverridesPresentKeys(t *testing.T) {
 	if cfg.Agent.Bin != "/opt/claude" {
 		t.Fatalf("agent.bin override: %q", cfg.Agent.Bin)
 	}
-	if cfg.Agent.Harness != "claude" {
-		t.Fatalf("agent.harness should keep default: %q", cfg.Agent.Harness)
+	if cfg.Agent.Harness != "" {
+		t.Fatalf("agent.harness should stay empty when absent (default selection downstream): %q", cfg.Agent.Harness)
 	}
-	if cfg.Agent.Thinking != "medium" {
-		t.Fatalf("agent.thinking should keep its default: %q", cfg.Agent.Thinking)
+	if cfg.Agent.Thinking != "" {
+		t.Fatalf("agent.thinking should stay empty when absent (per-harness default downstream): %q", cfg.Agent.Thinking)
 	}
 }
 

@@ -149,8 +149,8 @@ func runClassify(t *testing.T, req capture.Request, resultText, triageModel stri
 
 	var gotArgs []string
 	cls, err := ClassifyRequest(req, AuthorOptions{
-		Cfg:           cfg,
-		MCPConfigPath: "/tmp/should-be-ignored.json", // classify must drop this
+		Cfg:      cfg,
+		ToolArgv: []string{"--mcp-config", "/tmp/should-be-ignored.json"}, // classify must drop this
 		Command: func(_ context.Context, b string, args []string) *exec.Cmd {
 			gotArgs = args
 			return exec.Command(bin, args...)

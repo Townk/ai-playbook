@@ -57,19 +57,21 @@ type Driver struct {
 // parser are one matched contract owned in-tree (package author + agentstream),
 // so the user only picks WHICH harness plus these prefs.
 //
-//   - Harness: which shipped harness to drive ("claude"; pi/cursor are additive
-//     later). Each supported harness is a matched {owned invocation, stream
-//     adapter} pair.
+//   - Harness: which shipped harness to drive (empty → the compiled-in default
+//     selection, claude; pi/cursor are additive later). Each supported harness
+//     is a matched {owned invocation, stream adapter} pair.
 //   - Model: the model id to pass the harness (empty → harness default).
 //   - TriageModel: the model id for the cheap one-shot CLASSIFY pass (command/
-//     answer/escalate). Defaults to "haiku" (the claude CLI alias — cheap+fast)
-//     so a quick classify never burns the capable authoring model.
+//     answer/escalate), so a quick classify never burns the capable authoring
+//     model. Empty → the selected harness's own default (author.HarnessDefaults;
+//     claude: "haiku", the claude CLI's cheap+fast alias).
 //   - Bin: optional override for the harness executable path (empty → the
 //     harness name resolved on PATH).
-//   - Thinking: reasoning effort for the owned claude invocation, mapped to a
-//     MAX_THINKING_TOKENS budget (off | low | medium | high, or a bare integer).
-//     Empty defaults to "medium" so the model's reasoning streams as live
-//     activity. "off" disables thinking. See author.claudeThinkingTokens.
+//   - Thinking: reasoning effort for the owned invocation (off | low | medium |
+//     high, or a harness-specific value such as a bare integer token budget).
+//     Empty → the selected harness's own default (author.HarnessDefaults;
+//     claude: "medium", mapped to MAX_THINKING_TOKENS=8000 so reasoning streams
+//     as live activity). "off" disables thinking.
 type Agent struct {
 	Harness     string `toml:"harness"`
 	Model       string `toml:"model"`
@@ -140,17 +142,14 @@ func Default() *Config {
 			// falling back to a focused write.
 			TypeIntoPane: "zellij action write-chars --pane-id {pane} {text}",
 		},
-		Agent: Agent{
-			Harness: "claude",
-			Model:   "",
-			// The cheap classify pass: "haiku" is the claude CLI model alias
-			// (cheap+fast) for a one-shot command/answer/escalate decision.
-			TriageModel: "haiku",
-			Bin:         "",
-			// "medium" → MAX_THINKING_TOKENS=8000 in the owned claude invocation, so
-			// reasoning blocks stream as live activity by default. "off" disables it.
-			Thinking: "medium",
-		},
+		// The [agent] value defaults are ALL empty here on purpose (ADR-0012):
+		// harness "" selects the compiled-in default harness (claude), and the
+		// model/triage_model/thinking defaults resolve PER HARNESS through
+		// author.HarnessDefaults where cfg meets the harness registry — an
+		// explicit user value always wins. Baking a value here would make it
+		// indistinguishable from an explicit choice and pin every harness to one
+		// harness's aliases (the old hardcoded "haiku" triage default).
+		Agent: Agent{},
 		// "" means auto: driver.resolveShell honours $SHELL (when it names a
 		// supported shell) and falls back through zsh → bash → sh. A no-config
 		// run therefore inherits the user's login shell, not a hardcoded preset.

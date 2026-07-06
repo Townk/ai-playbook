@@ -73,8 +73,8 @@ func runMeta(t *testing.T, resultText string) (Metadata, []string, error) {
 
 	var gotArgs []string
 	meta, err := PlaybookMetadata("# Playbook — x\n\nbody\n", AuthorOptions{
-		Cfg:           cfg,
-		MCPConfigPath: "/tmp/should-be-ignored.json", // PlaybookMetadata must drop this
+		Cfg:      cfg,
+		ToolArgv: []string{"--mcp-config", "/tmp/should-be-ignored.json"}, // PlaybookMetadata must drop this
 		Command: func(_ context.Context, b string, args []string) *exec.Cmd {
 			gotArgs = args
 			return exec.Command(bin, args...)
@@ -118,7 +118,7 @@ func assertCannedMetadata(t *testing.T, meta Metadata) {
 }
 
 // A clean JSON result parses into Metadata; the no-MCP invariant holds (the owned
-// argv carries no --mcp-config even though MCPConfigPath was set), and the system
+// argv carries no --mcp-config even though ToolArgv was set), and the system
 // prompt is MetadataPrompt(doc).
 func TestPlaybookMetadata_ParsesCleanJSON(t *testing.T) {
 	meta, args, err := runMeta(t, cannedMetadataJSON)

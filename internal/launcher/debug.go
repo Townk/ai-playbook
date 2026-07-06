@@ -6,6 +6,9 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"github.com/Townk/ai-playbook/internal/author"
+	"github.com/Townk/ai-playbook/internal/config"
 )
 
 // Gated debug logging for the live launcher↔session↔float flow. These boundaries
@@ -39,11 +42,15 @@ func dbg(format string, args ...any) {
 // dbgEnv records the facts behind the zellij-spawn env-drop hypothesis: whether
 // the capable agent is resolvable in THIS process's PATH (a session pane spawned
 // by `zellij action new-pane` inherits the zellij server's env, not the
-// launcher's), and the PATH itself.
+// launcher's), and the PATH itself. The probed binary is the CONFIGURED
+// harness's — the same author.HarnessBin resolution the real invocation uses
+// (cfg [agent].bin else the harness name).
 func dbgEnv(where string) {
 	if dbgPath == "" {
 		return
 	}
-	cl, err := exec.LookPath("claude")
-	dbg("%s: claude=%q lookErr=%v PATH=%q", where, cl, err, os.Getenv("PATH"))
+	cfg, _ := config.Load()
+	bin := author.HarnessBin(cfg)
+	resolved, err := exec.LookPath(bin)
+	dbg("%s: harness bin %q=%q lookErr=%v PATH=%q", where, bin, resolved, err, os.Getenv("PATH"))
 }

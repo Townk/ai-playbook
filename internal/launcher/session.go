@@ -376,21 +376,31 @@ func (s *session) asker(cwd string) ui.AskFunc {
 	}
 }
 
-// writeMCPConfig writes the claude --mcp-config pointing at this session's tools
-// backend and returns its path (and a removal func), so the owned AuthorEvents
-// invocation reaches the agent's run/ask/remember tools. Returns "" when the
-// session can't be wired (nil session, no selfExe, or a write failure) — the
-// caller then authors without tools. The removal func is always safe to call.
-func (s *session) writeMCPConfig() (path string, remove func()) {
+// toolTransport asks the CONFIGURED harness for its tool-transport wiring
+// (Harness.ToolTransport — claude: a fresh --mcp-config pointing at this
+// session's tools backend) and returns the argv addition (and a removal func),
+// so the owned AuthorEvents invocation reaches the agent's run/ask/remember
+// tools. Returns nil argv when the session can't be wired (nil session, no
+// selfExe, an unknown harness, a BASIC harness without a tool loop, or a write
+// failure) — the caller then authors without tools. The removal func is always
+// safe to call. The launcher never writes transport artifacts itself (ADR-0012).
+func (s *session) toolTransport(cfg *config.Config) (argv []string, remove func()) {
 	if s == nil || s.selfExe == "" {
-		return "", func() {}
+		return nil, func() {}
 	}
-	p, err := author.WriteMCPConfig(s.selfExe, s.socket)
-	if err != nil {
-		dbg("authorPlaybook: WriteMCPConfig failed (%v); authoring without agent tools", err)
-		return "", func() {}
+	h, err := author.ConfiguredHarness(cfg)
+	if err != nil || !h.Capabilities().Tools {
+		// Unknown harness: the invocation itself surfaces the clear error.
+		// BASIC harness: no transport exists — the degradation notes are the
+		// caller's concern (textOnlyHarness); authoring proceeds without tools.
+		return nil, func() {}
 	}
-	return p, func() { os.Remove(p) }
+	a, cleanup, terr := author.WriteToolTransport(h, s.selfExe, s.socket)
+	if terr != nil {
+		dbg("authorPlaybook: ToolTransport failed (%v); authoring without agent tools", terr)
+		return nil, func() {}
+	}
+	return a, cleanup
 }
 
 // authorPlaybook handles a cache MISS (stage 4b): run the capable agent to author
@@ -433,14 +443,22 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 	// Falls back to the model classifier only when nothing was submitted.
 	reengage := newAuthoringReengage(req, d, c, noCache, sess, cfg)
 
+	// Tier gate (ADR-0012): structured authoring rides submit_playbook, which needs
+	// the harness's tool loop. A BASIC harness takes the existing TEXT authoring
+	// path instead, with the one-per-session degradation note.
+	if name, textOnly := textOnlyHarness(cfg); textOnly {
+		degradeNoteOnce("structured", noteStructuredUnavailable, name)
+		return authorPlaybookText(req, d, c, noCache, reengage, cwd, sharedDrv, title, bridgeOf(sess), cfg.Driver.Shell)
+	}
+
 	// INITIAL authoring runs the SHARED structured-authoring core (structuredStream):
-	// the OWNED claude stream-json invocation (AuthorEvents, Structured: true) is fanned
+	// the OWNED stream-json invocation (AuthorEvents, Structured: true) is fanned
 	// into a narration reader + activity feed, while the agent submits the playbook via
 	// submit_playbook → OnPlaybook → sess.lastPB. The viewer (RunStream, Structured:
 	// true) shows the ProgressWidget while draining narration, then renders body() (the
 	// captured playbook) on EOF as the finalDraft. The failure context
 	// (req.Command/Exit/Scrollback) flows through author's SystemPrompt/BuildUserMessage
-	// unchanged. The mcp-config wires the agent's run/ask/remember tools to this backend.
+	// unchanged. The tool transport wires the agent's run/ask/remember tools to this backend.
 	cs, err := structuredStream(req, sess, cfg)
 	if err != nil {
 		// Fallback: the harness binary may be missing or the harness unsupported.
@@ -451,7 +469,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 	defer cs.close()
 
 	code := ui.RunStream(cs.reader, ui.StreamOptions{
-		Harness:    "Claude Code",
+		Harness:    author.HarnessDisplayName(cfg),
 		Title:      title,
 		Cwd:        cwd,
 		Shell:      cfg.Driver.Shell, // configured shell for RunStream's own-driver fallback
@@ -494,7 +512,7 @@ func reengageStructured(kind reengage.ReengageKind) bool {
 // prompt byte-identical to the pre-feature output (characterization-tested). It is a
 // pure function (no session/process state) so the constraints injection is testable
 // without spawning the harness.
-func reengagePrompts(req capture.Request, kind reengage.ReengageKind, base, change string, constraints []string, cfg *config.Config, mcpWired bool) (sys, user string) {
+func reengagePrompts(req capture.Request, kind reengage.ReengageKind, base, change string, constraints []string, cfg *config.Config, toolsWired bool) (sys, user string) {
 	// Load BOTH knowledge sets ONCE (tail-capped at the load boundary) and thread
 	// them into whichever builder this kind uses, so every re-engagement recalls
 	// identically. Empty KB ⇒ byte-identical prompts (characterization contract).
@@ -506,13 +524,14 @@ func reengagePrompts(req capture.Request, kind reengage.ReengageKind, base, chan
 	case reengage.KindReengageFinalPlaybook:
 		// FINAL-PLAYBOOK (stage 2): fresh when base=="" (change = the troubleshoot
 		// content to distill), amend when base!="" (fold change into the base). This is
-		// the WRAP-UP prompt (ADR-0011 / K4): when the MCP tools backend is wired
-		// (mcpWired), fold in the ONE memory-fill instruction so the model `remember`s
-		// the session's durable lessons before finishing. Without MCP the `remember`
-		// tool is unavailable, so the instruction is omitted (byte-identical to the
-		// plain final prompt) — this is the ONLY prompt shape that gets it.
+		// the WRAP-UP prompt (ADR-0011 / K4): when the tools backend is wired
+		// (toolsWired), fold in the ONE memory-fill instruction so the model `remember`s
+		// the session's durable lessons before finishing. Without the tool transport
+		// the `remember` tool is unavailable, so the instruction is omitted
+		// (byte-identical to the plain final prompt) — this is the ONLY prompt shape
+		// that gets it.
 		sys = author.FinalPlaybookPrompt(req, base, change, global, project)
-		if mcpWired {
+		if toolsWired {
 			sys = author.WithMemoryFill(sys)
 		}
 		user = author.BuildUserMessage(req)
@@ -532,41 +551,58 @@ func reengagePrompts(req capture.Request, kind reengage.ReengageKind, base, chan
 //
 // Per invocation it builds the right prompt for the kind (regenerate → the
 // standard authoring prompt; followup → the failed-output prompt; finalplaybook →
-// the FINAL-PLAYBOOK prompt), lazily writes a fresh --mcp-config pointing at the
-// session's tools backend (so the re-engaged agent still reaches run/ask/remember),
-// and runs the OWNED harness invocation via author.RunHarnessEvents. The returned
-// close/wait func reaps the process AND removes the per-invocation mcp-config.
+// the FINAL-PLAYBOOK prompt), lazily asks the harness's ToolTransport for a fresh
+// transport artifact pointing at the session's tools backend (so the re-engaged
+// agent still reaches run/ask/remember), and runs the OWNED harness invocation
+// via author.RunHarnessEvents. The returned close/wait func reaps the process AND
+// removes the per-invocation transport artifact.
 //
-// A nil session (no tools backend) authors-without-tools (mcp path stays empty),
-// which still streams reasoning. Returns nil so the orchestrator falls back to the
-// text Agent only if config can't be loaded — otherwise the EventsFunc is always
-// returned and the orchestrator prefers it.
+// A nil session (no tools backend) authors-without-tools (the transport argv
+// stays empty), which still streams reasoning. Under a BASIC harness (ADR-0012)
+// the structured kinds (regenerate/finalplaybook) run as text with the
+// one-per-session degradation note, and the wrap-up's knowledge fill is skipped
+// with its own note; followup/drift-regen are text already and run unchanged.
+// Returns nil so the orchestrator falls back to the text Agent only if config
+// can't be loaded — otherwise the EventsFunc is always returned and the
+// orchestrator prefers it.
 func buildReengageEvents(req capture.Request, sess *session) reengage.EventsFunc {
 	return func(kind reengage.ReengageKind, base, change string, constraints []string) (<-chan agentstream.Event, func() error, error) {
-		// Per-invocation mcp-config so the re-engaged agent reaches the live backend.
-		mcpPath, removeMCP := sess.writeMCPConfig()
-
 		cfg, _ := config.Load()
 
-		// mcpPath != "" ⇒ the session's run/ask/remember backend is wired, so the
-		// wrap-up prompt may carry the memory-fill instruction (the `remember` tool
-		// exists). An unwired session omits it (the tool would be unavailable).
-		sys, user := reengagePrompts(req, kind, base, change, constraints, cfg, mcpPath != "")
+		// Tier gate (ADR-0012): a BASIC harness has no submit_playbook (structured
+		// drafting) and no remember (the wrap-up knowledge fill). Note each missing
+		// capability once per session; the invocation itself proceeds as text.
+		name, textOnly := textOnlyHarness(cfg)
+		if textOnly && reengageStructured(kind) {
+			degradeNoteOnce("structured", noteStructuredUnavailable, name)
+		}
+		if textOnly && kind == reengage.KindReengageFinalPlaybook {
+			degradeNoteOnce("knowledge", noteKnowledgeUnavailable, name)
+		}
 
-		// cfg already loaded above.
+		// Per-invocation tool transport so the re-engaged agent reaches the live
+		// backend (nil for a nil/unwired session or a BASIC harness).
+		toolArgv, removeTransport := sess.toolTransport(cfg)
+
+		// toolArgv non-empty ⇒ the session's run/ask/remember backend is wired, so
+		// the wrap-up prompt may carry the memory-fill instruction (the `remember`
+		// tool exists). An unwired session — and a BASIC harness — omit it (the
+		// tool would be unavailable).
+		sys, user := reengagePrompts(req, kind, base, change, constraints, cfg, len(toolArgv) > 0)
+
 		events, wait, err := author.RunHarnessEvents(sys, user, author.AuthorOptions{
-			Cfg:           cfg,
-			MCPConfigPath: mcpPath,
-			Structured:    reengageStructured(kind),
+			Cfg:        cfg,
+			ToolArgv:   toolArgv,
+			Structured: reengageStructured(kind) && !textOnly,
 		})
 		if err != nil {
-			removeMCP()
+			removeTransport()
 			return nil, nil, err
 		}
-		// Wrap wait to also remove the per-invocation mcp-config once the process exits.
+		// Wrap wait to also remove the per-invocation transport once the process exits.
 		closeFn := func() error {
 			werr := wait()
-			removeMCP()
+			removeTransport()
 			return werr
 		}
 		return events, closeFn, nil
@@ -675,7 +711,7 @@ func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, 
 
 	var body bytes.Buffer
 	code := ui.RunStream(stream, ui.StreamOptions{
-		Harness:   "Claude Code",
+		Harness:   author.HarnessDisplayName(reengage.Cfg),
 		Title:     title,
 		Cwd:       cwd,
 		Shell:     shell, // configured shell for RunStream's own-driver fallback

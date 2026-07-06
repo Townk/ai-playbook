@@ -139,10 +139,10 @@ const classifyTrigger = "Classify the request above. Respond with the JSON objec
 
 // ClassifyRequest runs the cheap-model TRIAGE classify over the OWNED harness and
 // returns a Classification (command/answer/escalate). It is a PURE text→JSON call
-// like PlaybookMetadata: NO MCP tools (no --mcp-config), and it runs on the TRIAGE
-// model — opts.Cfg.Agent.TriageModel (falling back to the baked-in default
-// "haiku") — via the AuthorOptions.ModelOverride seam, so the authoring path's
-// model is untouched.
+// like PlaybookMetadata: NO tools backend (no tool transport), and it runs on the
+// TRIAGE model — opts.Cfg.Agent.TriageModel, falling back to the configured
+// harness's own defaults row (HarnessDefaults) — via the
+// AuthorOptions.ModelOverride seam, so the authoring path's model is untouched.
 //
 // Parsing mirrors PlaybookMetadata: drain the event stream for the Final result
 // text, tolerate a fence/whitespace by extracting the outer {...}, json.Unmarshal,
@@ -160,7 +160,7 @@ const classifyTrigger = "Classify the request above. Respond with the JSON objec
 //     and escalates).
 func ClassifyRequest(req capture.Request, opts AuthorOptions) (Classification, error) {
 	// A classify call needs no tools backend; never attach --mcp-config.
-	opts.MCPConfigPath = ""
+	opts.ToolArgv = nil
 	// Bound the call (A5a): classify gates every request and is meant to finish
 	// in ~2-3s, so a stalled harness must not hang the caller forever. A caller
 	// that already set a Timeout (e.g. a test forcing a short deadline) keeps it.
@@ -204,13 +204,14 @@ func ClassifyRequest(req capture.Request, opts AuthorOptions) (Classification, e
 		fmt.Errorf("request classification failed after retry: %w", lastErr)
 }
 
-// triageModel resolves the model id for the classify pass: cfg [agent].TriageModel,
-// falling back to the baked-in default when cfg or the field is unset.
+// triageModel resolves the model id for the classify pass: cfg [agent].TriageModel
+// when explicitly set, else the configured harness's own defaults row (ADR-0012
+// decision 4 — claude: "haiku"; each harness names its own cheap alias).
 func triageModel(cfg *config.Config) string {
 	if cfg != nil && cfg.Agent.TriageModel != "" {
 		return cfg.Agent.TriageModel
 	}
-	return config.Default().Agent.TriageModel
+	return HarnessDefaults(resolveHarnessName(cfg)).TriageModel
 }
 
 // parseClassification extracts the outer {...} (tolerating a fence/whitespace) and

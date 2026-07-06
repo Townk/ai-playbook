@@ -226,17 +226,17 @@ var createStreamFn = structuredStream
 // submit_playbook DATA, not {id=…} markdown) wired to the session's tools backend and
 // fans it into a reader + activity feed + body accumulator. The body() closure prefers
 // the deterministic render of the captured playbook (sess.lastPB) over the accumulated
-// stream text (see structuredBody). A nil session authors without tools (writeMCPConfig
-// is nil-safe).
+// stream text (see structuredBody). A nil session authors without tools
+// (toolTransport is nil-safe).
 func structuredStream(req capture.Request, sess *session, cfg *config.Config) (createStream, error) {
-	mcpPath, removeMCP := sess.writeMCPConfig()
+	toolArgv, removeTransport := sess.toolTransport(cfg)
 	events, closeFn, err := author.AuthorEvents(req, author.AuthorOptions{
-		Cfg:           cfg,
-		MCPConfigPath: mcpPath,
-		Structured:    true, // author via submit_playbook (DATA), not {id=…} markdown
+		Cfg:        cfg,
+		ToolArgv:   toolArgv,
+		Structured: true, // author via submit_playbook (DATA), not {id=…} markdown
 	})
 	if err != nil {
-		removeMCP()
+		removeTransport()
 		return createStream{}, err
 	}
 	reader, activity, fo := agentstream.FanOut(events, closeFn, ActivityBuffer)
@@ -245,7 +245,7 @@ func structuredStream(req capture.Request, sess *session, cfg *config.Config) (c
 		reader:   reader,
 		activity: activity,
 		body:     func() string { return structuredBody(sess, req.ProjectRoot, home, fo.Body) },
-		close:    func() { reader.Close(); removeMCP() },
+		close:    func() { reader.Close(); removeTransport() },
 	}, nil
 }
 
@@ -366,6 +366,14 @@ func createAuthorWithProgress(req capture.Request, d triage.Decision, c *cache.C
 		sharedDrv = sess.drv
 	}
 	reengage := newAuthoringReengage(req, d, c, noCache, sess, cfg)
+
+	// Tier gate (ADR-0012): structured authoring rides submit_playbook, which
+	// needs the harness's tool loop. A BASIC harness takes the existing TEXT
+	// authoring path instead, with the one-per-session degradation note.
+	if name, textOnly := textOnlyHarness(cfg); textOnly {
+		degradeNoteOnce("structured", noteStructuredUnavailable, name)
+		return authorPlaybookText(req, d, c, noCache, reengage, cwd, sharedDrv, "", bridgeOf(sess), cfg.Driver.Shell)
+	}
 
 	cs, err := createStreamFn(req, sess, cfg)
 	if err != nil {

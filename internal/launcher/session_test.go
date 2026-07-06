@@ -450,33 +450,34 @@ func after(ss []string, key string) string {
 	return ""
 }
 
-// ── writeMCPConfig coverage ────────────────────────────────────────────────
+// ── toolTransport coverage ─────────────────────────────────────────────────
 
-// TestWriteMCPConfig_NilSession asserts the nil-session fast path returns an empty
-// path and a safe-to-call no-op remove func.
-func TestWriteMCPConfig_NilSession(t *testing.T) {
+// TestToolTransport_NilSession asserts the nil-session fast path returns no argv
+// and a safe-to-call no-op remove func.
+func TestToolTransport_NilSession(t *testing.T) {
 	var s *session
-	path, remove := s.writeMCPConfig()
-	if path != "" {
-		t.Errorf("nil session: want empty path, got %q", path)
+	argv, remove := s.toolTransport(config.Default())
+	if len(argv) != 0 {
+		t.Errorf("nil session: want empty argv, got %v", argv)
 	}
 	remove() // must not panic
 }
 
-// TestWriteMCPConfig_NoSelfExe asserts that a session with no selfExe falls through
-// the nil-selfExe guard and returns an empty path.
-func TestWriteMCPConfig_NoSelfExe(t *testing.T) {
+// TestToolTransport_NoSelfExe asserts that a session with no selfExe falls through
+// the nil-selfExe guard and returns no argv.
+func TestToolTransport_NoSelfExe(t *testing.T) {
 	s := &session{selfExe: ""}
-	path, remove := s.writeMCPConfig()
-	if path != "" {
-		t.Errorf("no selfExe: want empty path, got %q", path)
+	argv, remove := s.toolTransport(config.Default())
+	if len(argv) != 0 {
+		t.Errorf("no selfExe: want empty argv, got %v", argv)
 	}
 	remove()
 }
 
-// TestWriteMCPConfig_LiveSession asserts the success path: a live session with a
-// resolved selfExe writes a valid config file and the remove func cleans it up.
-func TestWriteMCPConfig_LiveSession(t *testing.T) {
+// TestToolTransport_LiveSession asserts the success path: a live session with a
+// resolved selfExe gets the harness's transport argv ("--mcp-config <path>" for
+// the default claude harness), the artifact exists, and remove cleans it up.
+func TestToolTransport_LiveSession(t *testing.T) {
 	minimalZDOTDIR(t)
 	sess := openSession(capture.Request{ProjectRoot: t.TempDir()}, mux.Null(), nil, "", "")
 	if sess == nil {
@@ -484,19 +485,20 @@ func TestWriteMCPConfig_LiveSession(t *testing.T) {
 	}
 	defer sess.close()
 	if sess.selfExe == "" {
-		t.Skip("os.Executable unavailable; cannot test writeMCPConfig success path")
+		t.Skip("os.Executable unavailable; cannot test toolTransport success path")
 	}
 
-	path, remove := sess.writeMCPConfig()
-	if path == "" {
-		t.Fatal("writeMCPConfig: expected a non-empty config path")
+	argv, remove := sess.toolTransport(config.Default())
+	if len(argv) != 2 || argv[0] != "--mcp-config" {
+		t.Fatalf("toolTransport: want [--mcp-config <path>], got %v", argv)
 	}
+	path := argv[1]
 	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("writeMCPConfig: config file not created at %s: %v", path, err)
+		t.Fatalf("toolTransport: transport artifact not created at %s: %v", path, err)
 	}
 	remove()
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
-		t.Errorf("writeMCPConfig remove func did not clean up %s", path)
+		t.Errorf("toolTransport remove func did not clean up %s", path)
 	}
 }
 

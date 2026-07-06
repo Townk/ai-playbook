@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"strconv"
 	"time"
 
 	"github.com/Townk/ai-playbook/internal/agentstream"
@@ -29,106 +28,25 @@ import (
 // use it to force a short deadline).
 const defaultCallTimeout = 60 * time.Second
 
-// ClaudeArgs builds the OWNED claude argv for the streaming event path. The
-// invocation flags and the stream adapter are a single matched contract — these
-// flags are NOT user-configurable; the user only selects the harness + value
-// prefs (model, bin) via config [agent]. The flags mirror the existing
-// tools-backend wiring (mcp-config + append-system-prompt + positional user
-// message), in stream-json so agentstream's claude adapter can parse it:
-//
-//	claude -p --output-format stream-json --verbose --include-partial-messages
-//	       [--model <model>] [--mcp-config <path>]
-//	       --append-system-prompt <systemPrompt> <userMessage>
-//
-// model and mcpConfigPath are optional (omitted when empty).
-//
-// When bare is set (the cheap CLASSIFY pass), the call is stripped to a BARE
-// quick-model invocation: it REPLACES the default system prompt with
-// --system-prompt (instead of --append-system-prompt) — which, per `claude
-// --help`, drops Claude's auto-discovery of CLAUDE.md, sync/attribution, and
-// auto-memory — and adds --strict-mcp-config (confine MCP to --mcp-config, which
-// classify never passes → no global MCP) and
-// --exclude-dynamic-system-prompt-sections (drop the cwd/env/git-status/memory
-// machine sections). All three flags are present in the current claude build
-// (verified against `claude --help`). The authoring path (bare=false) keeps
-// --append-system-prompt and Claude's full default context, unchanged.
-func ClaudeArgs(model, mcpConfigPath, systemPrompt, userMessage string, bare bool) []string {
-	args := []string{
-		"-p",
-		"--output-format", "stream-json",
-		"--verbose",
-		"--include-partial-messages",
-		// Use ONLY the MCP servers we pass via --mcp-config (or none) — NEVER the
-		// user's global/project MCP servers (Gmail/Calendar/Drive/…). Each of those
-		// is a process spawn + handshake at startup, irrelevant to authoring/adapt/
-		// classify, and a major chunk of time-to-first-token. Applies to every path
-		// (the bare classify already relied on it).
-		"--strict-mcp-config",
-	}
-	if model != "" {
-		args = append(args, "--model", model)
-	}
-	if mcpConfigPath != "" {
-		args = append(args, "--mcp-config", mcpConfigPath)
-	}
-	if bare {
-		args = append(args,
-			"--exclude-dynamic-system-prompt-sections",
-			"--system-prompt", systemPrompt,
-			userMessage,
-		)
-		return args
-	}
-	args = append(args, "--append-system-prompt", systemPrompt, userMessage)
-	return args
-}
-
-// claudeThinkingTokens maps the config [agent].thinking preference to a
-// MAX_THINKING_TOKENS budget for the OWNED claude invocation. Claude Code's
-// `--print --output-format stream-json` only EMITS thinking blocks (which the
-// claude adapter maps to Reasoning events) when extended thinking is enabled,
-// and the env var MAX_THINKING_TOKENS is the mechanism Claude Code honors in
-// print mode. An empty/unrecognized preference defaults to "on" (medium) so
-// reasoning activity streams out of the box. "off" returns 0 → no env var set →
-// no thinking. NOTE: in --print stream-json the thinking block TEXT is omitted
-// (Claude Code does not surface the readable summary); the blocks still stream,
-// so the live "model is reasoning" activity fires even though the text is empty.
-// pi (--mode json, thinkingText) surfaces the reasoning text natively.
-func claudeThinkingTokens(thinking string) int {
-	switch thinking {
-	case "off", "none", "0":
-		return 0
-	case "low":
-		return 4000
-	case "high":
-		return 16000
-	case "medium", "on", "":
-		return 8000
-	default:
-		// Unknown value: tolerate a bare integer budget; else default to medium.
-		if n, err := strconv.Atoi(thinking); err == nil && n >= 0 {
-			return n
-		}
-		return 8000
-	}
-}
-
 // AuthorOptions tunes AuthorEvents. Cfg supplies the harness selection + value
-// prefs ([agent]); MCPConfigPath, when set, wires the tools backend into the
-// owned argv. Command is the test seam: when non-nil it replaces the real
-// process launch with a caller-built *exec.Cmd (the fake-harness pattern), so
-// AuthorEvents is unit-testable without a real claude on PATH.
+// prefs ([agent]); ToolArgv, when set, wires the tools backend into the owned
+// argv. Command is the test seam: when non-nil it replaces the real process
+// launch with a caller-built *exec.Cmd (the fake-harness pattern), so
+// AuthorEvents is unit-testable without a real harness on PATH.
 type AuthorOptions struct {
 	Cfg *config.Config
-	// MCPConfigPath, when non-empty, is forwarded as --mcp-config (claude harness).
-	MCPConfigPath string
+	// ToolArgv, when non-empty, is the tool-transport argv addition returned by
+	// Harness.ToolTransport (claude: ["--mcp-config", <path>]). It is spliced
+	// into the owned argv AND triggers the tool-instruction fold into the system
+	// prompt. Empty → no tools backend (the plain invocation).
+	ToolArgv []string
 	// ModelOverride, when non-empty, replaces cfg [agent].Model for THIS invocation
 	// only (the owned argv's --model). It is the seam the cheap CLASSIFY pass uses to
 	// run on the triage model without disturbing the authoring path (which keeps
 	// using cfg [agent].Model). Empty → the configured Model is used as before.
 	ModelOverride string
 	// Structured, when true, appends StructuredToolInstruction() instead of
-	// ToolInstruction when MCPConfigPath is set: the create flow directs the model to
+	// ToolInstruction when ToolArgv is set: the create flow directs the model to
 	// diagnose with run/ask and return the playbook as DATA via submit_playbook (the
 	// host renders the markdown), rather than writing {id=…} markdown itself. Only the
 	// create path sets it; the markdown authoring paths leave it false.
@@ -203,10 +121,11 @@ func AuthorEvents(req capture.Request, opts AuthorOptions) (<-chan agentstream.E
 // agentstream.Get(adapter)'s Parse, forwarding each event on the returned channel
 // (closed on EOF).
 //
-// When opts.MCPConfigPath is set, the harness's tool-use instruction is appended
-// to systemPrompt (so the agent reaches the session's run/ask/remember backend)
-// and --mcp-config is wired into the argv — exactly as the standard authoring path
-// does, so re-engagement's followup/wrapup/regenerate prompts get the same tools.
+// When opts.ToolArgv is set (the Harness.ToolTransport attachment), the harness's
+// tool-use instruction is appended to systemPrompt (so the agent reaches the
+// session's run/ask/remember backend) and the transport argv is wired into the
+// owned argv — exactly as the standard authoring path does, so re-engagement's
+// followup/wrapup/regenerate prompts get the same tools.
 //
 // The returned func() error waits for the process to exit (reaping it) and returns
 // its exit error; call it after draining the channel.
@@ -216,10 +135,7 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 		cfg = config.Default()
 	}
 
-	harnessName := cfg.Agent.Harness
-	if harnessName == "" {
-		harnessName = config.Default().Agent.Harness
-	}
+	harnessName := resolveHarnessName(cfg)
 	h, ok := harnessFor(harnessName)
 	if !ok {
 		return nil, nil, fmt.Errorf("harness %q not yet supported", harnessName)
@@ -229,29 +145,38 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 	// system prompt when the tools backend is wired, then resolve the per-call knobs.
 	// The Harness only turns those into its owned argv/adapter/env.
 	sys := systemPrompt
-	if opts.MCPConfigPath != "" {
+	if len(opts.ToolArgv) > 0 {
 		if opts.Structured {
 			sys += StructuredToolInstruction()
 		} else {
 			sys += ToolInstruction
 		}
 	}
+	// Value-pref resolution (ADR-0012 decision 4): an explicit [agent] value wins;
+	// an empty one falls through to the harness's own defaults row.
+	defaults := HarnessDefaults(harnessName)
 	// Per-invocation model override (the classify pass selects the triage model)
 	// falls back to the configured authoring model when unset.
 	model := cfg.Agent.Model
+	if model == "" {
+		model = defaults.Model
+	}
 	if opts.ModelOverride != "" {
 		model = opts.ModelOverride
 	}
 	// NoThinking forces thinking off for THIS call regardless of cfg.Thinking.
 	thinking := cfg.Agent.Thinking
+	if thinking == "" {
+		thinking = defaults.Thinking
+	}
 	if opts.NoThinking {
 		thinking = "off"
 	}
 	inv := Invocation{
-		Model:         model,
-		MCPConfigPath: opts.MCPConfigPath,
-		Bare:          opts.Bare,
-		Thinking:      thinking,
+		Model:    model,
+		ToolArgv: opts.ToolArgv,
+		Bare:     opts.Bare,
+		Thinking: thinking,
 	}
 	args := h.Argv(sys, userMessage, inv)
 	adapterName := h.AdapterName()
@@ -268,10 +193,7 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 		adapter = opts.Adapter
 	}
 
-	bin := cfg.Agent.Bin
-	if bin == "" {
-		bin = harnessName
-	}
+	bin := HarnessBin(cfg)
 
 	ctx := context.Background()
 	cancel := func() {}

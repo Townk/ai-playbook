@@ -33,6 +33,7 @@ done/stale entries. Phase work lives in the roadmap, not here.
 - [ ] CI hardening batch: per-job cache keys + golangci-lint via go.mod `tool` directive; `concurrency` groups; dependabot (gomod+actions); `go mod tidy -diff` in CI (drop the GoReleaser hook); release-notes empty-file guard; a cheap macos-latest build+vet job (darwin-first releases, ubuntu-only CI) (2026-07-04)
 - [ ] Unify the two cell-width engines: app code measures with mattn/go-runewidth while the charm v2 stack renders with clipperhouse/displaywidth — EA/emoji width disagreements can misalign frames (2026-07-04)
 - [ ] Test hygiene: retire coverage_boost_test.go's symbol-pinning tests into behavioral per-file tests; add factories for the 124 copy-pasted `defaultTheme(), "default"` constructor calls; share the duplicated collectMsgs helper (2026-07-04)
+- [ ] BASIC-tier residual (ADR-0012): FollowupPrompt's BASE text teaches the `run` tool unconditionally — under a BASIC harness the sentence should gate on tools wiring (left byte-identical in H1; only the folds gate today) (2026-07-06)
 
 - [ ] `ask --version` prints a bare `v0.9.0` while `ai-playbook`/`apb` print name-aware `<prog> <version>` — align ask's version line with its siblings (2026-07-04)
 

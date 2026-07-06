@@ -1,13 +1,25 @@
 package ui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/Townk/ai-playbook/internal/author"
+	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 )
+
+// noBackendRegenNote builds the drift-region note for a regenerate that failed
+// because no AI backend is available (F24). It names the CONFIGURED harness's
+// binary — the same author.HarnessBin resolution the real invocation uses (cfg
+// [agent].bin else the harness name) — instead of assuming any one harness.
+func noBackendRegenNote() string {
+	cfg, _ := config.Load() // always non-nil (Default on error)
+	return fmt.Sprintf("no AI backend found — install and authenticate %s, or resolve manually", author.HarnessBin(cfg))
+}
 
 // looksLikeNoBackend reports whether err indicates the AI harness/backend is missing
 // or unusable (F24) — the binary isn't on PATH, the harness isn't supported/built, or
@@ -412,7 +424,7 @@ func (m model) handleDriftRegen(msg driftRegenMsg) (tea.Model, tea.Cmd) {
 		// generic "resolve manually" alternate — either way the drift region shows a
 		// visible message, never a silent no-op.
 		if looksLikeNoBackend(msg.Err) {
-			st.RegenNote = "no AI backend found — install and authenticate the Claude CLI (claude), or resolve manually"
+			st.RegenNote = noBackendRegenNote()
 		} else {
 			st.RegenNote = ""
 		}

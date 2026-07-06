@@ -73,7 +73,7 @@ func Author(req capture.Request, cfg *config.Config, agent Agent) (io.ReadCloser
 // HarnessAgent is the production Agent: it runs the CONFIGURED harness via
 // RunHarnessEvents and drains the model's text output into the streaming
 // io.ReadCloser the callers render. opts carries the harness selection (Cfg); the
-// plain (no-tools) invocation leaves MCPConfigPath empty. It replaces the removed
+// plain (no-tools) invocation leaves ToolArgv empty. It replaces the removed
 // claude-only ClaudeAgent so the harness is honored on every path — the legacy
 // path ignored [agent].harness and always ran claude (finding A5c). The retired
 // $ASSIST_MODEL/$AI_PLAYBOOK_MODEL model overrides and the bypassPermissions flag

@@ -77,10 +77,12 @@ type Adapter interface {
 	Parse(r io.Reader, emit func(Event)) error
 }
 
-// registry maps a harness/adapter name to its built-in Adapter.
+// registry maps a harness/adapter name to its built-in Adapter. Harness-specific
+// adapters register themselves from their own file's init (see claude.go), so
+// this file stays free of concrete harness names; the unstructured text adapter
+// is the only harness-neutral built-in.
 var registry = map[string]Adapter{
-	"claude": claudeAdapter{},
-	"text":   textAdapter{},
+	"text": textAdapter{},
 }
 
 // Get returns the registered Adapter for name and whether it exists.

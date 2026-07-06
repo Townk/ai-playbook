@@ -9,6 +9,13 @@ import (
 	"strings"
 )
 
+// init installs the claude adapter under its registry name — registration lives
+// HERE (the claude adapter's own file) so the shared registry never names a
+// concrete harness (the ADR-0012 leak discipline).
+func init() {
+	registry["claude"] = claudeAdapter{}
+}
+
 // claudeAdapter parses Claude Code's `--output-format stream-json --verbose
 // --include-partial-messages` output: one JSON object per line (NDJSON). It
 // normalizes that wire format into the shared Event model.

@@ -63,8 +63,12 @@ var reviewSystemPrompt = "You are reviewing a playbook (a runnable markdown docu
 	author.AuthoringRubric()
 
 // aiSkipNote is printed in place of the AI review's text when no model backend
-// is available (F24-style degrade, never an abort).
-const aiSkipNote = "AI review skipped — no model backend (install + authenticate the Claude CLI, or configure [agent] in ai-playbook config)"
+// is available (F24-style degrade, never an abort). bin is the CONFIGURED
+// harness's binary (author.HarnessBin — cfg [agent].bin else the harness name),
+// so the note names the backend that was actually looked for.
+func aiSkipNote(bin string) string {
+	return fmt.Sprintf("AI review skipped — no model backend (install + authenticate %s, or configure [agent] in ai-playbook config)", bin)
+}
 
 // ValidateMain is the `ai-playbook validate` subcommand: it resolves the single
 // playbook source (a slug via the store, or --file), runs the deterministic
@@ -169,7 +173,7 @@ func ValidateMain() int {
 			}
 			<-done
 		case isNoBackend(serr):
-			aiText = aiSkipNote
+			aiText = aiSkipNote(author.HarnessBin(cfg))
 		default:
 			aiText = fmt.Sprintf("AI review failed: %v", serr)
 		}

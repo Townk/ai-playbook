@@ -18,7 +18,7 @@ import (
 )
 
 func TestClaudeArgs_OwnedInvocation(t *testing.T) {
-	args := ClaudeArgs("opus", "/tmp/mcp.json", "SYS", "USER", false)
+	args := claudeArgs("opus", []string{"--mcp-config", "/tmp/mcp.json"}, "SYS", "USER", false)
 	joined := strings.Join(args, "\x00")
 	for _, want := range []string{
 		"-p",
@@ -50,7 +50,7 @@ func TestClaudeArgs_OwnedInvocation(t *testing.T) {
 }
 
 func TestClaudeArgs_OmitsEmptyModelAndMCP(t *testing.T) {
-	args := ClaudeArgs("", "", "SYS", "USER", false)
+	args := claudeArgs("", nil, "SYS", "USER", false)
 	joined := strings.Join(args, "\x00")
 	if strings.Contains(joined, "--model") {
 		t.Errorf("empty model should be omitted: %v", args)
@@ -65,7 +65,7 @@ func TestClaudeArgs_OmitsEmptyModelAndMCP(t *testing.T) {
 // --exclude-dynamic-system-prompt-sections, and (since classify passes no
 // mcp-config) carries no --mcp-config.
 func TestClaudeArgs_Bare(t *testing.T) {
-	args := ClaudeArgs("haiku", "", "SYS", "USER", true)
+	args := claudeArgs("haiku", nil, "SYS", "USER", true)
 	has := func(tok string) bool {
 		for _, a := range args {
 			if a == tok {

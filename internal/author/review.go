@@ -24,8 +24,8 @@ var reviewProcess func(ctx context.Context, bin string, args []string) *exec.Cmd
 // runs, instead of blocking silently until the harness finishes. It mirrors
 // ClassifyRequest's option construction:
 //
-//   - opts.MCPConfigPath = "" — a review call needs no tools backend; never
-//     attach --mcp-config.
+//   - opts.ToolArgv = nil — a review call needs no tools backend; never attach
+//     a tool transport.
 //   - opts.Bare = true — a BARE quick-model invocation: REPLACE the default
 //     system prompt (--system-prompt, not --append-system-prompt) and drop
 //     CLAUDE.md auto-discovery, auto-memory, global MCP, and the dynamic
@@ -49,11 +49,11 @@ var reviewProcess func(ctx context.Context, bin string, args []string) *exec.Cmd
 // command loads the project config and passes it here.
 func ReviewStream(cfg *config.Config, systemPrompt, userMessage string) (<-chan agentstream.Event, func() error, error) {
 	opts := AuthorOptions{
-		Cfg:           cfg,
-		MCPConfigPath: "",
-		Bare:          true,
-		NoThinking:    false,
-		Command:       reviewProcess,
+		Cfg:        cfg,
+		ToolArgv:   nil,
+		Bare:       true,
+		NoThinking: false,
+		Command:    reviewProcess,
 	}
 	return RunHarnessEvents(systemPrompt, userMessage, opts)
 }

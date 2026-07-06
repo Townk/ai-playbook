@@ -12,10 +12,10 @@ import (
 // full slice (not a subset) — a drift in flag order/content fails here.
 func TestClaudeHarness_ArgvGolden(t *testing.T) {
 	got := claudeHarness{}.Argv("SYS", "USER", Invocation{
-		Model:         "opus",
-		MCPConfigPath: "/tmp/mcp.json",
-		Bare:          false,
-		Thinking:      "medium",
+		Model:    "opus",
+		ToolArgv: []string{"--mcp-config", "/tmp/mcp.json"},
+		Bare:     false,
+		Thinking: "medium",
 	})
 	want := []string{
 		"-p",
