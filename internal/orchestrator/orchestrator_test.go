@@ -522,3 +522,63 @@ func TestCheckDrift_NoRunContention(t *testing.T) {
 	o.Drv.Stop()
 	<-done
 }
+
+// EffectiveTimeout is the single "which ceiling applies" rule: a positive
+// declared timeout wins; zero/negative falls back to the 10-minute default.
+func TestEffectiveTimeout(t *testing.T) {
+	if got := EffectiveTimeout(90 * time.Second); got != 90*time.Second {
+		t.Errorf("declared 90s → %v, want 90s", got)
+	}
+	if got := EffectiveTimeout(0); got != 10*time.Minute {
+		t.Errorf("undeclared → %v, want the 10m default", got)
+	}
+	if got := EffectiveTimeout(-time.Second); got != 10*time.Minute {
+		t.Errorf("negative → %v, want the 10m default", got)
+	}
+}
+
+// Do(KindRun) hands the driver the DECLARED timeout when the action carries a
+// positive one, and the package default otherwise — captured via the runIDFn
+// seam so no live shell is needed.
+func TestDoRun_TimeoutDeclaredVsDefault(t *testing.T) {
+	var got []time.Duration
+	orig := runIDFn
+	runIDFn = func(_ *driver.Driver, _, _, _ string, timeout time.Duration) driver.Result {
+		got = append(got, timeout)
+		return driver.Result{Exit: 0}
+	}
+	defer func() { runIDFn = orig }()
+
+	o := New(nil, &recMux{})
+	if _, err := o.Do(Action{Kind: KindRun, ID: "a", Payload: "x", Timeout: 15 * time.Minute}); err != nil {
+		t.Fatalf("declared: %v", err)
+	}
+	if _, err := o.Do(Action{Kind: KindRun, ID: "b", Payload: "y"}); err != nil {
+		t.Fatalf("undeclared: %v", err)
+	}
+	want := []time.Duration{15 * time.Minute, 10 * time.Minute}
+	if len(got) != 2 || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("driver received timeouts %v, want %v", got, want)
+	}
+}
+
+// FormatTimeout trims time.Duration.String's zero-valued trailing units so the
+// "timed out after <d>" message reads like the timeout= an author would
+// declare (Go-normalized forms like 90s → 1m30s are kept as-is).
+func TestFormatTimeout(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{10 * time.Minute, "10m"},
+		{time.Hour, "1h"},
+		{90 * time.Second, "1m30s"},
+		{15 * time.Minute, "15m"},
+		{time.Second, "1s"},
+	}
+	for _, c := range cases {
+		if got := FormatTimeout(c.d); got != c.want {
+			t.Errorf("FormatTimeout(%v) = %q, want %q", c.d, got, c.want)
+		}
+	}
+}

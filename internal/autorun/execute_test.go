@@ -4,17 +4,19 @@ import (
 	"io"
 	"strings"
 	"testing"
+	"time"
 )
 
 type fakeRunner struct {
 	calls     []string
-	exits     map[string]int  // id → exit (default 0)
-	cancelled map[string]bool // id → cancelled (default false)
+	exits     map[string]int    // id → exit (default 0)
+	cancelled map[string]bool   // id → cancelled (default false)
+	timedOut  map[string]string // id → formatted effective ceiling ("" = not timed out)
 }
 
-func (f *fakeRunner) RunStep(s Step) (int, string, bool) {
+func (f *fakeRunner) RunStep(s Step) (int, string, string, bool) {
 	f.calls = append(f.calls, s.ID)
-	return f.exits[s.ID], "", f.cancelled[s.ID] // 0/false unless scripted
+	return f.exits[s.ID], "", f.timedOut[s.ID], f.cancelled[s.ID] // 0/""/false unless scripted
 }
 
 func TestExecute_StopsAtFirstFailure_NoLaterSteps(t *testing.T) {
@@ -138,5 +140,62 @@ func TestExecute_Cancelled_SkipsRollbackAndLabels(t *testing.T) {
 	}
 	if got := statusOfID(out.String(), "boom"); got != StatusCancelled {
 		t.Errorf("cancelled step summary status = %q, want %q\n%s", got, StatusCancelled, out.String())
+	}
+}
+
+// timeoutRunner records each step's declared Timeout by id (extends the
+// fakeRunner pattern; kept separate so the existing exits/cancelled scripting
+// stays untouched).
+type timeoutRunner struct {
+	fakeRunner
+	timeouts map[string]time.Duration
+}
+
+func (f *timeoutRunner) RunStep(s Step) (int, string, string, bool) {
+	if f.timeouts == nil {
+		f.timeouts = map[string]time.Duration{}
+	}
+	f.timeouts[s.ID] = s.Timeout
+	return f.fakeRunner.RunStep(s)
+}
+
+// Execute must carry Block.Timeout onto every Step it builds — the forward
+// steps AND a rollback target (which gets its OWN block's declared ceiling).
+func TestExecute_StepCarriesTimeout(t *testing.T) {
+	blocks := []Block{
+		{ID: "a", Kind: KindRun, Command: "a", Timeout: 2 * time.Minute, Rollback: "undo-a"},
+		{ID: "undo-a", Kind: KindRun, Command: "undo-a", Timeout: 7 * time.Minute},
+		{ID: "b", Kind: KindRun, Command: "b", Needs: []string{"a"}},
+	}
+	r := &timeoutRunner{fakeRunner: fakeRunner{exits: map[string]int{"b": 1}}}
+	Execute(Config{Blocks: blocks, AutoRollback: true, Out: io.Discard}, r)
+	if got := r.timeouts["a"]; got != 2*time.Minute {
+		t.Errorf("forward step a Timeout = %v, want 2m", got)
+	}
+	if got := r.timeouts["b"]; got != 0 {
+		t.Errorf("undeclared step b Timeout = %v, want 0 (the runner's default applies)", got)
+	}
+	if got := r.timeouts["undo-a"]; got != 7*time.Minute {
+		t.Errorf("rollback target undo-a Timeout = %v, want 7m", got)
+	}
+}
+
+// A step the runner reports as timed out surfaces the timed-out form in the
+// end-of-run summary (Execute → StepResult.TimedOutAfter → Summarize), while
+// a plain failure keeps the existing row.
+func TestExecute_SummaryShowsTimedOutStep(t *testing.T) {
+	blocks := []Block{{ID: "slow", Kind: KindRun, Command: "sleep 30", Timeout: time.Second}}
+	var out strings.Builder
+	r := &fakeRunner{exits: map[string]int{"slow": 143}, timedOut: map[string]string{"slow": "1s"}}
+	Execute(Config{Blocks: blocks, Out: &out}, r)
+	if !strings.Contains(out.String(), "(timed out after 1s, exit 143)") {
+		t.Errorf("summary must render the timed-out row:\n%s", out.String())
+	}
+
+	out.Reset()
+	Execute(Config{Blocks: []Block{{ID: "boom", Kind: KindRun, Command: "false"}}, Out: &out},
+		&fakeRunner{exits: map[string]int{"boom": 1}})
+	if !strings.Contains(out.String(), "(exit 1)") || strings.Contains(out.String(), "timed out") {
+		t.Errorf("plain failure summary changed:\n%s", out.String())
 	}
 }

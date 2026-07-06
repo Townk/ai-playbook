@@ -391,3 +391,22 @@ func TestHeartbeat_DotsThenNewline(t *testing.T) {
 		t.Fatalf("expected trailing newline, got %q", out)
 	}
 }
+
+// ---- ValidateMain: a bad timeout= is a contract Error (exit 1); a valid one
+// on a non-runnable block only warns (exit 0) ----
+
+func TestValidateMain_TimeoutFindings(t *testing.T) {
+	bad := "---\nname: N\ndescription: D\ncategory: C\ncreated: 2026-01-01\n---\n\n# T\n\n```bash {id=a timeout=banana}\ntrue\n```\n"
+	badPath := writeValidateTemp(t, "bad-timeout.md", bad)
+	withArgs(t, []string{"ai-playbook", "validate", "--no-ai", "--file", badPath})
+	if code := ValidateMain(); code != 1 {
+		t.Fatalf("unparseable timeout= → exit %d, want 1", code)
+	}
+
+	warnOnly := "---\nname: N\ndescription: D\ncategory: C\ncreated: 2026-01-01\n---\n\n# T\n\n```text {id=note timeout=15m}\nprose\n```\n\n```bash {id=a}\ntrue\n```\n"
+	warnPath := writeValidateTemp(t, "warn-timeout.md", warnOnly)
+	withArgs(t, []string{"ai-playbook", "validate", "--no-ai", "--file", warnPath})
+	if code := ValidateMain(); code != 0 {
+		t.Fatalf("valid timeout= on a static block must only warn → exit %d, want 0", code)
+	}
+}

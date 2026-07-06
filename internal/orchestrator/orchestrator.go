@@ -30,9 +30,45 @@ import (
 	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
-// defaultTimeout bounds a single run block (matches the broker's
-// AI_PLAYBOOK_RUN_TIMEOUT default of 120s).
-const defaultTimeout = 120 * time.Second
+// defaultTimeout bounds a run block that declares no timeout= ceiling of its
+// own. It exists to catch HUNG blocks, not slow ones: 10 minutes lets
+// legitimate long steps (installs, first backup captures) finish while still
+// guaranteeing an unattended --auto run terminates (block-timeout spec,
+// Decision 2 — raised from the broker-era 120s).
+const defaultTimeout = 10 * time.Minute
+
+// EffectiveTimeout returns the ceiling Do(KindRun) actually applies for a
+// declared per-block timeout: the declaration itself when positive, else
+// defaultTimeout. Exported so both display paths (the viewer status line and
+// --auto's step output) can name the SAME duration in their
+// "timed out after <d>" message.
+func EffectiveTimeout(declared time.Duration) time.Duration {
+	if declared > 0 {
+		return declared
+	}
+	return defaultTimeout
+}
+
+// FormatTimeout renders a timeout ceiling for the "timed out after <d>"
+// message, trimming time.Duration.String's zero-valued trailing units (10m0s →
+// 10m, 1h0m0s → 1h) so it reads like the timeout= an author would declare.
+// The single formatter for both display paths (the viewer's failed summary
+// line and --auto's step output/summary row), kept next to EffectiveTimeout so
+// the duration named and the duration applied can never drift apart.
+func FormatTimeout(d time.Duration) string {
+	s := d.String()
+	if strings.HasSuffix(s, "m0s") {
+		s = s[:len(s)-2]
+	}
+	if strings.HasSuffix(s, "h0m") {
+		s = s[:len(s)-2]
+	}
+	return s
+}
+
+// runIDFn is the driver-run seam Do(KindRun) goes through. Tests swap it to
+// capture the timeout actually handed to the driver without a live shell.
+var runIDFn = (*driver.Driver).RunID
 
 // ErrNotImplemented marks an action kind that is modeled but deferred to a later
 // migration stage.
@@ -148,6 +184,10 @@ type Action struct {
 	// it (producer id → driver.CapturePath → STAT) so the executor never re-derives
 	// the retention layout. Ignored by every non-run kind.
 	StdinPath string
+	// Timeout, for a KindRun action, is the block's declared timeout= ceiling;
+	// zero (or negative) means "none declared" and Do applies defaultTimeout —
+	// see EffectiveTimeout. Ignored by every non-run kind.
+	Timeout time.Duration
 }
 
 // Orchestrator performs actions against a live shell Driver and a Mux.
@@ -197,7 +237,9 @@ func (o *Orchestrator) Do(a Action) (driver.Result, error) {
 		// Execute the block in the shell, value-passing APB_OUT_<id>/LAST_* so a
 		// later block can reference this one's output. StdinPath (when set) pipes a
 		// prior block's retained capture into this block's stdin (from= piping).
-		return o.Drv.RunID(a.ID, a.Payload, a.StdinPath, defaultTimeout), nil
+		// The ceiling is the block's declared timeout= when positive, else the
+		// package default (via the runIDFn seam for timeout-capture tests).
+		return runIDFn(o.Drv, a.ID, a.Payload, a.StdinPath, EffectiveTimeout(a.Timeout)), nil
 	case KindStop:
 		// Interrupt the running block by killing its foreground process group.
 		o.Drv.Stop()

@@ -108,7 +108,7 @@ func TestRunStep_Interrupt_CancelsQuickly(t *testing.T) {
 	}
 	done := make(chan stepResult, 1)
 	go func() {
-		exit, _, cancelled := runner.RunStep(Step{ID: "slow", Kind: KindRun, Command: "sleep 5"})
+		exit, _, _, cancelled := runner.RunStep(Step{ID: "slow", Kind: KindRun, Command: "sleep 5"})
 		done <- stepResult{exit: exit, cancelled: cancelled}
 	}()
 
@@ -206,5 +206,34 @@ func TestRun_WarnsUndeclaredOverride(t *testing.T) {
 	// "BOGUS" substring, which also occurs inside "ALSO_BOGUS").
 	if strings.Index(got, "variable ALSO_BOGUS\n") > strings.Index(got, "variable BOGUS\n") {
 		t.Errorf("warnings must be sorted; got:\n%s", got)
+	}
+}
+
+// TestRun_Timeout_Integration: a block declaring timeout=1s is killed at ~1s
+// (not the 10-minute default) and the step output says
+// "timed out after 1s" — the declared effective duration (block-timeout spec,
+// Decision 4) — instead of reading as a plain failure.
+func TestRun_Timeout_Integration(t *testing.T) {
+	if testing.Short() {
+		t.Skip("opens a real driver")
+	}
+	var out strings.Builder
+	start := time.Now()
+	code := Run(RunConfig{
+		Blocks: []Block{{ID: "slow", Kind: KindRun, Command: "sleep 30", Timeout: time.Second}},
+		Slug:   "t", Out: &out, Now: func() string { return "STAMP" },
+	})
+	elapsed := time.Since(start)
+	if code == 0 {
+		t.Errorf("a timed-out block must exit non-zero\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "timed out after 1s") {
+		t.Errorf("step output must name the effective ceiling:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "(timed out after 1s") {
+		t.Errorf("the summary row must render the timed-out form too:\n%s", out.String())
+	}
+	if elapsed > 20*time.Second {
+		t.Errorf("run took %v; the declared 1s timeout did not apply", elapsed)
 	}
 }

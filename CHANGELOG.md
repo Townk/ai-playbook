@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Per-block `timeout=` fence attribute.** A runnable block can now declare
+  its own execution ceiling in Go duration syntax — `` ```bash {id=first-capture
+  timeout=15m} `` (`90s`, `15m`, `1h`) — honored on both run paths (the viewer
+  and `--auto`, including rollback targets). `validate` enforces the contract:
+  an unparseable or non-positive value (`timeout=0`, negative) is an **error**
+  (every block always keeps a ceiling, so unattended runs terminate), and a
+  valid value on a non-runnable block (static/diff/create, where it is inert)
+  is a warning.
+
+### Changed
+
+- **The default block run timeout rose from 120 seconds to 10 minutes.** The
+  ceiling exists to catch hung blocks, not slow ones — two minutes killed
+  legitimate long steps (installs, first backup captures). A step known to run
+  even longer declares its own `timeout=`.
+
+### Fixed
+
+- A block run killed by its timeout now says so — `timed out after <duration>`
+  (the block's declared `timeout=` or the default) in the viewer's failure
+  status line and in the `--auto` step output — instead of reading as a plain
+  failure.
+
 ## [0.12.1] - 2026-07-05
 
 ### Added

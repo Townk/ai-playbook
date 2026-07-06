@@ -115,14 +115,15 @@ func ValidateMain() int {
 	blocks := make([]validate.Block, 0, len(pbBlocks))
 	for _, b := range pbBlocks {
 		blocks = append(blocks, validate.Block{
-			ID:       b.ID,
-			Type:     b.Type,
-			Lang:     b.Lang,
-			Needs:    b.Needs,
-			Static:   b.Static,
-			From:     b.From,
-			Rollback: b.Rollback,
-			Payload:  b.Payload,
+			ID:         b.ID,
+			Type:       b.Type,
+			Lang:       b.Lang,
+			Needs:      b.Needs,
+			Static:     b.Static,
+			From:       b.From,
+			Rollback:   b.Rollback,
+			TimeoutRaw: b.TimeoutRaw,
+			Payload:    b.Payload,
 		})
 	}
 

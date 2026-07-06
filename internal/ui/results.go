@@ -2,6 +2,7 @@ package ui
 
 import (
 	"strings"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -54,6 +55,12 @@ type resultMsg struct {
 	ID      string
 	Exit    int
 	Logpath string
+	// TimedOut marks a run result the driver killed at its timeout ceiling;
+	// TimedOutAfter is the EFFECTIVE duration that ceiling was (the block's
+	// declared timeout= or the orchestrator default), so the failure line can
+	// say "timed out after <d>" instead of reading as a plain failure.
+	TimedOut      bool
+	TimedOutAfter time.Duration
 }
 
 type blockRunState struct {
@@ -64,6 +71,13 @@ type blockRunState struct {
 	Expanded  bool
 	SpinFrame int
 	Stopped   bool // user clicked stop on this block; suppress auto-followup when its result arrives
+
+	// TimedOut / TimedOutAfter surface a run killed at its timeout ceiling: the
+	// failed summary line renders "✗ timed out after <TimedOutAfter>" instead of
+	// the plain "✗ failed". Overwritten by every new result for the block, so a
+	// re-run that fails normally never keeps a stale timed-out form.
+	TimedOut      bool
+	TimedOutAfter time.Duration
 
 	// FollowupExhausted is set on the "verify" block once the auto-follow-up cap is
 	// reached: the verify block normally hides the manual "try another fix" button
@@ -124,6 +138,8 @@ func (m model) handleResult(msg resultMsg) (tea.Model, tea.Cmd) {
 	}
 	st.Logpath = msg.Logpath
 	st.Exit = msg.Exit
+	st.TimedOut = msg.TimedOut
+	st.TimedOutAfter = msg.TimedOutAfter
 	// A result for a block the user deliberately stopped is NOT a failed fix.
 	// Resolve to the neutral "stopped" state, clear the flag, and never auto-fire
 	// the follow-up — regardless of the (typically 143/SIGTERM) exit code.

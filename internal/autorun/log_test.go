@@ -38,3 +38,21 @@ func TestSummarize_RendersEachStatus(t *testing.T) {
 		}
 	}
 }
+
+// A timed-out step's summary row names the effective ceiling instead of
+// reading as a plain failure; a plain failure keeps its existing form.
+func TestSummarize_TimedOutRow(t *testing.T) {
+	out := Summarize([]StepResult{
+		{ID: "slow", Status: StatusFailed, Exit: 143, TimedOutAfter: "1s"},
+		{ID: "boom", Status: StatusFailed, Exit: 1},
+	})
+	if !strings.Contains(out, "✗ failed") {
+		t.Errorf("timed-out row keeps the failed status word:\n%s", out)
+	}
+	if !strings.Contains(out, "(timed out after 1s, exit 143)") {
+		t.Errorf("timed-out row must name the effective ceiling:\n%s", out)
+	}
+	if !strings.Contains(out, "(exit 1)") {
+		t.Errorf("plain failure row changed:\n%s", out)
+	}
+}

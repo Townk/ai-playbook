@@ -1011,7 +1011,14 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 			statusPart = sty.Render(label)
 		default: // "failed"
 			sty := lipgloss.NewStyle().Foreground(lipgloss.Color(colRed))
-			label = "✗ failed (exit " + itoa(st.Exit) + ")"
+			if st.TimedOut {
+				// A hang-kill, not a real error: name the ceiling that fired (the
+				// block's declared timeout= or the run default, carried on the
+				// result) so the user can tell the two failure kinds apart.
+				label = "✗ timed out after " + orchestrator.FormatTimeout(st.TimedOutAfter) + " (exit " + itoa(st.Exit) + ")"
+			} else {
+				label = "✗ failed (exit " + itoa(st.Exit) + ")"
+			}
 			statusPart = sty.Render(label)
 			// When a rollback chain triggered by this failure has finished, append a
 			// peach suffix so the failure line reads "✗ failed (exit N) — all steps rolled back".

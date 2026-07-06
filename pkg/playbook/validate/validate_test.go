@@ -217,3 +217,60 @@ func TestCheck_FenceBalance_LineOffset(t *testing.T) {
 		}
 	}
 }
+
+// ---- timeout=: contract Errors + the inert-placement Warning (block-timeout
+// spec, Decision 3) ----
+
+// TestCheck_Timeout is the validate table for the timeout= attribute: an
+// unparseable, zero, or negative value is an Error (every block must keep a
+// real ceiling — unattended --auto runs must terminate); a valid value on a
+// non-runnable block (static/diff/create) is a Warning (the attribute is inert
+// there); a valid value on a runnable block, or no attribute at all, yields no
+// finding.
+func TestCheck_Timeout(t *testing.T) {
+	cases := []struct {
+		name     string
+		blk      Block
+		wantErr  bool
+		wantWarn bool
+	}{
+		{"absent", Block{ID: "a", Type: "shell", Lang: "bash"}, false, false},
+		{"valid on shell", Block{ID: "a", Type: "shell", Lang: "bash", TimeoutRaw: "15m"}, false, false},
+		{"valid on run", Block{ID: "a", Type: "run", Lang: "python", TimeoutRaw: "90s"}, false, false},
+		{"unparseable", Block{ID: "a", Type: "shell", Lang: "bash", TimeoutRaw: "banana"}, true, false},
+		{"zero", Block{ID: "a", Type: "shell", Lang: "bash", TimeoutRaw: "0"}, true, false},
+		{"negative", Block{ID: "a", Type: "shell", Lang: "bash", TimeoutRaw: "-5s"}, true, false},
+		{"valid on static", Block{ID: "a", Type: "static", Static: true, TimeoutRaw: "15m"}, false, true},
+		{"valid on diff", Block{ID: "a", Type: "diff", Lang: "diff", TimeoutRaw: "15m"}, false, true},
+		{"valid on create", Block{ID: "a", Type: "create", Lang: "yaml", TimeoutRaw: "15m"}, false, true},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			// A runnable sibling keeps the unrelated "runnable" warning out of the way.
+			blocks := []Block{c.blk, {ID: "z", Type: "shell", Lang: "bash"}}
+			fs := Check("", fm("N", "D", "C", "2026-01-01"), true, blocks, 0)
+			if got := has(fs, "timeout", Error); got != c.wantErr {
+				t.Errorf("timeout Error = %v, want %v (findings: %+v)", got, c.wantErr, fs)
+			}
+			if got := has(fs, "timeout", Warning); got != c.wantWarn {
+				t.Errorf("timeout Warning = %v, want %v (findings: %+v)", got, c.wantWarn, fs)
+			}
+		})
+	}
+}
+
+// An unparseable timeout on a NON-runnable block is still the contract Error
+// (garbage is garbage wherever it sits), not the inert-placement Warning.
+func TestCheck_Timeout_UnparseableOnStaticIsError(t *testing.T) {
+	blocks := []Block{
+		{ID: "a", Type: "static", Static: true, TimeoutRaw: "banana"},
+		{ID: "z", Type: "shell", Lang: "bash"},
+	}
+	fs := Check("", fm("N", "D", "C", "2026-01-01"), true, blocks, 0)
+	if !has(fs, "timeout", Error) {
+		t.Fatalf("unparseable timeout on a static block must be an Error: %+v", fs)
+	}
+	if has(fs, "timeout", Warning) {
+		t.Fatalf("the inert-placement Warning must not double-report a garbage value: %+v", fs)
+	}
+}

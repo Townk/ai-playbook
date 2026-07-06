@@ -140,6 +140,9 @@ func kindFor(k StepKind) orchestrator.Kind {
 // RunStep executes one step via the orchestrator, streams its output to
 // r.out, and captures it to a temp log file (mirrors internal/ui's
 // writeRunLog shape; kept private here to avoid importing internal/ui).
+// timedOutAfter is the formatted effective ceiling when the run was killed at
+// its timeout ("" otherwise) — the same duration the step output names — so
+// Execute can carry it into the end-of-run summary row.
 //
 // The block runs on its own goroutine so RunStep can race it against
 // r.stopCh: if stopCh closes first (a real SIGINT via Run, or a direct close
@@ -148,7 +151,7 @@ func kindFor(k StepKind) orchestrator.Kind {
 // cancelExit — a non-zero exit Execute treats as a failure, stopping the
 // run. A nil stopCh (the zero value) never fires, so RunStep behaves exactly
 // as before for callers that don't opt into interruption.
-func (r *orchRunner) RunStep(s Step) (exit int, outputPath string, cancelled bool) {
+func (r *orchRunner) RunStep(s Step) (exit int, outputPath, timedOutAfter string, cancelled bool) {
 	// Assemble the command through the canonical schema payload rule
 	// (playbook.ExecCommand): a shell step runs verbatim, a script (run) step is
 	// written to a session temp script and invoked by its interpreter — THE
@@ -168,7 +171,7 @@ func (r *orchRunner) RunStep(s Step) (exit int, outputPath string, cancelled boo
 
 	doneCh := make(chan driver.Result, 1)
 	go func() {
-		res, _ := r.orch.Do(orchestrator.Action{Kind: kindFor(s.Kind), ID: s.ID, Payload: command, StdinPath: stdinPath})
+		res, _ := r.orch.Do(orchestrator.Action{Kind: kindFor(s.Kind), ID: s.ID, Payload: command, StdinPath: stdinPath, Timeout: s.Timeout})
 		doneCh <- res
 	}()
 
@@ -190,12 +193,23 @@ func (r *orchRunner) RunStep(s Step) (exit int, outputPath string, cancelled boo
 	if res.Err != "" {
 		fmt.Fprint(r.out, res.Err)
 	}
+	// A run killed at its ceiling says so — with the EFFECTIVE duration (the
+	// step's declared timeout= or the orchestrator default) — instead of
+	// reading as a plain failure. Not on the cancelled path: the driver marks
+	// a user interrupt TimedOut too, but that is a deliberate abort.
+	if res.TimedOut && !cancelled && s.Kind == KindRun {
+		timedOutAfter = orchestrator.FormatTimeout(orchestrator.EffectiveTimeout(s.Timeout))
+		if res.Out != "" || res.Err != "" {
+			fmt.Fprintln(r.out) // the captured output never ends in a newline
+		}
+		fmt.Fprintf(r.out, "timed out after %s\n", timedOutAfter)
+	}
 
 	logPath := writeStepLog(s.ID, res.Out, res.Err)
 	if cancelled {
-		return cancelExit, logPath, true
+		return cancelExit, logPath, "", true
 	}
-	return res.Exit, logPath, false
+	return res.Exit, logPath, timedOutAfter, false
 }
 
 // assemble turns a step into the command the shell eval's, via the canonical

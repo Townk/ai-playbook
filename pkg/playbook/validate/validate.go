@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
@@ -28,7 +29,7 @@ const (
 // Finding is one structural problem detected by Check.
 type Finding struct {
 	Severity Severity
-	Check    string // "front-matter"|"duplicate-id"|"needs"|"from"|"cycle"|"fence"|"runnable"|"lang"|"verify"|"rollback"|"file-block"|"env-decl"
+	Check    string // "front-matter"|"duplicate-id"|"needs"|"from"|"cycle"|"fence"|"runnable"|"lang"|"timeout"|"verify"|"rollback"|"file-block"|"env-decl"
 	Message  string
 	Where    string // block id | "line N" | "front matter"
 }
@@ -44,7 +45,11 @@ type Block struct {
 	Static   bool
 	From     string // id of the block whose retained stdout feeds this one's stdin (from=<id>, ADR-0010); "" if none
 	Rollback string // id of the block that undoes this one (rollback=<id>); "" if none
-	Payload  string // the block's code content (the quality checks scan it; "" is fine for structural-only callers)
+	// TimeoutRaw is the verbatim timeout= attribute value ("" when absent). Raw
+	// — not the parsed duration — because the parser deliberately collapses an
+	// unparseable value to zero; validate re-parses so it can Error on garbage.
+	TimeoutRaw string
+	Payload    string // the block's code content (the quality checks scan it; "" is fine for structural-only callers)
 }
 
 // Check runs every deterministic check and returns findings (nil ⇔
@@ -164,6 +169,11 @@ func Check(rawBody string, fm frontmatter.FrontMatter, fmOK bool, blocks []Block
 			})
 		}
 	}
+
+	// 8. timeout= — contract tier: an unparseable or non-positive value is an
+	// Error (every block must keep a real ceiling); a valid value on a
+	// non-runnable block is a Warning (the attribute is inert there).
+	findings = append(findings, timeoutFindings(blocks)...)
 
 	// fence balance: added in Task 2
 	findings = append(findings, fenceFindings(rawBody, bodyLineOffset)...)
@@ -322,6 +332,52 @@ func fromFindings(blocks []Block, idSet map[string]bool, typeOf map[string]strin
 				Severity: Error,
 				Check:    "from",
 				Message:  fmt.Sprintf("block %q pipes from %q, which is a %s block (only shell/run blocks produce output)", b.ID, b.From, targetType),
+				Where:    b.ID,
+			})
+		}
+	}
+	return findings
+}
+
+// timeoutFindings validates every block's timeout= attribute (the raw value —
+// the parser collapses unparseable to zero, so validate re-parses TimeoutRaw).
+// Contract tier (Error, like a malformed from=): the value must parse as a
+// POSITIVE Go duration — timeout=0/negative would mean "no ceiling", and every
+// block always has one because unattended --auto runs must terminate; a
+// generous explicit duration covers real long-running cases. A valid value on
+// a non-runnable block (static/diff/create) is a Warning: the attribute is
+// inert there (diff apply has its own fixed applyTimeout), so it belongs on
+// the runnable step it was meant to bound.
+func timeoutFindings(blocks []Block) []Finding {
+	var findings []Finding
+	for _, b := range blocks {
+		if b.TimeoutRaw == "" {
+			continue
+		}
+		d, err := time.ParseDuration(b.TimeoutRaw)
+		if err != nil {
+			findings = append(findings, Finding{
+				Severity: Error,
+				Check:    "timeout",
+				Message:  fmt.Sprintf("block %q has an unparseable timeout=%q — use a Go duration like 90s, 15m, or 1h", b.ID, b.TimeoutRaw),
+				Where:    b.ID,
+			})
+			continue
+		}
+		if d <= 0 {
+			findings = append(findings, Finding{
+				Severity: Error,
+				Check:    "timeout",
+				Message:  fmt.Sprintf("block %q declares timeout=%s, which is not positive — declare a generous positive ceiling instead (every block must terminate)", b.ID, b.TimeoutRaw),
+				Where:    b.ID,
+			})
+			continue
+		}
+		if !runnableType(b.Type) {
+			findings = append(findings, Finding{
+				Severity: Warning,
+				Check:    "timeout",
+				Message:  fmt.Sprintf("block %q is a %s block — timeout= has no effect here; declare it on the runnable step it should bound", b.ID, b.Type),
 				Where:    b.ID,
 			})
 		}

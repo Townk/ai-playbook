@@ -32,6 +32,7 @@ func (m model) toAutorunBlocks() ([]autorun.Block, map[string]string) {
 			From:     b.From,
 			Rollback: b.Rollback,
 			Static:   b.Static,
+			Timeout:  b.Timeout,
 			Kind:     autorun.KindRun,
 		})
 		status[b.ID] = m.blockStates[b.ID].Status

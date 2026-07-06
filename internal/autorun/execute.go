@@ -3,21 +3,24 @@ package autorun
 import (
 	"fmt"
 	"io"
+	"time"
 )
 
 // Step is a unit handed to a StepRunner.
 type Step struct {
 	ID, Command string
-	Lang        string // fence language; a script block's runner assembles its interpreter invocation from this
-	From        string // id of the from= producer whose retained stdout feeds this step's stdin; "" if none
+	Lang        string        // fence language; a script block's runner assembles its interpreter invocation from this
+	From        string        // id of the from= producer whose retained stdout feeds this step's stdin; "" if none
+	Timeout     time.Duration // declared timeout= run ceiling; zero when undeclared (the orchestrator's default applies)
 	Kind        StepKind
 }
 
 // StepRunner executes one step and returns its exit + captured output path +
-// whether the step was aborted by an interrupt signal (as opposed to merely
-// exiting non-zero on its own).
+// the formatted effective ceiling when the step was killed at its timeout
+// ("" for every other outcome) + whether the step was aborted by an interrupt
+// signal (as opposed to merely exiting non-zero on its own).
 type StepRunner interface {
-	RunStep(s Step) (exit int, outputPath string, cancelled bool)
+	RunStep(s Step) (exit int, outputPath, timedOutAfter string, cancelled bool)
 }
 
 // Config drives Execute. Out receives the streamed per-step headers + final summary.
@@ -45,7 +48,7 @@ func Execute(cfg Config, r StepRunner) int {
 		}
 
 		fmt.Fprintf(cfg.Out, "[%s] %s\n", b.ID, b.Command)
-		exit, out, cancelled := r.RunStep(Step{ID: b.ID, Command: b.Command, Lang: b.Lang, From: b.From, Kind: b.Kind})
+		exit, out, timedOutAfter, cancelled := r.RunStep(Step{ID: b.ID, Command: b.Command, Lang: b.Lang, From: b.From, Timeout: b.Timeout, Kind: b.Kind})
 		fmt.Fprintln(cfg.Out)
 
 		st := statusFor(exit)
@@ -53,11 +56,12 @@ func Execute(cfg Config, r StepRunner) int {
 			st = StatusCancelled
 		}
 		results = append(results, StepResult{
-			ID:         b.ID,
-			Command:    b.Command,
-			Exit:       exit,
-			Status:     st,
-			OutputPath: out,
+			ID:            b.ID,
+			Command:       b.Command,
+			TimedOutAfter: timedOutAfter,
+			Exit:          exit,
+			Status:        st,
+			OutputPath:    out,
 		})
 
 		if cancelled {
@@ -82,7 +86,7 @@ func Execute(cfg Config, r StepRunner) int {
 			origin, target := pair[0], pair[1]
 			command := commandFor(cfg.Blocks, target)
 			fmt.Fprintf(cfg.Out, "[%s] %s\n", target, command)
-			exit, out, _ := r.RunStep(Step{ID: target, Command: command, Lang: langFor(cfg.Blocks, target), Kind: KindRun})
+			exit, out, timedOutAfter, _ := r.RunStep(Step{ID: target, Command: command, Lang: langFor(cfg.Blocks, target), Timeout: timeoutFor(cfg.Blocks, target), Kind: KindRun})
 			fmt.Fprintln(cfg.Out)
 
 			status[origin] = StatusRolledBack
@@ -93,11 +97,12 @@ func Execute(cfg Config, r StepRunner) int {
 				}
 			}
 			results = append(results, StepResult{
-				ID:         target,
-				Command:    command,
-				Exit:       exit,
-				Status:     statusFor(exit),
-				OutputPath: out,
+				ID:            target,
+				Command:       command,
+				TimedOutAfter: timedOutAfter,
+				Exit:          exit,
+				Status:        statusFor(exit),
+				OutputPath:    out,
 			})
 		}
 	}
@@ -145,4 +150,17 @@ func langFor(blocks []Block, id string) string {
 		}
 	}
 	return ""
+}
+
+// timeoutFor looks up a block's declared timeout= ceiling by id, so a rollback
+// target runs under its OWN declared ceiling like a forward step. Zero when
+// the id is unknown or the block declares none (the orchestrator's default
+// applies).
+func timeoutFor(blocks []Block, id string) time.Duration {
+	for _, b := range blocks {
+		if b.ID == id {
+			return b.Timeout
+		}
+	}
+	return 0
 }

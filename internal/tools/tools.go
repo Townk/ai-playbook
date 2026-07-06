@@ -50,8 +50,11 @@ import (
 	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
-// runTimeout bounds a single agent-issued `run` (matches the orchestrator /
-// broker AI_PLAYBOOK_RUN_TIMEOUT default of 120s).
+// runTimeout bounds a single agent-issued `run`. Deliberately this tool's OWN
+// 120s ceiling (the broker-era AI_PLAYBOOK_RUN_TIMEOUT default): an
+// authoring-time probe should fail fast, so it does NOT track the
+// orchestrator's 10-minute block-run default (nor a block's timeout= — no
+// parsed block exists at this stage).
 const runTimeout = 120 * time.Second
 
 // askUnavailableMsg is the sentinel reply when an ask cannot be completed: the

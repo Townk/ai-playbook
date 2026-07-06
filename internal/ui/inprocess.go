@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"runtime"
 	"sync"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -178,18 +179,24 @@ func (m model) orchCmd(b Button) tea.Cmd {
 	payload := b.Payload
 	var cleanup func()
 	var stdinPath string
+	var timeout time.Duration
 	if k == orchestrator.KindRun {
 		payload, cleanup = m.assembleRun(b.BlockID, b.Payload)
 		// Wire from= piping: feed the block's stdin from its producer's retained
 		// stdout capture. Resolved via the driver (which owns the retention layout)
 		// and STAT-verified — a missing capture ⇒ producer never ran ⇒ </dev/null.
 		stdinPath = m.resolveStdin(b.BlockID)
+		// Carry the block's declared timeout= ceiling; zero (unknown id / none
+		// declared) lets the orchestrator apply its default.
+		if blk, ok := m.blockByID(b.BlockID); ok {
+			timeout = blk.Timeout
+		}
 	}
 	return func() tea.Msg {
 		if cleanup != nil {
 			defer cleanup()
 		}
-		res, err := orch.Do(orchestrator.Action{Kind: k, ID: b.BlockID, Payload: payload, StdinPath: stdinPath})
+		res, err := orch.Do(orchestrator.Action{Kind: k, ID: b.BlockID, Payload: payload, StdinPath: stdinPath, Timeout: timeout})
 		if errors.Is(err, orchestrator.ErrMisrouted) {
 			// A re-engagement kind reached the executor — a wiring bug (the ui should
 			// have driven it through the reengage engine). Surface it distinctly so it
@@ -209,7 +216,15 @@ func (m model) orchCmd(b Button) tea.Cmd {
 			// stderr). The model's resultMsg handler then flips the apply⇄undo toggle
 			// / re-gates dependents off st.Action + res.Exit (set on the click).
 			logpath := writeRunLog(b.BlockID, res.Out, res.Err)
-			return resultMsg{ID: b.BlockID, Exit: res.Exit, Logpath: logpath}
+			msg := resultMsg{ID: b.BlockID, Exit: res.Exit, Logpath: logpath}
+			// Surface a run killed at its ceiling as such (run kind ONLY: an
+			// apply/undo has its own fixed applyTimeout, whose duration this
+			// effective-run computation would misname).
+			if k == orchestrator.KindRun && res.TimedOut {
+				msg.TimedOut = true
+				msg.TimedOutAfter = orchestrator.EffectiveTimeout(timeout)
+			}
+			return msg
 		default:
 			// stop/copy/play/view-diff have no result to surface: stop/copy/play
 			// performed their effect and the model already updated its own state on

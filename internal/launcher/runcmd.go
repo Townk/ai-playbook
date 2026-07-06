@@ -342,6 +342,7 @@ func blocksFor(body string) []autorun.Block {
 			From:     b.From,
 			Rollback: b.Rollback,
 			Static:   b.Static,
+			Timeout:  b.Timeout,
 			Kind:     kindFromType(b.Type),
 		})
 	}

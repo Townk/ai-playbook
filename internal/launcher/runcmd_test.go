@@ -6,6 +6,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Townk/ai-playbook/internal/autorun"
 	"github.com/Townk/ai-playbook/internal/ui"
@@ -796,5 +797,23 @@ func TestBlocksFor_CarriesLang(t *testing.T) {
 	}
 	if byID["sh"].Lang != "bash" {
 		t.Fatalf("shell block Lang = %q, want %q", byID["sh"].Lang, "bash")
+	}
+}
+
+// TestBlocksFor_CarriesTimeout locks the timeout= threading: blocksFor must
+// propagate each block's parsed Timeout into autorun.Block.Timeout so the
+// headless runner enforces the declared ceiling (block-timeout spec).
+func TestBlocksFor_CarriesTimeout(t *testing.T) {
+	body := "```bash {id=slow timeout=15m}\nsleep 1\n```\n\n```bash {id=fast}\nls\n```\n"
+	got := blocksFor(body)
+	byID := map[string]autorun.Block{}
+	for _, b := range got {
+		byID[b.ID] = b
+	}
+	if byID["slow"].Timeout != 15*time.Minute {
+		t.Fatalf("slow block Timeout = %v, want 15m", byID["slow"].Timeout)
+	}
+	if byID["fast"].Timeout != 0 {
+		t.Fatalf("undeclared block Timeout = %v, want 0", byID["fast"].Timeout)
 	}
 }

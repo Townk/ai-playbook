@@ -1,6 +1,6 @@
 // Package playbook is the public, harness-agnostic owner of the playbook
 // schema. It parses a Markdown playbook body into the canonical block model
-// (the {id=…}/{rollback=…}/{static}/file=/needs=/from= grammar) and
+// (the {id=…}/{rollback=…}/{static}/file=/needs=/from=/timeout= grammar) and
 // normalizes fences, and is the single source of truth for that grammar. It
 // imports nothing beyond goldmark and the standard library, so any
 // front-end, validator, or embedded runner can consume the schema without
@@ -12,6 +12,7 @@ package playbook
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/ast"
@@ -21,7 +22,7 @@ import (
 
 // Block is the canonical parsed representation of one playbook code block — the
 // schema owner's view of a `{id=…}`/`{rollback=…}`/`{static}`/`file=`/`needs=`/
-// `from=` fenced block (see docs/specifications/playbook-schema.md). The
+// `from=`/`timeout=` fenced block (see docs/specifications/playbook-schema.md). The
 // renderer, validate, launcher, and autorun all derive their per-block state
 // from this.
 type Block struct {
@@ -31,9 +32,15 @@ type Block struct {
 	Needs    []string
 	Static   bool
 	File     string
-	Rollback string // id of the block that undoes this one (rollback=<id>); "" if none
-	From     string // id of the block whose retained stdout feeds this one's stdin (from=<id>, ADR-0010); "" if none
-	Payload  string
+	Rollback string        // id of the block that undoes this one (rollback=<id>); "" if none
+	From     string        // id of the block whose retained stdout feeds this one's stdin (from=<id>, ADR-0010); "" if none
+	Timeout  time.Duration // per-block run ceiling (timeout=<Go duration>); zero when absent or unparseable (the runner's default applies)
+	// TimeoutRaw is the verbatim timeout= attribute value ("" when absent). The
+	// parser deliberately collapses an unparseable value to a zero Timeout (it
+	// never errors), so the raw string is carried for validate to Error on
+	// garbage / non-positive declarations.
+	TimeoutRaw string
+	Payload    string
 }
 
 // EffectiveNeeds returns the block's combined data+order dependency set: Needs
@@ -108,6 +115,14 @@ func buildBlock(n ast.Node, src []byte, ordinal int) Block {
 		From:     attrs["from"],
 		Static:   flags["static"],
 		Payload:  payload,
+	}
+	if raw := attrs["timeout"]; raw != "" {
+		blk.TimeoutRaw = raw
+		// Non-erroring by design: an unparseable value stays zero — validate owns
+		// the errors (it re-parses TimeoutRaw).
+		if d, err := time.ParseDuration(raw); err == nil {
+			blk.Timeout = d
+		}
 	}
 	blk.Type = ClassifyType(lang, blk.Static)
 	if f := attrs["file"]; f != "" {

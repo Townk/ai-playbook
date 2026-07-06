@@ -1,5 +1,7 @@
 package autorun
 
+import "time"
+
 type StepKind int
 
 const (
@@ -18,6 +20,7 @@ type Block struct {
 	From     string // id of the block whose retained stdout feeds this one's stdin (from=<id>); "" if none. Folds into effectiveNeeds so --auto orders the producer first.
 	Rollback string // id of the block that undoes this one; "" if none
 	Static   bool
+	Timeout  time.Duration // declared timeout= run ceiling; zero when undeclared (the orchestrator's default applies)
 	Kind     StepKind
 }
 
