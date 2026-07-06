@@ -26,6 +26,12 @@ type Harness interface {
 	AdapterName() string
 	// Env returns extra KEY=VALUE entries appended to the harness process env.
 	Env(inv Invocation) []string
+	// WorkingDir returns the process working directory (cmd.Dir) for this
+	// invocation, or "" to inherit the caller's cwd. Cursor's FULL path returns
+	// a scratch root (the transport ToolDir) so a hooks/builtin-write bypass
+	// cannot land in the user's real project (see harness_cursor.go point 6);
+	// claude/pi return "" — their authoring reads the project from cwd.
+	WorkingDir(inv Invocation) string
 	// DisplayName is the human label ("Claude Code", "pi", "Cursor") used by the
 	// streaming UI header and error strings.
 	DisplayName() string

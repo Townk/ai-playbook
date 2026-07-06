@@ -171,24 +171,40 @@ Notes are stderr/status-line one-liners, once per session, tested verbatim.
   - **Builtin containment (Step 6) — the decisive safety gate.** Because FULL
     must run in agent mode (ask/plan refuse MCP tools), cursor's builtin
     write/shell tools are in scope, and they EXECUTE headlessly under `-p` with
-    no per-command gate and no `cmd.Dir` — a would-be mutation of the user's real
-    project. Probe evidence (cursor-agent 2026.07.01-777f564): a FULL-shape run
-    (agent mode, `--trust`, `--approve-mcps`, HOME redirected, no `--force`/
-    `--yolo`) asked to write a file AND run `touch` did BOTH (`editToolCall`/
-    `shellToolCall` → success). cursor has NO builtin-off flag, and
-    `permissions.deny` in `cli-config.json` is NOT honored headlessly (retested
-    under `--force`, `--auto-review`, `--sandbox enabled` — builtins still ran).
-    The working mechanism is a **preToolUse hook** (cursor CLI supports it; only
-    `deny`/exit-2 is reliably enforced): the transport plants
-    `<dir>/.cursor/hooks.json` + `cursor_pretool_hook.sh` (`failClosed:true`)
-    that permits ONLY `MCP:<tool>` and DENIES every builtin — the cursor analog
-    of pi's `--no-builtin-tools`. Re-probed with the hook: the same write/shell
-    prompt is REJECTED (`result_keys=["rejected"]`) while the MCP call still
-    succeeds. `tool_name` precedes `tool_input` on the wire, so the first-match
-    extraction cannot be spoofed by a fake name in a tool argument.
+    no per-command gate — a would-be mutation of the user's real project. cursor
+    has NO builtin-off flag, and `permissions.deny` in `cli-config.json` is NOT
+    honored headlessly. Two barriers contain them (Phase D final-hardening
+    evidence, cursor-agent 2026.07.01-777f564; see cursor-full-promotion.md):
+    - **Barrier 1 — a preToolUse allowlist gate.** The transport plants
+      `<dir>/.cursor/hooks.json` (`failClosed:true`) whose command runs the
+      hidden `<SelfExe> __cursor-pretool-hook` subcommand. `preToolUse` fires for
+      EVERY tool headlessly (ground-truth captured, testdata/cursor/hook_input_*.json:
+      an MCP tool arrives as `tool_name:"MCP:run"`, builtins as bare
+      `"Shell"`/`"Write"`/`"Read"`). The gate does a REAL JSON parse of the
+      TOP-LEVEL `tool_name` and permits ONLY the `MCP:` prefix — NOT a shell
+      `grep|head` first-match, which round 2 showed spoofable (a model-controlled
+      nested `tool_name` inside `tool_input` could flip a builtin to allow); the
+      top-level parse ignores any nested decoy (unit-proven, TestCursorPreToolHook).
+      `failClosed:true` is fail-CLOSED: a crash/timeout/garbage output BLOCKS the
+      tool (live-proven — a non-JSON, exit-1 hook blocked a shell; the same hook
+      with `failClosed:false` let it through). Live proof of the shipped gate:
+      the same write/shell prompt is REJECTED with our exact deny message
+      (`editToolCall`/`shellToolCall` → `rejected`) while the MCP call still
+      succeeds.
+    - **Barrier 2 — a scratch working directory.** The FULL-path process runs
+      with `cmd.Dir=<dir>` (`WorkingDir`), NOT the user's real project. cursor
+      sandboxes hook and builtin filesystem WRITES to the workspace root (= cwd,
+      live-verified: an out-of-workspace hook log write was silently dropped),
+      so even a hypothetical Barrier-1 bypass lands in the disposable transport
+      root; and it makes OUR `<dir>/.cursor/hooks.json` the project-level hook
+      (highest of the project/user precedence order), so no real-project
+      `.cursor/hooks.json` can override or disable the gate. The Step-5 guard
+      probes run with the same `cwd=<dir>` so their MCP view matches the run's
+      exactly (no project `.cursor/mcp.json` divergence).
+
     RequireHarness-gated live proof: `TestCursorLive_ToolHookBlocksBuiltins`
-    asserts a builtin-mutation prompt creates no file through the production
-    transport.
+    asserts, through the production transport, that a builtin write + shell are
+    denied while the MCP `run` tool is allowed in the same session.
   The shared `mcpServers` writer (`mcpconfig.go`) is now used by BOTH FULL
   harnesses (claude's `--mcp-config`, cursor's redirected `.cursor/mcp.json`).
 - Authoring-context asymmetry (LOW, benign — documented). On the FULL tool path

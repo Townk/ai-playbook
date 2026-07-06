@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/climeta"
 	diffpkg "github.com/Townk/ai-playbook/internal/diff"
 	"github.com/Townk/ai-playbook/internal/launcher"
@@ -98,6 +99,11 @@ var dispatch = map[string]func(prog string) int{
 	"mcp":      func(string) int { return mcpMain() },
 	"diff":     func(string) int { return diffpkg.Main() },
 	"input":    func(string) int { return dialog.Main() },
+	// __cursor-pretool-hook is the HIDDEN builtin-tool allowlist gate the cursor
+	// FULL transport wires as a preToolUse hook (`<SelfExe> __cursor-pretool-hook`).
+	// It is deliberately absent from climeta (no help/man/completion) — it is an
+	// internal machine interface, not a user command (see dispatchOnlyKeys).
+	"__cursor-pretool-hook": func(string) int { author.CursorPreToolHook(os.Stdin, os.Stdout); return 0 },
 }
 
 // versionCmd is the dispatch handler for "version"/"--version"/"-v".

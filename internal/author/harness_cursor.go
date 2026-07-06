@@ -13,10 +13,10 @@ package author
 
 import (
 	"context"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,14 +24,6 @@ import (
 	"strings"
 	"time"
 )
-
-// cursorPreToolHook is the embedded preToolUse hook the tool transport plants
-// under the redirected config root: it permits ONLY our MCP tools and denies
-// every cursor builtin (write/shell/read/…). See cursor_pretool_hook.sh and the
-// builtin-allowlist note on ToolTransport.
-//
-//go:embed cursor_pretool_hook.sh
-var cursorPreToolHook string
 
 // cursorBin is the default executable for the cursor harness. The install
 // script (https://cursor.com/install, 2026.07.01) symlinks the CLI as BOTH
@@ -105,18 +97,30 @@ func (cursorHarness) DisplayName() string { return "Cursor" }
 //     run in AGENT mode — cursor-agent REFUSES MCP tool calls in --mode ask/plan
 //     (live-verified), so the read-only modes cannot host our tools — and agent
 //     mode ALSO exposes cursor's builtin write/shell tools, which EXECUTE under
-//     -p with no per-command gate and no cmd.Dir (they would mutate the user's
-//     real project). cursor-agent has NO builtin-off flag and does NOT honor
-//     permissions.deny headlessly (both live-verified). The containment is a
-//     preToolUse HOOK planted under the redirected config root
-//     (`<dir>/.cursor/hooks.json` → cursor_pretool_hook.sh, failClosed:true)
-//     that permits ONLY "MCP:<tool>" and DENIES every builtin — the cursor
-//     analog of pi's --no-builtin-tools. Live-verified: with the hook a builtin
-//     write/shell prompt is rejected (result_keys=["rejected"]) while the MCP
-//     call still succeeds; without it both a file write and a `touch` ran.
+//     -p with no per-command gate. cursor-agent has NO builtin-off flag and does
+//     NOT honor permissions.deny headlessly (both live-verified). The containment
+//     is a preToolUse HOOK planted under the redirected config root
+//     (`<dir>/.cursor/hooks.json`, failClosed:true) whose command runs the hidden
+//     `<SelfExe> __cursor-pretool-hook` gate — a real JSON parse of the TOP-LEVEL
+//     tool_name that permits ONLY "MCP:<tool>" and DENIES every builtin (the
+//     cursor analog of pi's --no-builtin-tools). Ground-truth (Phase D): the hook
+//     fires headlessly for EVERY tool (MCP + builtin), an MCP tool arrives as
+//     "MCP:run" and builtins as bare "Shell"/"Write"/"Read", failClosed:true is
+//     fail-CLOSED (a crash/timeout/garbage output BLOCKS — live-proven), and the
+//     allowlist denies builtin write+shell while the MCP call still succeeds.
+//  6. Scratch working directory (the second, structural barrier). The FULL-path
+//     process runs with cmd.Dir = <ToolDir> (WorkingDir), NOT the user's real
+//     project. cursor sandboxes hook and builtin filesystem writes to the
+//     workspace root (= cwd, live-verified), so even a hypothetical hook bypass
+//     lands in the disposable transport root, never the real project; and it
+//     makes OUR `<ToolDir>/.cursor/hooks.json` the project-level hook (highest of
+//     project/user precedence), so no real-project `.cursor/hooks.json` can
+//     override or disable the gate. Our own tools are unaffected: `run` executes
+//     in the tools-backend driver PTY (its own cwd), and auth is HOME-relative.
 //
-// See docs/specifications/multi-harness.md (cursor section) for the full Phase C
-// probe record and the builtin-containment evidence.
+// See docs/specifications/multi-harness.md (cursor section) and
+// docs/specifications/cursor-full-promotion.md (Phase D) for the full probe
+// record and the builtin-containment evidence.
 func (cursorHarness) Capabilities() Capabilities { return Capabilities{Tools: true} }
 
 // Env redirects HOME at the transport root on the TOOL path so cursor-agent
@@ -133,6 +137,16 @@ func (cursorHarness) Env(inv Invocation) []string {
 	}
 	return nil
 }
+
+// WorkingDir pins the FULL-path process to the scratch transport root
+// (cmd.Dir=<ToolDir>) — the second, structural builtin-containment barrier (see
+// Capabilities point 6). cursor sandboxes hook/builtin filesystem writes to the
+// workspace root (= cwd), so running there confines any hypothetical bypass to
+// the disposable root and makes our `<ToolDir>/.cursor/hooks.json` the
+// project-level hook that no real-project hooks.json can override. The tool-less
+// paths (empty ToolDir) return "" — cursor runs in the caller's cwd untouched,
+// so text authoring/classify/review keep the user's project context.
+func (cursorHarness) WorkingDir(inv Invocation) string { return inv.ToolDir }
 
 // Argv builds the OWNED cursor-agent argv for the streaming event path. The
 // invocation flags and the stream adapter are a single matched contract; the
@@ -235,11 +249,12 @@ const cursorMCPListTimeout = 20 * time.Second
 //
 //  1. writes `<dir>/.cursor/mcp.json` holding ONLY our server
 //     (`<SelfExe> mcp --socket <socketPath>`, the same document claude emits);
-//  2. plants the builtin-tool ALLOWLIST hook — `<dir>/.cursor/hooks.json` +
-//     the embedded cursor_pretool_hook.sh — so that under agent mode (which
-//     FULL requires; ask/plan refuse MCP tools) cursor's builtin write/shell
-//     tools are DENIED and only our MCP tools run (the decisive safety gate —
-//     see Capabilities point 5);
+//  2. plants the builtin-tool ALLOWLIST hook — `<dir>/.cursor/hooks.json`
+//     wiring a preToolUse hook to `<SelfExe> __cursor-pretool-hook`
+//     (failClosed:true) — so that under agent mode (which FULL requires;
+//     ask/plan refuse MCP tools) cursor's builtin write/shell tools are DENIED
+//     and only our MCP tools run (the decisive safety gate — see Capabilities
+//     point 5);
 //  3. on darwin, symlinks the REAL macOS keychain dir into `<dir>/Library` so
 //     authentication survives the HOME redirect (the keychain is HOME-relative;
 //     this exposes nothing cursor-agent lacks in BASIC — it already reads this
@@ -276,14 +291,15 @@ func (cursorHarness) ToolTransport(inv Invocation, socketPath, dir string) (file
 
 	// The builtin-tool allowlist hook (the decisive safety gate — see
 	// Capabilities point 5). Under agent mode cursor's builtin write/shell tools
-	// execute headlessly with no per-command gate; this preToolUse hook denies
-	// every non-MCP tool, leaving EXACTLY our run/ask/remember/submit_playbook —
-	// the cursor analog of pi's --no-builtin-tools.
-	hookFiles, herr := writeCursorToolHook(cursorDir)
+	// execute headlessly with no per-command gate; this preToolUse hook runs the
+	// hidden `<SelfExe> __cursor-pretool-hook` gate, which denies every non-MCP
+	// tool, leaving EXACTLY our run/ask/remember/submit_playbook — the cursor
+	// analog of pi's --no-builtin-tools.
+	hookPath, herr := writeCursorToolHook(cursorDir, inv.SelfExe)
 	if herr != nil {
 		return nil, nil, herr
 	}
-	files = append(files, hookFiles...)
+	files = append(files, hookPath)
 
 	// Auth survival under the redirect. cursor-agent's darwin credential store
 	// is the macOS keychain, resolved via $HOME/Library/Keychains — so a bare
@@ -330,40 +346,114 @@ type cursorHooksDoc struct {
 // cursorHook is one hook definition. FailClosed makes a hook crash/timeout/
 // invalid-output BLOCK the action instead of cursor's default fail-open — the
 // safety-critical setting for our deny hook (cursor.com/docs/hooks).
+//
+// TRUST NOTE (Phase D / F3): the builtin containment DEPENDS on cursor honoring
+// failClosed:true — proven fail-closed against cursor-agent 2026.07.01-777f564
+// (a garbage/exit-1 hook blocked the tool; the same hook with failClosed:false
+// let it through). This is re-proven by TestCursorLive_ToolHookBlocksBuiltins on
+// every machine with the CLI; a BACKLOG line flags re-proving on a cursor
+// upgrade. If a future cursor ever regresses failClosed, WorkingDir's scratch
+// cwd (Capabilities point 6) is the structural backstop that keeps a hook
+// regression out of the user's real project.
 type cursorHook struct {
 	Command    string `json:"command"`
 	FailClosed bool   `json:"failClosed"`
 }
 
-// writeCursorToolHook plants the builtin-tool allowlist: the embedded
-// preToolUse script (cursor_pretool_hook.sh) under <cursorDir>/hooks/ and a
-// hooks.json that wires it with failClosed:true. It is invoked as `sh <path>`
-// (the live-verified command shape) so no exec bit or shebang portability is
-// required. Returns the written paths (both live under the transport root, so
-// WriteToolTransport's RemoveAll(dir) cleans them up).
-func writeCursorToolHook(cursorDir string) ([]string, error) {
-	hooksDir := filepath.Join(cursorDir, "hooks")
-	if err := os.MkdirAll(hooksDir, 0o700); err != nil {
-		return nil, err
+// cursorMCPToolPrefix is the tool_name prefix cursor-agent gives EVERY MCP tool
+// on the preToolUse wire ("MCP:<toolName>", e.g. "MCP:run" — GROUND-TRUTH
+// captured, cursor-agent 2026.07.01-777f564; see testdata/cursor/hook_input_*.json).
+// Builtins arrive as BARE names ("Shell", "Write", "Read", …) — no prefix — so
+// this prefix is the allow discriminator, and any unknown/new tool name (no
+// prefix) DENIES by default.
+const cursorMCPToolPrefix = "MCP:"
+
+// The exact preToolUse responses (cursor.com/docs/hooks). allow lets the tool
+// proceed; deny blocks it with a message the user and the model both see. We
+// print one of these to stdout from the hook subcommand and exit 0 — cursor
+// honors the stdout permission decision (live-verified).
+const (
+	cursorHookAllowJSON = `{"permission":"allow"}`
+	cursorHookDenyJSON  = `{"permission":"deny","user_message":"ai-playbook: builtin tool blocked (authoring uses only the ai-playbook MCP tools).","agent_message":"Builtin tools are disabled in this authoring session. Use only the ai-playbook MCP tools: run, ask, remember, submit_playbook."}`
+)
+
+// cursorHookInput is the SUBSET of cursor's preToolUse JSON the gate needs: the
+// TOP-LEVEL tool_name and nothing else. json.Unmarshal binds the top-level
+// "tool_name" key regardless of key order, and a nested "tool_name" the model
+// plants inside the (attacker-controlled) tool_input object is IGNORED because
+// it is not a top-level key — this is what closes the grep|head first-match
+// spoof (`{"tool_input":{"tool_name":"MCP:x"},"tool_name":"Shell"}` binds
+// "Shell" → deny). See TestCursorPreToolHook.
+type cursorHookInput struct {
+	ToolName string `json:"tool_name"`
+}
+
+// cursorHookAllows is the allowlist DECISION: permit iff the tool_name has the
+// MCP prefix. Every builtin and every unknown/empty name is denied.
+func cursorHookAllows(toolName string) bool {
+	return strings.HasPrefix(toolName, cursorMCPToolPrefix)
+}
+
+// CursorPreToolHook is the body of the hidden `ai-playbook __cursor-pretool-hook`
+// subcommand — the ENFORCED builtin-tool allowlist for cursor's FULL authoring
+// path. It reads cursor's preToolUse JSON from r and writes the allow/deny
+// response to w. It ALLOWS iff the TOP-LEVEL tool_name has the MCP prefix; ANY
+// error (unreadable stdin, malformed JSON, empty/missing name, non-MCP name)
+// DENIES — fail-closed in every direction. It returns whether it allowed (for
+// the caller's exit-code signal), but the authoritative decision is the JSON on
+// w: we always emit a decision and let the caller exit 0, so a deny never
+// depends on cursor's failClosed path (which is, additionally, live-proven to
+// block on our crash/garbage as belt-and-suspenders).
+func CursorPreToolHook(r io.Reader, w io.Writer) bool {
+	allow := false
+	raw, err := io.ReadAll(r)
+	if err == nil {
+		var in cursorHookInput
+		if json.Unmarshal(raw, &in) == nil {
+			allow = cursorHookAllows(in.ToolName)
+		}
 	}
-	scriptPath := filepath.Join(hooksDir, "pretool-allowlist.sh")
-	if err := os.WriteFile(scriptPath, []byte(cursorPreToolHook), 0o700); err != nil {
-		return nil, err
+	if allow {
+		fmt.Fprintln(w, cursorHookAllowJSON)
+	} else {
+		fmt.Fprintln(w, cursorHookDenyJSON)
 	}
+	return allow
+}
+
+// shellQuote POSIX-single-quotes s so a path with spaces (or any shell
+// metacharacter) survives cursor's shell-parse of a hooks.json `command` string
+// (cursor shell-parses the command — live-verified: a double-quoted spaced path
+// runs; single quotes disable ALL expansion, the robust form). This is the F4
+// fix: `'…/ai-playbook' __cursor-pretool-hook` composes even when SelfExe holds
+// a space.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+}
+
+// writeCursorToolHook plants the builtin-tool allowlist: a hooks.json wiring a
+// single preToolUse hook to `<SelfExe> __cursor-pretool-hook` (the hidden gate
+// subcommand) with failClosed:true. No shell script is planted — the gate is
+// the ai-playbook binary itself, invoked directly, so the tool_name parse is a
+// real JSON parse (not a spoofable grep) and there is no script to read or
+// exec-bit to set. Returns the hooks.json path (under the transport root, so
+// WriteToolTransport's RemoveAll(dir) cleans it up).
+func writeCursorToolHook(cursorDir, selfExe string) (string, error) {
+	command := shellQuote(selfExe) + " __cursor-pretool-hook"
 	doc, err := json.Marshal(cursorHooksDoc{
 		Version: 1,
 		Hooks: map[string][]cursorHook{
-			"preToolUse": {{Command: "sh " + scriptPath, FailClosed: true}},
+			"preToolUse": {{Command: command, FailClosed: true}},
 		},
 	})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	hooksPath := filepath.Join(cursorDir, "hooks.json")
 	if err := os.WriteFile(hooksPath, doc, 0o600); err != nil {
-		return nil, err
+		return "", err
 	}
-	return []string{scriptPath, hooksPath}, nil
+	return hooksPath, nil
 }
 
 // cursorVerifyIsolation is the Step-5 guard: under HOME=home it confirms
@@ -376,8 +466,16 @@ func cursorVerifyIsolation(bin, home string) error {
 	defer cancel()
 	env := append(os.Environ(), "HOME="+home)
 
+	// The guard MUST mirror the real invocation exactly: the FULL-path process
+	// runs with HOME=<home> AND cmd.Dir=<home> (WorkingDir). Pinning the probes'
+	// cwd to home too means the guard's `mcp list` sees the SAME server set the
+	// run will — otherwise, launched from the user's real project cwd, the probe
+	// could pick up a PROJECT `.cursor/mcp.json` the isolated run never loads
+	// (guard/run divergence). With cwd=home, both the global (HOME) and any
+	// project (cwd) MCP config resolve to our single `<home>/.cursor/mcp.json`.
 	list := exec.CommandContext(ctx, bin, "mcp", "list")
 	list.Env = env
+	list.Dir = home
 	out, lerr := list.CombinedOutput()
 	if lerr != nil {
 		return fmt.Errorf("cursor tool transport: isolation probe (%s mcp list) failed: %w (output: %s)", bin, lerr, strings.TrimSpace(string(out)))
@@ -388,6 +486,7 @@ func cursorVerifyIsolation(bin, home string) error {
 
 	status := exec.CommandContext(ctx, bin, "status")
 	status.Env = env
+	status.Dir = home
 	sout, _ := status.CombinedOutput()
 	if !cursorStatusAuthenticated(string(sout)) {
 		return fmt.Errorf("cursor tool transport: authentication did not survive the HOME redirect (%s status: %s); staying BASIC", bin, strings.TrimSpace(string(sout)))

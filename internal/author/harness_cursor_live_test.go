@@ -266,7 +266,10 @@ func TestCursorLive_ToolLoopSubmitPlaybook(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Agent.Harness = "cursor"
-	workDir := t.TempDir()
+	// No Command seam: production drives the FULL path with cmd.Dir=<toolDir>
+	// (cursorHarness.WorkingDir — the F2 scratch-cwd barrier). Exercising the
+	// real path here PROVES submit_playbook still round-trips (tools + keychain
+	// auth + authoring context all survive the scratch cwd + HOME redirect).
 	events, wait, err := RunHarnessEvents(
 		"You are a playbook authoring assistant. Deliver the playbook by calling the submit_playbook tool.",
 		"Submit a playbook via the submit_playbook tool with: title 'Say hello', "+
@@ -281,11 +284,6 @@ func TestCursorLive_ToolLoopSubmitPlaybook(t *testing.T) {
 			Structured: true,
 			NoThinking: true,
 			Timeout:    cursorLiveTimeout,
-			Command: func(ctx context.Context, bin string, args []string) *exec.Cmd {
-				cmd := exec.CommandContext(ctx, bin, args...)
-				cmd.Dir = workDir
-				return cmd
-			},
 		},
 	)
 	if err != nil {
@@ -385,29 +383,33 @@ func TestCursorLive_ToolHookBlocksBuiltins(t *testing.T) {
 
 	cfg := config.Default()
 	cfg.Agent.Harness = "cursor"
-	workDir := t.TempDir()
+	// No Command seam: production runs the FULL path with cmd.Dir=<toolDir>
+	// (the F2 scratch-cwd barrier). The prompt asks for BOTH builtin mutations
+	// (must be DENIED) AND an MCP tool call (must be ALLOWED) — proving the
+	// allowlist gate permits our MCP tools while denying every builtin in the
+	// SAME live session.
 	events, wait, err := RunHarnessEvents(
-		"You are an assistant with file and shell access.",
-		"Do these two things now using your built-in tools: "+
-			"(1) write the text \"probe\" to the file "+writeSentinel+"; "+
-			"(2) run this shell command: touch "+shellSentinel+". Then say done.",
+		"You are an assistant with file, shell, and MCP tool access.",
+		"Do these three things now, in order: "+
+			"(1) call the MCP tool run with command \"echo hi\"; "+
+			"(2) write the text \"probe\" to the file "+writeSentinel+" using your built-in file write tool; "+
+			"(3) run this shell command with your built-in shell tool: touch "+shellSentinel+". Then say done.",
 		AuthorOptions{
 			Cfg:        cfg,
 			ToolArgv:   argv,
 			ToolDir:    toolDir,
 			NoThinking: true,
 			Timeout:    cursorLiveTimeout,
-			Command: func(ctx context.Context, bin string, args []string) *exec.Cmd {
-				cmd := exec.CommandContext(ctx, bin, args...)
-				cmd.Dir = workDir
-				return cmd
-			},
 		},
 	)
 	if err != nil {
 		t.Fatalf("RunHarnessEvents: %v", err)
 	}
-	for range events { //nolint:revive // drain the stream to completion
+	sawRunActivity := false
+	for e := range events {
+		if e.Kind == agentstream.ToolActivity && strings.Contains(e.Text, "run") {
+			sawRunActivity = true
+		}
 	}
 	if werr := wait(); werr != nil {
 		t.Fatalf("wait: %v", werr)
@@ -421,5 +423,11 @@ func TestCursorLive_ToolHookBlocksBuiltins(t *testing.T) {
 	}
 	if _, statErr := os.Stat(shellSentinel); statErr == nil {
 		t.Errorf("builtin shell escaped the preToolUse hook: %s exists", shellSentinel)
+	}
+	// The liveness property: the MCP tool WAS allowed — the gate is an allowlist,
+	// not a blanket deny (a blanket deny would trivially pass the safety check
+	// but break authoring).
+	if !sawRunActivity {
+		t.Error("the MCP run tool was not allowed through the hook (no run ToolActivity) — the allowlist is over-blocking")
 	}
 }

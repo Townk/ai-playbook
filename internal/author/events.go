@@ -208,6 +208,15 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 	}
 
 	cmd := buildCommand(ctx, opts.Command, bin, args)
+	// Working directory: a harness that must run in a scratch cwd (cursor's FULL
+	// path — a builtin/hook bypass must not touch the user's real project)
+	// returns it here; "" inherits the caller's cwd (claude/pi, and cursor's
+	// tool-less paths). Applied after buildCommand so it wins over a test seam's
+	// own cmd.Dir — production and tests both run the FULL path in the scratch
+	// transport root.
+	if wd := h.WorkingDir(inv); wd != "" {
+		cmd.Dir = wd
+	}
 	if len(extraEnv) > 0 {
 		// Inherit the parent env (nil Env == os.Environ at exec time) and append
 		// our extras. Set explicitly only when adding, to avoid disturbing a

@@ -204,6 +204,10 @@ func TestRun_VersionUsesInvokedProgName(t *testing.T) {
 var dispatchOnlyKeys = map[string]bool{
 	"--version": true,
 	"-v":        true,
+	// __cursor-pretool-hook is an internal machine interface (the cursor FULL
+	// builtin-tool allowlist gate), invoked by cursor via a planted hooks.json —
+	// never by a user — so it is intentionally absent from the climeta registry.
+	"__cursor-pretool-hook": true,
 }
 
 // registryNames returns every name and alias climeta.Commands registers,

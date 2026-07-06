@@ -63,6 +63,10 @@ func (claudeHarness) Env(inv Invocation) []string {
 	return []string{"MAX_THINKING_TOKENS=0"}
 }
 
+// WorkingDir: claude authoring reads the project from the caller's cwd — no
+// scratch redirect (only cursor's FULL path needs one; see the Harness contract).
+func (claudeHarness) WorkingDir(Invocation) string { return "" }
+
 // ToolTransport writes claude's transport artifact — the --mcp-config JSON
 // pointing claude at `<SelfExe> mcp --socket <socketPath>` (the MCP stdio
 // adapter, package mcpserver, which forwards tool calls to the session's tools

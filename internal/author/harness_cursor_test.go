@@ -186,16 +186,20 @@ func TestCursorStatusAuthenticated(t *testing.T) {
 	}
 }
 
-// TestCursorToolHook pins the builtin-tool allowlist transport (Finding 1): the
-// tool transport plants a preToolUse hook that permits only MCP tools and denies
-// every builtin, with failClosed:true. This is the decisive safety gate — under
-// agent mode (which FULL requires) cursor's builtin write/shell tools otherwise
-// execute headlessly. Live-verified end to end by
-// TestCursorLive_ToolHookBlocksBuiltins.
+// TestCursorToolHook pins the builtin-tool allowlist transport (F1): the tool
+// transport plants a preToolUse hook that runs the hidden binary gate
+// `<SelfExe> __cursor-pretool-hook` with failClosed:true. This is the decisive
+// safety gate — under agent mode (which FULL requires) cursor's builtin
+// write/shell tools otherwise execute headlessly. The gate DECISION is unit-
+// tested by TestCursorPreToolHook; this pins the wiring. Live-verified end to
+// end by TestCursorLive_ToolHookBlocksBuiltins.
 func TestCursorToolHook(t *testing.T) {
 	h := cursorHarness{}
 	dir := t.TempDir()
-	files, _, err := h.ToolTransport(Invocation{SelfExe: "/path/to/ai-playbook"}, "/tmp/tools.sock", dir)
+	// A SelfExe with a space proves the F4 quoting (cursor shell-parses the
+	// command string).
+	selfExe := "/path/to/ai playbook/ai-playbook"
+	files, _, err := h.ToolTransport(Invocation{SelfExe: selfExe}, "/tmp/tools.sock", dir)
 	if err != nil {
 		t.Fatalf("ToolTransport: %v", err)
 	}
@@ -217,35 +221,87 @@ func TestCursorToolHook(t *testing.T) {
 	if !pre[0].FailClosed {
 		t.Error("the deny hook must be failClosed:true (a crash/timeout must BLOCK, not fail-open)")
 	}
-	scriptPath := filepath.Join(dir, ".cursor", "hooks", "pretool-allowlist.sh")
-	if pre[0].Command != "sh "+scriptPath {
-		t.Errorf("hook command = %q, want %q", pre[0].Command, "sh "+scriptPath)
+	// The command invokes the hidden binary gate with the SelfExe robustly
+	// single-quoted (F4) — no shell script, no exec bit.
+	wantCmd := shellQuote(selfExe) + " __cursor-pretool-hook"
+	if pre[0].Command != wantCmd {
+		t.Errorf("hook command = %q, want %q", pre[0].Command, wantCmd)
+	}
+	if strings.Contains(pre[0].Command, ".sh") {
+		t.Errorf("hook command must not reference a shell script (spoofable grep parse): %q", pre[0].Command)
 	}
 
-	// The script is written, lives under dir, and is listed among the transport
-	// files (so WriteToolTransport's RemoveAll cleans it up).
-	script, err := os.ReadFile(scriptPath)
-	if err != nil {
-		t.Fatalf("read hook script: %v", err)
-	}
-	if !strings.Contains(string(script), `"permission":"deny"`) || !strings.Contains(string(script), "MCP:") {
-		t.Errorf("hook script is not the MCP allowlist:\n%s", script)
-	}
-	var sawScript, sawHooks bool
+	// hooks.json is under dir (so WriteToolTransport's RemoveAll cleans it up),
+	// and NO hook shell script is planted.
+	var sawHooks bool
 	for _, f := range files {
 		rel, rerr := filepath.Rel(dir, f)
 		if rerr != nil || strings.HasPrefix(rel, "..") {
 			t.Errorf("transport file outside dir: %s", f)
 		}
-		switch f {
-		case scriptPath:
-			sawScript = true
-		case hooksPath:
+		if f == hooksPath {
 			sawHooks = true
 		}
+		if strings.HasSuffix(f, ".sh") {
+			t.Errorf("transport must not plant a shell hook script: %s", f)
+		}
 	}
-	if !sawScript || !sawHooks {
-		t.Errorf("transport files must include the hook script and hooks.json; got %v", files)
+	if !sawHooks {
+		t.Errorf("transport files must include hooks.json; got %v", files)
+	}
+}
+
+// TestCursorPreToolHook is the F1 spoof-proof: the hidden __cursor-pretool-hook
+// gate parses the TOP-LEVEL tool_name with a real JSON parser and allows ONLY
+// the "MCP:" prefix — so the round-2 grep|head first-match spoof (a nested
+// tool_name inside the model-controlled tool_input) can no longer flip a builtin
+// to allow. Every error (malformed/empty/unknown) fails CLOSED (deny).
+func TestCursorPreToolHook(t *testing.T) {
+	cases := []struct {
+		name      string
+		input     string
+		wantAllow bool
+	}{
+		{"real MCP tool (fixture)", cursorFixture(t, "hook_input_mcp.json"), true},
+		{"real builtin Shell (fixture)", cursorFixture(t, "hook_input_shell.json"), false},
+		{"real builtin Write (fixture)", cursorFixture(t, "hook_input_write.json"), false},
+		{"plain MCP", `{"tool_name":"MCP:submit_playbook","tool_input":{}}`, true},
+		{"plain builtin", `{"tool_name":"Shell","tool_input":{"command":"rm -rf /"}}`, false},
+		// THE SPOOF: a nested tool_name "MCP:x" inside the attacker-controlled
+		// tool_input, with the REAL top-level tool_name "Shell". A byte-order
+		// first-match (grep|head) returns MCP:x → allow; the real top-level parse
+		// binds "Shell" → DENY.
+		{"spoof: nested MCP decoy before top-level Shell", `{"tool_input":{"tool_name":"MCP:x"},"tool_name":"Shell"}`, false},
+		{"spoof: nested MCP decoy after top-level Shell", `{"tool_name":"Shell","tool_input":{"tool_name":"MCP:x"}}`, false},
+		{"decoy: only a nested tool_name, no top-level", `{"tool_input":{"tool_name":"MCP:x"}}`, false},
+		{"unknown/new builtin denies by default", `{"tool_name":"SomeFutureTool"}`, false},
+		{"empty MCP-like prefix name is still allowed", `{"tool_name":"MCP:"}`, true},
+		{"malformed JSON", `{"tool_name":`, false},
+		{"empty input", ``, false},
+		{"not an object", `["MCP:run"]`, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var out strings.Builder
+			allow := CursorPreToolHook(strings.NewReader(tc.input), &out)
+			if allow != tc.wantAllow {
+				t.Errorf("CursorPreToolHook allow=%v, want %v (input=%q)", allow, tc.wantAllow, tc.input)
+			}
+			// The stdout JSON must AGREE with the return and be the exact cursor
+			// permission shape.
+			got := strings.TrimSpace(out.String())
+			want := cursorHookDenyJSON
+			if tc.wantAllow {
+				want = cursorHookAllowJSON
+			}
+			if got != want {
+				t.Errorf("stdout = %q, want %q", got, want)
+			}
+			// A deny must never carry an allow permission (defense-in-depth read).
+			if !tc.wantAllow && strings.Contains(got, `"permission":"allow"`) {
+				t.Errorf("deny case emitted an allow permission: %q", got)
+			}
+		})
 	}
 }
 

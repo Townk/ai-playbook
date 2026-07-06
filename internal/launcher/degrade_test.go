@@ -31,10 +31,11 @@ func (f fakeBasicHarness) Argv(systemPrompt, userMessage string, _ author.Invoca
 	*f.lastSys = systemPrompt
 	return []string{"-p", userMessage}
 }
-func (fakeBasicHarness) AdapterName() string               { return "text" }
-func (fakeBasicHarness) Env(author.Invocation) []string    { return nil }
-func (fakeBasicHarness) DisplayName() string               { return "Basic Fake" }
-func (fakeBasicHarness) Capabilities() author.Capabilities { return author.Capabilities{} }
+func (fakeBasicHarness) AdapterName() string                 { return "text" }
+func (fakeBasicHarness) Env(author.Invocation) []string      { return nil }
+func (fakeBasicHarness) WorkingDir(author.Invocation) string { return "" }
+func (fakeBasicHarness) DisplayName() string                 { return "Basic Fake" }
+func (fakeBasicHarness) Capabilities() author.Capabilities   { return author.Capabilities{} }
 func (fakeBasicHarness) ToolTransport(author.Invocation, string, string) ([]string, []string, error) {
 	return nil, nil, errors.New("BASIC harness has no tool transport")
 }

@@ -24,12 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     keychain in so login survives the redirect. Because FULL authoring must run
     in cursor's agent mode (its MCP tools are refused in read-only ask/plan
     mode), which also exposes cursor's builtin write/shell tools, the transport
-    plants a `preToolUse` allowlist hook (`failClosed`) that permits only our
-    MCP tools and denies every builtin — so a headless authoring run cannot
-    mutate the user's project (live-verified). A wire-time isolation guard
-    (`cursor-agent mcp list`/`status` under the redirect) refuses to enable
-    tools — degrading to text mode with a once-per-session note — if any of the
-    user's own MCP servers would leak in or authentication is lost.
+    contains them two ways (both live-verified): a `preToolUse` allowlist hook
+    (`failClosed`) whose gate parses the tool name and permits only our MCP
+    tools while denying every builtin, and a scratch working directory so even a
+    hypothetical bypass cannot touch the user's real project. A wire-time
+    isolation guard (`cursor-agent mcp list`/`status` under the redirect)
+    refuses to enable tools — degrading to text mode with a once-per-session
+    note — if any of the user's own MCP servers would leak in or authentication
+    is lost.
   - **Capability tiers with visible degradation.** A BASIC harness authors
     via text mode and skips knowledge capture, and each degraded surface says
     so once per session (`structured drafting unavailable on <harness> —

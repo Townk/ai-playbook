@@ -364,3 +364,126 @@ partial-FULL implementation (transport + Step-5 guard + caps flip + live test +
 spec/CHANGELOG + backlog line removed) OR the narrowed "stay BASIC" record with
 the specific mechanism failures. Keep LLM probes to Step 4 only; Steps 0-3 are
 free/deterministic.
+
+---
+
+## Phase D — final hardening before release (2026-07-06, work laptop; cursor-agent 2026.07.01-777f564)
+
+_Two prior rounds each found a real hole: the builtin hazard was confirmed live
+(fixed by the preToolUse hook, `d3dcc8e`), then that hook was shown spoofable
+(round 3). This round is an adversarial self-review assuming the authoring model
+is the attacker trying to (a) run a cursor BUILTIN write/shell tool or (b) leak
+the user's global MCP servers. Everything below is backed by CAPTURED evidence,
+not assumption — the two prior misses came from building on unverified shape._
+
+### Tier decision: **FULL, hardened.** F1–F4 closed; the adversarial sweep is clean; every claim is evidence-backed with a unit and/or live test.
+
+### Ground truth captured FIRST (this is what bit us twice)
+
+- **The preToolUse hook input format** (real captures → `internal/author/testdata/cursor/hook_input_{mcp,shell,write}.json`).
+  A representative record:
+  `{"conversation_id":…,"model":"claude-opus-4-8","tool_name":"MCP:run","tool_input":{"command":"echo hi"},"tool_use_id":…,"hook_event_name":"preToolUse","cursor_version":"2026.07.01-777f564","workspace_roots":["…/work"],"user_email":"…","transcript_path":…}`.
+  Findings: `preToolUse` fires headlessly for EVERY tool (MCP + builtin); an MCP
+  tool's name is exactly `"MCP:<tool>"` (e.g. `"MCP:run"` — the tool name only,
+  NOT server-qualified, NOT `mcp__…`); builtins are BARE names (`"Shell"`,
+  `"Write"`, `"Read"`). `tool_name` is a TOP-LEVEL key; `tool_input` is a
+  model-controlled nested object. The allowlist is built on THIS: allow iff the
+  top-level `tool_name` has the `MCP:` prefix.
+- **Broken-hook behavior.** With `failClosed:true`, a hook that emits non-JSON
+  garbage and exits 1 BLOCKS the tool (fail-CLOSED); the identical hook with
+  `failClosed:false` lets the tool through (fail-open, matching the docs). A
+  WHOLE-`hooks.json` that is malformed JSON disables containment (config-level
+  fail-open, independent of per-hook `failClosed`) — not attacker-reachable
+  because WE author `hooks.json` (Go `json.Marshal`, always valid) and the model
+  cannot rewrite it (builtin writes are denied, and cursor parses hooks once at
+  startup). `preToolUse` ALONE (no dedicated `beforeShellExecution`) denies
+  builtins and allows MCP — proven by an allowlist prototype that denied Write +
+  Shell (no sentinel files) while `MCP:run` succeeded.
+- **Command parsing.** cursor SHELL-parses the `hooks.json` `command` string (a
+  double-quoted spaced path runs). So a SelfExe path with spaces is handled by
+  POSIX single-quoting it in the command (F4).
+- **Hook sandbox.** Hooks run sandboxed: filesystem WRITES are confined to the
+  workspace root (= cwd) — an out-of-workspace log write was silently dropped
+  while an in-workspace one succeeded — but exec + read of external paths and
+  stdin/stdout all work (the real `ai-playbook` binary ran fine as a hook). This
+  is WHY the round-2/round-3 "hook didn't fire" symptom was a red herring: the
+  hook was firing and its stdout decision honored; only its debug log write
+  (outside the workspace) was being dropped.
+
+### The findings — all closed
+
+- **F1 [SECURITY — the spoof]. CLOSED.** The old hook extracted `tool_name`
+  with `grep … | head -1` (first byte-order match), so a model-controlled
+  `{"tool_input":{"tool_name":"MCP:x"},"tool_name":"Shell"}` could return ALLOW
+  for a `Shell` builtin. Fix: a hidden, climeta-unlisted `ai-playbook
+  __cursor-pretool-hook` subcommand reads stdin and `json.Unmarshal`s into a
+  struct with ONLY a top-level `ToolName string \`json:"tool_name"\``. Go binds
+  the top-level key regardless of order and IGNORES a nested `tool_name` inside
+  `tool_input`; it allows iff the name has the `MCP:` prefix, and fail-closes
+  (deny) on ANY error — unreadable stdin, malformed JSON, empty, non-object,
+  missing/empty name. `TestCursorPreToolHook` proves deny for the spoof, the
+  nested decoy (before AND after the real key), a plain builtin, an
+  unknown/future tool, malformed JSON, empty input, and a non-object; allow for
+  a real `MCP:*` name and the captured `MCP:run` fixture.
+- **F2 [SECURITY — second barrier]. CLOSED.** The FULL-path process now runs
+  with `cmd.Dir=<ToolDir>` (`cursorHarness.WorkingDir`, applied in
+  `RunHarnessEvents`), a disposable scratch root — NOT the user's real project.
+  Because cursor sandboxes builtin/hook writes to the workspace (= cwd), a
+  hypothetical Barrier-1 bypass lands in scratch; and it makes our
+  `<ToolDir>/.cursor/hooks.json` the PROJECT-level hook (higher precedence than
+  user hooks), so no real-project `hooks.json` can override the gate. Our own
+  tools are unaffected — `run` executes in the tools-backend driver PTY (its own
+  cwd) and auth is HOME-relative — PROVEN by `TestCursorLive_ToolLoopSubmitPlaybook`
+  now driving the real production path (no cwd seam) and still round-tripping a
+  clean `submit_playbook`.
+- **F3 [MED — trusted hook]. CLOSED (documented + belt).** Broken-hook behavior
+  is now KNOWN: `failClosed:true` is fail-closed against crash/timeout/garbage
+  (proven). Containment therefore depends on cursor honoring `failClosed` hooks,
+  proven against 2026.07.01-777f564; a code comment and a BACKLOG line flag this
+  to be re-proven on cursor upgrade. Barrier 2 (`cmd.Dir` scratch) is the
+  structural backstop if a future cursor ever regresses `failClosed`, so a
+  single-point hook regression cannot reach the real project.
+- **F4 [LOW — spaced path]. CLOSED.** Folded into F1's binary invocation: the
+  command is `shellQuote(SelfExe) + " __cursor-pretool-hook"` (POSIX
+  single-quote), robust to spaces/metacharacters given cursor's shell-parse.
+  `TestCursorToolHook` pins the quoting with a spaced SelfExe and asserts no
+  `.sh` script is planted.
+
+### Adversarial sweep — additional vectors, all closed
+
+- **Unknown/new tool names DENY by default** — the allowlist permits only the
+  `MCP:` prefix; every builtin category (`Shell`/`Read`/`Write`/`Edit`/`Delete`/
+  `Task`/…) and any future tool without the prefix is denied (unit-tested).
+- **`--approve-mcps` + the hook are independent layers** — approval loads our
+  server; the hook still gates every per-tool call (the live MCP call passed
+  THROUGH the hook to allow, builtins were denied in the same run).
+- **Every failure path degrades to BASIC, never unguarded FULL** — SelfExe
+  missing, hook-plant failure, isolation-guard foreign-server/auth failure all
+  return an error from `ToolTransport`; the launcher's `toolTransport` turns
+  that into text authoring + the once-per-session note. BASIC runs `--mode ask`
+  (read-only), so the real-project cwd is safe there.
+- **Guard/run coherence** — the Step-5 guard now runs `mcp list`/`status` with
+  `cwd=<dir>` (matching the run's `cmd.Dir`), so a real-project
+  `.cursor/mcp.json` can neither hide a leak from the guard nor diverge from
+  what the run loads.
+- **TOCTOU / temp-dir perms** — the transport root is a private `0700`
+  `os.MkdirTemp`; `mcp.json`/`hooks.json` are `0600`; the keychain symlink
+  exposes only what BASIC already reads. cursor parses hooks once at startup, so
+  a mid-session config rewrite (itself denied) cannot disable the gate.
+
+### Self-verification checklist — ALL PASS
+
+- [x] Ground-truth hook format captured + committed as fixtures; allowlist built on it.
+- [x] F1 spoof + nested-tool_name decoy DENY (unit test, no CLI).
+- [x] Live: builtin write + shell DENIED, MCP tool ALLOWED, `submit_playbook` round-trip works (2026.07.01-777f564).
+- [x] Broken-hook behavior recorded; `failClosed:true` fail-closed; F3 documented + BACKLOG re-prove-on-upgrade line.
+- [x] `cmd.Dir=<ToolDir>` on the FULL path; tools + auth unaffected (submit round-trip).
+- [x] Every failure path degrades to BASIC + the once-per-session note.
+- [x] `make check`: build/vet/lint/fmt-check green, gofmt clean; ALL package tests pass
+  including the cursor unit + live suite. The only failures are `TestPiLive_*`,
+  which fail with "No API key found for the selected model" because pi is not
+  logged in on this laptop — a pre-existing, environmental failure unrelated to
+  this change (the pi live-test file is untouched here; this change's only pi
+  edit is an additive `WorkingDir(){return ""}`, and an unset cwd cannot cause an
+  auth error). On a machine with pi logged in, `make check` is fully green.
+- [x] CHANGELOG/spec/BACKLOG updated; single-purpose gpg-signed commit, no AI trailers, explicit `git add`.

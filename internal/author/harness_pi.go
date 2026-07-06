@@ -66,6 +66,10 @@ func (piHarness) Capabilities() Capabilities { return Capabilities{Tools: true} 
 // environment untouched.
 func (piHarness) Env(inv Invocation) []string { return nil }
 
+// WorkingDir: pi authoring reads the project from the caller's cwd — no scratch
+// redirect (only cursor's FULL path needs one; see the Harness contract).
+func (piHarness) WorkingDir(Invocation) string { return "" }
+
 // Argv builds the OWNED pi argv for the streaming event path. The invocation
 // flags and the stream adapter are a single matched contract; the user only
 // selects value prefs (model, bin) via config [agent]:
