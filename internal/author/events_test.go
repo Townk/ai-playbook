@@ -164,15 +164,16 @@ func TestRunHarnessEvents_ThinkingEnvWired(t *testing.T) {
 }
 
 // TestAuthorEvents_UnsupportedHarness: a configured harness with no shipped
-// adapter (cursor until H3) → a clear error, no process.
+// adapter → a clear error, no process. (The probe name is deliberately one
+// that can never ship — the three real harnesses all register now.)
 func TestAuthorEvents_UnsupportedHarness(t *testing.T) {
 	cfg := config.Default()
-	cfg.Agent.Harness = "cursor"
+	cfg.Agent.Harness = "no-such-harness"
 	_, _, err := AuthorEvents(sampleFailure(), AuthorOptions{Cfg: cfg})
 	if err == nil {
 		t.Fatal("expected error for unsupported harness")
 	}
-	if !strings.Contains(err.Error(), "cursor") || !strings.Contains(err.Error(), "not yet supported") {
+	if !strings.Contains(err.Error(), "no-such-harness") || !strings.Contains(err.Error(), "not yet supported") {
 		t.Errorf("error = %q, want a clear not-yet-supported message", err)
 	}
 }

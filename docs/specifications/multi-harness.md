@@ -99,15 +99,46 @@ Notes are stderr/status-line one-liners, once per session, tested verbatim.
 
 ### cursor (fixture-first; live tests gated on the CLI)
 
-- Invocation: `cursor-agent -p --output-format stream-json` (documented
-  shape); system-prompt handling characterized from docs/fixtures — if no
-  replace/append flags exist, the adapter documents the fold-into-user-
-  message fallback for the bare path.
-- Tools: cursor speaks MCP; `ToolTransport` writes the same mcpServers
-  document Claude uses (shared writer, per-harness attachment flags).
+- Invocation: `cursor-agent -p --output-format stream-json
+  --stream-partial-output --mode ask` (documentation-derived; sources cited
+  in harness_cursor.go). `--mode ask` is Cursor's documented read-only mode
+  — print mode can otherwise use write/shell tools, an unsanctioned mutation
+  channel for a text-producing invocation (the hazard pi closes with
+  `--no-tools`). The CLI installs as `agent`/`cursor-agent` (never `cursor`),
+  so the defaults table grew a per-harness `Bin` column; `cursor-agent` (the
+  every-vintage symlink) is the default.
+- System prompt: cursor-agent has NEITHER replace nor append flags, and no
+  context-suppression flags either (.cursor/rules, AGENTS.md, CLAUDE.md
+  auto-load unconditionally) — so BOTH paths use the documented fallback:
+  the system prompt is folded into the head of the single positional user
+  message, and bare == append in shape.
+- Tools: cursor speaks MCP but attaches servers ONLY by file discovery
+  (project `.cursor/mcp.json` / global `~/.cursor/mcp.json`; no
+  per-invocation config flag). Writing into the user's project config is
+  isolation-unsafe (mutates/overwrites a user-owned file, races concurrent
+  sessions, and the global servers still load — no `--strict-mcp-config`
+  analog), and no documentation establishes a schema-enforcing re-ask tool
+  loop. Cursor therefore SHIPPED BASIC (`Capabilities{Tools:false}`); the
+  shared-mcpServers-writer factoring is deferred to the promotion, whose
+  gate is an ISOLATED per-invocation MCP attachment plus a live
+  schema-enforcement proof (the RequireHarness-gated live tests). The
+  strongest attachment candidate is `--workspace <temp dir>` holding our
+  own `.cursor/mcp.json` — that neutralizes the user-file-mutation and
+  concurrent-session objections, but the global servers still load and
+  headless MCP approval is undocumented (`--approve-mcps` would
+  blanket-approve the user's servers too), so live probes decide.
+- Stream: `result` is the terminal envelope (REQUIRED — A5b); assistant
+  deltas are deduped per the documented `--stream-partial-output`
+  three-variant rule; thinking events are suppressed in print mode, so
+  cursor never emits Reasoning. The Final TEXT is the LAST assistant
+  segment (accumulated from the deltas; segments are the text runs between
+  tool calls), NOT the envelope's `result` field — the documented example
+  shows that field is the no-separator concatenation of every segment in
+  the turn, which would glue narration onto the stored body. The field is
+  used only as the fallback when no delta streamed.
 - Every live assertion wrapped in a skip-unless-installed guard; the
-  fixture corpus is the review artifact. Tier target: FULL; BASIC until
-  the tool loop is proven.
+  fixture corpus (doc-derived from the published stream-json examples) is
+  the review artifact. Tier: BASIC shipped; FULL is the promotion target.
 
 ### claude (refactor only)
 

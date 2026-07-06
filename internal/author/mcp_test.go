@@ -171,18 +171,19 @@ func TestHarnessAgent_PlainHasNoMCPConfig(t *testing.T) {
 }
 
 // TestHarnessAgent_HonorsConfiguredHarness is the A5c fix: a text Agent built for a
-// NON-claude harness must NOT silently run claude — it surfaces the configured
-// harness's not-yet-supported error. The legacy path ignored [agent].harness here.
+// harness with no shipped adapter must NOT silently run the default — it surfaces
+// the configured harness's not-yet-supported error. The legacy path ignored
+// [agent].harness here. (The probe name is deliberately one that can never ship.)
 func TestHarnessAgent_HonorsConfiguredHarness(t *testing.T) {
 	cfg := config.Default()
-	cfg.Agent.Harness = "cursor"
+	cfg.Agent.Harness = "no-such-harness"
 
 	agent := HarnessAgent(AuthorOptions{Cfg: cfg})
 	_, err := agent("SYS", "USER")
 	if err == nil {
 		t.Fatal("expected the configured harness to be honored (not-yet-supported error)")
 	}
-	if !strings.Contains(err.Error(), "cursor") || !strings.Contains(err.Error(), "not yet supported") {
+	if !strings.Contains(err.Error(), "no-such-harness") || !strings.Contains(err.Error(), "not yet supported") {
 		t.Errorf("error = %q, want it to name the configured harness", err)
 	}
 }

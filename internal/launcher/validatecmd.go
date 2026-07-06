@@ -64,8 +64,9 @@ var reviewSystemPrompt = "You are reviewing a playbook (a runnable markdown docu
 
 // aiSkipNote is printed in place of the AI review's text when no model backend
 // is available (F24-style degrade, never an abort). bin is the CONFIGURED
-// harness's binary (author.HarnessBin — cfg [agent].bin else the harness name),
-// so the note names the backend that was actually looked for.
+// harness's binary (author.HarnessBin — cfg [agent].bin, else the harness's own
+// default bin, else the harness name), so the note names the backend that was
+// actually looked for.
 func aiSkipNote(bin string) string {
 	return fmt.Sprintf("AI review skipped — no model backend (install + authenticate %s, or configure [agent] in ai-playbook config)", bin)
 }

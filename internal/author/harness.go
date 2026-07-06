@@ -82,6 +82,11 @@ type Defaults struct {
 	Model       string
 	TriageModel string
 	Thinking    string
+	// Bin is the executable [agent].bin resolves to when unset — set ONLY when
+	// the harness's CLI binary is not named after its registry row (cursor: the
+	// CLI installs as `agent`/`cursor-agent`, never `cursor`). Empty means the
+	// registry name IS the binary name (claude, pi).
+	Bin string
 }
 
 // harnessRegistration pairs a Harness with its config-defaults row.
@@ -167,15 +172,22 @@ func ConfiguredHarness(cfg *config.Config) (Harness, error) {
 }
 
 // HarnessBin resolves the executable the configured harness runs as: cfg
-// [agent].bin when set, else the harness name looked up on PATH — the SAME
-// resolution RunHarnessEvents uses for the real invocation, shared so
-// no-backend messages (validate's AI-review skip note, the drift-regen note)
-// and the debug env probe name the binary that would actually be launched.
+// [agent].bin when set, else the harness's own default bin (the Defaults.Bin
+// row, for a harness whose binary is not named after its registry row —
+// cursor's CLI installs as `cursor-agent`), else the harness name looked up on
+// PATH — the SAME resolution RunHarnessEvents uses for the real invocation,
+// shared so no-backend messages (validate's AI-review skip note, the
+// drift-regen note) and the debug env probe name the binary that would
+// actually be launched.
 func HarnessBin(cfg *config.Config) string {
 	if cfg != nil && cfg.Agent.Bin != "" {
 		return cfg.Agent.Bin
 	}
-	return resolveHarnessName(cfg)
+	name := resolveHarnessName(cfg)
+	if d := HarnessDefaults(name); d.Bin != "" {
+		return d.Bin
+	}
+	return name
 }
 
 // HarnessDisplayName returns the configured harness's human label (its
