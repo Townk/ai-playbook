@@ -108,7 +108,6 @@ All ai-playbook env vars are prefixed `AI_PLAYBOOK_`.
 | `AI_PLAYBOOK_NO_CACHE`    | unset (cache on)     | When set (non-empty), disable cache serving (always escalate/author). |
 | `AI_PLAYBOOK_PROJECT_ROOT`| git-root / cwd       | The project root used for context hashing and the project-local store. |
 | `AI_PLAYBOOK_SCROLLBACK_LINES` | `200`           | How many scrollback lines to capture for request context. |
-| `AI_PLAYBOOK_RUN_TIMEOUT` | `120` (seconds)      | Timeout for a single run-block execution. |
 | `AI_PLAYBOOK_MAX_FOLLOWUPS` | `3`                | Max auto-follow-ups on a failed verify (positive integer; non-positive/unparseable → the default). |
 
 The harness itself — which one, its model, and its executable path — is configured

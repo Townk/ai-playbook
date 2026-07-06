@@ -56,6 +56,9 @@ done/stale entries. Phase work lives in the roadmap, not here.
 
 - [ ] The structured draft's top-level verify Step can't declare `timeout=` (per-code-item only) — a long-running verify gets only the 10m default; add the field if a real case appears (2026-07-05)
 
+- [ ] `AI_PLAYBOOK_SCROLLBACK_LINES` is documented in docs/configuration.md but read nowhere (only a const comment mirrors it) — wire it in internal/capture or drop the row (2026-07-05)
+- [ ] Timed-out failure messages name the ceiling but not the remedy — consider a hint suffix pointing at the `timeout=` fence attr (2026-07-05)
+
 ## Ideas
 
 - [ ] (low priority) E2E/integration tests for the integration entry points (`launcher` entry points, `cmd` `selftest`/`mcpMain`) — spawn the real binary + drive a TUI/PTY. These render via live mux/model/TUI/driver so they're not unit-testable; coverage there is intentionally low. Would push total coverage 80%→~90% (2026-06-27)
