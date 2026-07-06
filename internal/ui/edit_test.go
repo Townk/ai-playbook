@@ -47,7 +47,8 @@ func TestEditButton_OnlyWhenFileBacked(t *testing.T) {
 }
 
 // TestEditButton_IsScreen verifies the [edit] button is Screen=true (absolute
-// row hit-test, not body-line relative) and on the title row (screen row 1).
+// row hit-test, not body-line relative) and on the shared badges row below the
+// title/subtitle (badgeRowIdx).
 func TestEditButton_IsScreen(t *testing.T) {
 	m := newTestModelFileBacked(t, "/store/x.md")
 	m.reflow()
@@ -56,8 +57,8 @@ func TestEditButton_IsScreen(t *testing.T) {
 			if !b.Screen {
 				t.Error("[edit] button must have Screen=true")
 			}
-			if b.Line != 1 {
-				t.Errorf("[edit] button Line = %d, want 1 (title row)", b.Line)
+			if b.Line != m.badgeRowIdx() {
+				t.Errorf("[edit] button Line = %d, want %d (badges row)", b.Line, m.badgeRowIdx())
 			}
 			if b.BlockID != "edit" {
 				t.Errorf("[edit] button BlockID = %q, want \"edit\"", b.BlockID)

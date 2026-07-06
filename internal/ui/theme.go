@@ -38,6 +38,18 @@ const (
 	colHintLabelFg = "#ff5555"
 	colHintLabelBg = "#3a1212"
 
+	// Action-pill body foregrounds: the text/icon INSIDE a colored powerline
+	// pill. The rule: a darker shade of the pill's own hue when the pill color
+	// is bright, a lighter shade when it's dark.
+	//   - colPeach (#fab387) is bright → a hand-tuned dark warm brown of the
+	//     same hue; reads clearly on the peach body (~5:1 contrast) without
+	//     collapsing to black like colBase would.
+	colPillPeachFg = "#5c3212"
+	//   - colBlue (#89b4fa) is mid-bright → the darker treatment reads better
+	//     than a lighter tint (a light blue on blue washes out); hand-tuned
+	//     dark navy of the same hue (~5:1 contrast).
+	colPillBlueFg = "#16325c"
+
 	// Flash highlight: bright background applied to a button glyph for ~140ms
 	// after activation. A bright bold foreground with NO background — a background
 	// on the glyph cell makes some terminals render the nerd-font (PUA) glyph

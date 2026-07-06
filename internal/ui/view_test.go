@@ -9,9 +9,9 @@ import (
 	"charm.land/lipgloss/v2"
 )
 
-// TestCachedBadgePillRow verifies that when isCached=true the cached-pill row
-// (the row BELOW the title) contains "cached ·", an age token, and the pill
-// glyphs — and that the title line itself no longer carries the pill.
+// TestCachedBadgePillRow verifies that when isCached=true the shared badges row
+// (the row BELOW the title/subtitle) contains "cached ·", an age token, and the
+// pill glyphs — and that the title lines themselves carry no pill.
 func TestCachedBadgePillRow(t *testing.T) {
 	m := newModel("agent", "hello world")
 	m.width = 120
@@ -19,28 +19,28 @@ func TestCachedBadgePillRow(t *testing.T) {
 	m.cachedAt = time.Now().Add(-3 * time.Minute) // 3 minutes ago
 	m.answerRegen = fakeAnswerRegen()             // wire a regenerate path so the reload renders
 
-	row := m.cachedBadgeRow()
+	row := m.badgesRowString()
 	plain := strip(row)
 	if !strings.Contains(plain, "cached ·") {
-		t.Fatalf("pill row missing 'cached ·' badge: %q", plain)
+		t.Fatalf("badges row missing 'cached ·' badge: %q", plain)
 	}
 	if !strings.Contains(plain, "m ago") {
-		t.Fatalf("pill row missing age token (expected '...m ago'): %q", plain)
+		t.Fatalf("badges row missing age token (expected '...m ago'): %q", plain)
 	}
 	if !strings.Contains(row, "\U0000E0B6") {
-		t.Fatalf("pill row missing powerline left-cap (U+E0B6): %q", row)
+		t.Fatalf("badges row missing powerline left-cap (U+E0B6): %q", row)
 	}
 	if !strings.Contains(row, "\U0010F1DA") {
-		t.Fatalf("pill row missing reload icon (U+10F1DA): %q", row)
+		t.Fatalf("badges row missing reload icon (U+10F1DA): %q", row)
 	}
-	if strings.Contains(m.titleLine(m.width), "\U0000E0B6") {
-		t.Fatalf("title line should no longer carry the pill")
+	if strings.Contains(strings.Join(m.titleLines(), "\n"), "\U0000E0B6") {
+		t.Fatalf("title lines should not carry the pill")
 	}
 }
 
-// TestCachedBadgeInNormalLines verifies that normalLines() places the pill with
-// a blank line above and below it.
-// Layout: index 0=leading blank, 1=title, 2=blank-above-pill, 3=pill, 4=blank-below-pill, 5+=body.
+// TestCachedBadgeInNormalLines verifies that normalLines() places the badges row
+// directly below the title, followed by the top-pad blank.
+// Layout: index 0=leading blank, 1=title, 2=badges row, 3=top-pad blank, 4+=body.
 func TestCachedBadgeInNormalLines(t *testing.T) {
 	m := newModel("agent", "hello")
 	m.width = 120
@@ -55,30 +55,25 @@ func TestCachedBadgeInNormalLines(t *testing.T) {
 		t.Fatal("normalLines returned fewer than 5 lines")
 	}
 
-	// Row 2: blank above the pill.
-	if got := strings.TrimSpace(strip(lines[2])); got != "" {
-		t.Fatalf("row 2 (blank above pill) must be empty, got: %q", got)
-	}
-
-	// Row 3: the pill row.
-	raw := lines[3]
+	// Row 2: the badges row, directly below the (1-line) title.
+	raw := lines[2]
 	plain := strip(raw)
 	if !strings.Contains(plain, "cached ·") {
-		t.Fatalf("pill row (index 3) missing cached badge: %q", plain)
+		t.Fatalf("badges row (index 2) missing cached badge: %q", plain)
 	}
 	if !strings.Contains(plain, "m ago") {
-		t.Fatalf("pill row (index 3) missing age in cached badge: %q", plain)
+		t.Fatalf("badges row (index 2) missing age in cached badge: %q", plain)
 	}
 	if !strings.Contains(raw, "\U0000E0B6") {
-		t.Fatalf("pill row (index 3) missing powerline left-cap (U+E0B6): %q", raw)
+		t.Fatalf("badges row (index 2) missing powerline left-cap (U+E0B6): %q", raw)
 	}
 	if !strings.Contains(raw, "\U0010F1DA") {
-		t.Fatalf("pill row (index 3) missing reload icon (U+10F1DA): %q", raw)
+		t.Fatalf("badges row (index 2) missing reload icon (U+10F1DA): %q", raw)
 	}
 
-	// Row 4: blank below the pill.
-	if got := strings.TrimSpace(strip(lines[4])); got != "" {
-		t.Fatalf("row 4 (blank below pill) must be empty, got: %q", got)
+	// Row 3: the top-pad blank below the badges row.
+	if got := strings.TrimSpace(strip(lines[3])); got != "" {
+		t.Fatalf("row 3 (top-pad below badges) must be empty, got: %q", got)
 	}
 }
 
@@ -98,15 +93,15 @@ func TestBodyTopAndBodyHeightCached(t *testing.T) {
 		t.Errorf("non-cached body = %d, want %d", got, h-5)
 	}
 
-	// Cached: bodyTop == 5, body == h-7.
+	// Cached: one badges row → bodyTop == 4, body == h-6.
 	mc := newModel("agent", "")
 	mc.height = h
 	mc.isCached = true
-	if got := mc.bodyTop(); got != 5 {
-		t.Errorf("cached bodyTop = %d, want 5", got)
+	if got := mc.bodyTop(); got != 4 {
+		t.Errorf("cached bodyTop = %d, want 4", got)
 	}
-	if got := mc.body(); got != h-7 {
-		t.Errorf("cached body = %d, want %d", got, h-7)
+	if got := mc.body(); got != h-6 {
+		t.Errorf("cached body = %d, want %d", got, h-6)
 	}
 }
 
@@ -151,17 +146,17 @@ func TestCachedBadgeAbsentWhenNotCachedNoPill(t *testing.T) {
 	m.width = 120
 	m.isCached = false
 
-	if m.cachedBadgeRow() != "" {
-		t.Fatalf("cachedBadgeRow must be empty when isCached=false: %q", m.cachedBadgeRow())
+	if m.badgesRowString() != "" {
+		t.Fatalf("badges row must be empty when isCached=false and not file-backed: %q", m.badgesRowString())
 	}
-	if strings.Contains(m.titleLine(m.width), "\U0000E0B6") {
-		t.Fatalf("title line must not contain the pill when isCached=false")
+	if strings.Contains(strings.Join(m.titleLines(), "\n"), "\U0000E0B6") {
+		t.Fatalf("title lines must not contain the pill when isCached=false")
 	}
 }
 
 // TestCachedReloadButtonRegistered verifies that when isCached=true and reflow
-// is called, a Screen-fixed "regenerate" button is present at the pill row
-// (bodyTop()-2) with a sane column, Width=2, BlockID="cached".
+// is called, a Screen-fixed "regenerate" button is present at the badges row
+// (badgeRowIdx) with a sane column, whole-pill width, BlockID="cached".
 func TestCachedReloadButtonRegistered(t *testing.T) {
 	m := newModel("agent", "hello")
 	m.width = 120
@@ -184,9 +179,9 @@ func TestCachedReloadButtonRegistered(t *testing.T) {
 	if !regenBtn.Screen {
 		t.Error("regenerate button must have Screen=true")
 	}
-	wantLine := m.bodyTop() - 2
+	wantLine := m.badgeRowIdx()
 	if regenBtn.Line != wantLine {
-		t.Errorf("regenerate button Line = %d, want %d (bodyTop()-2)", regenBtn.Line, wantLine)
+		t.Errorf("regenerate button Line = %d, want %d (badgeRowIdx)", regenBtn.Line, wantLine)
 	}
 	if regenBtn.BlockID != "cached" {
 		t.Errorf("regenerate button BlockID = %q, want %q", regenBtn.BlockID, "cached")
@@ -260,8 +255,10 @@ func TestCachedReloadButtonHitTest(t *testing.T) {
 }
 
 // TestCachedRegenHintLabelRendered verifies that in hint mode the regenerate
-// button's hint label is drawn on the blank line ABOVE the cached pill (anchored
-// near the reload glyph), not omitted — and that it floats above, not over, the pill.
+// button's hint label is painted directly OVER the badges row (anchored at the
+// reload glyph's column) — the row above is the title/subtitle, never blank,
+// so the own-row placement applies (mirroring the drift buttons under their
+// banner) — and that it lands at the reload-icon column, not at the row start.
 func TestCachedRegenHintLabelRendered(t *testing.T) {
 	m := newModel("agent", "hello")
 	m.width = 120
@@ -293,13 +290,18 @@ func TestCachedRegenHintLabelRendered(t *testing.T) {
 		}
 	}
 	if pillIdx < 1 {
-		t.Fatalf("pill row not found at index >=1: %#v", lines)
+		t.Fatalf("badges row not found at index >=1: %#v", lines)
 	}
-	if !strings.Contains(lines[pillIdx-1], "Z") {
-		t.Fatalf("regenerate hint label 'Z' not rendered on the line above the pill; above=%q", lines[pillIdx-1])
+	row := lines[pillIdx]
+	labelAt := strings.Index(row, "Z")
+	if labelAt < 0 {
+		t.Fatalf("regenerate hint label 'Z' not rendered on the badges row; row=%q", row)
 	}
-	if strings.Contains(lines[pillIdx], "Z") {
-		t.Errorf("hint label should float above the pill, not over it; pill=%q", lines[pillIdx])
+	// The label is anchored at the reload glyph's column inside the pill (the
+	// stripped row's byte layout differs from display cells, so just require it
+	// to sit past the pill's "cached ·" prefix rather than at the row start).
+	if labelAt < strings.Index(row, "cached") {
+		t.Errorf("hint label must anchor at the reload glyph, not before the pill; row=%q", row)
 	}
 }
 

@@ -102,16 +102,16 @@ func TestPlaybookHeading_TrimsHeadingSpace(t *testing.T) {
 	}
 }
 
-// TestHeaderUsesTitleWhenSet verifies header() renders the playbook title when set,
-// and falls back to the default "ai-playbook — <harness>" otherwise.
+// TestHeaderUsesTitleWhenSet verifies titleLines() renders the playbook title when
+// set, and falls back to the default "ai-playbook — <harness>" otherwise.
 func TestHeaderUsesTitleWhenSet(t *testing.T) {
 	m := newModel("agent", "")
-	if got := m.header(); !strings.Contains(got, "ai-playbook — agent") {
+	if got := strings.Join(m.titleLines(), "\n"); !strings.Contains(got, "ai-playbook — agent") {
 		t.Fatalf("default header must contain %q, got %q", "ai-playbook — agent", got)
 	}
 
 	m.title = "Playbook — Compiling an Android Application"
-	got := m.header()
+	got := strings.Join(m.titleLines(), "\n")
 	if !strings.Contains(got, "Playbook — Compiling an Android Application") {
 		t.Fatalf("header must contain the title, got %q", got)
 	}
@@ -358,19 +358,20 @@ func TestModelFromFMPlaybook_HidesYAMLAndH1(t *testing.T) {
 	}
 }
 
-// TestSubtitleRowString verifies the subtitle row renders the description when set
-// and is empty otherwise (no extra header row), and that subtitleRows tracks it.
+// TestSubtitleRowString verifies the subtitle rows render the description when set
+// and are absent otherwise (no extra header row), and that subtitleRows tracks it.
 func TestSubtitleRowString(t *testing.T) {
 	m := newModel("agent", "")
-	if m.subtitleRowString() != "" || m.subtitleRows() != 0 {
-		t.Fatalf("no subtitle → empty row and 0 rows")
+	if len(m.subtitleRowStrings()) != 0 || m.subtitleRows() != 0 {
+		t.Fatalf("no subtitle → no rows and 0 rows")
 	}
 	m.subtitle = "a one-line description"
-	if !strings.Contains(m.subtitleRowString(), "a one-line description") {
-		t.Fatalf("subtitle row must contain the description, got %q", m.subtitleRowString())
+	rows := m.subtitleRowStrings()
+	if len(rows) != 1 || !strings.Contains(rows[0], "a one-line description") {
+		t.Fatalf("subtitle rows must contain the description, got %q", rows)
 	}
 	if m.subtitleRows() != 1 {
-		t.Fatalf("subtitle set → subtitleRows must be 1, got %d", m.subtitleRows())
+		t.Fatalf("short subtitle → subtitleRows must be 1, got %d", m.subtitleRows())
 	}
 }
 

@@ -490,10 +490,6 @@ func (m model) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// headerRows is the height the header takes (title only; top padding provides
-// the gap between header and body).
-const headerRows = 1
-
 // hintRows is the height the bottom key-hint takes.
 const hintRows = 1
 
@@ -508,11 +504,13 @@ func (m *model) contentWidth() int {
 }
 
 // body returns the number of visible body rows.
-// Non-cached layout: leading(1) + header(1) + top-pad(1) + body + bot-pad(1) + hint(1) = H → body = H-5.
-// Cached layout:     leading(1) + header(1) + blank(1) + pill(1) + blank(1) + body + bot-pad(1) + hint(1) = H → body = H-7.
+// Layout: leading(1) + title(T) + subtitle(S) + badges(B) + top-pad(1) + body +
+// bot-pad(1) + hint(1) = H → body = H - T - S - B - 4. Title and subtitle are
+// the WRAPPED row counts (headerLimit cells); the badges row (B) is 1 when the
+// cached and/or edit pill is shown, 0 otherwise.
 func (m *model) body() int {
-	// subtract leading blank + top/bottom pads + cached extra rows + subtitle row
-	h := m.height - headerRows - hintRows - 3 - m.cachedRows() - m.subtitleRows()
+	// subtract leading blank + top/bottom pads + wrapped header rows + badges row
+	h := m.height - hintRows - 3 - m.titleRows() - m.subtitleRows() - m.badgeRows()
 	if m.confirmResolved {
 		// The confirm block is questionLines+4 bottom rows (blank, the wrapped question's
 		// N lines, blank, buttons, blank). It REPLACES the single bottom-pad already
@@ -592,22 +590,12 @@ func (m *model) clampScroll() {
 	}
 }
 
-// cachedRows returns the number of extra header rows inserted when showing a
-// cached-replay badge: 2 (blank above the pill + blank below the pill) when
-// isCached, 0 otherwise. This is the single source of truth for the layout
-// delta between cached and non-cached views.
-func (m *model) cachedRows() int {
-	if m.isCached {
-		return 2
-	}
-	return 0
-}
-
-// bodyTop returns the screen row (0-based) of the first body line.
-// Non-cached layout: leading blank(1) + header(1) + [subtitle?] + top-pad(1) = row 3 (+1 with a subtitle).
-// Cached layout:     leading blank(1) + header(1) + [subtitle?] + blank(1) + pill(1) + blank(1) = row 5 (+1 with a subtitle).
+// bodyTop returns the screen row (0-based) of the first body line:
+// leading blank(1) + wrapped title rows + wrapped subtitle rows + badges
+// row (1 when the cached/edit pills are shown) + top-pad(1). With a 1-line
+// title and no subtitle/badges this is the historical row 3.
 func (m *model) bodyTop() int {
-	return 1 + headerRows + m.subtitleRows() + 1 + m.cachedRows()
+	return 1 + m.titleRows() + m.subtitleRows() + m.badgeRows() + 1
 }
 
 // lineBlank reports whether body line lineIdx is empty or all-whitespace (ANSI

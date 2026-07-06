@@ -89,12 +89,13 @@ func TestResetDependents(t *testing.T) {
 func TestHeaderShowsFailureIndicator(t *testing.T) {
 	m := newModel("T", "```bash {id=a}\ntrue\n```\n")
 
-	if strings.Contains(strip(m.header()), "a step failed") {
+	header := func() string { return strip(strings.Join(m.titleLines(), "\n")) }
+	if strings.Contains(header(), "a step failed") {
 		t.Error("header must not show a failure indicator when nothing has failed")
 	}
 
 	m.blockStates["a"] = blockRunState{Status: "failed", Exit: 1}
-	if !strings.Contains(strip(m.header()), "a step failed") {
-		t.Errorf("header must surface 'a step failed' after a block fails; got %q", strip(m.header()))
+	if !strings.Contains(header(), "a step failed") {
+		t.Errorf("header must surface 'a step failed' after a block fails; got %q", header())
 	}
 }

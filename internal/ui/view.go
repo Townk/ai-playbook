@@ -8,7 +8,6 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
-	"github.com/mattn/go-runewidth"
 
 	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
@@ -94,20 +93,76 @@ func (m model) renderBody() string {
 	return m.md // first line isn't the H1 (shouldn't happen for a finalized playbook)
 }
 
-func (m model) header() string {
-	label := "ai-playbook — " + m.harness
+// headerWrapWidth is the cell width the title and subtitle wrap at: header
+// content never runs past 80 display columns even in a wider pane (and clamps
+// to the pane width when narrower).
+const headerWrapWidth = 80
+
+// titleTextCol is the screen column where the title TEXT begins: the 2-col
+// pane margin + the "▓▓▓ " prefix (3 decorative blocks + 1 space). Wrapped
+// title continuation lines and every subtitle line align at this column.
+const titleTextCol = 6
+
+// headerLimit returns the effective header wrap width: headerWrapWidth cells,
+// clamped to the pane width when the pane is narrower (m.width==0 — unsized
+// tests/startup — keeps the 80-cell default).
+func (m model) headerLimit() int {
+	if m.width > 0 && m.width < headerWrapWidth {
+		return m.width
+	}
+	return headerWrapWidth
+}
+
+// headerLabel is the plain (unstyled) title text: the playbook title when set,
+// else the "ai-playbook — <harness>" default.
+func (m model) headerLabel() string {
 	if m.title != "" {
-		label = m.title
+		return m.title
 	}
-	styled := lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve)).Bold(true).
-		Render(strings.Repeat("▓", 3) + " " + label)
+	return "ai-playbook — " + m.harness
+}
+
+// titleLines returns the styled header rows: "  ▓▓▓ <title>" word-wrapped at
+// headerLimit cells (display width via lipgloss.Width, word boundaries via
+// wrapWithHardBreak), continuation lines aligned under the title's first text
+// character (titleTextCol). When a step failed, the playbook-level "⚠ a step
+// failed" cue flows after the title text — appended to the last title line
+// when it fits within the limit, else on its own aligned continuation row.
+func (m model) titleLines() []string {
+	limit := m.headerLimit()
+	avail := limit - titleTextCol
+	if avail < 1 {
+		avail = 1
+	}
+	styled := lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve)).Bold(true)
+	wrapped := wrapWithHardBreak(m.headerLabel(), avail)
+	rows := make([]string, 0, len(wrapped))
+	for i, ln := range wrapped {
+		if i == 0 {
+			rows = append(rows, "  "+styled.Render(strings.Repeat("▓", 3)+" "+ln))
+			continue
+		}
+		rows = append(rows, strings.Repeat(" ", titleTextCol)+styled.Render(ln))
+	}
 	if m.anyStepFailed() {
-		// Playbook-level failure cue: a prior step failed, so a later health-check (e.g.
-		// Verify) is not presented as if all is well. Left-flowing after the title, so it
-		// never collides with the right-aligned [edit]/cached badges.
-		styled += lipgloss.NewStyle().Foreground(lipgloss.Color(colRed)).Render("  ⚠ a step failed")
+		// Failure cue: a prior step failed, so a later health-check (e.g. Verify)
+		// is not presented as if all is well.
+		const cueText = "⚠ a step failed"
+		cue := lipgloss.NewStyle().Foreground(lipgloss.Color(colRed)).Render(cueText)
+		last := len(rows) - 1
+		if lipgloss.Width(rows[last])+2+lipgloss.Width(cueText) <= limit {
+			rows[last] += "  " + cue
+		} else {
+			rows = append(rows, strings.Repeat(" ", titleTextCol)+cue)
+		}
 	}
-	return styled
+	return rows
+}
+
+// titleRows returns the number of header rows the wrapped title occupies.
+// Single source of truth for the title's layout height (>= 1).
+func (m *model) titleRows() int {
+	return len(m.titleLines())
 }
 
 // anyStepFailed reports whether any block ended in the failed state. Drives the
@@ -121,28 +176,37 @@ func (m model) anyStepFailed() bool {
 	return false
 }
 
-// subtitleRowString returns the styled subtitle row (the front-matter
-// description) shown directly under the ▓▓▓ title for a finalized/served playbook
-// that carries one, with the standard 2-col left margin and indented to align
-// under the title text. It returns "" when there is no subtitle (so no extra
-// header row is emitted). The text is dim (subtext) so it reads as a caption.
-func (m model) subtitleRowString() string {
+// subtitleRowStrings returns the styled subtitle rows (the front-matter
+// description) shown directly under the ▓▓▓ title for a finalized/served
+// playbook that carries one: the text word-wraps at headerLimit cells and
+// every line starts at titleTextCol, so the subtitle's first character aligns
+// with the title's first text character. Nil when there is no subtitle (no
+// extra header rows). The text is dim (overlay) so it reads as a caption.
+func (m model) subtitleRowStrings() []string {
 	if m.subtitle == "" {
-		return ""
+		return nil
 	}
-	// 2-col pane margin + 4 cols (3 ▓ + 1 space) to align under the title text.
-	return "  " + lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).
-		Render("    "+m.subtitle)
+	avail := m.headerLimit() - titleTextCol
+	if avail < 1 {
+		avail = 1
+	}
+	st := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
+	wrapped := wrapWithHardBreak(m.subtitle, avail)
+	rows := make([]string, 0, len(wrapped))
+	for _, ln := range wrapped {
+		rows = append(rows, strings.Repeat(" ", titleTextCol)+st.Render(ln))
+	}
+	return rows
 }
 
-// subtitleRows returns the number of extra header rows the subtitle occupies: 1
-// when a subtitle is present, 0 otherwise. Single source of truth for the layout
-// delta the subtitle introduces (mirrors cachedRows()).
+// subtitleRows returns the number of extra header rows the wrapped subtitle
+// occupies (0 when there is none). Single source of truth for the layout
+// delta the subtitle introduces (mirrors titleRows()).
 func (m *model) subtitleRows() int {
-	if m.subtitle != "" {
-		return 1
+	if m.subtitle == "" {
+		return 0
 	}
-	return 0
+	return len(m.subtitleRowStrings())
 }
 
 // relativeAge formats the age of cachedAt relative to now as a short string:
@@ -223,11 +287,12 @@ func (m model) cachedBadge() string {
 
 // appendCachedButton adds the screen-fixed regenerate button to m.buttons when
 // isCached is true. The ENTIRE pill is the click target; the flash highlight
-// anchors only to the reload glyph (handled in cachedBadge). Line is the pill's
-// absolute screen row (bodyTop()-2 in the cached header layout). Col is 0 — the
-// left cap, once buttonAt strips the 2-col left margin (the pill row's "  "
-// indent IS that margin). Width is the pill's visible width minus the trailing
-// space. Screen=true so buttonAt resolves it by absolute Y, not content line.
+// covers the whole pill (handled in cachedBadge). Line is the shared badges
+// row's absolute screen row (badgeRowIdx). Col is 0 — the left cap, once
+// buttonAt strips the 2-col left margin (the badges row's "  " indent IS that
+// margin; the cached pill is always the row's first badge). Width is the
+// pill's visible width minus the trailing space. Screen=true so buttonAt
+// resolves it by absolute Y, not content line.
 func (m *model) appendCachedButton() {
 	// Only add the clickable regenerate button when regeneration is actually possible
 	// (an orchestrator re-engagement OR the cached-answer seam). With neither wired the
@@ -235,13 +300,12 @@ func (m *model) appendCachedButton() {
 	if !m.canRegenerate() {
 		return
 	}
-	pillRow := m.bodyTop() - 2
 	pillW := lipgloss.Width(m.cachedBadge()) - 1 // drop the trailing space
 	if pillW < 1 {
 		pillW = 1
 	}
 	m.buttons = append(m.buttons, Button{
-		Line:    pillRow,
+		Line:    m.badgeRowIdx(),
 		Col:     0,
 		Width:   pillW,
 		Kind:    "regenerate",
@@ -252,72 +316,60 @@ func (m *model) appendCachedButton() {
 
 // reloadIconScreenCol returns the absolute screen column of the reload glyph in
 // the cached pill: 2-col indent + left cap (1) + the pill prefix width (db icon
-// + " cached · <age> "). Used to anchor the regenerate hint label above the glyph.
+// + " cached · <age> "). The cached pill is always the badges row's first badge,
+// so no cross-pill offset applies. Used to anchor the regenerate hint label
+// over the glyph.
 func (m model) reloadIconScreenCol() int {
 	prefix := "\U0000F1C0 cached · " + relativeAge(m.cachedAt) + " "
 	return 2 + 1 + lipgloss.Width(prefix)
 }
 
-// regenLabel returns the hint label assigned to the regenerate (cached pill)
-// button in the current hint session, or "" if none is assigned.
-func (m model) regenLabel() string {
-	for lbl, b := range m.hintLabels {
-		if b.Kind == "regenerate" {
-			return lbl
-		}
-	}
-	return ""
-}
-
-// editBadge powerline-pill styles: hoisted to package-level so they are allocated
-// once rather than on every render frame.
-var (
-	editBadgeCapStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen))
-	editBadgeBodyStyle = lipgloss.NewStyle().Foreground(lipgloss.Color(colBase)).Background(lipgloss.Color(colGreen))
-)
+// editIcon is the pencil glyph shown inside the [edit] pill body.
+const editIcon = "\U0010F304"
 
 // editBadge returns the styled powerline pill string for the file-backed [edit]
 // affordance, followed by exactly 1 trailing space. The pill mirrors cachedBadge:
-// capL (U+E0B6) + body (bg=colGreen, fg=colBase: " edit ") + capR (U+E0B4) + " ".
+// capL (U+E0B6) + body (bg=colGreen, fg=colBase: pencil icon + " edit") + capR
+// (U+E0B4) + " ". When m.flashKey == "edit:edit" (the pill was just activated)
+// the whole pill highlights with the flash colour, like every other pill button.
 // Returns "" when sourcePath is empty (ephemeral playbook).
 func (m model) editBadge() string {
 	if m.sourcePath == "" {
 		return ""
 	}
-	capL := editBadgeCapStyle.Render("\U0000E0B6")
-	body := editBadgeBodyStyle.Render(" edit ")
-	capR := editBadgeCapStyle.Render("\U0000E0B4")
+	capFg, bodyBg, bodyFg, bold := colGreen, colGreen, colBase, false
+	if m.flashKey == "edit:edit" {
+		capFg, bodyBg, bodyFg, bold = colFlashOn, colFlashOn, colBase, true
+	}
+	capStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(capFg))
+	bodyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(bodyFg)).
+		Background(lipgloss.Color(bodyBg)).
+		Bold(bold)
+	capL := capStyle.Render("\U0000E0B6")
+	body := bodyStyle.Render(editIcon + " edit")
+	capR := capStyle.Render("\U0000E0B4")
 	return capL + body + capR + " "
 }
 
 // appendEditButton adds the screen-fixed [edit] button to m.buttons when
-// sourcePath is non-empty (file-backed playbook). The badge is right-aligned on
-// the title row (screen row 1 — bodyTop()-2 in the non-cached, non-subtitle
-// layout; always 1 since the title is the second row after the leading blank).
-// Col is computed from the right edge so buttonAt (which strips the 2-col margin)
-// hits the badge area. Screen=true so buttonAt resolves it by absolute Y.
+// sourcePath is non-empty (file-backed playbook). The pill sits on the shared
+// badges row (badgeRowIdx), left-grouped after the cached pill — whose width
+// (trailing space included) is the edit pill's Col offset; 0 when not cached.
+// Col is content-relative (buttonAt strips the 2-col margin, which is the
+// badges row's "  " indent). The WHOLE pill is the click target. Screen=true
+// so buttonAt resolves it by absolute Y.
 func (m *model) appendEditButton() {
 	if m.sourcePath == "" {
 		return
 	}
-	badge := m.editBadge()
-	badgeW := lipgloss.Width(badge) - 1 // drop the trailing space for the hit target
+	badgeW := lipgloss.Width(m.editBadge()) - 1 // drop the trailing space for the hit target
 	if badgeW < 1 {
 		badgeW = 1
 	}
-	// Title is always screen row 1 (row 0 is the leading blank line).
-	// NOTE: titleRow=1 assumes the non-cached ShowMain render path — the only
-	// path that sets sourcePath; cached/ephemeral playbooks never get this button.
-	titleRow := 1
-	// Badge starts at screen col (m.width - lipgloss.Width(badge)); subtract 2 for
-	// the left margin that buttonAt strips via col := x-2.
-	editCol := m.width - lipgloss.Width(badge) - 2
-	if editCol < 0 {
-		editCol = 0
-	}
 	m.buttons = append(m.buttons, Button{
-		Line:    titleRow,
-		Col:     editCol,
+		Line:    m.badgeRowIdx(),
+		Col:     lipgloss.Width(m.cachedBadge()),
 		Width:   badgeW,
 		Kind:    "edit",
 		BlockID: "edit",
@@ -325,45 +377,41 @@ func (m *model) appendEditButton() {
 	})
 }
 
-// titleLine builds the full header line string for the given available width.
-// When the playbook is file-backed (sourcePath non-empty), the [edit] pill is
-// right-aligned on the title row with exactly 1 trailing space. The pill is
-// omitted when w < 1 (zero-width pane) rather than overflowing.
-// When the title is too long to share the row with the badge, the title is
-// truncated (with an ellipsis) so title+badge always fits within w and the
-// badge stays at the right edge — keeping its hit-box aligned with editCol.
-func (m model) titleLine(w int) string {
-	title := "  " + m.header()
-	badge := m.editBadge()
-	if badge == "" || w < 1 {
-		return title
-	}
-	titleW := lipgloss.Width(title)
-	badgeW := lipgloss.Width(badge)
-	if titleW+badgeW > w {
-		// Truncate title so title+badge fits within w; reserve room for the badge.
-		maxTitleW := w - badgeW
-		if maxTitleW < 1 {
-			maxTitleW = 1
-		}
-		title = runewidth.Truncate(title, maxTitleW, "…")
-		titleW = runewidth.StringWidth(title)
-	}
-	gap := w - titleW - badgeW
-	if gap < 0 {
-		gap = 0
-	}
-	return title + strings.Repeat(" ", gap) + badge
+// editBadgeScreenCol returns the absolute screen column of the pencil icon in
+// the edit pill: 2-col margin + the cached pill's width (0 when not cached) +
+// the left cap (1). Used to anchor the edit hint label over the icon.
+func (m model) editBadgeScreenCol() int {
+	return 2 + lipgloss.Width(m.cachedBadge()) + 1
 }
 
-// cachedBadgeRow returns the header row shown directly BELOW the title (reusing
-// the top-pad row): the left-aligned powerline pill on a cached replay, else ""
-// (the normal blank top-pad).
-func (m model) cachedBadgeRow() string {
-	if !m.isCached {
+// badgesRowString returns the shared badges row shown directly BELOW the
+// subtitle (or the title when there is no subtitle): the cached pill then the
+// edit pill, left-grouped with a single-space gap (each badge helper carries
+// its own trailing space). Empty when neither badge is present — no badges
+// row is emitted then (the plain top-pad follows the header directly).
+func (m model) badgesRowString() string {
+	row := m.cachedBadge() + m.editBadge()
+	if row == "" {
 		return ""
 	}
-	return "  " + m.cachedBadge()
+	return "  " + row
+}
+
+// badgeRows returns the number of header rows the badges row occupies: 1 when
+// either badge is present (cached replay and/or file-backed playbook), else 0.
+// Single source of truth for the badges row's layout delta.
+func (m *model) badgeRows() int {
+	if m.isCached || m.sourcePath != "" {
+		return 1
+	}
+	return 0
+}
+
+// badgeRowIdx returns the absolute screen row (0-based) of the shared badges
+// row: the leading blank + the wrapped title rows + the wrapped subtitle rows.
+// Only meaningful when badgeRows() == 1.
+func (m *model) badgeRowIdx() int {
+	return 1 + m.titleRows() + m.subtitleRows()
 }
 
 // statusBar is the slim, mode-aware bottom hint.
@@ -411,10 +459,10 @@ func (m model) viewString() string {
 
 	if m.hintMode {
 		// Labels float on the line above each button (or below when the line
-		// above is scrolled off the top). Screen-fixed buttons (e.g. the cached
-		// pill reload icon) are skipped here — they live in the header, not the
-		// scrollable body; their label is floated on the blank line above the pill
-		// in the cached-header block below (anchored to the reload-icon column).
+		// above is scrolled off the top). Screen-fixed buttons (the cached and
+		// edit pills) are skipped here — they live in the header, not the
+		// scrollable body; their labels are painted over the badges row in the
+		// header block below (anchored to each pill's icon column).
 		labelsByRow := map[int]map[int]string{}
 		for label, b := range m.hintLabels {
 			if b.Screen {
@@ -458,24 +506,32 @@ func (m model) viewString() string {
 		rows := Window(m.lines, m.xOff, m.yOff, cw, m.body())
 		pos, size := vthumb(len(m.lines), m.body(), m.yOff)
 		sb.WriteString("\n")
-		sb.WriteString(m.titleLine(m.width) + "\n")
-		if m.subtitle != "" {
-			sb.WriteString(m.subtitleRowString() + "\n") // description caption under the title
+		for _, tl := range m.titleLines() {
+			sb.WriteString(tl + "\n")
 		}
-		if m.isCached {
-			// Float the regenerate button's hint label on the blank line above the
-			// pill, anchored to the reload-icon column (the flash anchor) — mirroring
-			// how body buttons float their label on the line above the glyph.
-			above := padTo("", m.width)
-			if lbl := m.regenLabel(); lbl != "" {
-				above = spliceOver(above, lab.Render(lbl), m.reloadIconScreenCol())
+		for _, sl := range m.subtitleRowStrings() {
+			sb.WriteString(sl + "\n") // description caption under the title
+		}
+		if badges := m.badgesRowString(); badges != "" {
+			// The header pills' hint labels are painted directly OVER the badges row
+			// (anchored at each pill's icon column): the row above is the subtitle /
+			// title — never blank — so the F20 own-line fallback applies, exactly as
+			// for the drift buttons under their warning banner.
+			badges = padTo(badges, m.width)
+			for lbl, b := range m.hintLabels {
+				if !b.Screen {
+					continue
+				}
+				switch b.Kind {
+				case "regenerate":
+					badges = spliceOver(badges, lab.Render(lbl), m.reloadIconScreenCol())
+				case "edit":
+					badges = spliceOver(badges, lab.Render(lbl), m.editBadgeScreenCol())
+				}
 			}
-			sb.WriteString(above + "\n")              // blank above pill (+ hint label)
-			sb.WriteString(m.cachedBadgeRow() + "\n") // cached pill (left-aligned)
-			sb.WriteString("\n")                      // blank below pill
-		} else {
-			sb.WriteString("\n") // top-pad (single blank)
+			sb.WriteString(badges + "\n") // badges row (cached + edit pills, + hint labels)
 		}
+		sb.WriteString("\n") // top-pad (single blank)
 		for i, row := range rows {
 			idx := m.yOff + i
 			row = m.spinRow(idx, row) // advance any run spinner at View time (B1c)
@@ -579,18 +635,17 @@ func (m model) normalLines() []string {
 	pos, size := vthumb(len(m.lines), m.body(), m.yOff)
 	pad := func(s string) string { return padTo(s, m.width) }
 	out := make([]string, 0, m.height)
-	out = append(out, pad(""))                   // leading blank
-	out = append(out, pad(m.titleLine(m.width))) // title
-	if m.subtitle != "" {
-		out = append(out, pad(m.subtitleRowString())) // description caption under the title
+	out = append(out, pad("")) // leading blank
+	for _, tl := range m.titleLines() {
+		out = append(out, pad(tl)) // title (wrapped at headerLimit)
 	}
-	if m.isCached {
-		out = append(out, pad(""))                 // blank above pill
-		out = append(out, pad(m.cachedBadgeRow())) // cached pill (left-aligned)
-		out = append(out, pad(""))                 // blank below pill
-	} else {
-		out = append(out, pad("")) // top-pad (single blank)
+	for _, sl := range m.subtitleRowStrings() {
+		out = append(out, pad(sl)) // description caption under the title
 	}
+	if badges := m.badgesRowString(); badges != "" {
+		out = append(out, pad(badges)) // badges row (cached + edit pills)
+	}
+	out = append(out, pad("")) // top-pad (single blank)
 	spinRow := -1
 	actRow := -1
 	if m.thinking {
@@ -714,17 +769,16 @@ func (m model) staticRender() string {
 	cw := m.contentWidth()
 	lines, _, _ := Render(m.renderBody(), cw, RenderOpts{States: m.blockStates})
 	var sb strings.Builder
-	sb.WriteString(m.titleLine(m.width) + "\n")
-	if m.subtitle != "" {
-		sb.WriteString(m.subtitleRowString() + "\n") // description caption under the title
+	for _, tl := range m.titleLines() {
+		sb.WriteString(tl + "\n")
 	}
-	if m.isCached {
-		sb.WriteString("\n")                      // blank above pill
-		sb.WriteString(m.cachedBadgeRow() + "\n") // cached pill (left-aligned)
-		sb.WriteString("\n")                      // blank below pill
-	} else {
-		sb.WriteString("\n") // top-pad (single blank)
+	for _, sl := range m.subtitleRowStrings() {
+		sb.WriteString(sl + "\n") // description caption under the title
 	}
+	if badges := m.badgesRowString(); badges != "" {
+		sb.WriteString(badges + "\n") // badges row (cached + edit pills)
+	}
+	sb.WriteString("\n") // top-pad (single blank)
 	for _, l := range lines {
 		sb.WriteString("  " + l.Text + "\n")
 	}

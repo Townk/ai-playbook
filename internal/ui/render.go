@@ -520,6 +520,32 @@ const (
 	glyphReady    = "▶"          // U+25B6 — assisted (GUIDED) ready-cursor caret, tab gutter
 )
 
+// actionPill renders a tag-row action button as a powerline pill — the same
+// construction as the header's cachedBadge/editBadge: cap (U+E0B6) + body +
+// cap (U+E0B4). The body background is the action's accent colour and the body
+// content is "<glyph> <label>" in bodyFg (a darker shade of the same hue —
+// see colPillPeachFg/colPillBlueFg). The caps take the body colour as their
+// foreground with no background, giving the blended powerline ends. The body
+// keeps ONE continuous background across the glyph so the PUA-glyph
+// background-mismatch shift-down bug can't occur.
+//
+// When flash is true (the pill was just activated) the WHOLE pill highlights:
+// caps + body switch to the bright flash colour (colFlashOn) as the background
+// with dark bold text — mirroring cachedBadge's whole-pill flash, which reads
+// clearly against the colored resting state.
+func actionPill(glyph, label, bodyBg, bodyFg string, flash bool) string {
+	capFg, bg, fg, bold := bodyBg, bodyBg, bodyFg, false
+	if flash {
+		capFg, bg, fg, bold = colFlashOn, colFlashOn, colBase, true
+	}
+	capStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(capFg))
+	bodyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(fg)).
+		Background(lipgloss.Color(bg)).
+		Bold(bold)
+	return capStyle.Render("\U0000E0B6") + bodyStyle.Render(glyph+" "+label) + capStyle.Render("\U0000E0B4")
+}
+
 // Callout (admonition) bordered-frame glyphs — Symbols for Legacy Computing block.
 // Top-left corner and top/bottom border use sextant codepoints; left bar is a
 // half-block so it's always available in any Nerd Font.
@@ -932,36 +958,37 @@ func (r *renderer) code(n ast.Node) {
 			lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render("⚠ ") +
 			lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Render(driftNote)
 		r.lines = append(r.lines, Line{Text: msgLine, Wide: false, Code: true})
-		// Button line: glyph + space + label for each button, separated by glyphSep.
-		// Col is the position of each glyph within Line.Text, accumulated as
-		// indentW + widths of preceding visible elements. Mirrors the followup
-		// tag-button formula (see runRegion's followupCol computation).
+		// Button line: two blue powerline pills (blue is these actions' accent hue;
+		// mid-bright, so the darker same-hue text — colPillBlueFg — reads better than
+		// a lighter tint), separated by glyphSep. Col is the position of each pill's
+		// LEFT CAP within Line.Text, accumulated as indentW + widths of preceding
+		// visible elements; the WHOLE pill is the click target (Width = pill width).
 		resolveLineIdx := len(r.lines)
-		resolveGlyph := lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue)).Render(glyphViewDiff)
-		resolveLabel := lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Render("resolve manually")
+		resolvePill := actionPill(glyphViewDiff, "resolve manually", colBlue, colPillBlueFg,
+			r.flashKey != "" && r.flashKey == blk.ID+":drift-resolve")
+		regenPill := actionPill(glyphRetry, "regenerate", colBlue, colPillBlueFg,
+			r.flashKey != "" && r.flashKey == blk.ID+":drift-regen")
 		sep := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).Render(glyphSep)
-		regenGlyph := lipgloss.NewStyle().Foreground(lipgloss.Color(colBlue)).Render(glyphRetry)
-		regenLabel := lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Render("regenerate")
 		r.lines = append(r.lines, Line{
-			Text: indentStr + resolveGlyph + " " + resolveLabel + " " + sep + " " + regenGlyph + " " + regenLabel,
+			Text: indentStr + resolvePill + " " + sep + " " + regenPill,
 			Wide: false,
 			Code: true,
 		})
-		// drift-resolve: glyph starts right after the 2-space indent.
+		// drift-resolve: the pill starts right after the 2-space indent.
 		r.buttons = append(r.buttons, Button{
 			Line:    resolveLineIdx,
 			Col:     indentW,
-			Width:   2,
+			Width:   lipgloss.Width(resolvePill),
 			Kind:    "drift-resolve",
 			Payload: src,
 			BlockID: blk.ID,
 		})
-		// drift-regen: glyph starts after resolve glyph + space + label + space + sep + space.
-		regenCol := indentW + lipgloss.Width(glyphViewDiff) + 1 + lipgloss.Width("resolve manually") + 1 + lipgloss.Width(glyphSep) + 1
+		// drift-regen: the pill starts after resolve pill + space + sep + space.
+		regenCol := indentW + lipgloss.Width(resolvePill) + 1 + lipgloss.Width(glyphSep) + 1
 		r.buttons = append(r.buttons, Button{
 			Line:    resolveLineIdx,
 			Col:     regenCol,
-			Width:   2,
+			Width:   lipgloss.Width(regenPill),
 			Kind:    "drift-regen",
 			Payload: src,
 			BlockID: blk.ID,
@@ -1084,23 +1111,25 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 				extraKind, extraLabel, extraGlyph = "rollback", "Rollback playbook", glyphUndo
 			}
 		}
+		extraWidth := 0
 		if extraKind != "" {
+			// The extra action renders as a peach powerline pill (peach is the
+			// rollback/retry accent; bright, so the darker same-hue text —
+			// colPillPeachFg — is the readable choice). The flash highlight lights
+			// the whole pill (actionPill). extraCol is the pill's LEFT CAP position;
+			// the whole pill is the click target.
 			sep := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).Render(glyphSep)
 			extraCol = indentW + lipgloss.Width(label) + 1 + lipgloss.Width(rawToggle) + 1 + lipgloss.Width(glyphSep) + 1
-			glyph := extraGlyph
-			if r.flashKey != "" && r.flashKey == id+":"+extraKind {
-				glyph = lipgloss.NewStyle().Foreground(lipgloss.Color(colFlashOn)).Bold(true).Render(glyph)
-			} else {
-				glyph = lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render(glyph)
-			}
-			summary += " " + sep + " " + glyph + " " +
-				lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Render(extraLabel)
+			pill := actionPill(extraGlyph, extraLabel, colPeach, colPillPeachFg,
+				r.flashKey != "" && r.flashKey == id+":"+extraKind)
+			extraWidth = lipgloss.Width(pill)
+			summary += " " + sep + " " + pill
 		}
 		summaryLineIdx := len(r.lines)
 		r.lines = append(r.lines, Line{Text: indentStr + summary, Wide: false, Code: true})
 		r.buttons = append(r.buttons, Button{Line: summaryLineIdx, Col: toggleCol, Width: 2, Kind: "toggle", BlockID: id})
 		if extraCol >= 0 {
-			r.buttons = append(r.buttons, Button{Line: summaryLineIdx, Col: extraCol, Width: 2, Kind: extraKind, Payload: blk.Payload, BlockID: id})
+			r.buttons = append(r.buttons, Button{Line: summaryLineIdx, Col: extraCol, Width: extraWidth, Kind: extraKind, Payload: blk.Payload, BlockID: id})
 		}
 		// While a rollback chain triggered by this failure is running, show a spinner
 		// under the failure so the automatic undo has a stated cause.

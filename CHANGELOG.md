@@ -38,6 +38,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   project's run journals: `✓`/`✗` plus the run's total elapsed time, a bare
   `✗` for a run interrupted mid-flight, or `–` when never run.
 
+### Changed
+
+- **Action buttons restyled as powerline pills.** The viewer's four inline
+  action buttons — "try another fix", "Rollback playbook" (peach) and the
+  drift row's "resolve manually", "regenerate" (blue) — now render as filled
+  powerline pills (matching the header's cached/edit badges) with darker
+  same-hue text; the whole pill is the click target and the activation flash
+  lights the entire pill.
+- **The edit badge gains an icon and full interactivity.** The `edit` pill
+  now carries a pencil icon, participates in hint mode (a chip renders over
+  it like every other button), flashes on activation, and keeps its full
+  mouse hit box.
+- **The header wraps at 80 cells.** Long titles and subtitles word-wrap at
+  80 display columns; continuation lines (and the subtitle's first
+  character) align under the title's first text character after the ▓▓▓
+  prefix, and the layout below tracks the wrapped heights.
+- **Cached/edit badges share one row.** The cached-replay pill and the edit
+  pill now sit together, left-grouped, on a single badges row directly below
+  the subtitle instead of occupying separate header rows.
+
 ## [0.12.2] - 2026-07-05
 
 ### Added
