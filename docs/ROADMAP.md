@@ -3,7 +3,7 @@
 Durable single source of truth for the feature roadmap. Each phase lists its
 goal, status, settled decisions, and open questions. Per-phase, step-by-step
 implementation plans are written just-in-time when a phase starts (they're
-ephemeral; this doc is not). Last updated: 2026-07-06 (v0.12.3).
+ephemeral; this doc is not). Last updated: 2026-07-06 (v0.13.0).
 
 ## Vision
 
@@ -60,11 +60,15 @@ schema), a production-grade executor, and CI we trust. Milestones:
   (verify/rollback/file-block/env-decl) plus a rubric-fed AI review pass, and
   the embedded `playbook-authoring` SKILL with the public `skill show|install`
   verb (shipped in release archives).
-- **v0.13 — multi-harness.** Additional harness adapters (pi, cursor, …)
-  behind the `Harness` seam built 2026-07-04 (`internal/author/harness.go`) —
-  config-selected via `[agent] harness`, each adapter with its own argv/env/
-  stream-adapter arm and a conformance test suite so a new harness is a
-  bounded, testable addition.
+- **v0.13 — multi-harness.** DONE (2026-07-06): the 6-method `Harness`
+  capability contract ([ADR-0012](architecture/adrs/0012-harness-capability-contract.md))
+  with the tool transport behind the seam and per-harness config defaults;
+  **three adapters shipped, all at FULL tier** — `claude` (default), `pi`
+  (embedded extension), and `cursor` (config-root redirect for MCP isolation +
+  a `preToolUse` allowlist hook and scratch cwd that contain its builtin tools,
+  both live-verified) — with BASIC-tier degradation notes for any future
+  harness that lacks a schema-enforcing tool loop, and conformance + conditional
+  live tests per adapter.
 - **v1.0 — the complete product.** Phase 6 + Phase 5 + multi-harness shipped,
   plus the hardening/trust batch distributed across the ride: shared-test-
   driver speedup (retires the race lane), CI hardening (macOS job, cache
