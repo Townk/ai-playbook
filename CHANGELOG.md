@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.2] - 2026-07-05
+
 ### Added
 
 - **Per-block `timeout=` fence attribute.** A runnable block can now declare
@@ -476,7 +478,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Original zsh shell-script implementation (ai-assist).
 
-[Unreleased]: https://github.com/Townk/ai-playbook/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/Townk/ai-playbook/compare/v0.12.2...HEAD
+[0.12.2]: https://github.com/Townk/ai-playbook/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/Townk/ai-playbook/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/Townk/ai-playbook/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/Townk/ai-playbook/compare/v0.10.0...v0.11.0
