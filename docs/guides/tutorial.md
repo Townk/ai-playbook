@@ -8,7 +8,7 @@ Work through the chapters in order. Each one builds on what came before. By the 
 
 - `ai-playbook` installed and on your `$PATH`
 - A local clone of this repository (all examples reference files inside `examples/`)
-- **(Chapter 09 only)** a configured model backend — the Claude CLI installed and authenticated (`claude --version` to verify); optionally pick a model via `[agent] model` in the [config file](../configuration.md)
+- **(Chapter 09 only)** a configured model backend — an agent CLI installed and authenticated (`claude` by default; `pi` or `cursor` via `[agent] harness`); optionally pick a model via `[agent] model` in the [config file](../configuration.md)
 
 No model backend is needed for chapters 01–08. They are fully offline: pre-authored playbooks that exercise the viewer and the CLI without calling any AI service.
 
@@ -217,7 +217,7 @@ File: [`examples/09-fix-it.md`](../../examples/09-fix-it.md)
 Features: create · assist (triage: command / answer / escalate) · followup ("try another fix") · regenerate · cached badge
 
 > [!IMPORTANT]
-> This chapter requires a configured model backend. Ensure the Claude CLI is installed and authenticated before starting (`claude --version` to verify); optionally pick a model via `[agent] model` in the config file.
+> This chapter requires a configured model backend. Ensure your agent CLI is installed and authenticated before starting (`claude` by default — `claude --version` to verify; or select `pi`/`cursor` via `[agent] harness`); optionally pick a model via `[agent] model` in the config file.
 
 **Setup:** Open a terminal in the repo root.
 

@@ -13,6 +13,7 @@ done/stale entries. Phase work lives in the roadmap, not here.
 ## Bugs
 
 - [ ] Global knowledge.md concurrent-remember read-modify-write can lose a fact across sessions (unlocked; the compaction race guard narrows only compaction) — consider O_APPEND-safe append or file locking (2026-07-05)
+- [ ] `internal/mcpserver` `validation error:` render branch is dead code — the top `res.Error` guard fires first on a `submit_playbook` schema failure, so claude renders `error: <msg>` while pi's extension renders `validation error: <msg>` — a cosmetic wording divergence between the two FULL harnesses; fix the dead branch to align them (2026-07-06)
 
 ## Tasks
 

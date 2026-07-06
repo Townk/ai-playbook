@@ -14,15 +14,46 @@ malformed file is a loud error.
 ### `[agent]`
 
 Selects the model harness and a few value preferences. The harness *invocation*
-(flags, stream parser) is owned in-tree — you only pick which harness plus these.
+(flags, stream parser, tool transport) is owned in-tree — you only pick which
+harness plus these values.
 
 | Key            | Default    | Meaning |
 |----------------|------------|---------|
-| `harness`      | `claude`   | Which shipped harness to drive (Claude today; pi/cursor are additive later). |
-| `model`        | `""`       | Model id passed to the harness for authoring; empty → the harness default. |
-| `triage_model` | `haiku`    | Model id for the cheap one-shot CLASSIFY pass (command/answer/escalate) — a fast/cheap alias so a quick classify never burns the capable model. |
-| `bin`          | `""`       | Override for the harness executable path; empty → the harness name resolved on `PATH`. |
-| `thinking`     | `medium`   | Reasoning effort for the owned Claude invocation, mapped to a `MAX_THINKING_TOKENS` budget: `off` / `low` / `medium` / `high`, or a bare integer. `medium` ≈ 8000 tokens; `off` disables thinking. |
+| `harness`      | `claude`   | Which shipped harness to drive: `claude`, `pi`, or `cursor`. An unknown name is a loud error, never a silent fallback. |
+| `model`        | `""`       | Model id passed to the harness for authoring; empty → the harness's own default (table below). |
+| `triage_model` | `""`       | Model id for the cheap one-shot CLASSIFY pass (command/answer/escalate); empty → the harness's own default (table below). |
+| `bin`          | `""`       | Override for the harness executable path; empty → the harness's default binary resolved on `PATH` (table below). |
+| `thinking`     | `""`       | Reasoning effort: `off` / `low` / `medium` / `high`. On claude it maps to a `MAX_THINKING_TOKENS` budget (`medium` ≈ 8000 tokens; a bare integer is accepted as a raw budget); on pi it maps to the native `--thinking` flag (which also accepts pi's own `minimal` / `xhigh`); cursor has no thinking lever, so the value is ignored there. Empty → the harness's own default (table below). |
+
+**Per-harness defaults.** An empty value resolves through the selected
+harness's defaults row; an explicit value always wins:
+
+| Harness  | `model`               | `triage_model`        | `thinking` | binary (`bin`) |
+|----------|-----------------------|-----------------------|------------|----------------|
+| `claude` | harness default       | `haiku`               | `medium`   | `claude`       |
+| `pi`     | your pi default model | your pi default model | `medium`   | `pi`           |
+| `cursor` | cursor's default      | cursor's default      | none       | `cursor-agent` |
+
+pi and cursor are multi-provider/plan-scoped — any concrete cheap triage model
+baked in as a default could name one *you* cannot call, so their triage runs on
+your own default model; set `triage_model` to pick a cheaper one. Cursor's CLI
+installs as `agent`/`cursor-agent` (never `cursor`), so its default binary is
+the every-vintage `cursor-agent` name; set `bin = "agent"` if you prefer the
+primary name.
+
+**Capability tiers.** claude and pi are FULL harnesses: authoring drafts
+structured playbooks through `submit_playbook`, the agent probes with the
+`run`/`ask` tools, and session lessons are captured into the knowledge base via
+`remember`. cursor ships BASIC today (read-only ask-mode invocations):
+authoring falls back to the free-text markdown path, and each degraded surface
+says so once per session — `structured drafting unavailable on Cursor — using
+text mode`, and `knowledge capture unavailable on Cursor` when a wrap-up would
+have filled the knowledge base. Nothing degrades silently: the notes are the
+signal.
+
+**Contributor note:** the harness live tests run wherever the harness CLI is
+installed and skip elsewhere — on a machine with pi installed, `make test`
+makes ~3 tiny pi calls billed to your pi subscription.
 
 ### `[driver]`
 
@@ -78,7 +109,7 @@ Example:
 
 ```toml
 [agent]
-harness = "claude"
+harness = "claude"   # or "pi" / "cursor"; empty values below resolve per-harness
 model = "sonnet"
 triage_model = "haiku"
 thinking = "medium"

@@ -13,11 +13,13 @@ markdown, so the structure is deterministic and drift becomes impossible.
 
 ## Decision
 
-The model returns a **structured playbook object** via a **`submit_playbook` MCP
-tool** whose input JSON schema *is* the playbook. We drive the **claude CLI**
-(not the Anthropic API), so `instructor-go` doesn't fit — but claude's **tool-use
-loop** validates a tool call's arguments against the tool's `inputSchema` and
-makes the model retry a malformed call, which *enforces* the shape. The agent
+The model returns a **structured playbook object** via a **`submit_playbook`
+tool** whose input JSON schema *is* the playbook. We drive an **agent CLI**
+(not the Anthropic API), so `instructor-go` doesn't fit — but a **FULL-tier
+harness's tool-use loop** (claude and pi today — see ADR-0012) validates a tool
+call's arguments against the tool's `inputSchema` and makes the model retry a
+malformed call, which *enforces* the shape. (A BASIC harness lacking that loop
+falls back to the free-text authoring path.) The agent
 diagnoses as today (`run`/`ask`), then calls `submit_playbook(<structured>)` as
 its FINAL action instead of writing markdown. Our backend validates the object
 and a **deterministic renderer** emits the markdown into the existing

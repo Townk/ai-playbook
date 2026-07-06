@@ -91,6 +91,23 @@ man ask
 For quick reference without leaving the terminal, every command also has
 inline help: `ai-playbook <command> --help`.
 
+## Model backends
+
+ai-playbook drives an agent CLI you already have installed and authenticated —
+it never talks to a model API directly. Three harnesses ship, selected with
+`[agent] harness` in the [config file](docs/configuration.md):
+
+- **`claude`** (the default) — Claude Code, FULL tier: structured playbook
+  drafting, agent `run`/`ask` tools, and knowledge capture.
+- **`pi`** — the pi coding agent, FULL tier via an embedded pi extension that
+  carries the same tools.
+- **`cursor`** — Cursor's CLI agent, BASIC tier today: read-only ask-mode text
+  authoring (degradations are noted visibly, once per session); promotion to
+  FULL is tracked.
+
+Per-harness defaults (model, triage model, thinking, binary) are documented in
+the [configuration reference](docs/configuration.md).
+
 ## Usage
 
 The target command surface (see [`docs/ROADMAP.md`](docs/ROADMAP.md) for status

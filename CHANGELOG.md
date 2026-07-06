@@ -7,8 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Multi-harness support (`pi` and `cursor`).** The model harness is now a
+  three-way choice via `[agent] harness` (`claude` | `pi` | `cursor`), each a
+  self-contained in-tree adapter behind a capability contract (ADR-0012).
+  - **`pi`** ships at FULL tier: structured playbook drafting
+    (`submit_playbook`), the `run`/`ask` agent tools, and knowledge capture
+    (`remember`) all work, carried by an embedded pi extension that dials the
+    same unix-socket tools backend.
+  - **`cursor`** ships at BASIC tier today: authoring runs in Cursor's
+    read-only ask mode and falls back to the free-text markdown path;
+    promotion to FULL is tracked.
+  - **Capability tiers with visible degradation.** A BASIC harness authors
+    via text mode and skips knowledge capture, and each degraded surface says
+    so once per session (`structured drafting unavailable on <harness> —
+    using text mode`; `knowledge capture unavailable on <harness>`) — nothing
+    degrades silently.
+
 ### Changed
 
+- The harness seam now owns its tool transport: each harness writes its own
+  per-invocation transport artifact (claude an `--mcp-config` JSON, pi an
+  embedded extension) instead of the launcher assuming Claude's MCP wiring.
+- UI headers and the no-backend / AI-review-skipped notices name the
+  **configured** harness (its display name and binary), not a hardcoded
+  "Claude".
+- Config defaults resolve per-harness: `model`, `triage_model`, `thinking`,
+  and the binary name each fall back through the selected harness's defaults
+  table (the classify-pass triage model is no longer a hardcoded Claude alias).
+  Explicit `[agent]` values always win.
+- Harness live tests run conditionally wherever the harness CLI is installed
+  and skip otherwise (on a machine with `pi`, `make test` makes a few tiny pi
+  calls).
 - The cached and edit pills on the badges row now align with the subtitle
   (indented to the title text column) instead of the pane's left margin.
 
