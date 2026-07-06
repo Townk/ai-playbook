@@ -3,7 +3,7 @@
 Durable single source of truth for the feature roadmap. Each phase lists its
 goal, status, settled decisions, and open questions. Per-phase, step-by-step
 implementation plans are written just-in-time when a phase starts (they're
-ephemeral; this doc is not). Last updated: 2026-07-05 (v0.12.2).
+ephemeral; this doc is not). Last updated: 2026-07-06 (v0.12.3).
 
 ## Vision
 
