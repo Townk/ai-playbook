@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"time"
+
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Townk/ai-playbook/internal/autorun"
@@ -65,14 +67,35 @@ func (m model) beginRollback(failedID string) (model, tea.Cmd) {
 	// back) — its forward effect is being undone. (Two passes so a reset of one origin's
 	// dependents can't wipe another origin we already marked.) The rollback TARGET blocks
 	// that do the undoing land as a normal success (✓ ran) via their own result.
+	// Journal-drop exclusions: the failed block's state is restored below
+	// (failedState), so its record (the ✗ and FirstFailure) must survive; and
+	// every ORIGIN is about to be re-recorded rolled-back — dropping an origin
+	// here first (origin B can be a dependent of origin A) would make
+	// MarkRolledBack re-create it from zero, losing its real exit/duration.
+	keep := map[string]bool{failedID: true}
 	for _, id := range origins {
-		resetDependents(m.blockStates, m.blocks, id)
+		keep[id] = true
+	}
+	for _, id := range origins {
+		var drop []string
+		for _, rid := range resetDependents(m.blockStates, m.blocks, id) {
+			if !keep[rid] {
+				drop = append(drop, rid)
+			}
+		}
+		m.journalRemoveAll(drop)
 	}
 	for _, id := range origins {
 		ost := m.blockStates[id]
 		ost.Status = "rolledback"
 		ost.Action = ""
 		m.blockStates[id] = ost
+		if m.journal != nil {
+			// Re-record the undone block as rolled-back (overwriting its ok
+			// record — it is NOT ok, a retry re-runs it). The rollback TARGET
+			// blocks land as ordinary records via their own results.
+			m.journal.MarkRolledBack(id)
+		}
 	}
 	// Restore the failed block and mark it rolling back: it shows a "rolling back applied
 	// steps…" spinner under its ✗ failure until every target completes (rollbackPending → 0).
@@ -91,6 +114,7 @@ func (m model) beginRollback(failedID string) (model, tea.Cmd) {
 		st.Status = "running"
 		st.Action = "rollback"
 		st.SpinFrame = 0
+		st.runStartedAt = time.Now()
 		m.blockStates[tgt] = st
 		if c := m.emitAction(Button{Kind: "run", Payload: m.blockCommand(tgt), BlockID: tgt}); c != nil {
 			cmds = append(cmds, c)

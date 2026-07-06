@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"io"
 	"time"
+
+	"github.com/Townk/ai-playbook/internal/runlog"
 )
 
 // Step is a unit handed to a StepRunner.
@@ -31,6 +33,11 @@ type Config struct {
 	LogDir       string // cache.DefaultRoot(); "" skips the log file
 	Stamp        string // timestamp for the log filename
 	Slug         string
+	// Journal, when non-nil, receives every step result (incl. rollback
+	// re-records) and the run finalize — the durable per-playbook run journal
+	// (internal/runlog). nil = journaling off. Journal writes are advisory:
+	// they can never fail the run.
+	Journal *runlog.Journal
 }
 
 // Execute runs the forward loop over an injected runner and returns the process exit
@@ -48,7 +55,9 @@ func Execute(cfg Config, r StepRunner) int {
 		}
 
 		fmt.Fprintf(cfg.Out, "[%s] %s\n", b.ID, b.Command)
+		stepStart := time.Now()
 		exit, out, timedOutAfter, cancelled := r.RunStep(Step{ID: b.ID, Command: b.Command, Lang: b.Lang, From: b.From, Timeout: b.Timeout, Kind: b.Kind})
+		stepDur := time.Since(stepStart)
 		fmt.Fprintln(cfg.Out)
 
 		st := statusFor(exit)
@@ -62,6 +71,13 @@ func Execute(cfg Config, r StepRunner) int {
 			Exit:          exit,
 			Status:        st,
 			OutputPath:    out,
+			Duration:      stepDur,
+		})
+		cfg.Journal.Record(b.ID, runlog.BlockRecord{
+			Outcome:       journalOutcome(exit, cancelled),
+			Exit:          exit,
+			Duration:      stepDur,
+			TimedOutAfter: timedOutAfter,
 		})
 
 		if cancelled {
@@ -86,7 +102,9 @@ func Execute(cfg Config, r StepRunner) int {
 			origin, target := pair[0], pair[1]
 			command := commandFor(cfg.Blocks, target)
 			fmt.Fprintf(cfg.Out, "[%s] %s\n", target, command)
-			exit, out, timedOutAfter, _ := r.RunStep(Step{ID: target, Command: command, Lang: langFor(cfg.Blocks, target), Timeout: timeoutFor(cfg.Blocks, target), Kind: KindRun})
+			stepStart := time.Now()
+			exit, out, timedOutAfter, cancelled := r.RunStep(Step{ID: target, Command: command, Lang: langFor(cfg.Blocks, target), Timeout: timeoutFor(cfg.Blocks, target), Kind: KindRun})
+			stepDur := time.Since(stepStart)
 			fmt.Fprintln(cfg.Out)
 
 			status[origin] = StatusRolledBack
@@ -103,10 +121,24 @@ func Execute(cfg Config, r StepRunner) int {
 				Exit:          exit,
 				Status:        statusFor(exit),
 				OutputPath:    out,
+				Duration:      stepDur,
+			})
+			// The undone origin is re-recorded rolled-back (NOT ok — a retry
+			// re-runs it); the rollback TARGET's own execution is a normal
+			// record, exactly like the viewer's rollback chain — including a
+			// user-interrupted target journaling "stopped", same as the
+			// forward loop.
+			cfg.Journal.MarkRolledBack(origin)
+			cfg.Journal.Record(target, runlog.BlockRecord{
+				Outcome:       journalOutcome(exit, cancelled),
+				Exit:          exit,
+				Duration:      stepDur,
+				TimedOutAfter: timedOutAfter,
 			})
 		}
 	}
 
+	cfg.Journal.Finalize()
 	if cfg.LogDir != "" {
 		_, _ = WriteRunLog(cfg.LogDir, cfg.Stamp, cfg.Slug, results)
 	}
@@ -128,6 +160,20 @@ func statusFor(exit int) string {
 		return StatusOK
 	}
 	return StatusFailed
+}
+
+// journalOutcome maps a step's exit/cancelled pair onto the journal's block
+// outcome vocabulary: a user-interrupted step is "stopped" (it resumes like a
+// failure, but is not one), else ok/failed by exit.
+func journalOutcome(exit int, cancelled bool) string {
+	switch {
+	case cancelled:
+		return runlog.OutcomeStopped
+	case exit == 0:
+		return runlog.OutcomeOK
+	default:
+		return runlog.OutcomeFailed
+	}
 }
 
 // commandFor looks up a block's command by id.

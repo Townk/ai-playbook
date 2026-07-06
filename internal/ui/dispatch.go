@@ -112,6 +112,7 @@ func (m model) activateButton(b Button) (model, tea.Cmd) {
 		st.Status = "running"
 		st.Action = action
 		st.SpinFrame = 0
+		st.runStartedAt = time.Now()
 		m.blockStates[b.BlockID] = st
 		ac := m.emitAction(b)
 		m.reflow()

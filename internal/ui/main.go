@@ -18,6 +18,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 	"github.com/Townk/ai-playbook/internal/reengage"
+	"github.com/Townk/ai-playbook/internal/runlog"
 	"github.com/Townk/ai-playbook/pkg/driver"
 	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
@@ -107,6 +108,18 @@ type Options struct {
 	// metadata seam), and the EOF branch sets the pager title from the playbook's H1 —
 	// instead of running a final-playbook GENERATION pass.
 	FinalDraft bool
+	// JournalPath is the run-journal file this run persists to
+	// (internal/runlog). The LAUNCHER resolves it (data root + project key +
+	// run key) together with the playbook identity below — ui stays
+	// store/path-agnostic and receives all three as data. "" = journaling off
+	// (every pre-journal caller is unaffected).
+	JournalPath string
+	// JournalPlaybookPath is the journaled playbook identity: the absolute
+	// path of the source .md the journal names.
+	JournalPlaybookPath string
+	// JournalContentHash is the playbook content sha256
+	// (runlog.ContentHash), the retry content-drift gate's identity.
+	JournalContentHash string
 	// Ready, when non-nil, switches Run onto the ASYNC-orchestrator path: instead of
 	// opening the driver synchronously, Run renders the playbook first (shell buttons
 	// dimmed + inert via driverPending) and reads the single OrchReady off this channel
@@ -400,6 +413,14 @@ func Run(opts Options) int {
 	m := newModel(harness, "")
 	m.title = effectiveTitle(opts.Title, playbookTitle)
 	m.subtitle = playbookSubtitle
+	// Run journal: opened only on this interactive path (the no-TTY branch
+	// above renders without running). nil when the launcher supplied no
+	// JournalPath (journaling off). The journal is LAZY — nothing is written
+	// until a block result actually records — so a view-then-quit session (or
+	// a driver.Open-failure render-only fallback) can never overwrite the
+	// previous run's journal with an empty "ok".
+	journal := runlog.Open(opts.JournalPath, opts.JournalPlaybookPath, opts.JournalContentHash)
+	m.journal = journal
 	m.confirmEnv = playbookEnv     // front-matter env for the B2b confirmation gate
 	m.projectRoot = projectRoot    // heuristic project root (also in driver.Options.Env)
 	m.sourcePath = opts.SourcePath // on-disk .md path; non-empty → file-backed, [edit] enabled
@@ -450,11 +471,9 @@ func Run(opts Options) int {
 	if opts.AskBridge != nil {
 		go drainAskCancel(opts.AskBridge, nil)
 	}
-	// The final model may carry a non-zero exitCode (e.g. a GUIDED/assisted run
-	// that ends on a failed/aborted step) — surface it as the process exit code
+	// Settle the exit: finalize the run journal (Outcome + Finished stamped
+	// from the accumulated block records) and surface the final model's
+	// exitCode (e.g. a GUIDED/assisted run that ends on a failed/aborted step)
 	// instead of always returning 0.
-	if mm, ok := fm.(model); ok && mm.exitCode != 0 {
-		return mm.exitCode
-	}
-	return 0
+	return finishRun(fm, journal)
 }

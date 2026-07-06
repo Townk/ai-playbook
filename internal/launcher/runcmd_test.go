@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Townk/ai-playbook/internal/autorun"
+	"github.com/Townk/ai-playbook/internal/runlog"
 	"github.com/Townk/ai-playbook/internal/ui"
 	"github.com/Townk/ai-playbook/pkg/store"
 )
@@ -815,5 +816,106 @@ func TestBlocksFor_CarriesTimeout(t *testing.T) {
 	}
 	if byID["fast"].Timeout != 0 {
 		t.Fatalf("undeclared block Timeout = %v, want 0", byID["fast"].Timeout)
+	}
+}
+
+// ---- run-journal wiring (v0.12.3 R1): both paths resolve identity at run start ----
+
+// TestRunFile_JournalOptionsThreaded verifies a raw `run --file` resolves the
+// journal path (shared data root + kb project key + path-sha1 run key), the
+// absolute playbook path, and the content sha256 into ui.Options — the ui
+// package never derives these itself.
+func TestRunFile_JournalOptionsThreaded(t *testing.T) {
+	origPR, origUI := projectRootFn, uiRunFn
+	t.Cleanup(func() { projectRootFn, uiRunFn = origPR, origUI })
+	dataRoot := t.TempDir()
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", dataRoot)
+	projectRootFn = func() string { return "/my/proj" }
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pb.md")
+	content := "# PB\n\n```bash {id=go}\ntrue\n```\n"
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	var got ui.Options
+	uiRunFn = func(o ui.Options) int { got = o; return 0 }
+
+	if code := runFile(path, "", ui.Options{}); code != 0 {
+		t.Fatalf("runFile = %d", code)
+	}
+	abs, _ := filepath.Abs(path)
+	wantPath := runlog.Path(dataRoot, "/my/proj", runlog.RunKey("", abs))
+	if got.JournalPath != wantPath {
+		t.Errorf("JournalPath = %q, want %q", got.JournalPath, wantPath)
+	}
+	if got.JournalPlaybookPath != abs {
+		t.Errorf("JournalPlaybookPath = %q, want %q", got.JournalPlaybookPath, abs)
+	}
+	if got.JournalContentHash != runlog.ContentHash(content) {
+		t.Errorf("JournalContentHash = %q, want the sha256 of the raw file", got.JournalContentHash)
+	}
+}
+
+// TestRunPlaybook_JournalKeyIsSlug verifies a stored run keys its journal on
+// the STORE SLUG (the playbook's stable identity), not its file location.
+func TestRunPlaybook_JournalKeyIsSlug(t *testing.T) {
+	origLoad, origPR, origUI := storeLoadFn, projectRootFn, uiRunFn
+	t.Cleanup(func() { storeLoadFn, projectRootFn, uiRunFn = origLoad, origPR, origUI })
+	dataRoot := t.TempDir()
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", dataRoot)
+	projectRootFn = func() string { return "/my/proj" }
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "build.md")
+	if err := os.WriteFile(path, []byte("---\nname: build\n---\n"+storedBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	storeLoadFn = func(string) (store.Meta, string, error) {
+		return store.Meta{Slug: "build", Path: path}, "", nil
+	}
+	var got ui.Options
+	uiRunFn = func(o ui.Options) int { got = o; return 0 }
+
+	if code := runPlaybook("build", ui.Options{}); code != 0 {
+		t.Fatalf("runPlaybook = %d", code)
+	}
+	if want := runlog.Path(dataRoot, "/my/proj", "build"); got.JournalPath != want {
+		t.Errorf("JournalPath = %q, want the slug-keyed %q", got.JournalPath, want)
+	}
+}
+
+// TestRunMain_Auto_JournalThreaded verifies the --auto branch resolves the
+// SAME journal identity the viewer path would and threads it into the autorun
+// run config (a raw file keys on its path sha1; the store slug is not
+// synthesized from the filename).
+func TestRunMain_Auto_JournalThreaded(t *testing.T) {
+	origRun, origPR := autorunRunFn, projectRootFn
+	t.Cleanup(func() { autorunRunFn, projectRootFn = origRun, origPR })
+	dataRoot := t.TempDir()
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", dataRoot)
+	projectRootFn = func() string { return "/my/proj" }
+
+	dir := t.TempDir()
+	f := filepath.Join(dir, "auto.md")
+	content := "# Auto\n\n```bash {id=a}\necho a\n```\n"
+	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	withArgs(t, []string{"ai-playbook", "run", "--auto", "--file", f})
+
+	var got autorun.RunConfig
+	autorunRunFn = func(rc autorun.RunConfig) int { got = rc; return 0 }
+	if code := RunMain(); code != 0 {
+		t.Fatalf("RunMain auto = %d", code)
+	}
+	abs, _ := filepath.Abs(f)
+	wantPath := runlog.Path(dataRoot, "/my/proj", runlog.RunKey("", abs))
+	if got.JournalPath != wantPath {
+		t.Errorf("JournalPath = %q, want %q (path-sha1 key — the filename slug is not an identity)", got.JournalPath, wantPath)
+	}
+	if got.JournalPlaybookPath != abs || got.JournalContentHash != runlog.ContentHash(content) {
+		t.Errorf("journal identity = (%q, %q), want (%q, sha256 of the raw file)",
+			got.JournalPlaybookPath, got.JournalContentHash, abs)
 	}
 }

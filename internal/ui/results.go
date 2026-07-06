@@ -72,6 +72,11 @@ type blockRunState struct {
 	SpinFrame int
 	Stopped   bool // user clicked stop on this block; suppress auto-followup when its result arrives
 
+	// runStartedAt is stamped whenever the block is marked "running" (run,
+	// apply/undo, rollback target) so the result handler can journal a
+	// wall-clock duration (time.Since). Zero when the block never ran.
+	runStartedAt time.Time
+
 	// TimedOut / TimedOutAfter surface a run killed at its timeout ceiling: the
 	// failed summary line renders "✗ timed out after <TimedOutAfter>" instead of
 	// the plain "✗ failed". Overwritten by every new result for the block, so a
@@ -148,6 +153,7 @@ func (m model) handleResult(msg resultMsg) (tea.Model, tea.Cmd) {
 		st.Action = ""
 		st.Stopped = false
 		m.blockStates[msg.ID] = st
+		m.journalRecordResult(msg.ID, st, msg)
 		dbg("result id=%s exit=%d STOPPED — no auto-followup", msg.ID, msg.Exit)
 		// Stopping the in-flight chain step ends the materialization chain: clear
 		// it here (this early return skips the chain-advance block below), or the
@@ -176,7 +182,8 @@ func (m model) handleResult(msg resultMsg) (tea.Model, tea.Cmd) {
 		st.Action = ""
 		// Drop stale run results on blocks that (transitively) needed this one, so they
 		// re-lock cleanly instead of showing a leftover "✓ ran" beside a blocked block.
-		resetDependents(m.blockStates, m.blocks, msg.ID)
+		// Their journal records go with them — a re-locked block is unrun again.
+		m.journalRemoveAll(resetDependents(m.blockStates, m.blocks, msg.ID))
 	case msg.Exit != 0 && st.Action == "undo":
 		// Failed undo: patch is still applied (graceful — surface error, keep button as undo).
 		st.Status = "ok"
@@ -192,6 +199,15 @@ func (m model) handleResult(msg resultMsg) (tea.Model, tea.Cmd) {
 		st.Action = ""
 	}
 	m.blockStates[msg.ID] = st
+	// Journal the settled result (ok/failed → record with exit+duration; a
+	// successful undo → the record is removed). The deliberate-stop path
+	// already recorded and returned above. A FAILED undo is the one result
+	// that must NOT re-record: the block is still applied and its existing
+	// record still describes the original apply (re-recording would journal
+	// "ok" with the undo's non-zero exit, clobbering the real exit/duration).
+	if prevAction != "undo" || msg.Exit == 0 {
+		m.journalRecordResult(msg.ID, st, msg)
+	}
 	dbg("result id=%s exit=%d action=%s status->%s", msg.ID, msg.Exit, prevAction, st.Status)
 	// From-chain advance: while a materialization chain is in flight (a consumer's
 	// unrun producers running before it), only the EXPECTED in-flight step's own

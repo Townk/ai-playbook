@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // StepResult is one executed (or skipped/cancelled) step, for the summary + log.
@@ -19,6 +20,11 @@ type StepResult struct {
 	// summary row (and the JSON run log) tell a hang-kill from a real failure.
 	TimedOutAfter string `json:"timed_out_after,omitempty"`
 	OutputPath    string `json:"output,omitempty"`
+	// Duration is the step's wall-clock run time, measured around RunStep for
+	// the run journal (internal/runlog). Excluded from the legacy JSON run log
+	// (WriteRunLog) so its long-pinned shape is unchanged — the journal
+	// serializes durations in its own readable form.
+	Duration time.Duration `json:"-"`
 }
 
 // Summarize renders a one-line-per-step summary table (human-readable, to stdout).

@@ -11,6 +11,7 @@ import (
 
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/runlog"
 	"github.com/Townk/ai-playbook/pkg/driver"
 	"github.com/Townk/ai-playbook/pkg/playbook"
 	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
@@ -46,6 +47,16 @@ type RunConfig struct {
 	Env map[string]string
 	Out io.Writer     // default os.Stdout when nil
 	Now func() string // timestamp source; default UTC "20060102T150405Z"
+
+	// JournalPath is the run-journal file for this playbook run
+	// (internal/runlog; resolved by the launcher — autorun stays
+	// path-derivation-agnostic, the same convention as ui.Options).
+	// "" = journaling off. JournalPlaybookPath/JournalContentHash are the
+	// journaled playbook identity (absolute source path + content sha256).
+	// Journal writes are advisory: they can never fail the run.
+	JournalPath         string
+	JournalPlaybookPath string
+	JournalContentHash  string
 }
 
 // noopMux is a package-local orchestrator.Mux for headless runs — there is no
@@ -361,6 +372,13 @@ func Run(rc RunConfig) int {
 	}
 	defer cleanup()
 
+	// Open the run journal only once the run actually starts (env preflight
+	// and driver open both passed): a run that never began must not overwrite
+	// the previous run's journal. The journal is additionally LAZY (nothing is
+	// written until the first step records), so even a zero-block run leaves
+	// prior history intact. nil (path "") = journaling off.
+	journal := runlog.Open(rc.JournalPath, rc.JournalPlaybookPath, rc.JournalContentHash)
+
 	// Ctrl-C aborts the currently-running block: convert a delivered SIGINT
 	// into the same stopCh-close path RunStep's select watches, so real
 	// signal delivery and the test-only direct close share one mechanism.
@@ -387,5 +405,6 @@ func Run(rc RunConfig) int {
 		LogDir:       cache.DefaultRoot(),
 		Stamp:        now(),
 		Slug:         rc.Slug,
+		Journal:      journal,
 	}, runner)
 }

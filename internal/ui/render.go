@@ -1197,8 +1197,9 @@ func collectRollbackTargets(blocks []playbook.Block) map[string]bool {
 // needs=) on rootID, so undoing/rolling back rootID drops their stale results and
 // re-locks them instead of leaving a leftover "✓ ran" beside a now-blocked block. The
 // root block itself is left untouched. Deleting an entry resets it to the zero
-// (idle) blockRunState.
-func resetDependents(states map[string]blockRunState, blocks []Block, rootID string) {
+// (idle) blockRunState. Returns the reset ids so the caller can drop their
+// run-journal records too (a re-locked block is unrun again).
+func resetDependents(states map[string]blockRunState, blocks []Block, rootID string) []string {
 	depend := map[string]bool{rootID: true}
 	for changed := true; changed; {
 		changed = false
@@ -1217,11 +1218,14 @@ func resetDependents(states map[string]blockRunState, blocks []Block, rootID str
 			}
 		}
 	}
+	var reset []string
 	for id := range depend {
 		if id != rootID {
 			delete(states, id)
+			reset = append(reset, id)
 		}
 	}
+	return reset
 }
 
 // emitBlocked appends a single "⊘ needs: <ids>" indicator line styled with

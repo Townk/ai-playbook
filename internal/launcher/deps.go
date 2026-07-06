@@ -17,11 +17,16 @@ import (
 
 // depNode is one playbook resolved for dependency analysis: enough to render
 // and run it (Body, Cwd) plus its front matter (for further DependsOn edges).
+// Path/Raw carry the source file's location and raw content when the loader
+// read a real file (loadParent does; they feed the run journal's identity) —
+// pure in-memory loaders (tests) may leave them empty.
 type depNode struct {
 	Slug string
 	FM   frontmatter.FrontMatter
 	Body string
 	Cwd  string
+	Path string // the source .md path ("" when not file-backed)
+	Raw  string // the file's raw content, front matter included
 }
 
 // DepIssue is one structural problem found while walking a depends_on graph.

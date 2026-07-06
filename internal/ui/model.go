@@ -13,6 +13,7 @@ import (
 	idiff "github.com/Townk/ai-playbook/internal/diff"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 	"github.com/Townk/ai-playbook/internal/reengage"
+	"github.com/Townk/ai-playbook/internal/runlog"
 	"github.com/Townk/ai-playbook/pkg/dialog"
 	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
@@ -93,6 +94,12 @@ type model struct {
 	// wired (a standalone/sample viewer), so those affordances degrade to inert no-ops.
 	// Set alongside orch by Main / RunStream, or delivered later via orchReadyMsg.
 	reeng *reengage.Engine
+
+	// journal is the run journal writer (internal/runlog): every settled block
+	// result is persisted incrementally and the run finalizes when the viewer
+	// exits (finishRun). nil = journaling off (no JournalPath supplied — every
+	// non-run viewer path). Advisory only: writes never alter the run.
+	journal *runlog.Journal
 
 	// driverPending marks the ASYNC-startup window: the playbook renders IMMEDIATELY
 	// while the shell driver + orchestrator open in the BACKGROUND. While true the
@@ -857,6 +864,7 @@ func (m model) markRunning(id string) model {
 	st := m.blockStates[id]
 	st.Status = "running"
 	st.SpinFrame = 0
+	st.runStartedAt = time.Now()
 	m.blockStates[id] = st
 	return m
 }

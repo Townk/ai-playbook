@@ -59,6 +59,14 @@ func projectKey(projectRoot string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// ProjectKey exposes the shared per-project data key (projectKey) so sibling
+// layouts under $root/projects/<key>/ — e.g. internal/runlog's run journals —
+// derive the SAME key the KB and cache convention uses instead of forking the
+// sha1 derivation.
+func ProjectKey(projectRoot string) string {
+	return projectKey(projectRoot)
+}
+
 // Path returns the PROJECT KB file path for projectRoot under the given root,
 // mirroring assist::kb_path: $root/projects/<project_key>/knowledge.md.
 func Path(root, projectRoot string) string {

@@ -31,8 +31,10 @@ import (
 	"strings"
 
 	"github.com/Townk/ai-playbook/internal/autorun"
+	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/runlog"
 	"github.com/Townk/ai-playbook/internal/ui"
 	"github.com/Townk/ai-playbook/pkg/playbook"
 	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
@@ -123,11 +125,32 @@ func RunMain() int {
 
 	switch ra.Kind {
 	case "file":
-		return runFile(ra.Value, opts)
+		return runFile(ra.Value, "", opts)
 	case "playbook":
 		return runPlaybook(ra.Value, opts)
 	}
 	return 0
+}
+
+// journalIdentity resolves the run-journal wiring for a playbook run — the
+// journal file path (shared data root + kb project key + run key), the
+// journaled playbook identity (absolute source path), and the content sha256
+// (the retry drift gate). slug is the STORE slug ("" for a raw `--file` run,
+// whose key is the sha1 of its absolute path). The project key derives from
+// the invocation's heuristic project root (projectRootFn — the same
+// derivation the KB path uses), so a later `run --retry` from the same
+// project resolves the same journal.
+//
+// Journals are advisory: any resolution failure prints one stderr note and
+// returns an empty journalPath (journaling off), never failing the run.
+func journalIdentity(slug, file, raw string) (journalPath, playbookPath, contentHash string) {
+	abs, err := filepath.Abs(file)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook: run journal disabled (%v)\n", err)
+		return "", "", ""
+	}
+	key := runlog.RunKey(slug, abs)
+	return runlog.Path(cache.DefaultRoot(), projectRootFn(), key), abs, runlog.ContentHash(raw)
 }
 
 // runPlaybook resolves slug to its stored file path and delegates to runFile — the
@@ -146,7 +169,9 @@ func runPlaybook(slug string, opts ui.Options) int {
 		fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", lerr)
 		return 1
 	}
-	return runFile(meta.Path, opts)
+	// The slug is threaded so the run journal keys on the stored playbook's
+	// stable identity (runlog.RunKey) instead of its file location.
+	return runFile(meta.Path, slug, opts)
 }
 
 // runFile renders a markdown file through the `run --file` viewer. The ORIGINAL file
@@ -157,12 +182,18 @@ func runPlaybook(slug string, opts ui.Options) int {
 // relative to the heuristic repo root, else the repo root itself), exports it as
 // PROJECT_ROOT, and opens there; a plain front-matter file opens in the file's own
 // directory; a raw file with no front matter renders as-is in the invocation cwd.
-func runFile(file string, opts ui.Options) int {
+//
+// slug is the store slug when the run came through `run <slug>` (runPlaybook),
+// "" for a raw `run --file` — it only feeds the run journal's key.
+func runFile(file, slug string, opts ui.Options) int {
 	data, rerr := os.ReadFile(file)
 	if rerr != nil {
 		fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", rerr)
 		return 1
 	}
+	// Run-journal wiring (advisory): the launcher resolves the journal path +
+	// playbook identity; ui receives them as data (empty path = journaling off).
+	opts.JournalPath, opts.JournalPlaybookPath, opts.JournalContentHash = journalIdentity(slug, file, string(data))
 	fm, _, ok := frontmatter.Parse(string(data))
 	if !ok {
 		// No front matter → render as-is (cwd derived from the file by ui.Run).
@@ -212,6 +243,18 @@ func autoRun(ra runArgs) int {
 	}
 	slug := parentSlug(ra)
 
+	// Run-journal wiring for the PARENT run — the same identity the viewer
+	// path (runFile) resolves, so `run` and `run --auto` share one journal.
+	// The journal key uses the STORE slug only ("" for a raw file, whose key
+	// is its path sha1) — parentSlug's filename-derived slug is a display/log
+	// name, not a stable identity. Dependency runs (runDeps) stay unjournaled:
+	// each dep is its own playbook and R1 journals the requested run.
+	storeSlug := ""
+	if ra.Kind == "playbook" {
+		storeSlug = ra.Value
+	}
+	jPath, jPlaybook, jHash := journalIdentity(storeSlug, parent.Path, parent.Raw)
+
 	if len(parent.FM.DependsOn) == 0 {
 		// Pass the front-matter-stripped body — NOT the raw source — so the
 		// YAML fence never gets mis-parsed as a code block.
@@ -219,13 +262,16 @@ func autoRun(ra runArgs) int {
 			os.Setenv("PROJECT_ROOT", parent.Cwd) // mirrors Options.ProjectRoot's driver export
 		}
 		return autorunRunFn(autorun.RunConfig{
-			Blocks:       blocksFor(parent.Body),
-			EnvVars:      parent.FM.Env,
-			Cwd:          parent.Cwd,
-			Shell:        cfg.Driver.Shell,
-			Slug:         slug,
-			AutoRollback: !ra.NoAutoRollback,
-			EnvOverrides: ra.EnvOverrides,
+			Blocks:              blocksFor(parent.Body),
+			EnvVars:             parent.FM.Env,
+			Cwd:                 parent.Cwd,
+			Shell:               cfg.Driver.Shell,
+			Slug:                slug,
+			AutoRollback:        !ra.NoAutoRollback,
+			EnvOverrides:        ra.EnvOverrides,
+			JournalPath:         jPath,
+			JournalPlaybookPath: jPlaybook,
+			JournalContentHash:  jHash,
 		})
 	}
 
@@ -255,6 +301,9 @@ func autoRun(ra runArgs) int {
 		AutoRollback:              !ra.NoAutoRollback,
 		SuppressUndeclaredWarning: true,
 		Out:                       os.Stdout,
+		JournalPath:               jPath,
+		JournalPlaybookPath:       jPlaybook,
+		JournalContentHash:        jHash,
 	})
 }
 
@@ -292,7 +341,7 @@ func loadParent(ra runArgs) (depNode, error) {
 				cwd = dir
 			}
 		}
-		return depNode{FM: fm, Body: body, Cwd: cwd}, nil
+		return depNode{FM: fm, Body: body, Cwd: cwd, Path: ra.Value, Raw: string(data)}, nil
 	case "playbook":
 		meta, _, lerr := storeLoadFn(ra.Value)
 		if lerr != nil {
@@ -307,7 +356,7 @@ func loadParent(ra runArgs) (depNode, error) {
 		if fm.ProjectBound {
 			cwd = resolveProjectRoot(fm.ProjectRoot)
 		}
-		return depNode{Slug: ra.Value, FM: fm, Body: body, Cwd: cwd}, nil
+		return depNode{Slug: ra.Value, FM: fm, Body: body, Cwd: cwd, Path: meta.Path, Raw: string(data)}, nil
 	}
 	return depNode{}, fmt.Errorf("unsupported run source kind %q", ra.Kind)
 }
