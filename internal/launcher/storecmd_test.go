@@ -128,7 +128,7 @@ func TestFormatFuzzy_MultipleLines(t *testing.T) {
 // ---- formatHuman ----
 
 func TestFormatHuman_ContainsNameAndDescription(t *testing.T) {
-	out := formatHuman([]store.Meta{sampleMeta})
+	out := formatHuman([]store.Meta{sampleMeta}, nil)
 	if !strings.Contains(out, "Build") {
 		t.Errorf("formatHuman: missing name 'Build' in output:\n%s", out)
 	}
@@ -145,7 +145,7 @@ func TestFormatHuman_AlignedColumns(t *testing.T) {
 		{Name: "Short", Description: "A", Category: "x", Created: fixedNow.Add(-time.Hour)},
 		{Name: "VeryLongName", Description: "B", Category: "y", Created: fixedNow.Add(-2 * time.Hour)},
 	}
-	out := formatHuman(metas)
+	out := formatHuman(metas, nil)
 	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 	// Header + 2 data rows.
 	if len(lines) < 3 {
@@ -187,6 +187,7 @@ func TestFormatJSON_RoundTrip(t *testing.T) {
 // ---- ListMain: format flag parsing ----
 
 func TestListMain_DefaultHuman(t *testing.T) {
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir()) // hermetic LAST RUN column
 	withArgs(t, []string{"ai-playbook", "list"})
 	withIndexFn(t, func() ([]store.Meta, error) { return []store.Meta{sampleMeta}, nil })
 	if code := ListMain(); code != 0 {
@@ -195,6 +196,7 @@ func TestListMain_DefaultHuman(t *testing.T) {
 }
 
 func TestListMain_FormatHuman(t *testing.T) {
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir()) // hermetic LAST RUN column
 	withArgs(t, []string{"ai-playbook", "list", "--format", "human"})
 	withIndexFn(t, func() ([]store.Meta, error) { return []store.Meta{sampleMeta}, nil })
 	if code := ListMain(); code != 0 {
@@ -244,6 +246,7 @@ func TestSearchMain_MissingQuery_Exit2(t *testing.T) {
 }
 
 func TestSearchMain_WithQuery(t *testing.T) {
+	t.Setenv("AI_PLAYBOOK_DATA_DIR", t.TempDir()) // hermetic LAST RUN column
 	withArgs(t, []string{"ai-playbook", "search", "build"})
 	withSearchFn(t, func(q string) ([]store.Meta, error) {
 		if q != "build" {

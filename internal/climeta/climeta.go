@@ -112,7 +112,10 @@ var Commands = []Command{
 		Name:     "list",
 		Summary:  "List every saved playbook",
 		Synopsis: "list [--format human|fuzzy-data-source|json]",
-		Long:     "list enumerates the full store index in the requested format.",
+		Long: "list enumerates the full store index in the requested format. The human\n" +
+			"format's LAST RUN column shows each playbook's last journaled run in the\n" +
+			"current project: ✓ or ✗ plus the run's total elapsed time, a bare ✗ for a\n" +
+			"run interrupted mid-flight, or – when never run.",
 		Flags: []Flag{
 			{Name: "format", Placeholder: "<fmt>", Desc: "output format: human|fuzzy-data-source|json"},
 		},
@@ -125,8 +128,9 @@ var Commands = []Command{
 		Name:     "search",
 		Summary:  "Search saved playbooks by substring",
 		Synopsis: "search <query> [--format human|fuzzy-data-source|json]",
-		Long:     "search filters the store by substring match against <query> and prints the matches.",
-		Args:     "<query>",
+		Long: "search filters the store by substring match against <query> and prints the\n" +
+			"matches. Its human table carries the same LAST RUN column as list.",
+		Args: "<query>",
 		Flags: []Flag{
 			{Name: "format", Placeholder: "<fmt>", Desc: "output format: human|fuzzy-data-source|json"},
 		},

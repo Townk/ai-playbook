@@ -58,10 +58,19 @@ consult.
    ok and feed nothing remaining stay skipped. Capture persistence across
    sessions is explicitly out of scope (recorded below).
 5. **Discoverability.** Plain `run` (no `--retry`) on a playbook whose
-   journal records a failed last run prints one hint line before starting
-   fresh: `last run failed at <id> (<age> ago) — 'run --retry' resumes
-   there`. Starting fresh remains the default; a fresh run overwrites the
-   journal.
+   journal hash-matches the current content and records a resumable last
+   run — a failed/stopped outcome, or the mid-flight shape a crash/kill
+   leaves (no finished stamp, non-empty block records; an empty-blocks
+   skeleton is a session that never ran anything and stays silent) — prints
+   one hint line before starting fresh: `last run failed at <id> (<age>
+   ago) — 'run --retry' resumes there` (`stopped` / `was interrupted` for
+   those outcomes; age from the started stamp when finished is absent).
+   `<id>` is the retry seed's own start id, and a Fresh seed (no ok blocks,
+   or demotion emptied it) is silent — the hint never names a resume
+   `--retry` would degrade away from. Starting fresh remains the default;
+   a fresh run overwrites the journal.
+   _(Amended 2026-07-05: interrupted runs included — a killed terminal is
+   the motivating case — and the Fresh-seed silence made explicit.)_
 6. **`list` shows the last outcome.** The stored-playbook listing gains a
    last-run column sourced from the journals: `✓`/`✗` (or `–` when never
    run) plus the run's total elapsed. Journals are advisory metadata —

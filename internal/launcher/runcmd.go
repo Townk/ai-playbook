@@ -106,18 +106,27 @@ func RunMain() int {
 	// `run --retry --file <path>` find exactly the journal the non-retry form
 	// would write. A passing gate yields the pre-seed (nil on the fresh-run
 	// degradation) threaded into the viewer via ui.Options.
+	//
+	// A plain run (no --retry) over that same journal prints the one-line
+	// discoverability hint instead (retryHint, spec Decision 5) and starts
+	// fresh, exactly as before — the hint is stderr-only and advisory.
+	storeSlug := ""
+	if ra.Kind == "playbook" {
+		storeSlug = ra.Value
+	}
 	var retrySeed map[string]runlog.BlockRecord
 	if ra.Retry {
-		storeSlug := ""
-		if ra.Kind == "playbook" {
-			storeSlug = ra.Value
-		}
 		jPath, _, jHash := journalIdentity(storeSlug, parent.Path, parent.Raw)
 		seed, code, proceed := retryGate(jPath, jHash, playbook.ParseBlocks(parent.Body))
 		if !proceed {
 			return code
 		}
 		retrySeed = seed
+	} else {
+		jPath, _, jHash := journalIdentity(storeSlug, parent.Path, parent.Raw)
+		if hint := retryHint(jPath, jHash, playbook.ParseBlocks(parent.Body), retryCommand(ra)); hint != "" {
+			fmt.Fprintln(os.Stderr, hint)
+		}
 	}
 
 	if len(parent.FM.DependsOn) > 0 {
@@ -235,6 +244,85 @@ func retryGate(journalPath, contentHash string, blocks []playbook.Block) (map[st
 	return seed.PreSeeded, 0, true
 }
 
+// retryHint computes the plain-`run` discoverability hint (spec Decision 5):
+// when the playbook's journal records a resumable last run AND the document
+// still hash-matches it, one line names the pickup block, the run's age, and
+// the concrete `--retry` command. Resumable means a failed or stopped
+// outcome, OR the mid-flight shape a crash/kill leaves behind — no Finished
+// stamp but block records present ("last run was interrupted at …"; an
+// empty-blocks skeleton is a session that never ran anything, so it stays
+// silent). It returns "" — silence — in every other case: no journal path
+// (journaling unavailable), never run, corrupt journal, a succeeded last
+// run, or a drifted document (where --retry would refuse, so the hint would
+// mislead).
+//
+// The pickup id is runlog.RetrySeed's StartID — the SAME derivation --retry
+// resumes at, never first_failure alone (which can be empty or stale on a
+// failed run) — and a Fresh seed (no ok blocks, or demotion emptied it) is
+// silent too: --retry would just degrade to the fresh run the user is
+// already doing, so "resumes there" would contradict the command it names.
+//
+// Purely advisory: the caller prints the non-empty result to stderr (stdout
+// piping stays clean) and runs fresh either way — no exit code, no behavior
+// change.
+func retryHint(journalPath, contentHash string, blocks []playbook.Block, retryCmd string) string {
+	if journalPath == "" {
+		return ""
+	}
+	run, err := runlog.Load(journalPath)
+	if err != nil {
+		return "" // missing or corrupt — journals are advisory
+	}
+	var verb string
+	switch run.Outcome {
+	case runlog.OutcomeFailed, runlog.OutcomeStopped:
+		verb = run.Outcome
+	case "":
+		if !run.Finished.IsZero() || len(run.Blocks) == 0 {
+			return "" // not the crash shape — a mangled or never-ran skeleton
+		}
+		verb = "was interrupted"
+	default: // ok — nothing to resume
+		return ""
+	}
+	if run.ContentHash != contentHash {
+		return ""
+	}
+	seed := runlog.RetrySeed(blocks, run)
+	if seed.Fresh || seed.StartID == "" {
+		return ""
+	}
+	when := run.Finished
+	if when.IsZero() {
+		when = run.Started
+	}
+	ago := "just now"
+	if age := humanAge(when); age != "now" && age != "—" {
+		ago = age + " ago"
+	}
+	return fmt.Sprintf("ai-playbook run: last run %s at %q (%s) — '%s' resumes there",
+		verb, seed.StartID, ago, retryCmd)
+}
+
+// retryCommand renders the exact command the retry hint names: the user's own
+// run form (mode flag + source spelling) with --retry added.
+func retryCommand(ra runArgs) string {
+	parts := []string{"ai-playbook", "run"}
+	switch ra.Mode {
+	case modeAuto:
+		parts = append(parts, "--auto")
+	case modeAssisted:
+		parts = append(parts, "--assisted")
+	}
+	parts = append(parts, "--retry")
+	if ra.Kind == "file" {
+		parts = append(parts, "--file", ra.Value)
+	} else {
+		parts = append(parts, ra.Value)
+	}
+	return strings.Join(parts, " ")
+}
+
 // runPlaybook resolves slug to its stored file path and delegates to runFile — the
 // SAME `run --file` viewer path a raw file takes, so `run <slug>` and
 // `run --file <that file>` are provably one code path. This matters because
@@ -341,6 +429,8 @@ func autoRun(ra runArgs) int {
 	// through the same journal identity — a passing gate's pre-seed makes the
 	// headless loop skip the previously-ok steps and resume at the first
 	// non-ok one. Gated BEFORE the depends_on chain so a refusal runs nothing.
+	// A plain `--auto` run prints the same discoverability hint the viewer
+	// path does (naming the --auto retry form) and runs fresh.
 	var retrySeed map[string]runlog.BlockRecord
 	if ra.Retry {
 		seed, code, proceed := retryGate(jPath, jHash, playbook.ParseBlocks(parent.Body))
@@ -348,6 +438,8 @@ func autoRun(ra runArgs) int {
 			return code
 		}
 		retrySeed = seed
+	} else if hint := retryHint(jPath, jHash, playbook.ParseBlocks(parent.Body), retryCommand(ra)); hint != "" {
+		fmt.Fprintln(os.Stderr, hint)
 	}
 
 	if len(parent.FM.DependsOn) == 0 {

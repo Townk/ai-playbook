@@ -4,7 +4,10 @@ ai\-playbook\-list \- List every saved playbook
 .SH SYNOPSIS
 \fBai\-playbook\fR list [\-\-format human|fuzzy\-data\-source|json]
 .SH DESCRIPTION
-list enumerates the full store index in the requested format.
+list enumerates the full store index in the requested format. The human
+format's LAST RUN column shows each playbook's last journaled run in the
+current project: ✓ or ✗ plus the run's total elapsed time, a bare ✗ for a
+run interrupted mid\-flight, or – when never run.
 .SH OPTIONS
 .TP
 \fB\-\-format\fR \fI<fmt>\fR

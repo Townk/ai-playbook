@@ -24,16 +24,21 @@ package launcher
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
 	"os"
 	"os/exec"
 	"strings"
 	"text/tabwriter"
 	"time"
 
+	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/orchestrator"
+	"github.com/Townk/ai-playbook/internal/runlog"
 	"github.com/Townk/ai-playbook/internal/ui"
 	"github.com/Townk/ai-playbook/pkg/store"
 )
@@ -177,22 +182,94 @@ func printMetas(metas []store.Meta, format string) int {
 		}
 		fmt.Println(s)
 	default: // "human"
-		fmt.Print(formatHuman(metas))
+		fmt.Print(formatHuman(metas, lastRunCells(metas)))
 	}
 	return 0
 }
 
+// neverRanCell is the LAST RUN cell for a playbook with no journaled run.
+const neverRanCell = "–"
+
 // formatHuman returns an aligned tabwriter table with columns name,
-// description, category, and age (humanized time since Meta.Created).
-func formatHuman(metas []store.Meta) string {
+// description, category, age (humanized time since Meta.Created), and the
+// last-run outcome (lastRun[i], from lastRunCells; missing entries — e.g. a
+// nil slice — degrade to "never run").
+func formatHuman(metas []store.Meta, lastRun []string) string {
 	var sb strings.Builder
 	tw := tabwriter.NewWriter(&sb, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "NAME\tDESCRIPTION\tCATEGORY\tAGE")
-	for _, m := range metas {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", m.Name, m.Description, m.Category, humanAge(m.Created))
+	fmt.Fprintln(tw, "NAME\tDESCRIPTION\tCATEGORY\tAGE\tLAST RUN")
+	for i, m := range metas {
+		cell := neverRanCell
+		if i < len(lastRun) {
+			cell = lastRun[i]
+		}
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", m.Name, m.Description, m.Category, humanAge(m.Created), cell)
 	}
 	_ = tw.Flush()
 	return sb.String()
+}
+
+// lastRunCells resolves the LAST RUN column (spec Decision 6): one cell per
+// meta, joined from the CURRENT project's run journals — the same
+// runlog.Path(dataRoot, projectRoot, slug) the run path writes, so the column
+// reflects what `run <slug>` from this project last did. (The store index can
+// span the global store too; a run journal is always per-project, so a
+// playbook run from another project reads "never run" here.)
+//
+//	✓ <elapsed>  the last run succeeded (elapsed = finished − started)
+//	✗ <elapsed>  it failed or was stopped
+//	✗            it died mid-run (journal never finalized; no honest elapsed)
+//	–            never run
+//
+// Journals are ADVISORY: a missing runs dir or journal is simply "never run",
+// and corrupt journals produce ONE summary stderr note (not per-row spam) —
+// nothing here can fail the listing.
+func lastRunCells(metas []store.Meta) []string {
+	dataRoot := cache.DefaultRoot()
+	project := projectRootFn()
+	cells := make([]string, len(metas))
+	corrupt := 0
+	for i, m := range metas {
+		cells[i] = neverRanCell
+		run, err := runlog.Load(runlog.Path(dataRoot, project, m.Slug))
+		if err != nil {
+			if !errors.Is(err, fs.ErrNotExist) {
+				corrupt++
+			}
+			continue
+		}
+		switch run.Outcome {
+		case runlog.OutcomeOK:
+			cells[i] = "✓ " + humanElapsed(run.Finished.Sub(run.Started))
+		case runlog.OutcomeFailed, runlog.OutcomeStopped:
+			cells[i] = "✗ " + humanElapsed(run.Finished.Sub(run.Started))
+		default:
+			cells[i] = "✗"
+		}
+	}
+	if corrupt > 0 {
+		fmt.Fprintf(os.Stderr, "ai-playbook: %d run journal(s) unreadable — showing those playbooks as never run\n", corrupt)
+	}
+	return cells
+}
+
+// humanElapsed renders a run's total elapsed time for the LAST RUN column:
+// coarse rounding (whole seconds past a minute, tenths past a second,
+// milliseconds below) then orchestrator.FormatTimeout's zero-unit trimming
+// (1m30s, 10m, 1h — never 10m0s). Negative (malformed journal) clamps to 0s.
+func humanElapsed(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d >= time.Minute:
+		d = d.Round(time.Second)
+	case d >= time.Second:
+		d = d.Round(100 * time.Millisecond)
+	default:
+		d = d.Round(time.Millisecond)
+	}
+	return orchestrator.FormatTimeout(d)
 }
 
 // formatFuzzy returns one line per meta for the fuzzy-data-source format:

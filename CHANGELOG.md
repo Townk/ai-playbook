@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A durable run journal.** Both run paths — the interactive viewer and
+  `run --auto` — now record every playbook run to
+  `<data-root>/projects/<key>/runs/<run-key>.json`: per-block outcomes
+  (`ok`/`failed`/`stopped`/`rolled-back`), exit codes, durations, and
+  `timed_out_after`, plus the run window, overall outcome, and the playbook's
+  content hash. The journal is updated crash-safely (write-temp+rename) after
+  every block result, keeps the latest run only, and is strictly advisory —
+  a missing or corrupt journal never breaks `run` or `list`.
+- **`run --retry` resumes the last failed run.** With no journal or a
+  succeeded last run it says there is nothing to resume, and a playbook that
+  changed since the failed run is refused (no partial resume of a drifted
+  document). Otherwise the previously-succeeded blocks are pre-seeded as
+  "done — previous run" (still manually re-runnable; `verify` is never
+  pre-seeded), execution resumes at the first failed/unrun block, and any
+  pre-seeded producer whose output (`from=`, `$APB_*` references) a remaining
+  block consumes re-runs first — captures don't persist across sessions.
+  Composes with `--auto`, `--assisted`, and `--file`.
+- **A failed-run hint on plain `run`.** Running a playbook whose journal
+  records a failed, stopped, or interrupted (crashed/killed mid-run) last
+  run — and whose content still matches — prints one stderr line before
+  starting fresh: ``last run failed at "two" (2h ago) — 'ai-playbook run
+  --retry …' resumes there`` (the wording follows the outcome: `failed`,
+  `stopped`, or `was interrupted`). The hint stays silent whenever `--retry`
+  would just degrade to the fresh run anyway.
+- **`list` shows the last run outcome.** The human format — `search` shares
+  the same table — gains a LAST RUN column sourced from the current
+  project's run journals: `✓`/`✗` plus the run's total elapsed time, a bare
+  `✗` for a run interrupted mid-flight, or `–` when never run.
+
 ## [0.12.2] - 2026-07-05
 
 ### Added

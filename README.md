@@ -113,6 +113,7 @@ show   <slug>                          render a playbook (read-only)
 
 run    [[--playbook] <slug>            execute a playbook
        | --file <path>]
+       [--retry]
        [--assisted
        | --auto [--no-auto-rollback]
                 [--with-env <json|file>]]
@@ -141,6 +142,36 @@ supplies declared `env:` values on the CLI, and `env <slug>` scaffolds that JSON
 from a playbook's declaration — resolving current values and leaving secrets
 empty. A playbook may also declare `depends_on: [slug, …]`: its transitive
 dependencies run headless, in topological order, before it.
+
+### The run journal & resuming a failed run (`--retry`)
+
+Every playbook run — viewer or `--auto` — journals its latest state to
+`<data-root>/projects/<key>/runs/` (default data root
+`~/.local/share/ai-playbook`): per-block outcomes, exit codes, and durations,
+updated crash-safely after every block. One journal per playbook per project,
+latest run only; journals are advisory metadata — a missing or corrupt journal
+never breaks anything.
+
+When a run fails mid-way on something you fix out-of-band, `run --retry` picks
+it back up: it refuses when there is nothing to resume (no journal, or the
+last run succeeded) or when the playbook changed since the failed run;
+otherwise the blocks that already succeeded start pre-seeded as
+"done — previous run" (the `verify` block never — the goal is always
+re-proven), execution resumes at the first failed/unrun block, and any
+already-done producer whose output a remaining block still consumes (`from=`
+or `$APB_*` references) re-runs first, since captures don't persist across
+sessions. `--retry` composes with `--auto`, `--assisted`, and `--file`.
+
+Two discoverability surfaces ride the same journal: a plain `run` over a
+failed, stopped, or interrupted (crashed/killed mid-run) last run prints a
+one-line stderr hint (`last run failed at "two" (2h ago) — 'ai-playbook run
+--retry …' resumes there`; the verb follows the outcome — `stopped`, `was
+interrupted`), and `list`'s **LAST RUN** column — `search` shares the same
+table — shows each playbook's last outcome in the current project: `✓`/`✗`
+plus the run's total elapsed, a bare `✗` for a run interrupted mid-flight,
+or `–` when never run. Note the journal tracks the playbook you ran:
+`depends_on` parents' dependency runs are not journaled, so a retried parent
+re-runs its dependency chain fresh.
 
 ### Piping a block's output into the next step
 
