@@ -186,10 +186,11 @@ func TestCachedReloadButtonRegistered(t *testing.T) {
 	if regenBtn.BlockID != "cached" {
 		t.Errorf("regenerate button BlockID = %q, want %q", regenBtn.BlockID, "cached")
 	}
-	// The ENTIRE pill is the click target: Col 0 (the left cap, after buttonAt
-	// strips the 2-col margin) and Width = the pill's visible width sans trailing space.
-	if regenBtn.Col != 0 {
-		t.Errorf("regenerate button Col = %d, want 0 (whole-pill target starts at the left cap)", regenBtn.Col)
+	// The ENTIRE pill is the click target: Col titleTextCol-2 (the left cap of the
+	// subtitle-aligned row, after buttonAt strips the 2-col margin) and Width =
+	// the pill's visible width sans trailing space.
+	if regenBtn.Col != titleTextCol-2 {
+		t.Errorf("regenerate button Col = %d, want %d (whole-pill target starts at the left cap)", regenBtn.Col, titleTextCol-2)
 	}
 	wantW := lipgloss.Width(m.cachedBadge()) - 1
 	if regenBtn.Width != wantW {

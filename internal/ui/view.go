@@ -288,11 +288,11 @@ func (m model) cachedBadge() string {
 // appendCachedButton adds the screen-fixed regenerate button to m.buttons when
 // isCached is true. The ENTIRE pill is the click target; the flash highlight
 // covers the whole pill (handled in cachedBadge). Line is the shared badges
-// row's absolute screen row (badgeRowIdx). Col is 0 — the left cap, once
-// buttonAt strips the 2-col left margin (the badges row's "  " indent IS that
-// margin; the cached pill is always the row's first badge). Width is the
-// pill's visible width minus the trailing space. Screen=true so buttonAt
-// resolves it by absolute Y, not content line.
+// row's absolute screen row (badgeRowIdx). The badges row is indented to
+// titleTextCol (subtitle alignment); buttonAt strips the 2-col left margin,
+// so Col is titleTextCol-2 for the left cap (the cached pill is always the
+// row's first badge). Width is the pill's visible width minus the trailing
+// space. Screen=true so buttonAt resolves it by absolute Y, not content line.
 func (m *model) appendCachedButton() {
 	// Only add the clickable regenerate button when regeneration is actually possible
 	// (an orchestrator re-engagement OR the cached-answer seam). With neither wired the
@@ -306,7 +306,7 @@ func (m *model) appendCachedButton() {
 	}
 	m.buttons = append(m.buttons, Button{
 		Line:    m.badgeRowIdx(),
-		Col:     0,
+		Col:     titleTextCol - 2,
 		Width:   pillW,
 		Kind:    "regenerate",
 		BlockID: "cached",
@@ -315,13 +315,13 @@ func (m *model) appendCachedButton() {
 }
 
 // reloadIconScreenCol returns the absolute screen column of the reload glyph in
-// the cached pill: 2-col indent + left cap (1) + the pill prefix width (db icon
-// + " cached · <age> "). The cached pill is always the badges row's first badge,
-// so no cross-pill offset applies. Used to anchor the regenerate hint label
-// over the glyph.
+// the cached pill: the titleTextCol indent + left cap (1) + the pill prefix
+// width (db icon + " cached · <age> "). The cached pill is always the badges
+// row's first badge, so no cross-pill offset applies. Used to anchor the
+// regenerate hint label over the glyph.
 func (m model) reloadIconScreenCol() int {
 	prefix := "\U0000F1C0 cached · " + relativeAge(m.cachedAt) + " "
-	return 2 + 1 + lipgloss.Width(prefix)
+	return titleTextCol + 1 + lipgloss.Width(prefix)
 }
 
 // editIcon is the pencil glyph shown inside the [edit] pill body.
@@ -355,10 +355,11 @@ func (m model) editBadge() string {
 // appendEditButton adds the screen-fixed [edit] button to m.buttons when
 // sourcePath is non-empty (file-backed playbook). The pill sits on the shared
 // badges row (badgeRowIdx), left-grouped after the cached pill — whose width
-// (trailing space included) is the edit pill's Col offset; 0 when not cached.
-// Col is content-relative (buttonAt strips the 2-col margin, which is the
-// badges row's "  " indent). The WHOLE pill is the click target. Screen=true
-// so buttonAt resolves it by absolute Y.
+// (trailing space included) offsets the edit pill; 0 when not cached. The row
+// is indented to titleTextCol (subtitle alignment); Col is content-relative
+// (buttonAt strips the 2-col margin), so the base offset is titleTextCol-2.
+// The WHOLE pill is the click target. Screen=true so buttonAt resolves it by
+// absolute Y.
 func (m *model) appendEditButton() {
 	if m.sourcePath == "" {
 		return
@@ -369,7 +370,7 @@ func (m *model) appendEditButton() {
 	}
 	m.buttons = append(m.buttons, Button{
 		Line:    m.badgeRowIdx(),
-		Col:     lipgloss.Width(m.cachedBadge()),
+		Col:     titleTextCol - 2 + lipgloss.Width(m.cachedBadge()),
 		Width:   badgeW,
 		Kind:    "edit",
 		BlockID: "edit",
@@ -378,10 +379,10 @@ func (m *model) appendEditButton() {
 }
 
 // editBadgeScreenCol returns the absolute screen column of the pencil icon in
-// the edit pill: 2-col margin + the cached pill's width (0 when not cached) +
-// the left cap (1). Used to anchor the edit hint label over the icon.
+// the edit pill: the titleTextCol indent + the cached pill's width (0 when not
+// cached) + the left cap (1). Used to anchor the edit hint label over the icon.
 func (m model) editBadgeScreenCol() int {
-	return 2 + lipgloss.Width(m.cachedBadge()) + 1
+	return titleTextCol + lipgloss.Width(m.cachedBadge()) + 1
 }
 
 // badgesRowString returns the shared badges row shown directly BELOW the
@@ -394,7 +395,7 @@ func (m model) badgesRowString() string {
 	if row == "" {
 		return ""
 	}
-	return "  " + row
+	return strings.Repeat(" ", titleTextCol) + row
 }
 
 // badgeRows returns the number of header rows the badges row occupies: 1 when

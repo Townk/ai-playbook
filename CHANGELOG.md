@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The cached and edit pills on the badges row now align with the subtitle
+  (indented to the title text column) instead of the pane's left margin.
+
 ## [0.12.3] - 2026-07-06
 
 ### Added

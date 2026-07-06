@@ -200,8 +200,8 @@ func TestEditBadgeHasIconAndBadgesRow(t *testing.T) {
 	if b.Line != m.badgeRowIdx() {
 		t.Errorf("edit button Line = %d, want the badges row %d", b.Line, m.badgeRowIdx())
 	}
-	if b.Col != 0 {
-		t.Errorf("edit button Col = %d, want 0 (left-grouped, no cached pill)", b.Col)
+	if b.Col != titleTextCol-2 {
+		t.Errorf("edit button Col = %d, want %d (subtitle-aligned, no cached pill)", b.Col, titleTextCol-2)
 	}
 }
 
@@ -234,8 +234,8 @@ func TestBadgesRowSharedCachedAndEdit(t *testing.T) {
 		t.Fatalf("both buttons must sit on the badges row %d: regen=%d edit=%d",
 			m.badgeRowIdx(), regen.Line, edit.Line)
 	}
-	if wantCol := lipgloss.Width(m.cachedBadge()); edit.Col != wantCol {
-		t.Errorf("edit button Col = %d, want %d (after the cached pill)", edit.Col, wantCol)
+	if wantCol := titleTextCol - 2 + lipgloss.Width(m.cachedBadge()); edit.Col != wantCol {
+		t.Errorf("edit button Col = %d, want %d (subtitle-aligned, after the cached pill)", edit.Col, wantCol)
 	}
 	if regen.Col+regen.Width > edit.Col {
 		t.Errorf("pills must not overlap: regen ends at %d, edit starts at %d",
