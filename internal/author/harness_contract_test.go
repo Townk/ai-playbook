@@ -13,7 +13,7 @@ import (
 // shippedHarnesses lists every SHIPPED harness the contract suite runs over
 // (the multi-harness spec's Testing bullet 1). H2/H3 add rows ("pi", "cursor"),
 // not files — every entry must satisfy the whole contract below.
-var shippedHarnesses = []string{"claude"}
+var shippedHarnesses = []string{"claude", "pi"}
 
 // sessionFlags are session-resume/continuation flags NO harness may emit: the
 // codified contract (ADR-0012 decision 6) is fresh-process one-shot invocation,

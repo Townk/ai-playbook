@@ -166,7 +166,7 @@ func claudeArgs(model string, toolArgv []string, systemPrompt, userMessage strin
 // set to 0 → no thinking. NOTE: in --print stream-json the thinking block TEXT
 // is omitted (Claude Code does not surface the readable summary); the blocks
 // still stream, so the live "model is reasoning" activity fires even though the
-// text is empty. pi (--mode json, thinkingText) surfaces the reasoning text
+// text is empty. pi (--mode json, thinking_delta) surfaces the reasoning text
 // natively.
 func claudeThinkingTokens(thinking string) int {
 	switch thinking {

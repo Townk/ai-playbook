@@ -189,7 +189,7 @@ func TestReengageEvents_BasicHarness_NotesAndPromptHygiene(t *testing.T) {
 		}
 		for _, banned := range []string{
 			"submit_playbook",                           // StructuredToolInstruction's deliverable
-			"You have MCP tools",                        // both tool-instruction folds' opener
+			"You have the tools",                        // both tool-instruction folds' opener
 			"## Diagnosing in the user's environment",   // ToolInstruction heading
 			"## Diagnosing and submitting the playbook", // StructuredToolInstruction heading
 			"remember what you learned",                 // the memory-fill fold heading

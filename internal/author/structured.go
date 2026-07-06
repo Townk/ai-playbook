@@ -14,7 +14,7 @@ package author
 func StructuredToolInstruction() string {
 	return "\n\n" +
 		"## Diagnosing and submitting the playbook\n" +
-		"You have MCP tools `run`, `remember`, `ask`, and `submit_playbook`.\n" +
+		"You have the tools `run`, `remember`, `ask`, and `submit_playbook`.\n" +
 		"- Use `run` ONLY to DIAGNOSE (reproduce the situation, inspect cwd/files/versions). " +
 		"It runs in the USER's real shell — keep it READ-ONLY; do NOT apply changes with it.\n" +
 		"- Use `ask` to get input from the user and `remember` to save a durable fact, " +

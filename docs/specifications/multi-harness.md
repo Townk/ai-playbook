@@ -84,10 +84,12 @@ Notes are stderr/status-line one-liners, once per session, tested verbatim.
 - Model: `--model <pattern>` (supports `provider/id`); per-harness defaults
   chosen during characterization (T2 records them).
 - Stream: `--mode json` NDJSON; the adapter task characterizes the envelope
-  kinds live and maps them to the four events (reasoning arrives as
-  `thinkingText` per the existing code note). Strict-stream rules apply.
-- Tools: a pi EXTENSION (JS, embedded via go:embed, written to the session
-  temp dir by `ToolTransport`) registering `run`/`ask`/`remember`/
+  kinds live and maps them to the four events (reasoning arrives as real text
+  in `thinking_delta` events — live-characterized). Strict-stream rules apply.
+- Tools: a pi EXTENSION (TypeScript, embedded via go:embed, written by
+  `ToolTransport` into the private per-invocation transport dir the shared
+  launcher helper creates — the same system-temp dir claude's mcp-config
+  uses, removed when the stream closes) registering `run`/`ask`/`remember`/
   `submit_playbook`, each forwarding to the unix-socket backend
   (`tools.Dial` wire). Attached via `--extension <path>`; discovery stays
   disabled so ONLY our extension loads. Tier: FULL if pi's tool loop

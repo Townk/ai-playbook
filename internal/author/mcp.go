@@ -6,14 +6,15 @@ import (
 	"github.com/Townk/ai-playbook/internal/config"
 )
 
-// ToolInstruction is appended to the authoring system prompt when the claude
-// harness is invoked with the tools backend (--mcp-config). It tells the agent to
-// diagnose via the `run` MCP tool — which executes in the USER's real interactive
-// shell — rather than its own bash, so commands run in the environment the
-// playbook will run in.
+// ToolInstruction is appended to the authoring system prompt when the harness
+// is invoked with the tools backend (the Harness.ToolTransport attachment). It
+// tells the agent to diagnose via the provided `run` tool — which executes in
+// the USER's real interactive shell — rather than its own bash, so commands run
+// in the environment the playbook will run in. The wording is harness-neutral:
+// the same tools arrive as MCP tools on claude and as extension tools on pi.
 const ToolInstruction = "\n\n" +
 	"## Diagnosing in the user's environment\n" +
-	"You have MCP tools `run`, `remember`, and `ask`.\n" +
+	"You have the tools `run`, `remember`, and `ask`.\n" +
 	"- Use `run` ONLY to DIAGNOSE: reproduce the failure and inspect state (cwd, " +
 	"files, versions). It executes in the USER's real interactive shell — their cwd, " +
 	"aliases, and env, the exact shell the playbook's steps will run in. Keep these " +

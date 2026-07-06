@@ -65,7 +65,8 @@ func init() {
 // thinking_delta path yields empty Reasoning that would otherwise clobber the
 // live activity line. Dropping it means that with claude the activity line shows
 // TOOL activity only; the model's reasoning text is not exposed by claude
-// --print. pi (--mode json, thinkingText) surfaces real reasoning later.
+// --print. pi (--mode json, thinking_delta) surfaces real reasoning natively —
+// see the pi adapter (pi.go).
 type claudeAdapter struct{}
 
 // toolSummaryMaxCols bounds the single-line tool-activity summary width.

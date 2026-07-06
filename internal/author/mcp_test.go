@@ -175,14 +175,14 @@ func TestHarnessAgent_PlainHasNoMCPConfig(t *testing.T) {
 // harness's not-yet-supported error. The legacy path ignored [agent].harness here.
 func TestHarnessAgent_HonorsConfiguredHarness(t *testing.T) {
 	cfg := config.Default()
-	cfg.Agent.Harness = "pi"
+	cfg.Agent.Harness = "cursor"
 
 	agent := HarnessAgent(AuthorOptions{Cfg: cfg})
 	_, err := agent("SYS", "USER")
 	if err == nil {
 		t.Fatal("expected the configured harness to be honored (not-yet-supported error)")
 	}
-	if !strings.Contains(err.Error(), "pi") || !strings.Contains(err.Error(), "not yet supported") {
+	if !strings.Contains(err.Error(), "cursor") || !strings.Contains(err.Error(), "not yet supported") {
 		t.Errorf("error = %q, want it to name the configured harness", err)
 	}
 }

@@ -163,15 +163,16 @@ func TestRunHarnessEvents_ThinkingEnvWired(t *testing.T) {
 	check("medium", true, "0") // NoThinking forces 0 regardless of cfg.Thinking
 }
 
-// TestAuthorEvents_UnsupportedHarness: pi/cursor → a clear error, no process.
+// TestAuthorEvents_UnsupportedHarness: a configured harness with no shipped
+// adapter (cursor until H3) → a clear error, no process.
 func TestAuthorEvents_UnsupportedHarness(t *testing.T) {
 	cfg := config.Default()
-	cfg.Agent.Harness = "pi"
+	cfg.Agent.Harness = "cursor"
 	_, _, err := AuthorEvents(sampleFailure(), AuthorOptions{Cfg: cfg})
 	if err == nil {
 		t.Fatal("expected error for unsupported harness")
 	}
-	if !strings.Contains(err.Error(), "pi") || !strings.Contains(err.Error(), "not yet supported") {
+	if !strings.Contains(err.Error(), "cursor") || !strings.Contains(err.Error(), "not yet supported") {
 		t.Errorf("error = %q, want a clear not-yet-supported message", err)
 	}
 }
