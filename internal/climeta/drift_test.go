@@ -18,7 +18,7 @@ import "testing"
 // flag.FlagSet, kept in sync by hand with the fs.*Var call sites named below.
 var expectedFlags = map[string][]string{
 	// internal/launcher/runcmd.go, resolveRunArgs
-	"run": {"playbook", "file", "auto-rollback", "auto", "no-auto-rollback", "assisted", "with-env"},
+	"run": {"playbook", "file", "auto-rollback", "auto", "no-auto-rollback", "assisted", "retry", "with-env"},
 	// internal/launcher/validatecmd.go, resolveValidateArgs
 	"validate": {"file", "no-ai", "plain", "quiet"},
 	// internal/launcher/envcmd.go, resolveEnvArgs

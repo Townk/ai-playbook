@@ -57,6 +57,14 @@ type RunConfig struct {
 	JournalPath         string
 	JournalPlaybookPath string
 	JournalContentHash  string
+
+	// RetrySeed is the `--retry` pre-seed (runlog.Seed.PreSeeded, resolved by
+	// the launcher's gate ladder): block id → the previous run's ok record.
+	// Execute skips each seeded step ("↷ skipped (previous run)"), counts its
+	// needs= edges as met so execution resumes at the first non-ok step in the
+	// existing order, and installs the records into the lazy journal skeleton
+	// (previous_run: true, previous durations). nil = a fresh run.
+	RetrySeed map[string]runlog.BlockRecord
 }
 
 // noopMux is a package-local orchestrator.Mux for headless runs — there is no
@@ -406,5 +414,6 @@ func Run(rc RunConfig) int {
 		Stamp:        now(),
 		Slug:         rc.Slug,
 		Journal:      journal,
+		Preseed:      rc.RetrySeed,
 	}, runner)
 }

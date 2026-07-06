@@ -99,6 +99,27 @@ func RunMain() int {
 		fmt.Fprintf(os.Stderr, "ai-playbook run: %v\n", perr)
 		return 1
 	}
+
+	// `--retry` gate ladder — BEFORE the depends_on chain, so a refused retry
+	// never runs the deps. journalIdentity is the SAME seam the write path
+	// (runFile / autoRun) resolves through, so both `run --retry <slug>` and
+	// `run --retry --file <path>` find exactly the journal the non-retry form
+	// would write. A passing gate yields the pre-seed (nil on the fresh-run
+	// degradation) threaded into the viewer via ui.Options.
+	var retrySeed map[string]runlog.BlockRecord
+	if ra.Retry {
+		storeSlug := ""
+		if ra.Kind == "playbook" {
+			storeSlug = ra.Value
+		}
+		jPath, _, jHash := journalIdentity(storeSlug, parent.Path, parent.Raw)
+		seed, code, proceed := retryGate(jPath, jHash, playbook.ParseBlocks(parent.Body))
+		if !proceed {
+			return code
+		}
+		retrySeed = seed
+	}
+
 	if len(parent.FM.DependsOn) > 0 {
 		order, issues := resolveChain(parent.FM.DependsOn)
 		if len(issues) > 0 {
@@ -121,6 +142,7 @@ func RunMain() int {
 		Shell:        cfg.Driver.Shell,
 		AutoRollback: ra.AutoRollback,
 		Assisted:     ra.Mode == modeAssisted,
+		RetrySeed:    retrySeed,
 	}
 
 	switch ra.Kind {
@@ -151,6 +173,66 @@ func journalIdentity(slug, file, raw string) (journalPath, playbookPath, content
 	}
 	key := runlog.RunKey(slug, abs)
 	return runlog.Path(cache.DefaultRoot(), projectRootFn(), key), abs, runlog.ContentHash(raw)
+}
+
+// retryGate runs the `--retry` gate ladder (spec Decision 3) against the
+// journal at journalPath, in order, each refusal with its own message:
+//
+//  1. no journal — never run, unreadable path, corrupt file, or journaling
+//     unavailable — → message + exit 1 (a corrupt journal is advisory
+//     metadata: on the retry READ side it means "no journal");
+//  2. the journaled run succeeded → "nothing to resume" + exit 0;
+//  3. content-hash mismatch (the playbook's raw bytes changed since the
+//     failed run) → refusal + exit 1 (no partial resume of a drifted
+//     document);
+//  4. an empty pre-seed (no ok blocks, or demotion emptied it) → a note, then
+//     fall through to a plain FRESH run (nil seed, proceed=true).
+//
+// Otherwise it returns the pre-seed to thread into the run (proceed=true)
+// after a one-line resume note. contentHash is the CURRENT file's raw-byte
+// hash from journalIdentity — the same derivation the journal writer stored,
+// so the comparison is like-for-like.
+func retryGate(journalPath, contentHash string, blocks []playbook.Block) (map[string]runlog.BlockRecord, int, bool) {
+	if journalPath == "" {
+		// journalIdentity already printed why journaling is unavailable.
+		fmt.Fprintln(os.Stderr, "ai-playbook run: --retry: no run journal available — nothing to resume")
+		return nil, 1, false
+	}
+	run, err := runlog.Load(journalPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			fmt.Fprintln(os.Stderr, "ai-playbook run: --retry: no previous run recorded for this playbook — nothing to resume")
+		} else {
+			fmt.Fprintf(os.Stderr, "ai-playbook run: --retry: run journal unreadable (%v) — nothing to resume\n", err)
+		}
+		return nil, 1, false
+	}
+	if run.Outcome == runlog.OutcomeOK {
+		fmt.Fprintln(os.Stderr, "ai-playbook run: last run succeeded — nothing to resume")
+		return nil, 0, false
+	}
+	if run.ContentHash != contentHash {
+		fmt.Fprintln(os.Stderr, "ai-playbook run: --retry: playbook changed since the failed run — run fresh (drop --retry)")
+		return nil, 1, false
+	}
+	seed := runlog.RetrySeed(blocks, run)
+	if seed.Fresh {
+		fmt.Fprintln(os.Stderr, "ai-playbook run: --retry: no prior progress to carry over — running fresh")
+		return nil, 0, true
+	}
+	// StartID can be "" on the degenerate resumable journal (killed between
+	// the last block's record and Finalize, every forward block ok, no verify
+	// block to anchor the resume) — omit the "resuming at" clause rather than
+	// print `resuming at ""`.
+	note := fmt.Sprintf("ai-playbook run: %d block(s) done in the previous run", len(seed.PreSeeded))
+	if seed.StartID != "" {
+		note = fmt.Sprintf("ai-playbook run: resuming at %q — %d block(s) done in the previous run", seed.StartID, len(seed.PreSeeded))
+	}
+	if len(seed.Demoted) > 0 {
+		note += fmt.Sprintf("; re-running %s (outputs are not retained across sessions)", strings.Join(seed.Demoted, ", "))
+	}
+	fmt.Fprintln(os.Stderr, note)
+	return seed.PreSeeded, 0, true
 }
 
 // runPlaybook resolves slug to its stored file path and delegates to runFile — the
@@ -255,6 +337,19 @@ func autoRun(ra runArgs) int {
 	}
 	jPath, jPlaybook, jHash := journalIdentity(storeSlug, parent.Path, parent.Raw)
 
+	// `--auto --retry`: the same gate ladder as the viewer path, resolved
+	// through the same journal identity — a passing gate's pre-seed makes the
+	// headless loop skip the previously-ok steps and resume at the first
+	// non-ok one. Gated BEFORE the depends_on chain so a refusal runs nothing.
+	var retrySeed map[string]runlog.BlockRecord
+	if ra.Retry {
+		seed, code, proceed := retryGate(jPath, jHash, playbook.ParseBlocks(parent.Body))
+		if !proceed {
+			return code
+		}
+		retrySeed = seed
+	}
+
 	if len(parent.FM.DependsOn) == 0 {
 		// Pass the front-matter-stripped body — NOT the raw source — so the
 		// YAML fence never gets mis-parsed as a code block.
@@ -272,6 +367,7 @@ func autoRun(ra runArgs) int {
 			JournalPath:         jPath,
 			JournalPlaybookPath: jPlaybook,
 			JournalContentHash:  jHash,
+			RetrySeed:           retrySeed,
 		})
 	}
 
@@ -304,6 +400,7 @@ func autoRun(ra runArgs) int {
 		JournalPath:               jPath,
 		JournalPlaybookPath:       jPlaybook,
 		JournalContentHash:        jHash,
+		RetrySeed:                 retrySeed,
 	})
 }
 
@@ -462,6 +559,7 @@ type runArgs struct {
 	Mode           runMode
 	AutoRollback   bool              // existing default-viewer --auto-rollback opt-in
 	NoAutoRollback bool              // --no-auto-rollback (valid only with --auto)
+	Retry          bool              // --retry: resume the last failed run from its journal (composes with every mode)
 	EnvOverrides   map[string]string // --with-env values (valid only with --auto)
 }
 
@@ -511,11 +609,12 @@ func resolveRunArgs(args []string) (runArgs, error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	var withEnv string
-	var auto, autoMode, noAutoRollback, assisted bool
+	var auto, autoMode, noAutoRollback, assisted, retry bool
 	fs.BoolVar(&auto, "auto-rollback", false, "on a step failure, automatically roll back applied steps (else a manual button)")
 	fs.BoolVar(&autoMode, "auto", false, "run headless: execute every block in order with no viewer/driver pane")
 	fs.BoolVar(&noAutoRollback, "no-auto-rollback", false, "with --auto, do not roll back applied steps on a failure")
 	fs.BoolVar(&assisted, "assisted", false, "run GUIDED fullscreen: step-by-step confirmation in the same viewer/driver pane")
+	fs.BoolVar(&retry, "retry", false, "resume the last failed run from its journal: blocks that succeeded are pre-seeded; execution resumes at the first failed/unrun block")
 	fs.StringVar(&withEnv, "with-env", "", "with --auto, supply env var values as inline JSON or a JSON file path")
 	kind, value, serr := resolveSource(fs, args, "run", true)
 	if serr != nil {
@@ -538,7 +637,7 @@ func resolveRunArgs(args []string) (runArgs, error) {
 		return runArgs{}, fmt.Errorf("--with-env is only valid with --auto")
 	}
 
-	ra := runArgs{Kind: kind, Value: value, AutoRollback: auto, NoAutoRollback: noAutoRollback}
+	ra := runArgs{Kind: kind, Value: value, AutoRollback: auto, NoAutoRollback: noAutoRollback, Retry: retry}
 	switch {
 	case autoMode:
 		ra.Mode = modeAuto

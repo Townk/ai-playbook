@@ -60,6 +60,24 @@ func (m *model) journalRecordResult(id string, st blockRunState, msg resultMsg) 
 	})
 }
 
+// applyRetrySeed installs a `run --retry` pre-seed (Options.RetrySeed) onto
+// the model: every seeded block starts Status "ok" with the PreviousRun
+// marker — rendered "✓ done — previous run", satisfying needs= exactly like
+// any ok block (needsSatisfied reads Status), still manually re-runnable —
+// and the seed's records land in the LAZY journal's skeleton (Preseed), so
+// the first real block result persists them alongside it: the journal file is
+// complete from its first write, with previous_run: true and the previous
+// durations. A nil/empty seed (every fresh run) is a no-op.
+func (m *model) applyRetrySeed(seed map[string]runlog.BlockRecord) {
+	if len(seed) == 0 {
+		return
+	}
+	m.journal.Preseed(seed)
+	for id, rec := range seed {
+		m.blockStates[id] = blockRunState{Status: "ok", Exit: rec.Exit, PreviousRun: true}
+	}
+}
+
 // journalRemoveAll drops the journal records of blocks whose run state was
 // reset (resetDependents): they re-locked, so the journal must not keep them
 // as done.

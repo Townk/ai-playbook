@@ -113,6 +113,7 @@ func (m model) activateButton(b Button) (model, tea.Cmd) {
 		st.Action = action
 		st.SpinFrame = 0
 		st.runStartedAt = time.Now()
+		st.PreviousRun = false // a re-run of a retry pre-seeded block is this session's
 		m.blockStates[b.BlockID] = st
 		ac := m.emitAction(b)
 		m.reflow()
@@ -233,12 +234,18 @@ func (m model) chainMember(id string) bool {
 
 // fromChain returns the ordered block ids to run so that consumer consumerID
 // receives its piped stdin: every transitive from= producer that has NOT
-// completed ok this session, in dependency order (producers before consumers),
+// completed ok THIS SESSION, in dependency order (producers before consumers),
 // followed by consumerID itself. A producer already ok this session is omitted —
 // its retained capture serves, so it is never re-run — but the walk still stops
-// there (its own upstream is already materialized). Returns just [consumerID]
-// when nothing upstream needs materializing. A visited set guards against a cycle
-// (validation rejects from= cycles, so this is defensive only).
+// there (its own upstream is already materialized). A retry PRE-SEEDED
+// producer (Status ok but PreviousRun set) counts as UNMATERIALIZED: its ok is
+// a previous session's and its capture is gone, so a manual re-run of a
+// pre-seeded consumer re-materializes it instead of piping /dev/null —
+// Decision 4's "previous-session producers re-run on demand" applied to the
+// one surface demotion can't reach (a consumer that was itself ok). Returns
+// just [consumerID] when nothing upstream needs materializing. A visited set
+// guards against a cycle (validation rejects from= cycles, so this is
+// defensive only).
 func (m model) fromChain(consumerID string) []string {
 	var order []string
 	seen := map[string]bool{}
@@ -248,8 +255,10 @@ func (m model) fromChain(consumerID string) []string {
 			return
 		}
 		seen[id] = true
-		if blk, ok := m.blockByID(id); ok && blk.From != "" && m.blockStates[blk.From].Status != "ok" {
-			visit(blk.From) // materialize the unrun producer (and its own upstream) first
+		if blk, ok := m.blockByID(id); ok && blk.From != "" {
+			if pst := m.blockStates[blk.From]; pst.Status != "ok" || pst.PreviousRun {
+				visit(blk.From) // materialize the unrun/pre-seeded producer (and its upstream) first
+			}
 		}
 		order = append(order, id)
 	}

@@ -718,6 +718,18 @@ func (r *renderer) code(n ast.Node) {
 				col++
 				r.buttons = append(r.buttons, Button{Line: lineIdx, Col: runActionCol, Width: 2, Kind: "stop", BlockID: blk.ID})
 			case "ok":
+				if r.states[blk.ID].PreviousRun && r.readyID == "" {
+					// Pre-seeded ok from a PRIOR run (`run --retry`): its outputs
+					// don't exist in this session, so it stays manually re-runnable
+					// (spec Decision 3) — a live run button, not the dimmed done cue.
+					// (Assisted keeps its footer-driven cadence: no inline button.)
+					sb.WriteString(r.buttonGlyph(blk.ID, "run", glyphRun, colRun, bg))
+					col++
+					sb.WriteString(bg.Render(" "))
+					col++
+					r.buttons = append(r.buttons, Button{Line: lineIdx, Col: runActionCol, Width: 2, Kind: "run", Payload: blk.Payload, BlockID: blk.ID})
+					break
+				}
 				// Already ran successfully → disable the run action: a dimmed "done" cue
 				// with no button registered, so an idempotency-unsafe re-run can't happen
 				// by accident. An undo/rollback of a dependency clears this state and the
@@ -990,8 +1002,16 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 		switch st.Status {
 		case "ok":
 			sty := lipgloss.NewStyle().Foreground(lipgloss.Color(colGreen))
-			label = "✓ ran (exit " + itoa(st.Exit) + ")"
-			statusPart = sty.Render(label)
+			if st.PreviousRun {
+				// Pre-seeded by `run --retry`: done in the PREVIOUS session, not
+				// this one — the base done form plus a subdued origin suffix.
+				label = "✓ done — previous run"
+				statusPart = sty.Render("✓ done") +
+					lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Render(" — previous run")
+			} else {
+				label = "✓ ran (exit " + itoa(st.Exit) + ")"
+				statusPart = sty.Render(label)
+			}
 		case "stopped":
 			// Neutral state: the user deliberately stopped the block. Not a failure —
 			// no red, no "try another fix" button (see followupCol guard below).

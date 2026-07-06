@@ -865,6 +865,7 @@ func (m model) markRunning(id string) model {
 	st.Status = "running"
 	st.SpinFrame = 0
 	st.runStartedAt = time.Now()
+	st.PreviousRun = false // a re-run of a retry pre-seeded block is this session's
 	m.blockStates[id] = st
 	return m
 }

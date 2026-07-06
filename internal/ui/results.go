@@ -77,6 +77,14 @@ type blockRunState struct {
 	// wall-clock duration (time.Since). Zero when the block never ran.
 	runStartedAt time.Time
 
+	// PreviousRun marks a block pre-seeded "ok" from a PRIOR run's journal
+	// (`run --retry`): it renders "✓ done — previous run", keeps a LIVE run
+	// button (its outputs don't exist in this session, so it stays manually
+	// re-runnable), and satisfies needs= like any ok block. Cleared the moment
+	// the block runs again in this session (every mark-running site), so a new
+	// result renders and journals as an ordinary run.
+	PreviousRun bool
+
 	// TimedOut / TimedOutAfter surface a run killed at its timeout ceiling: the
 	// failed summary line renders "✗ timed out after <TimedOutAfter>" instead of
 	// the plain "✗ failed". Overwritten by every new result for the block, so a
@@ -145,6 +153,9 @@ func (m model) handleResult(msg resultMsg) (tea.Model, tea.Cmd) {
 	st.Exit = msg.Exit
 	st.TimedOut = msg.TimedOut
 	st.TimedOutAfter = msg.TimedOutAfter
+	// A settled result is THIS session's: the retry pre-seed marker never
+	// survives a real run (defensive — every mark-running site clears it too).
+	st.PreviousRun = false
 	// A result for a block the user deliberately stopped is NOT a failed fix.
 	// Resolve to the neutral "stopped" state, clear the flag, and never auto-fire
 	// the follow-up — regardless of the (typically 143/SIGTERM) exit code.

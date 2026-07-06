@@ -115,6 +115,7 @@ func (m model) beginRollback(failedID string) (model, tea.Cmd) {
 		st.Action = "rollback"
 		st.SpinFrame = 0
 		st.runStartedAt = time.Now()
+		st.PreviousRun = false // a re-run of a retry pre-seeded block is this session's
 		m.blockStates[tgt] = st
 		if c := m.emitAction(Button{Kind: "run", Payload: m.blockCommand(tgt), BlockID: tgt}); c != nil {
 			cmds = append(cmds, c)

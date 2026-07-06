@@ -51,7 +51,7 @@ consult.
    persistence).** A pre-seeded block's outputs (`APB_OUT_<id>` env,
    retained captures) do not exist in the new session. At retry start,
    any pre-seeded block that a REMAINING block consumes — via `from=` or
-   via an `APB_OUT_<id>`/`APB_ERR_<id>`/`APB_OUT_FILE_<id>`/
+   via an `APB_OUT_<id>`/`APB_ERR_<id>`/`APB_EXIT_<id>`/`APB_OUT_FILE_<id>`/
    `APB_ERR_FILE_<id>` reference in its payload (the env-scan machinery) —
    is DEMOTED to unrun, so the existing `from=`-chain auto-materialization
    and `needs=` gating make it re-run before its consumer. Blocks that were
@@ -80,6 +80,10 @@ consult.
   marker so history stays honest).
 - A retry whose pre-seeded producer set demotes EVERY prior ok block
   degrades gracefully to a fresh run (message, not an error).
+- A pre-seeded block caught by a retry-session rollback chain executes its
+  undo payload in the CURRENT session, where the rolled-back run's
+  value-passing vars (`$APB_OUT_/ERR_/EXIT_*`) expand empty — write
+  rollbacks self-contained (against durable state, not captures).
 - `--retry` composes with existing `run` flags (`--auto`, `--assisted`,
   `--file`); `run --retry <slug>` and `run --retry --file <path>` both
   resolve the same journal the non-retry form would write.

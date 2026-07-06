@@ -120,6 +120,13 @@ type Options struct {
 	// JournalContentHash is the playbook content sha256
 	// (runlog.ContentHash), the retry content-drift gate's identity.
 	JournalContentHash string
+	// RetrySeed is the `run --retry` pre-seed (runlog.Seed.PreSeeded, resolved
+	// by the launcher's gate ladder): block id → the previous run's ok record.
+	// Each listed block starts satisfied — Status "ok" with the PreviousRun
+	// marker ("✓ done — previous run"), its needs= edges met, still manually
+	// re-runnable — and its record is installed into the lazy journal skeleton
+	// so the first real result persists the full picture. nil = a fresh run.
+	RetrySeed map[string]runlog.BlockRecord
 	// Ready, when non-nil, switches Run onto the ASYNC-orchestrator path: instead of
 	// opening the driver synchronously, Run renders the playbook first (shell buttons
 	// dimmed + inert via driverPending) and reads the single OrchReady off this channel
@@ -421,6 +428,9 @@ func Run(opts Options) int {
 	// previous run's journal with an empty "ok".
 	journal := runlog.Open(opts.JournalPath, opts.JournalPlaybookPath, opts.JournalContentHash)
 	m.journal = journal
+	// `run --retry`: pre-seed the prior run's ok blocks (Status ok +
+	// PreviousRun) and install their records into the journal skeleton.
+	m.applyRetrySeed(opts.RetrySeed)
 	m.confirmEnv = playbookEnv     // front-matter env for the B2b confirmation gate
 	m.projectRoot = projectRoot    // heuristic project root (also in driver.Options.Env)
 	m.sourcePath = opts.SourcePath // on-disk .md path; non-empty → file-backed, [edit] enabled

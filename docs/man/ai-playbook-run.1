@@ -2,7 +2,7 @@
 .SH NAME
 ai\-playbook\-run \- Run a playbook (interactive, headless, or guided)
 .SH SYNOPSIS
-\fBai\-playbook\fR run [<slug>] [\-\-playbook <slug>] [\-\-file <path>] [\-\-assisted] [\-\-auto] [\-\-auto\-rollback] [\-\-with\-env <json>]
+\fBai\-playbook\fR run [<slug>] [\-\-playbook <slug>] [\-\-file <path>] [\-\-assisted] [\-\-auto] [\-\-auto\-rollback] [\-\-retry] [\-\-with\-env <json>]
 .SH DESCRIPTION
 run accepts a single playbook source, expressed one of three ways: a bare
 positional <slug> (implied \-\-playbook), \-\-playbook <slug> (resolved through
@@ -15,6 +15,14 @@ opt\-in and is mutually exclusive with \-\-auto (auto mode rolls back by default
 use \-\-no\-auto\-rollback to opt out) and with \-\-assisted (assisted mode owns
 post\-failure flow via its own manual "Roll back" button). \-\-no\-auto\-rollback
 and \-\-with\-env are only valid with \-\-auto.
+.PP
+\-\-retry resumes the LAST FAILED run from the playbook's run journal: blocks
+that succeeded are pre\-seeded as done ("done — previous run") and execution
+resumes at the first failed/unrun block. It composes with every mode. A retry
+refuses when the playbook changed since the failed run (content hash), says
+so when there is nothing to resume, and re\-runs any completed block whose
+output a remaining block consumes (from=/APB_* references are not retained
+across sessions).
 .SH OPTIONS
 .TP
 \fB\-\-playbook\fR \fI<slug>\fR
@@ -35,6 +43,9 @@ with \-\-auto, do not roll back applied steps on a failure
 \fB\-\-assisted\fR
 run GUIDED fullscreen: step\-by\-step confirmation in the same viewer/driver pane
 .TP
+\fB\-\-retry\fR
+resume the last failed run from its journal: blocks that succeeded are pre\-seeded; execution resumes at the first failed/unrun block
+.TP
 \fB\-\-with\-env\fR \fI<json>\fR
 with \-\-auto, supply env var values as inline JSON or a JSON file path
 .SH EXAMPLES
@@ -48,6 +59,10 @@ ai\-playbook run \-\-file ./scratch.md \-\-assisted
 .PP
 .nf
 ai\-playbook run deploy\-staging \-\-auto \-\-with\-env '{"REGION":"us\-east\-1"}'
+.fi
+.PP
+.nf
+ai\-playbook run deploy\-staging \-\-auto \-\-retry
 .fi
 .SH "SEE ALSO"
 \fBai\-playbook\fR(1)

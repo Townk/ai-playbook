@@ -285,6 +285,14 @@ func (j *Journal) MarkRolledBack(id string) {
 // Remove drops a block's record entirely — used when the viewer undoes a
 // block (or re-locks its dependents), returning it to the never-ran state.
 // A removed FirstFailure is cleared with it.
+//
+// While the journal is still LAZY (!dirty — nothing has recorded this
+// session), the removal is in-memory ONLY: a retry session whose FIRST action
+// undoes a pre-seeded block (Preseed creates records without dirtying) must
+// not overwrite the previous run's failed journal with an outcome-less
+// skeleton. Deliberately, dirty is NOT set either — that would let a later
+// Finalize stamp a bogus "ok" from the remaining seeds (the R1 clobber
+// class). The eventual first real Record persists the post-undo truth.
 func (j *Journal) Remove(id string) {
 	if j == nil {
 		return
@@ -295,6 +303,9 @@ func (j *Journal) Remove(id string) {
 	delete(j.run.Blocks, id)
 	if j.run.FirstFailure == id {
 		j.run.FirstFailure = ""
+	}
+	if !j.dirty {
+		return
 	}
 	j.save()
 }

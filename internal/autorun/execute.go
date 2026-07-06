@@ -38,6 +38,12 @@ type Config struct {
 	// (internal/runlog). nil = journaling off. Journal writes are advisory:
 	// they can never fail the run.
 	Journal *runlog.Journal
+	// Preseed is the `--retry` pre-seed (RunConfig.RetrySeed): each listed
+	// step starts StatusOK — skipped with a "↷ skipped (previous run)" line,
+	// its needs= edges met — and its previous record is installed into the
+	// journal skeleton so the first real result persists the complete run
+	// (previous_run: true, previous duration). nil = a fresh run.
+	Preseed map[string]runlog.BlockRecord
 }
 
 // Execute runs the forward loop over an injected runner and returns the process exit
@@ -47,6 +53,23 @@ func Execute(cfg Config, r StepRunner) int {
 	var results []StepResult
 	failedExit := 0
 	wasCancelled := false
+
+	// `--retry` pre-seed: seeded steps are already done (previous run) — mark
+	// them StatusOK so NextRunnable resumes at the first non-ok step in the
+	// EXISTING order (demoted producers are simply absent here, so they re-run
+	// via the same ordering), report each skip, and install the previous
+	// records into the lazy journal skeleton (no write until a real result).
+	if len(cfg.Preseed) > 0 {
+		cfg.Journal.Preseed(cfg.Preseed)
+		for _, b := range Sequence(cfg.Blocks) {
+			if _, ok := cfg.Preseed[b.ID]; !ok {
+				continue
+			}
+			status[b.ID] = StatusOK
+			fmt.Fprintf(cfg.Out, "[%s] ↷ skipped (previous run)\n\n", b.ID)
+			results = append(results, StepResult{ID: b.ID, Command: b.Command, Status: StatusSkipped})
+		}
+	}
 
 	for {
 		b, ok := NextRunnable(cfg.Blocks, status)
