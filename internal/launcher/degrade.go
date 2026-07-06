@@ -24,6 +24,12 @@ import (
 const (
 	noteStructuredUnavailable = "structured drafting unavailable on %s — using text mode"
 	noteKnowledgeUnavailable  = "knowledge capture unavailable on %s"
+	// noteToolsUnavailable fires when a FULL harness's tool transport cannot be
+	// wired SAFELY at run time — cursor's isolation guard refusing to enable
+	// tools because the MCP config root is not provably isolated (or auth was
+	// lost under the redirect). Authoring proceeds without agent tools rather
+	// than risk leaking the user's global MCP servers into the session.
+	noteToolsUnavailable = "agent tools disabled on %s — could not isolate the MCP config; authoring without tools"
 )
 
 var (

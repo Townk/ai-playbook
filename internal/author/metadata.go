@@ -83,8 +83,10 @@ func MetadataPrompt(doc string) string {
 // ONCE; if it still fails it returns a clear error (a later caller falls back to a
 // metadata-less front matter — this just surfaces the failure).
 func PlaybookMetadata(doc string, opts AuthorOptions) (Metadata, error) {
-	// A classification call needs no tools backend; never attach --mcp-config.
+	// A classification call needs no tools backend; never attach --mcp-config
+	// (nor redirect cursor's config root — clear both halves of the tool wiring).
 	opts.ToolArgv = nil
+	opts.ToolDir = ""
 	// Bound the call (A5a): like classify, metadata gates the finish of every
 	// authoring run and is meant to complete in a few seconds, so a stalled
 	// harness must not hang the caller forever. A caller that already set a

@@ -40,6 +40,11 @@ type AuthorOptions struct {
 	// into the owned argv AND triggers the tool-instruction fold into the system
 	// prompt. Empty → no tools backend (the plain invocation).
 	ToolArgv []string
+	// ToolDir is the per-invocation transport root returned by
+	// WriteToolTransport. It reaches the harness's Env via inv.ToolDir: cursor
+	// redirects its config ROOT there (HOME=<ToolDir>) so it reads only OUR MCP
+	// config; claude/pi ignore it. Set only on the tool paths, alongside ToolArgv.
+	ToolDir string
 	// ModelOverride, when non-empty, replaces cfg [agent].Model for THIS invocation
 	// only (the owned argv's --model). It is the seam the cheap CLASSIFY pass uses to
 	// run on the triage model without disturbing the authoring path (which keeps
@@ -175,6 +180,7 @@ func RunHarnessEvents(systemPrompt, userMessage string, opts AuthorOptions) (<-c
 	inv := Invocation{
 		Model:    model,
 		ToolArgv: opts.ToolArgv,
+		ToolDir:  opts.ToolDir,
 		Bare:     opts.Bare,
 		Thinking: thinking,
 	}

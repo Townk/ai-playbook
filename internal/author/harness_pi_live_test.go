@@ -147,8 +147,9 @@ func TestPiLive_ToolLoopSubmitPlaybook(t *testing.T) {
 	if !ok {
 		t.Fatal("pi harness not registered")
 	}
-	// SelfExe empty on purpose: pi's transport dials the socket directly.
-	argv, cleanup, err := WriteToolTransport(h, "", socket)
+	// SelfExe empty on purpose: pi's transport dials the socket directly. Bin
+	// empty: pi has no wire-time live probe (only cursor's guard uses it).
+	argv, toolDir, cleanup, err := WriteToolTransport(h, "", "", socket)
 	if err != nil {
 		t.Fatalf("WriteToolTransport: %v", err)
 	}
@@ -167,6 +168,7 @@ func TestPiLive_ToolLoopSubmitPlaybook(t *testing.T) {
 		AuthorOptions{
 			Cfg:        cfg,
 			ToolArgv:   argv,
+			ToolDir:    toolDir,
 			Structured: true,
 			NoThinking: true,
 			Timeout:    piLiveTimeout,

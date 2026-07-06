@@ -456,9 +456,12 @@ func after(ss []string, key string) string {
 // and a safe-to-call no-op remove func.
 func TestToolTransport_NilSession(t *testing.T) {
 	var s *session
-	argv, remove := s.toolTransport(config.Default())
+	argv, dir, remove := s.toolTransport(config.Default())
 	if len(argv) != 0 {
 		t.Errorf("nil session: want empty argv, got %v", argv)
+	}
+	if dir != "" {
+		t.Errorf("nil session: want empty dir, got %q", dir)
 	}
 	remove() // must not panic
 }
@@ -467,9 +470,12 @@ func TestToolTransport_NilSession(t *testing.T) {
 // the nil-selfExe guard and returns no argv.
 func TestToolTransport_NoSelfExe(t *testing.T) {
 	s := &session{selfExe: ""}
-	argv, remove := s.toolTransport(config.Default())
+	argv, dir, remove := s.toolTransport(config.Default())
 	if len(argv) != 0 {
 		t.Errorf("no selfExe: want empty argv, got %v", argv)
+	}
+	if dir != "" {
+		t.Errorf("no selfExe: want empty dir, got %q", dir)
 	}
 	remove()
 }
@@ -488,9 +494,12 @@ func TestToolTransport_LiveSession(t *testing.T) {
 		t.Skip("os.Executable unavailable; cannot test toolTransport success path")
 	}
 
-	argv, remove := sess.toolTransport(config.Default())
+	argv, dir, remove := sess.toolTransport(config.Default())
 	if len(argv) != 2 || argv[0] != "--mcp-config" {
 		t.Fatalf("toolTransport: want [--mcp-config <path>], got %v", argv)
+	}
+	if dir == "" {
+		t.Error("toolTransport: want a non-empty transport dir")
 	}
 	path := argv[1]
 	if _, err := os.Stat(path); err != nil {

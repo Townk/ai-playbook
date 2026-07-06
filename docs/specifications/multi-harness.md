@@ -97,13 +97,19 @@ Notes are stderr/status-line one-liners, once per session, tested verbatim.
   not, pi ships BASIC and the extension work is deferred — the task
   records the finding either way).
 
-### cursor (live-verified against cursor-agent 2026.07.01-777f564; FULL blocked on MCP isolation)
+### cursor (live-verified against cursor-agent 2026.07.01-777f564; FULL via a HOME-redirect MCP isolation)
 
 - Invocation: `cursor-agent -p --output-format stream-json
-  --stream-partial-output --mode ask --trust` (live-verified; rationale in
+  --stream-partial-output [--mode ask] --trust` (live-verified; rationale in
   harness_cursor.go). `--mode ask` is Cursor's read-only mode — print mode
   can otherwise use write/shell tools, an unsanctioned mutation channel for a
-  text-producing invocation (the hazard pi closes with `--no-tools`).
+  text-producing invocation (the hazard pi closes with `--no-tools`) — so it
+  rides the TOOL-LESS paths (text authoring, classify, followup, review). The
+  FULL tool path DROPS `--mode ask`: cursor-agent REFUSES MCP tool calls in ask
+  mode ("I'm in Ask mode, which restricts me to read-only actions" —
+  live-verified), so the run/ask/remember/submit_playbook tools would never
+  dispatch; default (agent) mode is required and the read-only posture is
+  steered by the tool-instruction fold instead (as claude/pi do).
   `--trust` is REQUIRED: cursor-agent refuses to start in a not-yet-trusted
   directory, and the flag is ephemeral (writes no durable `~/.cursor` state)
   and narrow (unlike `--force`/`--yolo` it does NOT lift the per-command
@@ -115,34 +121,45 @@ Notes are stderr/status-line one-liners, once per session, tested verbatim.
   auto-load unconditionally) — so BOTH paths use the documented fallback:
   the system prompt is folded into the head of the single positional user
   message, and bare == append in shape.
-- Tools: cursor STAYS BASIC (`Capabilities{Tools:false}`). The promotion
-  gate is an ISOLATED per-invocation MCP attachment; the Phase-B live probes
-  (cursor-agent 2026.07.01-777f564) proved it CANNOT be established, and a
-  leaky FULL is worse than BASIC (the safety invariant):
-  - **Isolation probe — FAILED.** With our own project `.cursor/mcp.json` in
-    a temp workspace AND the user's four global servers in
-    `~/.cursor/mcp.json` (context7, zellij, glean, atlassian), a headless
-    `-p --mode ask` run from that workspace exposed ALL FOUR global servers'
-    tools to the model (verified by asking it to enumerate its MCP tools: 31
-    atlassian Jira/Confluence tools, 85+ zellij tools incl.
-    `kill_all_sessions`/`exec_in_pane`, context7). The project config does
-    not replace or isolate — it MERGES with the global one, and there is no
-    `--strict-mcp-config` analog (`cursor-agent --help` / `mcp --help`).
-    `--workspace <temp dir>` does not change this: the global servers load
-    regardless of cwd/workspace.
-  - **Approval probe — blanket only.** Our project server showed `not loaded
-    (needs approval)` in `cursor-agent mcp list`; the only headless approval
-    is `--approve-mcps` ("Automatically approve all MCP servers"), which
-    blanket-approves the user's servers too. The alternative (`mcp
-    enable/disable <id>`) mutates the user's DURABLE approved list, not a
-    per-invocation scope.
-  - Schema-enforcement was not probed: the isolation failure alone
-    disqualifies promotion, and no attach path is safe to build on.
-  Since there is no way to attach OUR tools without the model also gaining
-  the user's globally-configured servers (an authoring-session
-  privilege-escalation into Jira/Confluence/shell tools), no tool transport
-  ships and cursor remains text-only. The shared-mcpServers-writer factoring
-  stays deferred (no consumer).
+- Tools: cursor is FULL (`Capabilities{Tools:true}`). Phase B found the naive
+  attach unsafe; Phase C (cursor-agent 2026.07.01-777f564) found the
+  STRUCTURAL fix — a per-invocation **HOME redirect** — and proved every gate
+  of the safety invariant. The transport (`ToolTransport`, harness_cursor.go)
+  writes `<dir>/.cursor/mcp.json` holding ONLY our server and sets
+  `HOME=<dir>` via `Env`, so cursor-agent resolves its global MCP config from
+  the pristine root we control. Probe record:
+  - **Mechanism (Step 0).** cursor-agent resolves the global MCP config from
+    `os.homedir()/.cursor/mcp.json`. There is NO config-root env var —
+    `CURSOR_CONFIG_DIR`, `CURSOR_HOME`, and `XDG_CONFIG_HOME` are all no-ops
+    (verified); only a `HOME` override moves the resolution root.
+  - **Isolation (Step 1) — PASSED.** With the user's four global servers in
+    the real `~/.cursor/mcp.json` (context7, zellij, glean, atlassian) and a
+    decoy server in `<dir>/.cursor/mcp.json`, `cursor-agent mcp list` under
+    `HOME=<dir>` reports ONLY the decoy — the four global servers do not load.
+    (Phase B's failure was the merge of a PROJECT `.cursor/mcp.json` with the
+    global one; the HOME redirect moves the GLOBAL root itself, so there is
+    nothing to merge with.)
+  - **Auth (Step 2) — PASSED (darwin).** A bare HOME override loses auth (the
+    macOS keychain is HOME-relative, `$HOME/Library/Keychains`). The transport
+    symlinks the REAL keychain dir into `<dir>/Library/Keychains`, restoring
+    login while the MCP config stays isolated; `cursor-agent status` under the
+    redirect then reports "Logged in". The symlink exposes nothing cursor-agent
+    lacks in BASIC (it already reads this keychain to authenticate).
+  - **Approval (Step 3) — safe.** `--approve-mcps` under the redirect approves
+    ONLY our server (nothing else is configured). The user's durable
+    `~/.cursor` state and `~/.config/cursor/cli-config.json` approvals were
+    byte-diffed before/after and did not change (only a benign `updatedAt`).
+  - **Schema enforcement (Step 4) — PASSED.** cursor-agent passes each tool's
+    `inputSchema` to the model AND relays a tool's `isError` result back,
+    driving an automatic re-ask: an even-port-only probe server rejected an
+    odd port and the model retried with an even one — the schema-enforced loop
+    submit_playbook/run/ask/remember ride on.
+  - **Runtime guard (Step 5) — mandatory.** `ToolTransport` never trusts the
+    redirect held: when a bin is known it runs `cursor-agent mcp list` +
+    `status` under `HOME=<dir>` and REFUSES to enable tools (→ BASIC, with the
+    once-per-session note) if any foreign server is visible or auth was lost.
+  The shared `mcpServers` writer (`mcpconfig.go`) is now used by BOTH FULL
+  harnesses (claude's `--mcp-config`, cursor's redirected `.cursor/mcp.json`).
 - Stream: `result` is the terminal envelope (REQUIRED — A5b); assistant
   deltas are deduped per the live-verified `--stream-partial-output`
   three-variant rule (delta = `timestamp_ms` without `model_call_id`;
@@ -158,9 +175,10 @@ Notes are stderr/status-line one-liners, once per session, tested verbatim.
   narration onto the stored body. The field is used only as the fallback
   when no delta streamed.
 - Every live assertion wrapped in a skip-unless-installed guard; the
-  fixture corpus is now raw live captures (cursor-*.ndjson). Tier: BASIC
-  shipped and now real-CLI-verified; FULL blocked on the MCP isolation gap
-  above.
+  fixture corpus is now raw live captures (cursor-*.ndjson). Tier: FULL —
+  real-CLI-verified end to end (the `TestCursorLive_ToolLoopSubmitPlaybook`
+  acceptance test drives the isolated redirect + guard + submit_playbook
+  round-trip against the installed CLI).
 
 ### claude (refactor only)
 

@@ -16,9 +16,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`submit_playbook`), the `run`/`ask` agent tools, and knowledge capture
     (`remember`) all work, carried by an embedded pi extension that dials the
     same unix-socket tools backend.
-  - **`cursor`** ships at BASIC tier today: authoring runs in Cursor's
-    read-only ask mode and falls back to the free-text markdown path;
-    promotion to FULL is tracked.
+  - **`cursor`** ships at FULL tier: structured playbook drafting
+    (`submit_playbook`), the `run`/`ask` agent tools, and knowledge capture
+    (`remember`) all work. cursor-agent has no per-invocation MCP-config flag,
+    so the transport isolates our tools by redirecting its config root
+    (`HOME=<tempdir>` holding only our server) and, on macOS, symlinks the
+    keychain in so login survives the redirect. A wire-time isolation guard
+    (`cursor-agent mcp list`/`status` under the redirect) refuses to enable
+    tools — degrading to text mode with a once-per-session note — if any of the
+    user's own MCP servers would leak in or authentication is lost.
   - **Capability tiers with visible degradation.** A BASIC harness authors
     via text mode and skips knowledge capture, and each degraded surface says
     so once per session (`structured drafting unavailable on <harness> —
@@ -29,7 +35,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - The harness seam now owns its tool transport: each harness writes its own
   per-invocation transport artifact (claude an `--mcp-config` JSON, pi an
-  embedded extension) instead of the launcher assuming Claude's MCP wiring.
+  embedded extension, cursor a redirected `.cursor/mcp.json` config root)
+  instead of the launcher assuming Claude's MCP wiring.
 - UI headers and the no-backend / AI-review-skipped notices name the
   **configured** harness (its display name and binary), not a hardcoded
   "Claude".

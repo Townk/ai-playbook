@@ -6,7 +6,6 @@
 package author
 
 import (
-	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -72,13 +71,7 @@ func (claudeHarness) ToolTransport(inv Invocation, socketPath, dir string) (file
 	if inv.SelfExe == "" {
 		return nil, nil, errors.New("claude tool transport: the ai-playbook executable path (SelfExe) is unknown")
 	}
-	doc := mcpConfig{McpServers: map[string]mcpServerSpec{
-		"ai-playbook": {
-			Command: inv.SelfExe,
-			Args:    []string{"mcp", "--socket", socketPath},
-		},
-	}}
-	b, err := json.Marshal(doc)
+	b, err := mcpServersDocument(inv.SelfExe, socketPath)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -87,19 +80,6 @@ func (claudeHarness) ToolTransport(inv Invocation, socketPath, dir string) (file
 		return nil, nil, err
 	}
 	return []string{path}, []string{"--mcp-config", path}, nil
-}
-
-// mcpConfig is the claude --mcp-config document shape: a map of server name → an
-// stdio server spec (command + args) claude launches and speaks MCP to over its
-// stdio. Our server is `ai-playbook mcp --socket <path>`, which forwards tool
-// calls to the session's tools backend.
-type mcpConfig struct {
-	McpServers map[string]mcpServerSpec `json:"mcpServers"`
-}
-
-type mcpServerSpec struct {
-	Command string   `json:"command"`
-	Args    []string `json:"args"`
 }
 
 // claudeArgs builds the OWNED claude argv for the streaming event path. The

@@ -232,12 +232,17 @@ func TestRegisterHarness_DuplicatePanics(t *testing.T) {
 // the harness's attachment argv, and a cleanup that removes everything.
 func TestWriteToolTransport(t *testing.T) {
 	h, _ := harnessFor("claude")
-	argv, cleanup, err := WriteToolTransport(h, "/path/to/ai-playbook", "/tmp/tools.sock")
+	// bin "" keeps this CLI-free (claude ignores it; cursor would skip its live
+	// guard) — the helper's contract is the dir + argv + cleanup, not a live probe.
+	argv, dir, cleanup, err := WriteToolTransport(h, "/path/to/ai-playbook", "", "/tmp/tools.sock")
 	if err != nil {
 		t.Fatalf("WriteToolTransport: %v", err)
 	}
 	if len(argv) != 2 || argv[0] != "--mcp-config" {
 		t.Fatalf("argv = %v, want [--mcp-config <path>]", argv)
+	}
+	if dir == "" {
+		t.Fatal("WriteToolTransport returned an empty transport dir")
 	}
 	if _, err := os.Stat(argv[1]); err != nil {
 		t.Fatalf("transport artifact missing: %v", err)

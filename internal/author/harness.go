@@ -72,6 +72,19 @@ type Invocation struct {
 	// harness's tool wiring back at `<SelfExe> mcp --socket <path>` (or the
 	// harness's equivalent).
 	SelfExe string
+	// Bin is the harness's resolved executable (HarnessBin), set on the
+	// ToolTransport Invocation so a transport that needs to RUN the CLI at
+	// wire-time can — cursor's isolation guard runs `<Bin> mcp list`/`status`
+	// under the redirect. Empty means "no CLI available" (the CLI-free unit
+	// contract path); a transport must then skip any live probe.
+	Bin string
+	// ToolDir is the per-invocation transport root (the WriteToolTransport temp
+	// dir). Harnesses whose tool attachment is a REDIRECTED CONFIG ROOT rather
+	// than an argv flag read it from Env — cursor returns HOME=<ToolDir> so
+	// cursor-agent resolves its MCP config from the pristine root we populated.
+	// Empty on tool-less invocations (classify/metadata/text), so Env stays
+	// clean there.
+	ToolDir string
 }
 
 // Defaults is a harness's per-harness config-default row (ADR-0012 decision 4):
@@ -203,18 +216,22 @@ func HarnessDisplayName(cfg *config.Config) string {
 
 // WriteToolTransport is the shared transport-wiring step: it creates a private
 // per-invocation dir, asks h to write its transport artifact(s) into it, and
-// returns the argv addition plus a cleanup that removes the dir. The cleanup is
-// always safe to call. Callers gate on h.Capabilities().Tools — asking a BASIC
-// harness for a transport is a caller bug and surfaces as ToolTransport's error.
-func WriteToolTransport(h Harness, selfExe, socketPath string) (argv []string, cleanup func(), err error) {
-	dir, err := os.MkdirTemp("", "ai-playbook-transport-")
+// returns the argv addition, the dir (some harnesses redirect the harness's
+// config ROOT at it via Env — cursor sets HOME=<dir>; claude/pi ignore it), and
+// a cleanup that removes the dir. The cleanup is always safe to call. bin is the
+// harness's resolved executable, handed to the transport so a wire-time
+// isolation guard can run the CLI (cursor); pass "" when no CLI is available.
+// Callers gate on h.Capabilities().Tools — asking a BASIC harness for a
+// transport is a caller bug and surfaces as ToolTransport's error.
+func WriteToolTransport(h Harness, selfExe, bin, socketPath string) (argv []string, dir string, cleanup func(), err error) {
+	dir, err = os.MkdirTemp("", "ai-playbook-transport-")
 	if err != nil {
-		return nil, func() {}, err
+		return nil, "", func() {}, err
 	}
-	_, argv, err = h.ToolTransport(Invocation{SelfExe: selfExe}, socketPath, dir)
+	_, argv, err = h.ToolTransport(Invocation{SelfExe: selfExe, Bin: bin}, socketPath, dir)
 	if err != nil {
 		os.RemoveAll(dir)
-		return nil, func() {}, err
+		return nil, "", func() {}, err
 	}
-	return argv, func() { os.RemoveAll(dir) }, nil
+	return argv, dir, func() { os.RemoveAll(dir) }, nil
 }

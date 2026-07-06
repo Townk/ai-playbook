@@ -53,12 +53,13 @@ func HarnessAgentWithMCP(cfg *config.Config, selfExe, socketPath string) Agent {
 		if err != nil || !h.Capabilities().Tools {
 			return runHarnessText(systemPrompt, userMessage, AuthorOptions{Cfg: cfg})
 		}
-		argv, cleanup, err := WriteToolTransport(h, selfExe, socketPath)
+		argv, dir, cleanup, err := WriteToolTransport(h, selfExe, HarnessBin(cfg), socketPath)
 		if err != nil {
 			// Fallback: author as before (no tools) rather than fail the session.
+			// (A cursor isolation-guard refusal lands here — degrade to BASIC.)
 			return runHarnessText(systemPrompt, userMessage, AuthorOptions{Cfg: cfg})
 		}
-		stream, rerr := runHarnessText(systemPrompt, userMessage, AuthorOptions{Cfg: cfg, ToolArgv: argv})
+		stream, rerr := runHarnessText(systemPrompt, userMessage, AuthorOptions{Cfg: cfg, ToolArgv: argv, ToolDir: dir})
 		if rerr != nil {
 			cleanup()
 			return nil, rerr

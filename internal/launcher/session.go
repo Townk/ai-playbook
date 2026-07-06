@@ -384,23 +384,28 @@ func (s *session) asker(cwd string) ui.AskFunc {
 // selfExe, an unknown harness, a BASIC harness without a tool loop, or a write
 // failure) — the caller then authors without tools. The removal func is always
 // safe to call. The launcher never writes transport artifacts itself (ADR-0012).
-func (s *session) toolTransport(cfg *config.Config) (argv []string, remove func()) {
+func (s *session) toolTransport(cfg *config.Config) (argv []string, dir string, remove func()) {
 	if s == nil || s.selfExe == "" {
-		return nil, func() {}
+		return nil, "", func() {}
 	}
 	h, err := author.ConfiguredHarness(cfg)
 	if err != nil || !h.Capabilities().Tools {
 		// Unknown harness: the invocation itself surfaces the clear error.
 		// BASIC harness: no transport exists — the degradation notes are the
 		// caller's concern (textOnlyHarness); authoring proceeds without tools.
-		return nil, func() {}
+		return nil, "", func() {}
 	}
-	a, cleanup, terr := author.WriteToolTransport(h, s.selfExe, s.socket)
+	a, td, cleanup, terr := author.WriteToolTransport(h, s.selfExe, author.HarnessBin(cfg), s.socket)
 	if terr != nil {
+		// A FULL harness whose transport could not be wired safely (cursor's
+		// isolation guard refusing when the MCP config root is not provably
+		// isolated, or auth lost under the redirect) degrades to text authoring
+		// with ONE visible note — never a silent leak of the user's servers.
 		dbg("authorPlaybook: ToolTransport failed (%v); authoring without agent tools", terr)
-		return nil, func() {}
+		degradeNoteOnce("isolation", noteToolsUnavailable, h.DisplayName())
+		return nil, "", func() {}
 	}
-	return a, cleanup
+	return a, td, cleanup
 }
 
 // authorPlaybook handles a cache MISS (stage 4b): run the capable agent to author
@@ -582,7 +587,7 @@ func buildReengageEvents(req capture.Request, sess *session) reengage.EventsFunc
 
 		// Per-invocation tool transport so the re-engaged agent reaches the live
 		// backend (nil for a nil/unwired session or a BASIC harness).
-		toolArgv, removeTransport := sess.toolTransport(cfg)
+		toolArgv, toolDir, removeTransport := sess.toolTransport(cfg)
 
 		// toolArgv non-empty ⇒ the session's run/ask/remember backend is wired, so
 		// the wrap-up prompt may carry the memory-fill instruction (the `remember`
@@ -593,6 +598,7 @@ func buildReengageEvents(req capture.Request, sess *session) reengage.EventsFunc
 		events, wait, err := author.RunHarnessEvents(sys, user, author.AuthorOptions{
 			Cfg:        cfg,
 			ToolArgv:   toolArgv,
+			ToolDir:    toolDir,
 			Structured: reengageStructured(kind) && !textOnly,
 		})
 		if err != nil {

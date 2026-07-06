@@ -6,12 +6,16 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/Townk/ai-playbook/internal/agentstream"
 	"github.com/Townk/ai-playbook/internal/config"
+	"github.com/Townk/ai-playbook/internal/draft"
 	"github.com/Townk/ai-playbook/internal/harnesstest"
+	"github.com/Townk/ai-playbook/internal/tools"
+	"github.com/Townk/ai-playbook/pkg/driver"
 )
 
 // The cursor adapter is LIVE-VERIFIED (cursor-agent 2026.07.01-777f564): these
@@ -184,5 +188,134 @@ func TestCursorLive_AuthoringShapedFinal(t *testing.T) {
 	// envelope's all-segment concatenation instead of the last segment.
 	if !strings.HasPrefix(final, "# Answer") {
 		t.Errorf("Final does not start at the document (narration glued in front?):\n%s", final)
+	}
+}
+
+// TestCursorLive_ToolLoopSubmitPlaybook is the FULL-tier acceptance test the
+// Phase C promotion rests on: the real cursor-agent CLI runs under the ISOLATED
+// config root (the HOME redirect), the wire-time isolation guard passes (only
+// OUR ai-playbook server is visible + auth survived), the model calls
+// submit_playbook, our re-exec'd `ai-playbook mcp` server forwards it over the
+// unix socket to a REAL tools backend, and the backend's OnPlaybook receives a
+// draft-clean playbook — the schema-enforced structured loop end to end on the
+// live harness. It exercises the SAME WriteToolTransport path production uses
+// (guard included), so a guard refusal fails here exactly as it degrades to
+// BASIC in the launcher. Skipped where cursor-agent is absent or the binary
+// can't build.
+func TestCursorLive_ToolLoopSubmitPlaybook(t *testing.T) {
+	harnesstest.RequireHarness(t, "cursor-agent")
+
+	// A real ai-playbook binary: cursor's transport points its MCP server at
+	// `<SelfExe> mcp --socket <socket>`, so the loop needs the actual subcommand
+	// (mirrors the claude e2e — cmd/ai-playbook is the main package).
+	selfExe := filepath.Join(t.TempDir(), "ai-playbook")
+	if out, berr := exec.Command("go", "build", "-o", selfExe, "github.com/Townk/ai-playbook/cmd/ai-playbook").CombinedOutput(); berr != nil {
+		t.Skipf("build ai-playbook: %v\n%s", berr, out)
+	}
+
+	// A real tools backend: minimal controlled zsh (no user rc), temp roots, and
+	// an OnPlaybook capture.
+	zdot := t.TempDir()
+	if err := os.WriteFile(filepath.Join(zdot, ".zshrc"), []byte("# minimal rc\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d, err := driver.Open(driver.Options{Shell: "zsh", Env: append(os.Environ(), "ZDOTDIR="+zdot)})
+	if err != nil {
+		t.Fatalf("driver.Open: %v", err)
+	}
+	t.Cleanup(func() { d.Close() })
+
+	var mu sync.Mutex
+	var got *draft.Playbook
+	// Short socket path: unix sun_path is ~104 bytes on darwin; a nested
+	// t.TempDir() path can overflow it.
+	sockDir, err := os.MkdirTemp("", "curssock")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.RemoveAll(sockDir) })
+	socket := filepath.Join(sockDir, "t.sock")
+	srv, err := tools.Serve(socket, tools.Deps{
+		Driver:      d,
+		ProjectRoot: t.TempDir(),
+		KBRoot:      t.TempDir(),
+		OnPlaybook: func(pb draft.Playbook) {
+			mu.Lock()
+			defer mu.Unlock()
+			got = &pb
+		},
+	})
+	if err != nil {
+		t.Fatalf("tools.Serve: %v", err)
+	}
+	t.Cleanup(func() { srv.Close() })
+
+	h, ok := harnessFor("cursor")
+	if !ok {
+		t.Fatal("cursor harness not registered")
+	}
+	// The production wiring path: writes the isolated .cursor/mcp.json, symlinks
+	// the keychain, and RUNS the Step-5 isolation guard (mcp list + status under
+	// HOME=<dir>). A guard failure returns an error here — the same signal the
+	// launcher turns into a BASIC degrade.
+	argv, toolDir, cleanup, err := WriteToolTransport(h, selfExe, "cursor-agent", socket)
+	if err != nil {
+		t.Fatalf("WriteToolTransport (isolation guard refused?): %v", err)
+	}
+	t.Cleanup(cleanup)
+
+	cfg := config.Default()
+	cfg.Agent.Harness = "cursor"
+	workDir := t.TempDir()
+	events, wait, err := RunHarnessEvents(
+		"You are a playbook authoring assistant. Deliver the playbook by calling the submit_playbook tool.",
+		"Submit a playbook via the submit_playbook tool with: title 'Say hello', "+
+			"one section headed 'Steps' whose content is a single item "+
+			"{kind:\"code\", lang:\"bash\", code:\"echo hello\"}, and meta "+
+			"{description:\"Print hello\", project_bound:false}. "+
+			"submit_playbook is your only action.",
+		AuthorOptions{
+			Cfg:        cfg,
+			ToolArgv:   argv,
+			ToolDir:    toolDir,
+			Structured: true,
+			NoThinking: true,
+			Timeout:    cursorLiveTimeout,
+			Command: func(ctx context.Context, bin string, args []string) *exec.Cmd {
+				cmd := exec.CommandContext(ctx, bin, args...)
+				cmd.Dir = workDir
+				return cmd
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("RunHarnessEvents: %v", err)
+	}
+	sawSubmitActivity := false
+	for e := range events {
+		if e.Kind == agentstream.ToolActivity && strings.Contains(e.Text, "submit_playbook") {
+			sawSubmitActivity = true
+		}
+	}
+	if err := wait(); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if got == nil {
+		t.Fatal("the backend never received a submit_playbook (the tool loop did not close)")
+	}
+	if !sawSubmitActivity {
+		t.Error("no submit_playbook ToolActivity event streamed")
+	}
+	if got.Title != "Say hello" {
+		t.Errorf("playbook title = %q, want 'Say hello'", got.Title)
+	}
+	if len(got.Sections) == 0 {
+		t.Fatal("playbook has no sections")
+	}
+	if got.Meta.Description == "" {
+		t.Error("playbook meta.description is empty")
 	}
 }

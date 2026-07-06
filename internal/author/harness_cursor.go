@@ -11,7 +11,17 @@
 // (harness_cursor_live_test.go) re-verify wherever the CLI exists.
 package author
 
-import "errors"
+import (
+	"context"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"time"
+)
 
 // cursorBin is the default executable for the cursor harness. The install
 // script (https://cursor.com/install, 2026.07.01) symlinks the CLI as BOTH
@@ -45,50 +55,61 @@ func init() {
 	})
 }
 
-// cursorHarness is the Cursor {owned argv + stream adapter + process env}
-// contract. Cursor ships BASIC (Capabilities{Tools:false}) — documented on
-// ToolTransport below: it speaks MCP, but only via file discovery, which
-// cannot be attached per-invocation in isolation.
+// cursorHarness is the Cursor {owned argv + stream adapter + process env + tool
+// transport} contract. Cursor is a FULL harness (Phase C of the promotion
+// brief): its tool loop passes each MCP tool's inputSchema to the model (which
+// self-conforms) AND relays a tool's error result back for a re-ask — the
+// schema-enforced loop submit_playbook/run/ask/remember ride on — and its MCP
+// config root is ISOLATED per-invocation via a HOME redirect (see ToolTransport).
 type cursorHarness struct{}
 
 func (cursorHarness) AdapterName() string { return "cursor" }
 
 func (cursorHarness) DisplayName() string { return "Cursor" }
 
-// Capabilities: BASIC — and LIVE-PROVEN to stay BASIC (Phase B of the
-// promotion brief, cursor-agent 2026.07.01-777f564). The gate is an ISOLATED
-// per-invocation MCP attachment; it cannot be established:
+// Capabilities: FULL — the promotion the brief's Phase C reopened and proved
+// (cursor-agent 2026.07.01-777f564). Phase B found the naive attach unsafe
+// (project `.cursor/mcp.json` MERGES with the user's global `~/.cursor/mcp.json`;
+// no --strict-mcp-config analog); Phase C found the STRUCTURAL fix: cursor-agent
+// resolves its global MCP config from os.homedir()/.cursor/mcp.json and honors a
+// HOME override (there is NO CURSOR_CONFIG_DIR/CURSOR_HOME/XDG_CONFIG_HOME config
+// root var — the other candidates are no-ops). Redirecting HOME at a pristine
+// per-invocation root that holds ONLY our server isolates the config cleanly:
 //
-//  1. No isolation. cursor-agent discovers MCP servers from config files —
-//     project `.cursor/mcp.json` MERGED WITH global `~/.cursor/mcp.json` — and
-//     there is no --strict-mcp-config analog (verified: `cursor-agent --help`,
-//     `cursor-agent mcp --help`). A headless `-p --mode ask` run from a temp
-//     workspace holding our OWN .cursor/mcp.json still exposed EVERY server in
-//     the user's global config to the model (verified by asking it to list its
-//     MCP tools: the user's atlassian/zellij/context7 servers — Jira/
-//     Confluence writes, shell-class zellij tools — all present). Attaching
-//     our tools necessarily grants the model the user's global servers too: an
-//     authoring-session privilege escalation. --workspace <dir> does not
-//     change it (global servers load regardless of cwd/workspace).
-//  2. Blanket approval only. Our own server lists as "not loaded (needs
-//     approval)"; the sole headless approval is --approve-mcps ("approve all
-//     MCP servers"), which blanket-approves the user's servers too. `mcp
-//     enable/disable` mutates the user's DURABLE approved list, not a
-//     per-invocation scope.
+//  1. Isolation (deterministic, `cursor-agent mcp list` oracle). Under
+//     HOME=<root> the model sees ONLY our server — the user's global
+//     atlassian/zellij/glean/context7 do not load. ToolTransport verifies this
+//     at wire time (the Step-5 guard) before enabling tools.
+//  2. Auth survives (darwin). The macOS keychain is HOME-relative
+//     ($HOME/Library/Keychains), so the transport symlinks the REAL keychain
+//     dir into the redirect root (no access cursor-agent lacks in BASIC). The
+//     guard's `status` probe confirms auth held; if not, it degrades to BASIC.
+//  3. Approval is safe once isolated. --approve-mcps under the redirect can
+//     approve ONLY our server (nothing else is configured); it never touches
+//     the user's durable ~/.cursor state (diff-verified before/after).
+//  4. Schema enforcement. cursor-agent passes inputSchema to the model and
+//     relays a tool's isError result back, driving an automatic re-ask
+//     (live-verified: an even-port-only server rejected an odd port and the
+//     model retried with an even one) — enough for structured submit_playbook.
 //
-// A FULL tier that leaks or blanket-approves the user's global servers into
-// our headless authoring run is a security regression, worse than BASIC (the
-// brief's safety invariant), so no tool transport ships. Schema enforcement
-// was not probed — the isolation failure alone disqualifies promotion and
-// leaves no safe attach path to build on. See docs/specifications/
-// multi-harness.md (cursor section) for the full probe record.
-func (cursorHarness) Capabilities() Capabilities { return Capabilities{Tools: false} }
+// See docs/specifications/multi-harness.md (cursor section) for the full Phase C
+// probe record.
+func (cursorHarness) Capabilities() Capabilities { return Capabilities{Tools: true} }
 
-// Env: cursor-agent needs no extra process env — model selection is a flag,
-// no thinking control exists (see the defaults row), and authentication comes
-// from the user's own environment/login (CURSOR_API_KEY or `cursor-agent
-// login`) untouched.
-func (cursorHarness) Env(inv Invocation) []string { return nil }
+// Env redirects HOME at the transport root on the TOOL path so cursor-agent
+// resolves its MCP config from the pristine `<ToolDir>/.cursor/mcp.json` we
+// populated (holding ONLY our server) instead of the user's global
+// `~/.cursor/mcp.json` — the ISOLATION mechanism (Phase C). ToolDir is set only
+// when tools are wired (WriteToolTransport → RunHarnessEvents); the tool-less
+// paths (authoring text, classify, metadata) leave it empty and cursor-agent
+// runs against the user's own HOME untouched. Authentication survives the
+// redirect via the keychain symlink ToolTransport plants under the root.
+func (cursorHarness) Env(inv Invocation) []string {
+	if inv.ToolDir != "" {
+		return []string{"HOME=" + inv.ToolDir}
+	}
+	return nil
+}
 
 // Argv builds the OWNED cursor-agent argv for the streaming event path. The
 // invocation flags and the stream adapter are a single matched contract; the
@@ -147,32 +168,164 @@ func (cursorHarness) Argv(systemPrompt, userMessage string, inv Invocation) []st
 		"-p",
 		"--output-format", "stream-json",
 		"--stream-partial-output",
-		"--mode", "ask",
-		"--trust",
 	}
+	// Mode is a function of the tier of THIS invocation:
+	//
+	//   - Tool-less (BASIC text authoring, classify, followup, review): --mode
+	//     ask keeps cursor-agent READ-ONLY, closing its built-in write/shell
+	//     mutation channel for a turn whose only job is to produce text.
+	//   - Tools wired (FULL): --mode ask is DROPPED. cursor-agent REFUSES MCP
+	//     tool calls in ask mode ("I'm in Ask mode, which restricts me to
+	//     read-only actions" — live-verified), so our run/ask/remember/
+	//     submit_playbook tools would never dispatch. Default (agent) mode is
+	//     required; the model is steered to READ-ONLY diagnosis via `run` and
+	//     to emit the playbook as its deliverable by the tool-instruction fold,
+	//     the same contract the claude/pi FULL paths run under.
+	if len(inv.ToolArgv) == 0 {
+		args = append(args, "--mode", "ask")
+	}
+	args = append(args, "--trust")
 	if inv.Model != "" {
 		args = append(args, "--model", inv.Model)
 	}
-	// The Invocation contract: a non-empty ToolArgv is spliced into the owned
-	// argv. Cursor is BASIC today so the launcher never produces one (gated on
-	// Capabilities().Tools); the splice is the promotion seam.
+	// The tool transport's attach argv (cursor: ["--approve-mcps"], so our sole
+	// isolated server loads headlessly without an interactive approval prompt).
 	args = append(args, inv.ToolArgv...)
 	args = append(args, cursorFoldPrompt(systemPrompt, userMessage))
 	return args
 }
 
-// ToolTransport: none — cursor ships BASIC. The rationale (file-discovery-only
-// MCP attachment is isolation-unsafe; the schema-enforced tool loop is
-// unproven) lives on Capabilities above. Callers gate on Capabilities().Tools,
-// so reaching this is a caller bug and fails loudly. The shared-mcpServers-
-// document factoring the spec sketches for a FULL cursor is deferred to the
-// promotion — no speculative shared writer ships without a consumer.
+// cursorMCPListTimeout bounds each wire-time isolation-guard probe (`mcp list`,
+// `status`). Both are local, model-free CLI calls that returned in ~1-4s during
+// Phase C; a short bound keeps a stalled CLI from hanging authoring (a stall
+// degrades to BASIC, never blocks).
+const cursorMCPListTimeout = 20 * time.Second
+
+// ToolTransport wires cursor's ISOLATED tools by REDIRECTING its config root.
+// cursor-agent has no per-invocation MCP-config flag (no --mcp-config /
+// --strict-mcp-config analog); it resolves the global config from
+// os.homedir()/.cursor/mcp.json and honors a HOME override (Phase C). So the
+// transport:
+//
+//  1. writes `<dir>/.cursor/mcp.json` holding ONLY our server
+//     (`<SelfExe> mcp --socket <socketPath>`, the same document claude emits);
+//  2. on darwin, symlinks the REAL macOS keychain dir into `<dir>/Library` so
+//     authentication survives the HOME redirect (the keychain is HOME-relative;
+//     this exposes nothing cursor-agent lacks in BASIC — it already reads this
+//     keychain to authenticate);
+//  3. runs the Step-5 isolation guard when a bin is known (production + the live
+//     test); and
+//  4. returns ["--approve-mcps"] as the attach argv — under the isolated root
+//     that approves ONLY our server.
+//
+// Env(inv) returns HOME=<dir> for the matching invocation, so cursor-agent reads
+// the config we just wrote. WriteToolTransport removes `dir` when the stream
+// closes.
 func (cursorHarness) ToolTransport(inv Invocation, socketPath, dir string) (files []string, argv []string, err error) {
-	return nil, nil, errors.New(
-		"cursor tool transport: unavailable — cursor-agent merges project .cursor/mcp.json " +
-			"with the user's global ~/.cursor/mcp.json (no --strict-mcp-config analog), so " +
-			"attaching our tools would leak the user's global MCP servers into the authoring " +
-			"session; cursor runs BASIC (see Capabilities)")
+	if inv.SelfExe == "" {
+		return nil, nil, errors.New("cursor tool transport: the ai-playbook executable path (SelfExe) is unknown")
+	}
+	if socketPath == "" {
+		return nil, nil, errors.New("cursor tool transport: the tools backend socket path is unknown")
+	}
+
+	cursorDir := filepath.Join(dir, ".cursor")
+	if err := os.MkdirAll(cursorDir, 0o700); err != nil {
+		return nil, nil, err
+	}
+	doc, err := mcpServersDocument(inv.SelfExe, socketPath)
+	if err != nil {
+		return nil, nil, err
+	}
+	cfgPath := filepath.Join(cursorDir, "mcp.json")
+	if err := os.WriteFile(cfgPath, doc, 0o600); err != nil {
+		return nil, nil, err
+	}
+	files = append(files, cfgPath)
+
+	// Auth survival under the redirect. cursor-agent's darwin credential store
+	// is the macOS keychain, resolved via $HOME/Library/Keychains — so a bare
+	// HOME override loses auth. Symlinking the REAL keychain dir into the root
+	// restores it while the MCP config stays isolated (only .cursor/mcp.json is
+	// ours; nothing else about the user's HOME is exposed). On non-darwin the
+	// credential store differs and is not redirect-validated here; the guard's
+	// `status` probe catches a broken auth and degrades to BASIC.
+	if runtime.GOOS == "darwin" {
+		if realHome, herr := os.UserHomeDir(); herr == nil && realHome != dir {
+			libDir := filepath.Join(dir, "Library")
+			if err := os.MkdirAll(libDir, 0o700); err != nil {
+				return nil, nil, err
+			}
+			// Best-effort: a missing keychain surfaces as the guard's auth
+			// failure (→ BASIC), not a transport-write error.
+			_ = os.Symlink(filepath.Join(realHome, "Library", "Keychains"), filepath.Join(libDir, "Keychains"))
+		}
+	}
+
+	// Step-5 runtime guard. By construction `dir` is a fresh temp root holding
+	// exactly our one-server config — but never trust the redirect held. When a
+	// bin is known (production sets inv.Bin via WriteToolTransport; the CLI-free
+	// unit contract passes none), verify with cursor-agent's own oracle that
+	// under HOME=<dir> ONLY our server is visible and auth survived. Any foreign
+	// server or lost auth fails the transport → the caller degrades to BASIC.
+	if inv.Bin != "" {
+		if verr := cursorVerifyIsolation(inv.Bin, dir); verr != nil {
+			return nil, nil, verr
+		}
+	}
+
+	return files, []string{"--approve-mcps"}, nil
+}
+
+// cursorVerifyIsolation is the Step-5 guard: under HOME=home it confirms
+// cursor-agent sees ONLY our server (no leaked global MCP server) and is still
+// authenticated. Both probes are deterministic — `mcp list` reports configured
+// servers and `status` reports login state, neither makes a model call. A
+// non-nil error means "do NOT enable tools" and the caller degrades to BASIC.
+func cursorVerifyIsolation(bin, home string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), cursorMCPListTimeout)
+	defer cancel()
+	env := append(os.Environ(), "HOME="+home)
+
+	list := exec.CommandContext(ctx, bin, "mcp", "list")
+	list.Env = env
+	out, lerr := list.CombinedOutput()
+	if lerr != nil {
+		return fmt.Errorf("cursor tool transport: isolation probe (%s mcp list) failed: %w (output: %s)", bin, lerr, strings.TrimSpace(string(out)))
+	}
+	for _, name := range parseCursorMCPList(string(out)) {
+		if name != mcpServerName {
+			return fmt.Errorf("cursor tool transport: refusing to enable tools — foreign MCP server %q is visible under the isolated config root (only %q may be present); staying BASIC", name, mcpServerName)
+		}
+	}
+
+	status := exec.CommandContext(ctx, bin, "status")
+	status.Env = env
+	sout, _ := status.CombinedOutput()
+	if !strings.Contains(strings.ToLower(string(sout)), "logged in") {
+		return fmt.Errorf("cursor tool transport: authentication did not survive the HOME redirect (%s status: %s); staying BASIC", bin, strings.TrimSpace(string(sout)))
+	}
+	return nil
+}
+
+// parseCursorMCPList extracts the server NAMES from `cursor-agent mcp list`
+// output (one "servername: status" line per configured server; the status may
+// itself contain colons, e.g. "Error: Connection failed"). Blank/garbage lines
+// are ignored — the guard only cares about the SET of configured server names.
+func parseCursorMCPList(out string) []string {
+	var names []string
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		i := strings.IndexByte(line, ':')
+		if i <= 0 {
+			continue
+		}
+		names = append(names, strings.TrimSpace(line[:i]))
+	}
+	return names
 }
 
 // cursorFoldPrompt is the system-prompt fold (the spec's documented fallback

@@ -229,10 +229,11 @@ var createStreamFn = structuredStream
 // stream text (see structuredBody). A nil session authors without tools
 // (toolTransport is nil-safe).
 func structuredStream(req capture.Request, sess *session, cfg *config.Config) (createStream, error) {
-	toolArgv, removeTransport := sess.toolTransport(cfg)
+	toolArgv, toolDir, removeTransport := sess.toolTransport(cfg)
 	events, closeFn, err := author.AuthorEvents(req, author.AuthorOptions{
 		Cfg:        cfg,
 		ToolArgv:   toolArgv,
+		ToolDir:    toolDir,
 		Structured: true, // author via submit_playbook (DATA), not {id=…} markdown
 	})
 	if err != nil {

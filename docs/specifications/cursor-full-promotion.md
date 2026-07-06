@@ -1,6 +1,25 @@
 # Cursor harness: BASIC→FULL promotion brief (run on a machine with `cursor-agent`)
 
-_Status: actionable brief, 2026-07-06. Cursor shipped BASIC in v0.13
+_Status: COMPLETE, 2026-07-06. Cursor is now FULL. Phase A verified the
+adapter against the real CLI; Phase B found the WORKSPACE-config route unsafe
+(project `.cursor/mcp.json` merges with the global one); Phase C found the
+STRUCTURAL fix and proved every gate. **Phase C outcome (cursor-agent
+2026.07.01-777f564):** the config-root redirect is a `HOME` override (Step 0 —
+`CURSOR_CONFIG_DIR`/`CURSOR_HOME`/`XDG_CONFIG_HOME` are no-ops); under
+`HOME=<pristine dir>` `cursor-agent mcp list` shows ONLY our server (Step 1,
+isolation PASS); auth survives by symlinking the macOS keychain into the
+redirect root (Step 2, PASS on darwin); `--approve-mcps` approves only our
+server and does not mutate the user's durable `~/.cursor` state (Step 3, PASS,
+diff-verified); the tool loop passes `inputSchema` to the model and relays a
+tool's error result for an auto-retry (Step 4, PASS — even-port probe); and a
+mandatory wire-time guard (`mcp list`+`status` under the redirect) degrades to
+BASIC if isolation or auth ever fails (Step 5). Decision: **full FULL.** The
+implementation is the `HOME`-redirect `ToolTransport` + guard in
+`internal/author/harness_cursor.go`, `Capabilities{Tools:true}`, and the
+`TestCursorLive_ToolLoopSubmitPlaybook` acceptance test. The historical brief
+below is retained as the probe record._
+
+_Original brief (2026-07-06): Cursor shipped BASIC in v0.13
 (ADR-0012, `docs/specifications/multi-harness.md`) because its adapter was
 built fixture-first from documentation on a machine WITHOUT the CLI, and
 because an isolation-unsafe MCP transport is worse than none. This brief is
