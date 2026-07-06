@@ -55,31 +55,33 @@ func (cursorHarness) AdapterName() string { return "cursor" }
 
 func (cursorHarness) DisplayName() string { return "Cursor" }
 
-// Capabilities: BASIC. Two independent blockers, both documentation-derived
-// (fixture-first — the live tests are the promotion path):
+// Capabilities: BASIC — and LIVE-PROVEN to stay BASIC (Phase B of the
+// promotion brief, cursor-agent 2026.07.01-777f564). The gate is an ISOLATED
+// per-invocation MCP attachment; it cannot be established:
 //
-//  1. No isolated transport: cursor-agent discovers MCP servers ONLY from
-//     config files — project `.cursor/mcp.json` or global `~/.cursor/mcp.json`
-//     (cursor.com/docs/context/mcp); no per-invocation config flag exists
-//     (cursor.com/docs/cli/reference/parameters). Writing into the user's
-//     project `.cursor/mcp.json` is isolation-unsafe: it mutates (or
-//     overwrites) a file the user may own, races concurrent ai-playbook
-//     sessions in the same repo, leaks the per-session socket path into
-//     durable project state, and — with no --strict-mcp-config analog — the
-//     user's global servers would still load beside ours. An isolation-unsafe
-//     transport is worse than none, so no transport ships.
-//  2. Unproven tool loop: no Cursor documentation states that cursor-agent
-//     enforces MCP tool input schemas and re-asks the model on validation
-//     failure — the FULL-tier contract submit_playbook rides on.
+//  1. No isolation. cursor-agent discovers MCP servers from config files —
+//     project `.cursor/mcp.json` MERGED WITH global `~/.cursor/mcp.json` — and
+//     there is no --strict-mcp-config analog (verified: `cursor-agent --help`,
+//     `cursor-agent mcp --help`). A headless `-p --mode ask` run from a temp
+//     workspace holding our OWN .cursor/mcp.json still exposed EVERY server in
+//     the user's global config to the model (verified by asking it to list its
+//     MCP tools: the user's atlassian/zellij/context7 servers — Jira/
+//     Confluence writes, shell-class zellij tools — all present). Attaching
+//     our tools necessarily grants the model the user's global servers too: an
+//     authoring-session privilege escalation. --workspace <dir> does not
+//     change it (global servers load regardless of cwd/workspace).
+//  2. Blanket approval only. Our own server lists as "not loaded (needs
+//     approval)"; the sole headless approval is --approve-mcps ("approve all
+//     MCP servers"), which blanket-approves the user's servers too. `mcp
+//     enable/disable` mutates the user's DURABLE approved list, not a
+//     per-invocation scope.
 //
-// Promotion gate: an ISOLATED per-invocation MCP attachment plus a live
-// schema-enforcement proof, verified by the RequireHarness-gated live tests
-// on a machine that has the CLI. The strongest attachment candidate is
-// `--workspace <temp dir>` holding OUR OWN .cursor/mcp.json (a root we
-// control — no user-file mutation, no cross-session races); even then the
-// global ~/.cursor/mcp.json servers still load, and headless MCP approval is
-// undocumented (--approve-mcps would blanket-approve the user's servers too)
-// — live probes required (cursor.com/docs/cli/mcp).
+// A FULL tier that leaks or blanket-approves the user's global servers into
+// our headless authoring run is a security regression, worse than BASIC (the
+// brief's safety invariant), so no tool transport ships. Schema enforcement
+// was not probed — the isolation failure alone disqualifies promotion and
+// leaves no safe attach path to build on. See docs/specifications/
+// multi-harness.md (cursor section) for the full probe record.
 func (cursorHarness) Capabilities() Capabilities { return Capabilities{Tools: false} }
 
 // Env: cursor-agent needs no extra process env — model selection is a flag,
@@ -167,9 +169,10 @@ func (cursorHarness) Argv(systemPrompt, userMessage string, inv Invocation) []st
 // promotion — no speculative shared writer ships without a consumer.
 func (cursorHarness) ToolTransport(inv Invocation, socketPath, dir string) (files []string, argv []string, err error) {
 	return nil, nil, errors.New(
-		"cursor tool transport: unavailable — cursor-agent attaches MCP servers only via " +
-			".cursor/mcp.json file discovery (no per-invocation config flag), which cannot be " +
-			"written in isolation; cursor runs BASIC")
+		"cursor tool transport: unavailable — cursor-agent merges project .cursor/mcp.json " +
+			"with the user's global ~/.cursor/mcp.json (no --strict-mcp-config analog), so " +
+			"attaching our tools would leak the user's global MCP servers into the authoring " +
+			"session; cursor runs BASIC (see Capabilities)")
 }
 
 // cursorFoldPrompt is the system-prompt fold (the spec's documented fallback

@@ -143,10 +143,64 @@ outcome — the adapter is now real-CLI-verified even if it stays BASIC.
 
 ## Deliverables checklist
 
-- [ ] Phase A: live tests run (not skip) and pass; fixtures are real
+- [x] Phase A: live tests run (not skip) and pass; fixtures are real
       captures; H3 open questions answered with evidence; committed.
-- [ ] Phase B: the three gate probes documented with real output.
-- [ ] Either FULL shipped (transport + caps + tools + live test + docs +
-      CHANGELOG + backlog line removed) OR BASIC retained with the precise
-      blocker recorded (spec + brief + narrowed backlog line).
-- [ ] `make check` green; commits gpg-signed, no trailers.
+- [x] Phase B: the gate probes documented with real output (below).
+- [x] BASIC retained with the precise blocker recorded (spec + brief +
+      narrowed backlog line). FULL not shipped — isolation is unattainable.
+- [x] `make check` green for the cursor work (build/vet/lint/fmt + full
+      suite; only the pi live tests fail, on missing pi provider auth —
+      environmental, unrelated to cursor); commits gpg-signed, no trailers.
+
+---
+
+## OUTCOME (2026-07-06, run on the work-laptop; cursor-agent 2026.07.01-777f564)
+
+**Phase A — DONE (committed `fix(agentstream): verify the cursor adapter
+against the real CLI`).** The doc-derived adapter was wrong in several
+load-bearing ways; all corrected and re-verified live:
+
+- `--trust` is REQUIRED (cursor-agent refuses to start in a not-yet-trusted
+  dir; the flag is ephemeral — `~/.cursor` state byte-identical before/after —
+  and does not lift command gates, unlike `--force`/`--yolo`). The old "NO
+  --trust" rationale was wrong.
+- `tool_call` `started` carries the tool-named wrapper BESIDE sibling metadata
+  (`toolCallId`/`startedAtMs`/`hookAdditionalContexts`); the old
+  `map[string]cursorToolCallBody` aborted the line on the first real tool use.
+- `thinking` events DO stream (top-level `text`); now surfaced as Reasoning.
+- `result` is confirmed the no-separator concat of all assistant segments →
+  the last-segment Final policy is correct.
+- `--mode ask` does NOT clamp authoring (multi-paragraph markdown returns
+  intact; headless reads work).
+- The system-prompt fold intermittently trips the model's prompt-injection
+  refusal on canned "always reply exactly X" probes → live probe made benign.
+- Fixtures replaced with raw live captures.
+
+**Phase B — STAY BASIC (isolation is unattainable).** Decisive probe:
+
+- **Isolation FAILED.** Temp workspace with our own project `.cursor/mcp.json`
+  + the user's four global servers in `~/.cursor/mcp.json`. A headless
+  `cursor-agent -p --output-format stream-json --stream-partial-output --mode
+  ask --trust` run from that workspace, asked to enumerate its MCP tools,
+  returned the user's global servers in full: 31 `atlassian` tools (Jira/
+  Confluence create/edit/delete), 85+ `zellij` tools
+  (`kill_all_sessions`/`exec_in_pane`/`run_command`), `context7`. Project
+  config MERGES with global; there is NO `--strict-mcp-config` analog
+  (`cursor-agent --help`, `cursor-agent mcp --help`). `--workspace` does not
+  change it.
+- **Approval is blanket-only.** Our own server showed `not loaded (needs
+  approval)` in `cursor-agent mcp list`; the sole headless approval flag is
+  `--approve-mcps` ("Automatically approve all MCP servers"), which
+  blanket-approves the user's servers too. `mcp enable/disable` mutates the
+  user's durable approved list, not a per-invocation scope.
+- **Schema enforcement not probed** — the isolation failure alone disqualifies
+  promotion (a leaky FULL is worse than BASIC), and no attach path is safe to
+  build on.
+
+Conclusion: there is no way to attach OUR `run`/`ask`/`remember`/
+`submit_playbook` tools to a cursor-agent authoring session WITHOUT the model
+also gaining the user's globally-configured MCP servers — an authoring-session
+privilege escalation. Per the safety invariant, cursor STAYS BASIC. The
+narrowed remaining gap: cursor-agent needs a `--strict-mcp-config`-equivalent
+(load only a specified MCP config, ignore global) AND a scoped headless
+approval. Revisit if a future cursor-agent adds either.

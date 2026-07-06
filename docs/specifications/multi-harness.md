@@ -97,48 +97,70 @@ Notes are stderr/status-line one-liners, once per session, tested verbatim.
   not, pi ships BASIC and the extension work is deferred — the task
   records the finding either way).
 
-### cursor (fixture-first; live tests gated on the CLI)
+### cursor (live-verified against cursor-agent 2026.07.01-777f564; FULL blocked on MCP isolation)
 
 - Invocation: `cursor-agent -p --output-format stream-json
-  --stream-partial-output --mode ask` (documentation-derived; sources cited
-  in harness_cursor.go). `--mode ask` is Cursor's documented read-only mode
-  — print mode can otherwise use write/shell tools, an unsanctioned mutation
-  channel for a text-producing invocation (the hazard pi closes with
-  `--no-tools`). The CLI installs as `agent`/`cursor-agent` (never `cursor`),
-  so the defaults table grew a per-harness `Bin` column; `cursor-agent` (the
-  every-vintage symlink) is the default.
+  --stream-partial-output --mode ask --trust` (live-verified; rationale in
+  harness_cursor.go). `--mode ask` is Cursor's read-only mode — print mode
+  can otherwise use write/shell tools, an unsanctioned mutation channel for a
+  text-producing invocation (the hazard pi closes with `--no-tools`).
+  `--trust` is REQUIRED: cursor-agent refuses to start in a not-yet-trusted
+  directory, and the flag is ephemeral (writes no durable `~/.cursor` state)
+  and narrow (unlike `--force`/`--yolo` it does NOT lift the per-command
+  permission gates). The CLI installs as `agent`/`cursor-agent` (never
+  `cursor`), so the defaults table grew a per-harness `Bin` column;
+  `cursor-agent` (the every-vintage symlink) is the default.
 - System prompt: cursor-agent has NEITHER replace nor append flags, and no
   context-suppression flags either (.cursor/rules, AGENTS.md, CLAUDE.md
   auto-load unconditionally) — so BOTH paths use the documented fallback:
   the system prompt is folded into the head of the single positional user
   message, and bare == append in shape.
-- Tools: cursor speaks MCP but attaches servers ONLY by file discovery
-  (project `.cursor/mcp.json` / global `~/.cursor/mcp.json`; no
-  per-invocation config flag). Writing into the user's project config is
-  isolation-unsafe (mutates/overwrites a user-owned file, races concurrent
-  sessions, and the global servers still load — no `--strict-mcp-config`
-  analog), and no documentation establishes a schema-enforcing re-ask tool
-  loop. Cursor therefore SHIPPED BASIC (`Capabilities{Tools:false}`); the
-  shared-mcpServers-writer factoring is deferred to the promotion, whose
-  gate is an ISOLATED per-invocation MCP attachment plus a live
-  schema-enforcement proof (the RequireHarness-gated live tests). The
-  strongest attachment candidate is `--workspace <temp dir>` holding our
-  own `.cursor/mcp.json` — that neutralizes the user-file-mutation and
-  concurrent-session objections, but the global servers still load and
-  headless MCP approval is undocumented (`--approve-mcps` would
-  blanket-approve the user's servers too), so live probes decide.
+- Tools: cursor STAYS BASIC (`Capabilities{Tools:false}`). The promotion
+  gate is an ISOLATED per-invocation MCP attachment; the Phase-B live probes
+  (cursor-agent 2026.07.01-777f564) proved it CANNOT be established, and a
+  leaky FULL is worse than BASIC (the safety invariant):
+  - **Isolation probe — FAILED.** With our own project `.cursor/mcp.json` in
+    a temp workspace AND the user's four global servers in
+    `~/.cursor/mcp.json` (context7, zellij, glean, atlassian), a headless
+    `-p --mode ask` run from that workspace exposed ALL FOUR global servers'
+    tools to the model (verified by asking it to enumerate its MCP tools: 31
+    atlassian Jira/Confluence tools, 85+ zellij tools incl.
+    `kill_all_sessions`/`exec_in_pane`, context7). The project config does
+    not replace or isolate — it MERGES with the global one, and there is no
+    `--strict-mcp-config` analog (`cursor-agent --help` / `mcp --help`).
+    `--workspace <temp dir>` does not change this: the global servers load
+    regardless of cwd/workspace.
+  - **Approval probe — blanket only.** Our project server showed `not loaded
+    (needs approval)` in `cursor-agent mcp list`; the only headless approval
+    is `--approve-mcps` ("Automatically approve all MCP servers"), which
+    blanket-approves the user's servers too. The alternative (`mcp
+    enable/disable <id>`) mutates the user's DURABLE approved list, not a
+    per-invocation scope.
+  - Schema-enforcement was not probed: the isolation failure alone
+    disqualifies promotion, and no attach path is safe to build on.
+  Since there is no way to attach OUR tools without the model also gaining
+  the user's globally-configured servers (an authoring-session
+  privilege-escalation into Jira/Confluence/shell tools), no tool transport
+  ships and cursor remains text-only. The shared-mcpServers-writer factoring
+  stays deferred (no consumer).
 - Stream: `result` is the terminal envelope (REQUIRED — A5b); assistant
-  deltas are deduped per the documented `--stream-partial-output`
-  three-variant rule; thinking events are suppressed in print mode, so
-  cursor never emits Reasoning. The Final TEXT is the LAST assistant
+  deltas are deduped per the live-verified `--stream-partial-output`
+  three-variant rule (delta = `timestamp_ms` without `model_call_id`;
+  buffered pre-tool flush = both; end-of-turn flush = neither). Thinking
+  events DO stream (subtype "delta" carries top-level reasoning text —
+  contrary to the docs) and surface as Reasoning, like pi. `tool_call`
+  `started` carries the tool-named wrapper (`readToolCall`) beside sibling
+  metadata (`toolCallId`/`startedAtMs`/`hookAdditionalContexts`), from which
+  the adapter picks the wrapper. The Final TEXT is the LAST assistant
   segment (accumulated from the deltas; segments are the text runs between
-  tool calls), NOT the envelope's `result` field — the documented example
-  shows that field is the no-separator concatenation of every segment in
-  the turn, which would glue narration onto the stored body. The field is
-  used only as the fallback when no delta streamed.
+  tool calls), NOT the envelope's `result` field — confirmed live to be the
+  no-separator concatenation of every segment in the turn, which would glue
+  narration onto the stored body. The field is used only as the fallback
+  when no delta streamed.
 - Every live assertion wrapped in a skip-unless-installed guard; the
-  fixture corpus (doc-derived from the published stream-json examples) is
-  the review artifact. Tier: BASIC shipped; FULL is the promotion target.
+  fixture corpus is now raw live captures (cursor-*.ndjson). Tier: BASIC
+  shipped and now real-CLI-verified; FULL blocked on the MCP isolation gap
+  above.
 
 ### claude (refactor only)
 
