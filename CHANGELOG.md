@@ -43,6 +43,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - The cached and edit pills on the badges row now align with the subtitle
   (indented to the title text column) instead of the pane's left margin.
 
+### Fixed
+
+- **The `cursor` harness now works headlessly against the real CLI.** Verified
+  against `cursor-agent` 2026.07.01-777f564, correcting doc-derived assumptions
+  that broke real runs: the owned invocation passes `--trust` (cursor-agent
+  otherwise refuses to start in a not-yet-trusted directory — the flag is
+  ephemeral, writes no durable state, and does not lift the command-permission
+  gates); the stream parser handles the real `tool_call` shape (the tool-named
+  wrapper sits beside `toolCallId`/`startedAtMs`/`hookAdditionalContexts`
+  metadata, which previously aborted parsing on the first tool use); and
+  reasoning text — which cursor-agent does stream, contrary to its docs —
+  now surfaces as live activity, like `pi`.
+
 ## [0.12.3] - 2026-07-06
 
 ### Added

@@ -7,14 +7,11 @@ import (
 	"testing"
 )
 
-// readCursorFixture loads a cursor-agent stream fixture from testdata. Unlike
-// the pi fixtures (raw live captures), the cursor-*.ndjson files are
-// DOC-DERIVED: they are constructed from the verbatim event examples in
-// Cursor's stream-json reference (cursor.com/docs/cli/reference/output-format)
-// with plausible values filled in, because the cursor CLI was not available on
-// the authoring machine (the multi-harness spec's fixture-first rule). The
-// RequireHarness-gated live tests in internal/author re-verify against the
-// real CLI wherever it exists.
+// readCursorFixture loads a cursor-agent stream fixture from testdata. Like the
+// pi fixtures, the cursor-*.ndjson files are RAW LIVE CAPTURES — recorded from
+// cursor-agent 2026.07.01-777f564 (`-p --output-format stream-json
+// --stream-partial-output --mode ask --trust`). The RequireHarness-gated live
+// tests in internal/author re-verify against the real CLI wherever it exists.
 func readCursorFixture(t *testing.T, name string) string {
 	t.Helper()
 	b, err := os.ReadFile(filepath.Join("testdata", name))
@@ -37,20 +34,19 @@ func parseCursor(t *testing.T, input string) ([]Event, error) {
 	return events, err
 }
 
-// TestCursorAdapter_HappyFixture replays the doc-derived happy stream: the
-// --stream-partial-output deltas (timestamp_ms, no model_call_id) become
+// TestCursorAdapter_HappyFixture replays the real trivial capture: the
+// --stream-partial-output delta (timestamp_ms, no model_call_id) becomes
 // TextDelta, the end-of-turn duplicate flush (neither field) is skipped, and
-// the result envelope yields the authoritative Final. No Reasoning ever —
-// thinking events are suppressed in print mode
-// (cursor.com/docs/cli/reference/output-format).
+// the result envelope yields the authoritative Final. This trivial turn does
+// no thinking, so no Reasoning (thinking coverage is
+// TestCursorAdapter_ThinkingBecomesReasoning).
 func TestCursorAdapter_HappyFixture(t *testing.T) {
 	events, err := parseCursor(t, readCursorFixture(t, "cursor-happy.ndjson"))
 	if err != nil {
 		t.Fatalf("Parse: %v", err)
 	}
 	want := []Event{
-		{Kind: TextDelta, Text: "o"},
-		{Kind: TextDelta, Text: "k"},
+		{Kind: TextDelta, Text: "ok"},
 		{Kind: Final, Text: "ok"},
 	}
 	if len(events) != len(want) {
@@ -63,15 +59,15 @@ func TestCursorAdapter_HappyFixture(t *testing.T) {
 	}
 }
 
-// TestCursorAdapter_ToolUseFixture replays the doc-derived tool-use stream:
-// a faithful MULTI-SEGMENT turn modeled on the reference page's own example
-// (three assistant segments split by two tool calls, and a `result` field
-// that is the documented NO-SEPARATOR concatenation of all of them): one
-// ToolActivity per tool_call started (the readToolCall wrapper → bare "read"
-// + its args; completed is ignored), the buffered pre-tool flushes
-// (model_call_id) and the end-of-turn flush are NOT re-emitted as text, and
-// the Final is the LAST segment — the final answer — NEVER the envelope's
-// glued concatenation (the Final policy on cursorAdapter).
+// TestCursorAdapter_ToolUseFixture replays the real MULTI-SEGMENT capture (two
+// assistant segments split by one read tool call, and a `result` field that is
+// the live NO-SEPARATOR concatenation of both): one ToolActivity for the
+// tool_call started (the readToolCall wrapper → bare "read", picked out from
+// beside its sibling metadata keys; completed is ignored), the buffered
+// pre-tool flush (timestamp_ms + model_call_id) and the end-of-turn flush
+// (neither field) are NOT re-emitted as text, and the Final is the LAST
+// segment — the final answer — NEVER the envelope's glued concatenation (the
+// Final policy on cursorAdapter).
 func TestCursorAdapter_ToolUseFixture(t *testing.T) {
 	events, err := parseCursor(t, readCursorFixture(t, "cursor-tool-use.ndjson"))
 	if err != nil {
@@ -82,8 +78,6 @@ func TestCursorAdapter_ToolUseFixture(t *testing.T) {
 	var final string
 	for _, e := range events {
 		switch e.Kind {
-		case Reasoning:
-			t.Errorf("cursor print mode emitted Reasoning %q (thinking is suppressed)", e.Text)
 		case ToolActivity:
 			tools = append(tools, e.Text)
 		case TextDelta:
@@ -92,22 +86,21 @@ func TestCursorAdapter_ToolUseFixture(t *testing.T) {
 			final = e.Text
 		}
 	}
-	wantTools := []string{`read: {"path":"README.md"}`, `read: {"path":"CHANGELOG.md"}`}
-	if len(tools) != len(wantTools) || tools[0] != wantTools[0] || tools[1] != wantTools[1] {
-		t.Errorf("ToolActivity = %v, want %v", tools, wantTools)
+	// Exactly one tool activity, the read wrapper resolved to the bare name
+	// despite the sibling toolCallId/startedAtMs/hookAdditionalContexts keys.
+	if len(tools) != 1 || !strings.HasPrefix(tools[0], "read: ") || !strings.Contains(tools[0], "notes.txt") {
+		t.Errorf("ToolActivity = %v, want a single read: …notes.txt", tools)
 	}
-	// The duplicates (buffered pre-tool flushes + end-of-turn flush) must not
+	// The duplicates (buffered pre-tool flush + end-of-turn flush) must not
 	// double the streamed text: the accumulated deltas equal exactly the glued
-	// all-segment concatenation the doc shows in the `result` field.
-	glued := "I'll read the README.md file" +
-		"Based on the README, I'll check the changelog" +
-		"Done! The README covers install and usage; the changelog is current."
+	// all-segment concatenation the CLI reports in the `result` field.
+	glued := "STEP ONE done\n\nI'll read the file now." + "STEP TWO done XYZZY-4217"
 	if got := text.String(); got != glued {
 		t.Errorf("accumulated TextDelta = %q, want %q (duplicate flushes must be skipped)", got, glued)
 	}
 	// The Final policy: the LAST segment (the answer), not the envelope's glued
 	// concatenation — that concat would corrupt the stored body downstream.
-	if want := "Done! The README covers install and usage; the changelog is current."; final != want {
+	if want := "STEP TWO done XYZZY-4217"; final != want {
 		t.Errorf("Final = %q, want the last assistant segment %q", final, want)
 	}
 	if final == glued {
@@ -115,6 +108,33 @@ func TestCursorAdapter_ToolUseFixture(t *testing.T) {
 	}
 	if events[len(events)-1].Kind != Final {
 		t.Errorf("last event = %+v, want the Final (result is the terminal envelope)", events[len(events)-1])
+	}
+}
+
+// TestCursorAdapter_ThinkingBecomesReasoning pins the reasoning mapping against
+// real thinking lines (captured verbatim from cursor-agent): a `thinking`
+// subtype "delta" carries reasoning text at the top-level `text` field and
+// becomes a Reasoning event; the text-less "completed" event drops via the
+// empty-activity rule. (Contradicts the doc claim that thinking is suppressed
+// in print mode.)
+func TestCursorAdapter_ThinkingBecomesReasoning(t *testing.T) {
+	input := `{"type":"thinking","subtype":"delta","text":"I","session_id":"s","timestamp_ms":1}` + "\n" +
+		`{"type":"thinking","subtype":"delta","text":"'m going to read the file.","session_id":"s","timestamp_ms":2}` + "\n" +
+		`{"type":"thinking","subtype":"completed","session_id":"s","timestamp_ms":3}` + "\n" +
+		`{"type":"result","subtype":"success","is_error":false,"result":"done","session_id":"s"}` + "\n"
+	events, err := parseCursor(t, input)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	var reasoning []string
+	for _, e := range events {
+		if e.Kind == Reasoning {
+			reasoning = append(reasoning, e.Text)
+		}
+	}
+	want := []string{"I", "'m going to read the file."}
+	if len(reasoning) != len(want) || reasoning[0] != want[0] || reasoning[1] != want[1] {
+		t.Errorf("Reasoning = %v, want %v (the text-less completed event must drop)", reasoning, want)
 	}
 }
 
@@ -296,9 +316,11 @@ func TestCursorAdapter_BlankAndUnknownLinesTolerated(t *testing.T) {
 
 // TestCursorAdapter_ToolNameDerivation pins cursorToolName's wrapper-key rule:
 // the ToolCall suffix is trimmed to the bare name (shellToolCall → shell, with
-// a command arg the shared toolSummary surfaces), a suffix-less key passes
-// through bare, and an empty tool_call object yields an empty summary that the
-// empty-activity rule then drops entirely.
+// a command arg the shared toolSummary surfaces), the wrapper is picked out
+// from beside the real sibling metadata keys (toolCallId/startedAtMs/
+// hookAdditionalContexts), a suffix-less key passes through bare, and an empty
+// tool_call object yields an empty summary that the empty-activity rule then
+// drops entirely.
 func TestCursorAdapter_ToolNameDerivation(t *testing.T) {
 	const terminal = `{"type":"result","subtype":"success","is_error":false,"result":"","session_id":"s"}` + "\n"
 	cases := map[string]struct {
@@ -308,6 +330,10 @@ func TestCursorAdapter_ToolNameDerivation(t *testing.T) {
 		"suffix trimmed + command surfaced": {
 			line: `{"type":"tool_call","subtype":"started","call_id":"c1","tool_call":{"shellToolCall":{"args":{"command":"echo hi"}}},"session_id":"s"}`,
 			want: []string{"shell: echo hi"},
+		},
+		"wrapper picked out from real sibling metadata keys": {
+			line: `{"type":"tool_call","subtype":"started","call_id":"c5","tool_call":{"readToolCall":{"args":{"path":"f"}},"hookAdditionalContexts":[],"toolCallId":"c5","startedAtMs":"1"},"session_id":"s"}`,
+			want: []string{`read: {"path":"f"}`},
 		},
 		"suffix-less key passes through": {
 			line: `{"type":"tool_call","subtype":"started","call_id":"c2","tool_call":{"grep":{"args":{"pattern":"x"}}},"session_id":"s"}`,

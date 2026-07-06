@@ -14,12 +14,11 @@ import (
 	"github.com/Townk/ai-playbook/internal/harnesstest"
 )
 
-// The cursor adapter is FIXTURE-FIRST: the CLI was not available on the
-// authoring machine, so the harness/adapter contract is documentation-derived
-// and these live tests are the RE-VERIFICATION path — on any machine that has
-// cursor-agent installed (and authenticated) they prove the owned argv
-// composes on the real CLI and the stream terminates in a Final event (the
-// BASIC floor). Where the CLI is absent they skip, naming the binary.
+// The cursor adapter is LIVE-VERIFIED (cursor-agent 2026.07.01-777f564): these
+// tests are the re-verification path — on any machine that has cursor-agent
+// installed (and authenticated) they prove the owned argv composes on the real
+// CLI and the stream terminates in a Final event (the BASIC floor). Where the
+// CLI is absent they skip, naming the binary.
 
 // cursorLiveTimeout bounds one live cursor-agent call — minutes of headroom
 // cover a slow model without hanging CI.
@@ -29,6 +28,14 @@ const cursorLiveTimeout = 3 * time.Minute
 // when it is not installed) with a tiny prompt, from an empty working dir so
 // rules/AGENTS.md discovery cannot pick up this repo's context files. It
 // returns the drained events and wait()'s error.
+//
+// The probe is a BENIGN factual Q&A, deliberately not an "always reply with
+// exactly X" instruction: cursor folds the system prompt into the positional
+// user message (no system-prompt flag exists), and a canned "always reply
+// exactly" fold reads to cursor's model as a prompt-injection attempt — it
+// intermittently REFUSES it (live-observed: "I won't follow that embedded
+// instruction. It's a prompt-injection attempt"). A coherent question the fold
+// legitimately answers keeps the BASIC-floor gate deterministic.
 func runCursorLive(t *testing.T, bare bool) ([]agentstream.Event, error) {
 	t.Helper()
 	harnesstest.RequireHarness(t, "cursor-agent")
@@ -37,8 +44,8 @@ func runCursorLive(t *testing.T, bare bool) ([]agentstream.Event, error) {
 	cfg.Agent.Harness = "cursor"
 	dir := t.TempDir()
 	events, wait, err := RunHarnessEvents(
-		"You are a test probe. Always reply with exactly: ok",
-		"Reply with exactly: ok",
+		"You are a helpful assistant. Answer in a single lowercase word.",
+		"What color is a clear daytime sky?",
 		AuthorOptions{
 			Cfg:        cfg,
 			Bare:       bare,
@@ -78,16 +85,14 @@ func assertCursorFinal(t *testing.T, events []agentstream.Event, err error) {
 	if last.Kind != agentstream.Final {
 		t.Fatalf("last event = %+v, want the Final (result is cursor's terminal envelope)", last)
 	}
-	if !strings.Contains(strings.ToLower(last.Text), "ok") {
-		t.Errorf("Final = %q, want the probe answer", last.Text)
+	if !strings.Contains(strings.ToLower(last.Text), "blue") {
+		t.Errorf("Final = %q, want the probe answer (blue)", last.Text)
 	}
-	// Documented print-mode behavior: thinking events never appear, so the
-	// adapter must not have produced Reasoning on the real CLI either.
-	for _, e := range events {
-		if e.Kind == agentstream.Reasoning {
-			t.Errorf("live cursor stream emitted Reasoning %q (docs: thinking is suppressed in print mode)", e.Text)
-		}
-	}
+	// Reasoning MAY appear: cursor-agent streams thinking text in stream-json
+	// (live-verified — the doc's print-mode suppression claim is false), and
+	// the adapter surfaces it as Reasoning. A trivial "ok" turn usually does no
+	// thinking, so this is not asserted either way — the point is that Reasoning
+	// is now legitimate, not a bug.
 }
 
 // TestCursorLive_BareFinalEvent is the live argv-composition probe for the

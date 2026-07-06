@@ -19,13 +19,11 @@ func init() {
 
 // cursorAdapter parses cursor-agent's `-p --output-format stream-json
 // --stream-partial-output` output: one JSON object per line (NDJSON). The
-// event schema is DOCUMENTATION-DERIVED (fixture-first — the cursor CLI was
-// not available on the authoring machine): every envelope below is taken from
-// Cursor's published stream-json reference,
-// cursor.com/docs/cli/reference/output-format, whose verbatim examples seeded
-// the testdata/cursor-*.ndjson fixtures. The RequireHarness-gated live tests
-// re-verify the mapping wherever the CLI exists. It normalizes that wire
-// format into the shared Event model:
+// event schema is VERIFIED against the real CLI (cursor-agent
+// 2026.07.01-777f564): the testdata/cursor-*.ndjson fixtures are raw live
+// captures, and the RequireHarness-gated live tests re-verify the mapping
+// wherever the CLI exists. It normalizes that wire format into the shared
+// Event model:
 //
 //   - assistant → TextDelta, under the documented --stream-partial-output
 //     dedup rule. The CLI emits THREE kinds of assistant events, told apart by
@@ -38,13 +36,21 @@ func init() {
 //     always sets --stream-partial-output; a no-partial stream would emit only
 //     no-field assistant events (all skipped) and still yield its Final from
 //     the result envelope.
-//   - tool_call subtype "started" → ToolActivity. The tool_call object wraps
-//     the call in a single tool-named key (the documented example:
-//     `readToolCall` with an `args` object); the adapter derives the bare tool
-//     name by trimming the ToolCall suffix and renders it with the shared
-//     toolSummary. subtype "completed" repeats the args plus a result and is
-//     ignored — started is the single complete-args moment, one activity line
-//     per call (the same rule as pi).
+//   - thinking subtype "delta" → Reasoning. cursor-agent DOES stream reasoning
+//     text in stream-json under --stream-partial-output (live-verified — the
+//     doc claim that thinking is suppressed in print mode is FALSE for this
+//     wire); the reasoning text is a top-level `text` field. Surfaced as live
+//     activity like pi (which also gets real reasoning text); the text-less
+//     "completed" event drops via the empty-activity rule. Not every turn
+//     thinks (a trivial answer emits none).
+//   - tool_call subtype "started" → ToolActivity. The tool_call object carries
+//     the tool-named wrapper key (`readToolCall` with an `args` object) BESIDE
+//     sibling metadata keys (toolCallId, startedAtMs, hookAdditionalContexts);
+//     cursorToolName picks the wrapper (the entry decoding to a body with an
+//     `args` object), derives the bare tool name by trimming the ToolCall
+//     suffix, and renders it with the shared toolSummary. subtype "completed"
+//     repeats the args plus a result and is ignored — started is the single
+//     complete-args moment, one activity line per call (the same rule as pi).
 //   - result → Final (the documented terminal envelope and the stream's
 //     success marker). The Final TEXT is NOT taken from the envelope's
 //     `result` field: the documented example shows that field is the
@@ -64,10 +70,10 @@ func init() {
 //     gracefully (the docs promise backward-compatible field additions and
 //     tell consumers to ignore unknown fields).
 //
-// Reasoning is NEVER emitted: "thinking events are suppressed in print mode
-// and will not appear in any output format"
-// (cursor.com/docs/cli/reference/output-format) — with cursor the live
-// activity line shows tool activity only, like claude --print.
+// Reasoning IS emitted (from thinking deltas): unlike claude --print (which
+// redacts thinking to an empty signature stream) and contrary to the cursor
+// docs, cursor-agent surfaces real reasoning text in stream-json — so the
+// cursor live activity line shows reasoning AND tool activity, like pi.
 //
 // Strictness (A5b, the same discipline as the claude and pi adapters): the
 // wire format is NDJSON and a successful run ALWAYS terminates with a result
@@ -95,8 +101,17 @@ type cursorLine struct {
 	TimestampMs json.RawMessage `json:"timestamp_ms,omitempty"`
 	ModelCallID json.RawMessage `json:"model_call_id,omitempty"`
 
-	// type == "tool_call": a single tool-named wrapper key → its body.
-	ToolCall map[string]cursorToolCallBody `json:"tool_call,omitempty"`
+	// type == "thinking": the reasoning text is a TOP-LEVEL field (subtype
+	// "delta" carries text; "completed" is text-less) — captured live, see the
+	// reasoning note on cursorAdapter.
+	Text string `json:"text,omitempty"`
+
+	// type == "tool_call": the tool-named wrapper key sits BESIDE sibling
+	// metadata keys (toolCallId, startedAtMs, hookAdditionalContexts) whose
+	// values are not tool bodies, so this is a raw map decoded per-entry by
+	// cursorToolName — NOT map[string]cursorToolCallBody, which would fail to
+	// unmarshal the array/string siblings and abort the whole line.
+	ToolCall map[string]json.RawMessage `json:"tool_call,omitempty"`
 
 	// type == "result"
 	Result string `json:"result,omitempty"`
@@ -194,6 +209,14 @@ func (p *cursorParser) parseLine(line string, emit func(Event)) (sawResult bool,
 				p.seg.WriteString(b.Text)
 			}
 		}
+	case "thinking":
+		// cursor-agent DOES stream reasoning text in stream-json under
+		// --stream-partial-output (verified live — the doc's "thinking is
+		// suppressed in print mode" claim is false for this wire): subtype
+		// "delta" carries reasoning text, "completed" is text-less. Surface it
+		// as live Reasoning activity, like pi; emitActivity drops the empty
+		// "completed" event.
+		emitActivity(emit, Reasoning, l.Text)
 	case "tool_call":
 		if l.Subtype != "started" {
 			return false, nil
@@ -235,25 +258,31 @@ func (p *cursorParser) finalText(resultField string) string {
 	return resultField
 }
 
-// cursorToolName extracts the bare tool name + args from a tool_call object's
-// tool-named wrapper key (the documented shape: {"readToolCall": {"args":
-// {...}}} → "read"). The docs show exactly one wrapper key; if a future
-// envelope carried several, the first in sorted order keeps the choice
-// deterministic. A wrapper key without the ToolCall suffix passes through
-// bare.
-func cursorToolName(tc map[string]cursorToolCallBody) (name string, args json.RawMessage) {
+// cursorToolName extracts the bare tool name + args from a tool_call object.
+// The live wire wraps the call in a tool-named key ({"readToolCall": {"args":
+// {...}}} → "read") that sits BESIDE sibling metadata keys (toolCallId,
+// startedAtMs, hookAdditionalContexts) whose values are strings/arrays, not
+// tool bodies. The wrapper is the entry whose value decodes to a body carrying
+// an `args` object; the siblings fail that decode (or lack args) and are
+// skipped. Sorted iteration keeps the choice deterministic if a future
+// envelope ever carried several wrappers. A wrapper key without the ToolCall
+// suffix passes through bare.
+func cursorToolName(tc map[string]json.RawMessage) (name string, args json.RawMessage) {
 	keys := make([]string, 0, len(tc))
 	for k := range tc {
 		keys = append(keys, k)
 	}
-	if len(keys) == 0 {
-		return "", nil
-	}
 	sort.Strings(keys)
-	key := keys[0]
-	name = strings.TrimSuffix(key, "ToolCall")
-	if name == "" {
-		name = key
+	for _, key := range keys {
+		var body cursorToolCallBody
+		if json.Unmarshal(tc[key], &body) != nil || body.Args == nil {
+			continue
+		}
+		name = strings.TrimSuffix(key, "ToolCall")
+		if name == "" {
+			name = key
+		}
+		return name, body.Args
 	}
-	return name, tc[key].Args
+	return "", nil
 }

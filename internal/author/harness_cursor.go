@@ -3,11 +3,12 @@
 // cursor-agent argv and the system-prompt fold. Everything cursor-specific in
 // package author lives HERE (the ADR-0012 seam).
 //
-// FIXTURE-FIRST (the multi-harness spec's cursor rule): the cursor CLI was not
-// available on the authoring machine, so every behavioral claim below cites
-// Cursor's published CLI documentation (short URLs inline) instead of a live
-// probe, and the RequireHarness-gated live tests (harness_cursor_live_test.go)
-// are the re-verification path that runs wherever the CLI exists.
+// LIVE-VERIFIED against cursor-agent 2026.07.01-777f564: the owned argv and the
+// stream mapping below were checked against the real CLI (Phase A of the cursor
+// promotion brief), correcting several doc-derived assumptions — see the
+// --trust rationale on Argv and the thinking/tool_call notes on the adapter
+// (agentstream/cursor.go). The RequireHarness-gated live tests
+// (harness_cursor_live_test.go) re-verify wherever the CLI exists.
 package author
 
 import "errors"
@@ -32,10 +33,11 @@ func init() {
 		// user's plan/catalog, turning every classify into a hard failure. A
 		// cheaper triage model is one [agent] triage_model line away.
 		TriageModel: "",
-		// Thinking "": cursor-agent documents no reasoning-control flag or env
-		// var, and thinking events are suppressed in print mode anyway
-		// (cursor.com/docs/cli/reference/output-format), so there is no lever
-		// for this preference to drive — the harness ignores it.
+		// Thinking "": cursor-agent has no reasoning-control flag or env var
+		// (verified: `cursor-agent --help` lists none), so there is no lever for
+		// this preference to drive — the harness ignores it. (Thinking events DO
+		// stream in stream-json and the adapter surfaces them as Reasoning; there
+		// is simply no way to tune the level.)
 		Thinking: "",
 		// Bin: the registry name ("cursor") is NOT the binary name — see
 		// cursorBin.
@@ -91,9 +93,9 @@ func (cursorHarness) Env(inv Invocation) []string { return nil }
 // user only selects value prefs (model, bin) via config [agent]:
 //
 //	cursor-agent -p --output-format stream-json --stream-partial-output
-//	             --mode ask [--model <model>] [toolArgv...] <foldedPrompt>
+//	             --mode ask --trust [--model <model>] [toolArgv...] <foldedPrompt>
 //
-// Flag rationale (all documentation-derived; the URLs are the evidence):
+// Flag rationale (live-verified against cursor-agent 2026.07.01-777f564):
 //
 //   - -p --output-format stream-json: the documented headless NDJSON shape
 //     (cursor.com/docs/cli/reference/output-format). The prompt is positional,
@@ -112,13 +114,23 @@ func (cursorHarness) Env(inv Invocation) []string { return nil }
 //     produce text (the same hazard pi's --no-tools closes). Every cursor path
 //     is text-producing (BASIC ⇒ text authoring, classify, followup, review),
 //     so read-only is correct for all of them; a FULL promotion revisits this.
+//   - --trust: REQUIRED for a headless run in a directory the user has not
+//     already trusted interactively. Without it cursor-agent refuses to start
+//     ("Workspace Trust Required") and the stream never opens — the BASIC floor
+//     cannot be met (live-verified: a fresh dir fails, adding --trust succeeds).
+//     Crucially --trust is EPHEMERAL and NARROW: it writes NOTHING durable
+//     (verified — the ~/.cursor state files are byte-identical before and after
+//     a --trust run) and, unlike --force/--yolo, does NOT lift the per-command
+//     permission gates; it only clears the one-time workspace-trust prompt for
+//     this invocation. The flag is documented as headless-only ("only works
+//     with --print/headless mode", `cursor-agent --help`).
 //   - NO session flags: --resume/--continue are never emitted (the one-shot
 //     contract). cursor-agent has no documented flag to suppress its local
 //     chat persistence (each print run still records a session id); no state
 //     is ever REUSED, which is what the contract requires.
-//   - NO --force/--yolo (would lift the permission gates) and NO --trust
-//     (would durably mark the user's workspace trusted — a state mutation on
-//     the user's machine).
+//   - NO --force/--yolo: those lift the per-command permission gates (run
+//     everything), a mutation channel --mode ask + --trust deliberately do not
+//     open — read-only tools only, no state mutation.
 //
 // System-prompt handling: cursor-agent has NEITHER a replace nor an append
 // system-prompt flag (none documented in cursor.com/docs/cli/reference/
@@ -134,6 +146,7 @@ func (cursorHarness) Argv(systemPrompt, userMessage string, inv Invocation) []st
 		"--output-format", "stream-json",
 		"--stream-partial-output",
 		"--mode", "ask",
+		"--trust",
 	}
 	if inv.Model != "" {
 		args = append(args, "--model", inv.Model)

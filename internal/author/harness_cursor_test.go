@@ -16,13 +16,12 @@ const cursorFolded = "<system_instructions>\nSYS\n</system_instructions>\n\nUSER
 
 // TestCursorHarness_ArgvCharacterization pins the EXACT ordered cursor-agent
 // argv for every invocation shape RunHarnessEvents produces. The flag set is
-// DOCUMENTATION-DERIVED (fixture-first; the URLs are cited on the Argv
-// rationale in harness_cursor.go): -p --output-format stream-json
-// --stream-partial-output --mode ask on every path, the prompt positional and
-// LAST. Bare and append are deliberately the SAME shape — cursor-agent
-// documents neither replace/append system-prompt flags nor any
-// context-suppression flags, so there is nothing to strip and nothing to
-// replace; the RequireHarness-gated live tests re-verify the composition
+// LIVE-VERIFIED (see the Argv rationale in harness_cursor.go): -p
+// --output-format stream-json --stream-partial-output --mode ask --trust on
+// every path, the prompt positional and LAST. Bare and append are deliberately
+// the SAME shape — cursor-agent has neither replace/append system-prompt flags
+// nor any context-suppression flags, so there is nothing to strip and nothing
+// to replace; the RequireHarness-gated live tests re-verify the composition
 // wherever the CLI exists.
 func TestCursorHarness_ArgvCharacterization(t *testing.T) {
 	h := cursorHarness{}
@@ -31,6 +30,7 @@ func TestCursorHarness_ArgvCharacterization(t *testing.T) {
 		"--output-format", "stream-json",
 		"--stream-partial-output",
 		"--mode", "ask",
+		"--trust",
 	}
 	app := func(rest ...string) []string { return append(append([]string{}, common...), rest...) }
 
