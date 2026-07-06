@@ -13,6 +13,8 @@ package author
 
 import (
 	"context"
+	_ "embed"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -22,6 +24,14 @@ import (
 	"strings"
 	"time"
 )
+
+// cursorPreToolHook is the embedded preToolUse hook the tool transport plants
+// under the redirected config root: it permits ONLY our MCP tools and denies
+// every cursor builtin (write/shell/read/…). See cursor_pretool_hook.sh and the
+// builtin-allowlist note on ToolTransport.
+//
+//go:embed cursor_pretool_hook.sh
+var cursorPreToolHook string
 
 // cursorBin is the default executable for the cursor harness. The install
 // script (https://cursor.com/install, 2026.07.01) symlinks the CLI as BOTH
@@ -91,9 +101,22 @@ func (cursorHarness) DisplayName() string { return "Cursor" }
 //     relays a tool's isError result back, driving an automatic re-ask
 //     (live-verified: an even-port-only server rejected an odd port and the
 //     model retried with an even one) — enough for structured submit_playbook.
+//  5. Builtin-tool containment (the decisive safety gate). FULL authoring must
+//     run in AGENT mode — cursor-agent REFUSES MCP tool calls in --mode ask/plan
+//     (live-verified), so the read-only modes cannot host our tools — and agent
+//     mode ALSO exposes cursor's builtin write/shell tools, which EXECUTE under
+//     -p with no per-command gate and no cmd.Dir (they would mutate the user's
+//     real project). cursor-agent has NO builtin-off flag and does NOT honor
+//     permissions.deny headlessly (both live-verified). The containment is a
+//     preToolUse HOOK planted under the redirected config root
+//     (`<dir>/.cursor/hooks.json` → cursor_pretool_hook.sh, failClosed:true)
+//     that permits ONLY "MCP:<tool>" and DENIES every builtin — the cursor
+//     analog of pi's --no-builtin-tools. Live-verified: with the hook a builtin
+//     write/shell prompt is rejected (result_keys=["rejected"]) while the MCP
+//     call still succeeds; without it both a file write and a `touch` ran.
 //
 // See docs/specifications/multi-harness.md (cursor section) for the full Phase C
-// probe record.
+// probe record and the builtin-containment evidence.
 func (cursorHarness) Capabilities() Capabilities { return Capabilities{Tools: true} }
 
 // Env redirects HOME at the transport root on the TOOL path so cursor-agent
@@ -178,9 +201,12 @@ func (cursorHarness) Argv(systemPrompt, userMessage string, inv Invocation) []st
 	//     tool calls in ask mode ("I'm in Ask mode, which restricts me to
 	//     read-only actions" — live-verified), so our run/ask/remember/
 	//     submit_playbook tools would never dispatch. Default (agent) mode is
-	//     required; the model is steered to READ-ONLY diagnosis via `run` and
-	//     to emit the playbook as its deliverable by the tool-instruction fold,
-	//     the same contract the claude/pi FULL paths run under.
+	//     required. Agent mode also exposes cursor's builtin write/shell tools,
+	//     which would execute headlessly against the user's real project — so
+	//     the tool transport plants a preToolUse allowlist hook that DENIES
+	//     every builtin and permits only our MCP tools (see ToolTransport's
+	//     containment note). The read-only diagnosis contract the claude/pi FULL
+	//     paths run under is thus ENFORCED here, not merely prompted.
 	if len(inv.ToolArgv) == 0 {
 		args = append(args, "--mode", "ask")
 	}
@@ -209,13 +235,18 @@ const cursorMCPListTimeout = 20 * time.Second
 //
 //  1. writes `<dir>/.cursor/mcp.json` holding ONLY our server
 //     (`<SelfExe> mcp --socket <socketPath>`, the same document claude emits);
-//  2. on darwin, symlinks the REAL macOS keychain dir into `<dir>/Library` so
+//  2. plants the builtin-tool ALLOWLIST hook — `<dir>/.cursor/hooks.json` +
+//     the embedded cursor_pretool_hook.sh — so that under agent mode (which
+//     FULL requires; ask/plan refuse MCP tools) cursor's builtin write/shell
+//     tools are DENIED and only our MCP tools run (the decisive safety gate —
+//     see Capabilities point 5);
+//  3. on darwin, symlinks the REAL macOS keychain dir into `<dir>/Library` so
 //     authentication survives the HOME redirect (the keychain is HOME-relative;
 //     this exposes nothing cursor-agent lacks in BASIC — it already reads this
 //     keychain to authenticate);
-//  3. runs the Step-5 isolation guard when a bin is known (production + the live
+//  4. runs the Step-5 isolation guard when a bin is known (production + the live
 //     test); and
-//  4. returns ["--approve-mcps"] as the attach argv — under the isolated root
+//  5. returns ["--approve-mcps"] as the attach argv — under the isolated root
 //     that approves ONLY our server.
 //
 // Env(inv) returns HOME=<dir> for the matching invocation, so cursor-agent reads
@@ -242,6 +273,17 @@ func (cursorHarness) ToolTransport(inv Invocation, socketPath, dir string) (file
 		return nil, nil, err
 	}
 	files = append(files, cfgPath)
+
+	// The builtin-tool allowlist hook (the decisive safety gate — see
+	// Capabilities point 5). Under agent mode cursor's builtin write/shell tools
+	// execute headlessly with no per-command gate; this preToolUse hook denies
+	// every non-MCP tool, leaving EXACTLY our run/ask/remember/submit_playbook —
+	// the cursor analog of pi's --no-builtin-tools.
+	hookFiles, herr := writeCursorToolHook(cursorDir)
+	if herr != nil {
+		return nil, nil, herr
+	}
+	files = append(files, hookFiles...)
 
 	// Auth survival under the redirect. cursor-agent's darwin credential store
 	// is the macOS keychain, resolved via $HOME/Library/Keychains — so a bare
@@ -277,6 +319,53 @@ func (cursorHarness) ToolTransport(inv Invocation, socketPath, dir string) (file
 	return files, []string{"--approve-mcps"}, nil
 }
 
+// cursorHooksDoc is the `.cursor/hooks.json` shape (cursor.com/docs/hooks): a
+// version tag and a map of hook event → hook definitions. We only ever write a
+// single preToolUse hook.
+type cursorHooksDoc struct {
+	Version int                     `json:"version"`
+	Hooks   map[string][]cursorHook `json:"hooks"`
+}
+
+// cursorHook is one hook definition. FailClosed makes a hook crash/timeout/
+// invalid-output BLOCK the action instead of cursor's default fail-open — the
+// safety-critical setting for our deny hook (cursor.com/docs/hooks).
+type cursorHook struct {
+	Command    string `json:"command"`
+	FailClosed bool   `json:"failClosed"`
+}
+
+// writeCursorToolHook plants the builtin-tool allowlist: the embedded
+// preToolUse script (cursor_pretool_hook.sh) under <cursorDir>/hooks/ and a
+// hooks.json that wires it with failClosed:true. It is invoked as `sh <path>`
+// (the live-verified command shape) so no exec bit or shebang portability is
+// required. Returns the written paths (both live under the transport root, so
+// WriteToolTransport's RemoveAll(dir) cleans them up).
+func writeCursorToolHook(cursorDir string) ([]string, error) {
+	hooksDir := filepath.Join(cursorDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0o700); err != nil {
+		return nil, err
+	}
+	scriptPath := filepath.Join(hooksDir, "pretool-allowlist.sh")
+	if err := os.WriteFile(scriptPath, []byte(cursorPreToolHook), 0o700); err != nil {
+		return nil, err
+	}
+	doc, err := json.Marshal(cursorHooksDoc{
+		Version: 1,
+		Hooks: map[string][]cursorHook{
+			"preToolUse": {{Command: "sh " + scriptPath, FailClosed: true}},
+		},
+	})
+	if err != nil {
+		return nil, err
+	}
+	hooksPath := filepath.Join(cursorDir, "hooks.json")
+	if err := os.WriteFile(hooksPath, doc, 0o600); err != nil {
+		return nil, err
+	}
+	return []string{scriptPath, hooksPath}, nil
+}
+
 // cursorVerifyIsolation is the Step-5 guard: under HOME=home it confirms
 // cursor-agent sees ONLY our server (no leaked global MCP server) and is still
 // authenticated. Both probes are deterministic — `mcp list` reports configured
@@ -293,19 +382,32 @@ func cursorVerifyIsolation(bin, home string) error {
 	if lerr != nil {
 		return fmt.Errorf("cursor tool transport: isolation probe (%s mcp list) failed: %w (output: %s)", bin, lerr, strings.TrimSpace(string(out)))
 	}
-	for _, name := range parseCursorMCPList(string(out)) {
-		if name != mcpServerName {
-			return fmt.Errorf("cursor tool transport: refusing to enable tools — foreign MCP server %q is visible under the isolated config root (only %q may be present); staying BASIC", name, mcpServerName)
-		}
+	if foreign, ok := cursorForeignServer(string(out)); ok {
+		return fmt.Errorf("cursor tool transport: refusing to enable tools — foreign MCP server %q is visible under the isolated config root (only %q may be present); staying BASIC", foreign, mcpServerName)
 	}
 
 	status := exec.CommandContext(ctx, bin, "status")
 	status.Env = env
 	sout, _ := status.CombinedOutput()
-	if !strings.Contains(strings.ToLower(string(sout)), "logged in") {
+	if !cursorStatusAuthenticated(string(sout)) {
 		return fmt.Errorf("cursor tool transport: authentication did not survive the HOME redirect (%s status: %s); staying BASIC", bin, strings.TrimSpace(string(sout)))
 	}
 	return nil
+}
+
+// cursorStatusAuthenticated reports whether `cursor-agent status` output shows a
+// live login. It must require POSITIVE auth: the logged-in line is
+// "✓ Logged in as <email>" and the logged-out line is "Not logged in" — and the
+// naive substring "logged in" is present in BOTH (a fail-OPEN bug: a logged-out
+// redirect would pass). So we require the "logged in as" phrase AND reject any
+// "not logged in" substring; an empty/error output (auth store unreachable
+// under the redirect) fails closed.
+func cursorStatusAuthenticated(out string) bool {
+	low := strings.ToLower(out)
+	if strings.Contains(low, "not logged in") {
+		return false
+	}
+	return strings.Contains(low, "logged in as")
 }
 
 // parseCursorMCPList extracts the server NAMES from `cursor-agent mcp list`
@@ -326,6 +428,19 @@ func parseCursorMCPList(out string) []string {
 		names = append(names, strings.TrimSpace(line[:i]))
 	}
 	return names
+}
+
+// cursorForeignServer reports the FIRST server in `cursor-agent mcp list` output
+// that is not our own (mcpServerName) — the isolation-leak signal. ok is true
+// when a foreign server leaked into the redirected config root, which fails the
+// wire-time guard. No servers, or only ours, is a clean isolation (ok=false).
+func cursorForeignServer(mcpListOutput string) (string, bool) {
+	for _, name := range parseCursorMCPList(mcpListOutput) {
+		if name != mcpServerName {
+			return name, true
+		}
+	}
+	return "", false
 }
 
 // cursorFoldPrompt is the system-prompt fold (the spec's documented fallback

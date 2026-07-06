@@ -21,7 +21,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`remember`) all work. cursor-agent has no per-invocation MCP-config flag,
     so the transport isolates our tools by redirecting its config root
     (`HOME=<tempdir>` holding only our server) and, on macOS, symlinks the
-    keychain in so login survives the redirect. A wire-time isolation guard
+    keychain in so login survives the redirect. Because FULL authoring must run
+    in cursor's agent mode (its MCP tools are refused in read-only ask/plan
+    mode), which also exposes cursor's builtin write/shell tools, the transport
+    plants a `preToolUse` allowlist hook (`failClosed`) that permits only our
+    MCP tools and denies every builtin — so a headless authoring run cannot
+    mutate the user's project (live-verified). A wire-time isolation guard
     (`cursor-agent mcp list`/`status` under the redirect) refuses to enable
     tools — degrading to text mode with a once-per-session note — if any of the
     user's own MCP servers would leak in or authentication is lost.

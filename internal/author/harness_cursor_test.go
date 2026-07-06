@@ -1,6 +1,7 @@
 package author
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -91,6 +92,163 @@ func TestCursorHarness_ArgvCharacterization(t *testing.T) {
 	}
 }
 
+// cursorFixture reads a captured cursor-agent CLI output sample from
+// testdata/cursor/ (real captures, cursor-agent 2026.07.01-777f564; the
+// status_logged_in email is redacted to a placeholder). These back the security
+// boundary of the isolation guard, which otherwise has no unit coverage.
+func cursorFixture(t *testing.T, name string) string {
+	t.Helper()
+	b, err := os.ReadFile(filepath.Join("testdata", "cursor", name))
+	if err != nil {
+		t.Fatalf("read fixture %s: %v", name, err)
+	}
+	return string(b)
+}
+
+// TestParseCursorMCPList pins the isolation-guard parser against REAL
+// `cursor-agent mcp list` output. The load-bearing property is the SECURITY one:
+// every configured server name must be extracted so a foreign (leaked) server
+// can never hide from the guard — including on a multi-colon status line
+// ("name: Error: Connection failed") and without mistaking the colon-less
+// "No MCP servers configured" chrome for a server.
+func TestParseCursorMCPList(t *testing.T) {
+	cases := []struct {
+		name    string
+		fixture string
+		want    []string
+	}{
+		{"isolated root — only our server", "mcp_list_isolated.txt", []string{"ai-playbook"}},
+		{"foreign server leaked (multi-colon status)", "mcp_list_foreign.txt", []string{"ai-playbook", "atlassian"}},
+		{"no servers configured (colon-less chrome)", "mcp_list_empty.txt", nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := parseCursorMCPList(cursorFixture(t, tc.fixture))
+			if !reflect.DeepEqual(got, tc.want) {
+				t.Errorf("parseCursorMCPList = %q, want %q", got, tc.want)
+			}
+		})
+	}
+
+	// Synthetic robustness: a name with a multi-colon status still yields the
+	// name; a colon-less line and a leading-colon line are NOT mistaken for
+	// servers (a foreign server always appears as "name: status", so it can
+	// never hide on such a line).
+	t.Run("multi-colon and colon-less lines", func(t *testing.T) {
+		out := "zellij: Error: nested: colons\n" +
+			"some banner with no colon\n" +
+			":leadingcolon\n" +
+			"  context7 : ready \n"
+		got := parseCursorMCPList(out)
+		want := []string{"zellij", "context7"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("parseCursorMCPList = %q, want %q", got, want)
+		}
+	})
+}
+
+// TestCursorForeignServer pins the guard's leak DECISION against real output:
+// only our server (or none) is a clean isolation; ANY other server present is a
+// leak the guard must reject. This is the security gate the launcher turns into
+// a BASIC degrade.
+func TestCursorForeignServer(t *testing.T) {
+	if _, ok := cursorForeignServer(cursorFixture(t, "mcp_list_isolated.txt")); ok {
+		t.Error("isolated root (only ai-playbook) must PASS — reported a foreign server")
+	}
+	if _, ok := cursorForeignServer(cursorFixture(t, "mcp_list_empty.txt")); ok {
+		t.Error("no servers configured must PASS — reported a foreign server")
+	}
+	foreign, ok := cursorForeignServer(cursorFixture(t, "mcp_list_foreign.txt"))
+	if !ok {
+		t.Fatal("a leaked foreign server (atlassian) must FAIL the guard")
+	}
+	if foreign != "atlassian" {
+		t.Errorf("foreign server = %q, want atlassian", foreign)
+	}
+}
+
+// TestCursorStatusAuthenticated pins the auth guard against the fail-OPEN bug:
+// `cursor-agent status` prints "✓ Logged in as <email>" when authenticated and
+// "Not logged in" when not — and the naive substring "logged in" is present in
+// BOTH, so a logged-OUT redirect would have passed. Positive auth is required
+// and a "not logged in" (or empty/error) output must fail closed.
+func TestCursorStatusAuthenticated(t *testing.T) {
+	if !cursorStatusAuthenticated(cursorFixture(t, "status_logged_in.txt")) {
+		t.Error("a logged-in status must authenticate")
+	}
+	if cursorStatusAuthenticated(cursorFixture(t, "status_logged_out.txt")) {
+		t.Error("a NOT-logged-in status must fail (the fail-open regression)")
+	}
+	for _, out := range []string{"", "   ", "error: could not reach auth store"} {
+		if cursorStatusAuthenticated(out) {
+			t.Errorf("empty/error status %q must fail closed", out)
+		}
+	}
+}
+
+// TestCursorToolHook pins the builtin-tool allowlist transport (Finding 1): the
+// tool transport plants a preToolUse hook that permits only MCP tools and denies
+// every builtin, with failClosed:true. This is the decisive safety gate — under
+// agent mode (which FULL requires) cursor's builtin write/shell tools otherwise
+// execute headlessly. Live-verified end to end by
+// TestCursorLive_ToolHookBlocksBuiltins.
+func TestCursorToolHook(t *testing.T) {
+	h := cursorHarness{}
+	dir := t.TempDir()
+	files, _, err := h.ToolTransport(Invocation{SelfExe: "/path/to/ai-playbook"}, "/tmp/tools.sock", dir)
+	if err != nil {
+		t.Fatalf("ToolTransport: %v", err)
+	}
+
+	// hooks.json wires a single preToolUse hook with failClosed:true.
+	hooksPath := filepath.Join(dir, ".cursor", "hooks.json")
+	b, err := os.ReadFile(hooksPath)
+	if err != nil {
+		t.Fatalf("read hooks.json: %v", err)
+	}
+	var doc cursorHooksDoc
+	if err := json.Unmarshal(b, &doc); err != nil {
+		t.Fatalf("hooks.json is not valid JSON: %v\n%s", err, b)
+	}
+	pre := doc.Hooks["preToolUse"]
+	if len(pre) != 1 {
+		t.Fatalf("want exactly one preToolUse hook, got %d", len(pre))
+	}
+	if !pre[0].FailClosed {
+		t.Error("the deny hook must be failClosed:true (a crash/timeout must BLOCK, not fail-open)")
+	}
+	scriptPath := filepath.Join(dir, ".cursor", "hooks", "pretool-allowlist.sh")
+	if pre[0].Command != "sh "+scriptPath {
+		t.Errorf("hook command = %q, want %q", pre[0].Command, "sh "+scriptPath)
+	}
+
+	// The script is written, lives under dir, and is listed among the transport
+	// files (so WriteToolTransport's RemoveAll cleans it up).
+	script, err := os.ReadFile(scriptPath)
+	if err != nil {
+		t.Fatalf("read hook script: %v", err)
+	}
+	if !strings.Contains(string(script), `"permission":"deny"`) || !strings.Contains(string(script), "MCP:") {
+		t.Errorf("hook script is not the MCP allowlist:\n%s", script)
+	}
+	var sawScript, sawHooks bool
+	for _, f := range files {
+		rel, rerr := filepath.Rel(dir, f)
+		if rerr != nil || strings.HasPrefix(rel, "..") {
+			t.Errorf("transport file outside dir: %s", f)
+		}
+		switch f {
+		case scriptPath:
+			sawScript = true
+		case hooksPath:
+			sawHooks = true
+		}
+	}
+	if !sawScript || !sawHooks {
+		t.Errorf("transport files must include the hook script and hooks.json; got %v", files)
+	}
+}
+
 // TestCursorFoldPrompt pins the fold composition: the system prompt fenced in
 // an explicit tag, then a blank line, then the user message — byte-exact, so
 // prompt-assembly drift is a deliberate change, not an accident.
@@ -158,13 +316,22 @@ func TestHarnessContract_CursorRow(t *testing.T) {
 	if want := []string{"--approve-mcps"}; !reflect.DeepEqual(argv, want) {
 		t.Errorf("cursor transport argv = %v, want %v", argv, want)
 	}
-	if len(files) != 1 || filepath.Base(files[0]) != "mcp.json" {
-		t.Fatalf("cursor transport files = %v, want one .cursor/mcp.json", files)
+	// The transport writes the isolated mcp.json plus the builtin-allowlist hook
+	// (hooks.json + the script); every artifact must live under dir so cleanup
+	// (RemoveAll(dir)) removes them.
+	var mcpPath string
+	for _, f := range files {
+		if rel, rerr := filepath.Rel(dir, f); rerr != nil || strings.HasPrefix(rel, "..") {
+			t.Errorf("cursor transport wrote outside its dir: %s (dir %s)", f, dir)
+		}
+		if filepath.Base(f) == "mcp.json" {
+			mcpPath = f
+		}
 	}
-	if rel, rerr := filepath.Rel(dir, files[0]); rerr != nil || strings.HasPrefix(rel, "..") {
-		t.Errorf("cursor transport wrote outside its dir: %s (dir %s)", files[0], dir)
+	if mcpPath == "" {
+		t.Fatalf("cursor transport files = %v, want a .cursor/mcp.json", files)
 	}
-	b, rerr := os.ReadFile(files[0])
+	b, rerr := os.ReadFile(mcpPath)
 	if rerr != nil {
 		t.Fatalf("read transport artifact: %v", rerr)
 	}

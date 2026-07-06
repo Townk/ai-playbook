@@ -97,7 +97,7 @@ Notes are stderr/status-line one-liners, once per session, tested verbatim.
   not, pi ships BASIC and the extension work is deferred — the task
   records the finding either way).
 
-### cursor (live-verified against cursor-agent 2026.07.01-777f564; FULL via a HOME-redirect MCP isolation)
+### cursor (live-verified against cursor-agent 2026.07.01-777f564; FULL via a HOME-redirect MCP isolation + a preToolUse builtin-containment hook)
 
 - Invocation: `cursor-agent -p --output-format stream-json
   --stream-partial-output [--mode ask] --trust` (live-verified; rationale in
@@ -108,8 +108,10 @@ Notes are stderr/status-line one-liners, once per session, tested verbatim.
   FULL tool path DROPS `--mode ask`: cursor-agent REFUSES MCP tool calls in ask
   mode ("I'm in Ask mode, which restricts me to read-only actions" —
   live-verified), so the run/ask/remember/submit_playbook tools would never
-  dispatch; default (agent) mode is required and the read-only posture is
-  steered by the tool-instruction fold instead (as claude/pi do).
+  dispatch; default (agent) mode is required. Agent mode also exposes cursor's
+  builtin write/shell tools, which the FULL transport neutralizes with a
+  preToolUse allowlist hook (the builtin-containment gate below), so the
+  read-only posture is ENFORCED, not merely prompted.
   `--trust` is REQUIRED: cursor-agent refuses to start in a not-yet-trusted
   directory, and the flag is ephemeral (writes no durable `~/.cursor` state)
   and narrow (unlike `--force`/`--yolo` it does NOT lift the per-command
@@ -125,9 +127,10 @@ Notes are stderr/status-line one-liners, once per session, tested verbatim.
   attach unsafe; Phase C (cursor-agent 2026.07.01-777f564) found the
   STRUCTURAL fix — a per-invocation **HOME redirect** — and proved every gate
   of the safety invariant. The transport (`ToolTransport`, harness_cursor.go)
-  writes `<dir>/.cursor/mcp.json` holding ONLY our server and sets
-  `HOME=<dir>` via `Env`, so cursor-agent resolves its global MCP config from
-  the pristine root we control. Probe record:
+  writes `<dir>/.cursor/mcp.json` holding ONLY our server, plants a preToolUse
+  builtin-containment hook (Step 6), and sets `HOME=<dir>` via `Env`, so
+  cursor-agent resolves its global MCP config from the pristine root we control.
+  Probe record:
   - **Mechanism (Step 0).** cursor-agent resolves the global MCP config from
     `os.homedir()/.cursor/mcp.json`. There is NO config-root env var —
     `CURSOR_CONFIG_DIR`, `CURSOR_HOME`, and `XDG_CONFIG_HOME` are all no-ops
@@ -158,8 +161,45 @@ Notes are stderr/status-line one-liners, once per session, tested verbatim.
     redirect held: when a bin is known it runs `cursor-agent mcp list` +
     `status` under `HOME=<dir>` and REFUSES to enable tools (→ BASIC, with the
     once-per-session note) if any foreign server is visible or auth was lost.
+    The `status` check requires POSITIVE auth ("logged in as") and rejects a
+    "not logged in" substring — the naive "logged in" contains-check fails OPEN
+    ("not logged in" contains it); `parseCursorMCPList`/`cursorForeignServer`/
+    `cursorStatusAuthenticated` are unit-tested against real `mcp list`/`status`
+    captures (testdata/cursor/), including a foreign-server leak (guard FAILS),
+    an only-ours isolation (PASSES), and multi-colon/colon-less lines (a foreign
+    server on a `name: Error: ...` line is never missed).
+  - **Builtin containment (Step 6) — the decisive safety gate.** Because FULL
+    must run in agent mode (ask/plan refuse MCP tools), cursor's builtin
+    write/shell tools are in scope, and they EXECUTE headlessly under `-p` with
+    no per-command gate and no `cmd.Dir` — a would-be mutation of the user's real
+    project. Probe evidence (cursor-agent 2026.07.01-777f564): a FULL-shape run
+    (agent mode, `--trust`, `--approve-mcps`, HOME redirected, no `--force`/
+    `--yolo`) asked to write a file AND run `touch` did BOTH (`editToolCall`/
+    `shellToolCall` → success). cursor has NO builtin-off flag, and
+    `permissions.deny` in `cli-config.json` is NOT honored headlessly (retested
+    under `--force`, `--auto-review`, `--sandbox enabled` — builtins still ran).
+    The working mechanism is a **preToolUse hook** (cursor CLI supports it; only
+    `deny`/exit-2 is reliably enforced): the transport plants
+    `<dir>/.cursor/hooks.json` + `cursor_pretool_hook.sh` (`failClosed:true`)
+    that permits ONLY `MCP:<tool>` and DENIES every builtin — the cursor analog
+    of pi's `--no-builtin-tools`. Re-probed with the hook: the same write/shell
+    prompt is REJECTED (`result_keys=["rejected"]`) while the MCP call still
+    succeeds. `tool_name` precedes `tool_input` on the wire, so the first-match
+    extraction cannot be spoofed by a fake name in a tool argument.
+    RequireHarness-gated live proof: `TestCursorLive_ToolHookBlocksBuiltins`
+    asserts a builtin-mutation prompt creates no file through the production
+    transport.
   The shared `mcpServers` writer (`mcpconfig.go`) is now used by BOTH FULL
   harnesses (claude's `--mcp-config`, cursor's redirected `.cursor/mcp.json`).
+- Authoring-context asymmetry (LOW, benign — documented). On the FULL tool path
+  the HOME redirect makes cursor-agent resolve config from the pristine `<dir>`,
+  so the user's global `~/.cursor/rules` and `~/.gitconfig` are ABSENT — whereas
+  the tool-less paths (text authoring, classify, followup, review) run under the
+  user's real HOME and DO see them. Authoring guidance travels in our folded
+  system prompt (not `~/.cursor/rules`), so this affects only ambient global
+  rules/git identity the model would otherwise incidentally observe; it does not
+  affect playbook correctness. Called out so the asymmetry is a known, accepted
+  property rather than a surprise.
 - Stream: `result` is the terminal envelope (REQUIRED — A5b); assistant
   deltas are deduped per the live-verified `--stream-partial-output`
   three-variant rule (delta = `timestamp_ms` without `model_call_id`;
