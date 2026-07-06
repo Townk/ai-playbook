@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an unparseable or non-positive value (`timeout=0`, negative) is an **error**
   (every block always keeps a ceiling, so unattended runs terminate), and a
   valid value on a non-runnable block (static/diff/create, where it is inert)
-  is a warning.
+  is a warning. The AI author can declare it too: the structured draft schema
+  carries an optional per-step `timeout` field the fence renderer emits.
 
 ### Changed
 

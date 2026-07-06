@@ -3,6 +3,7 @@ package draft_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Townk/ai-playbook/internal/draft"
 	"github.com/Townk/ai-playbook/internal/ui"
@@ -94,16 +95,44 @@ func TestRender_FromTag(t *testing.T) {
 }
 
 // TestRender_FromAttributeOrder pins the FULL fence-tag attribute order —
-// {id=… from=… file=… needs=… rollback=…} — with every attribute present at
-// once. Render-only (the combination is not semantically valid); the order
-// is a contract downstream goldens and re-parsers rely on.
+// {id=… from=… file=… needs=… rollback=… timeout=…} — with every attribute
+// present at once. Render-only (the combination is not semantically valid);
+// the order is a contract downstream goldens and re-parsers rely on.
 func TestRender_FromAttributeOrder(t *testing.T) {
 	pb := draft.Playbook{Title: "T", Sections: []draft.Section{{Heading: "S", Content: []draft.ContentItem{
-		{Kind: "code", Lang: "bash", Code: "x", ID: "all", From: "src", File: "out.txt", Needs: []string{"a", "b"}, Rollback: "undo"},
+		{Kind: "code", Lang: "bash", Code: "x", ID: "all", From: "src", File: "out.txt", Needs: []string{"a", "b"}, Rollback: "undo", Timeout: "90s"},
 	}}}}
 	out := draft.Render(pb)
-	if !strings.Contains(out, "```bash {id=all from=src file=out.txt needs=a,b rollback=undo}\n") {
+	if !strings.Contains(out, "```bash {id=all from=src file=out.txt needs=a,b rollback=undo timeout=90s}\n") {
 		t.Fatalf("fence attribute order changed:\n%s", out)
+	}
+}
+
+// TestRender_TimeoutTag: a code item declaring Timeout renders the timeout=
+// attribute in its fence tag, and the rendered form round-trips through the
+// public parser onto Block.Timeout (the block-timeout spec's authoring
+// surface). An item without Timeout is covered by TestRender_Golden — the
+// output stays byte-identical.
+func TestRender_TimeoutTag(t *testing.T) {
+	pb := draft.Playbook{Title: "T", Sections: []draft.Section{{Heading: "S", Content: []draft.ContentItem{
+		{Kind: "code", Lang: "bash", Code: "system-backup now", ID: "first-capture", Timeout: "15m"},
+	}}}}
+	out := draft.Render(pb)
+	if !strings.Contains(out, "```bash {id=first-capture timeout=15m}\n") {
+		t.Fatalf("fence missing timeout= tag:\n%s", out)
+	}
+	var blk *playbook.Block
+	for _, b := range playbook.ParseBlocks(out) {
+		if b.ID == "first-capture" {
+			blk = &b
+			break
+		}
+	}
+	if blk == nil {
+		t.Fatalf("rendered block did not re-parse:\n%s", out)
+	}
+	if blk.Timeout != 15*time.Minute {
+		t.Fatalf("round-tripped Block.Timeout = %v, want 15m (raw %q)", blk.Timeout, blk.TimeoutRaw)
 	}
 }
 
@@ -116,7 +145,7 @@ func TestRender_FromAttributeOrder(t *testing.T) {
 // (playbook.ClassifyType), and this test keeps the two ends agreeing.
 func TestValidate_Render_RoundTrip_FileValidatorAgrees(t *testing.T) {
 	pb := draft.Playbook{Title: "T", Sections: []draft.Section{{Heading: "S", Content: []draft.ContentItem{
-		{Kind: "code", Lang: "bash", Code: "echo hi", ID: "produce"},
+		{Kind: "code", Lang: "bash", Code: "echo hi", ID: "produce", Timeout: "15m"},
 		{Kind: "code", Lang: "python", Code: "import sys; print(sys.stdin.read())", ID: "consume", From: "produce"},
 	}}}, Verify: &draft.Step{Lang: "bash", Code: "true", From: "consume"}}
 	if err := draft.Validate(pb, true); err != nil {
@@ -127,7 +156,7 @@ func TestValidate_Render_RoundTrip_FileValidatorAgrees(t *testing.T) {
 	blocks := make([]validate.Block, 0, len(pbBlocks))
 	for _, b := range pbBlocks {
 		blocks = append(blocks, validate.Block{
-			ID: b.ID, Type: b.Type, Lang: b.Lang, Needs: b.Needs, Static: b.Static, From: b.From,
+			ID: b.ID, Type: b.Type, Lang: b.Lang, Needs: b.Needs, Static: b.Static, From: b.From, TimeoutRaw: b.TimeoutRaw,
 		})
 	}
 	fm := frontmatter.FrontMatter{Name: "N", Description: "D", Category: "C", Created: "2026-07-04"}

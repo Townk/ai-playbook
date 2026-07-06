@@ -196,7 +196,7 @@ func TestSubmitPlaybook_SchemaShape(t *testing.T) {
 		t.Fatal("submit_playbook tool not registered")
 	}
 	schema, _ := json.Marshal(sp.InputSchema)
-	for _, want := range []string{"title", "sections", "verify", "project_bound"} {
+	for _, want := range []string{"title", "sections", "verify", "project_bound", "timeout", "per-block execution ceiling", "declare ONLY for steps known to run long"} {
 		if !strings.Contains(string(schema), want) {
 			t.Errorf("submit_playbook input schema missing %q:\n%s", want, schema)
 		}

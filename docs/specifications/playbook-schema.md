@@ -38,6 +38,7 @@ runner keys run/diff/apply and success-detection on the `id`.
 | `{needs=<id>[,<id>...]}` | shipped | Gate: the block won't run — no run button in the viewer, skipped in `--auto` — until every listed id is `ok`. |
 | `{rollback=<id>}` | Phase 2    | On a runnable step, names the block (by id) that undoes it; the named block renders as that step's rollback, not a numbered step. On failure, completed steps' rollbacks run in REVERSE order. |
 | `{from=<id>}`   | Phase 6      | Data dependency (ADR-0010): wires the named producer's retained stdout to this block's **stdin**; implies `needs=<id>` for gating/ordering/invalidation. Only `shell`/`run` blocks may declare or be targeted by `from=`. See [Value-passing](#value-passing) below. |
+| `{timeout=<duration>}` | shipped | Per-block execution ceiling, Go duration syntax (`90s`, `15m`, `1h`); when absent the runner's default (10m) applies. An empty value (`timeout=`) reads as absent — every empty attribute does. `validate` errors on an unparseable or non-positive value (every block keeps a ceiling) and warns when a valid value sits on a non-runnable block, where it is inert. |
 | `{static}`      | shipped      | A non-runnable block (no run button) — illustrative output, config samples, etc. |
 
 Only **top-level** fenced blocks carry block authority: a fence tag (`id=`,

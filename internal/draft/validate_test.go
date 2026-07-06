@@ -7,7 +7,7 @@ import (
 
 func TestValidate_OK(t *testing.T) {
 	pb := Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
-		{Kind: "code", Lang: "bash", Code: "echo a", ID: "fix"},
+		{Kind: "code", Lang: "bash", Code: "echo a", ID: "fix", Timeout: "15m"},
 	}}}, Verify: &Step{Lang: "bash", Code: "ok"}}
 	if err := Validate(pb, true); err != nil {
 		t.Fatalf("want valid, got %v", err)
@@ -124,6 +124,24 @@ func TestValidate_Violations(t *testing.T) {
 			{Kind: "code", Lang: "bash", Code: "echo a", ID: "a", From: "b"},
 			{Kind: "code", Lang: "bash", Code: "echo b", ID: "b", Needs: []string{"a"}},
 		}}}}, false, "cycle"},
+		// timeout= mirrors the file validator's contract (Error) tier at
+		// submit time: a declared value must parse as a POSITIVE Go duration.
+		{"unparseable timeout", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "bash", Code: "echo x", ID: "fix", Timeout: "banana"},
+		}}}}, false, "timeout"},
+		{"zero timeout", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "bash", Code: "echo x", ID: "fix", Timeout: "0"},
+		}}}}, false, "timeout"},
+		{"negative timeout", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "bash", Code: "echo x", ID: "fix", Timeout: "-5s"},
+		}}}}, false, "timeout"},
+		// The value is malformed regardless of placement — an unparseable
+		// timeout on a static item is rejected too (the file validator keeps
+		// the unparseable case an Error even on non-runnable blocks).
+		{"unparseable timeout on static", Playbook{Title: "T", Sections: []Section{{Heading: "S", Content: []ContentItem{
+			{Kind: "code", Lang: "console", Code: "out", Static: true, Timeout: "banana"},
+			{Kind: "code", Lang: "bash", Code: "echo x", ID: "fix"},
+		}}}}, false, "timeout"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

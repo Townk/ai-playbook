@@ -41,13 +41,13 @@ func Render(pb Playbook) string {
 					}
 				}
 				b.WriteString("\n")
-				b.WriteString(fence(it.Lang, id, it.File, it.From, it.Needs, it.Rollback, it.Static, it.Code))
+				b.WriteString(fence(it.Lang, id, it.File, it.From, it.Needs, it.Rollback, it.Timeout, it.Static, it.Code))
 			}
 		}
 	}
 	if pb.Verify != nil {
 		b.WriteString("\n")
-		b.WriteString(fence(pb.Verify.Lang, "verify", "", pb.Verify.From, pb.Verify.Needs, "", false, pb.Verify.Code))
+		b.WriteString(fence(pb.Verify.Lang, "verify", "", pb.Verify.From, pb.Verify.Needs, "", "", false, pb.Verify.Code))
 	}
 	return b.String()
 }
@@ -63,8 +63,8 @@ func writeProse(b *strings.Builder, s string) {
 
 // fence renders one fenced code block with the {…} tag parseFenceInfo expects.
 // Static blocks carry only {static}; runnable blocks carry
-// {id=… from=… file=… needs=… rollback=…}.
-func fence(lang, id, file, from string, needs []string, rollback string, static bool, code string) string {
+// {id=… from=… file=… needs=… rollback=… timeout=…}.
+func fence(lang, id, file, from string, needs []string, rollback, timeout string, static bool, code string) string {
 	var tag string
 	if static {
 		tag = "{static}"
@@ -81,6 +81,9 @@ func fence(lang, id, file, from string, needs []string, rollback string, static 
 		}
 		if rollback != "" {
 			tag += " rollback=" + rollback
+		}
+		if timeout != "" {
+			tag += " timeout=" + timeout
 		}
 		tag += "}"
 	}

@@ -38,6 +38,7 @@ type ContentItem struct {
 	Static     bool     `json:"static,omitempty" jsonschema:"for kind=code: true if the block is non-runnable (console output / illustrative)"`
 	File       string   `json:"file,omitempty" jsonschema:"for a NEW file: the relative path; the block body is the file's full content (use a diff block to EDIT an existing file)"`
 	From       string   `json:"from,omitempty" jsonschema:"for kind=code: id of an earlier shell/run block whose captured stdout feeds this block's stdin (e.g. a python block reading sys.stdin); implies a needs= dependency on that id; only shell/run blocks may set this, and only a shell/run block may be the target"`
+	Timeout    string   `json:"timeout,omitempty" jsonschema:"for kind=code: optional per-block execution ceiling, Go duration (e.g. '15m') — declare ONLY for steps known to run long (installs, first captures, large downloads); omit otherwise (default 10m)"`
 }
 
 // Step is a single command used for the top-level verify.

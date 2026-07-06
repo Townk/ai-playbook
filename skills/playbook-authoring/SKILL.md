@@ -52,6 +52,7 @@ The runner keys run/diff/apply and success detection on the `id`.
 | `{needs=<id>[,<id>...]}` | gate: the block won't run until every listed id has succeeded |
 | `{rollback=<undo-id>}` | declared on a FORWARD step, naming the companion block (by id) that undoes it; the named block renders as that step's rollback, not a numbered step |
 | `{from=<id>}` | data edge: the named producer's stdout feeds this block's stdin (implies `needs=<id>`); `shell`/`run` blocks only |
+| `{timeout=<duration>}` | per-block execution ceiling, Go duration (`90s`, `15m`, `1h`). Omit for normal steps — the 10m default covers them; declare it only on steps known to run long (installs, first captures, large downloads) |
 | `file=<path>` | a create block: the block's entire payload becomes the file at `<path>`. A relative `<path>` resolves against the PROJECT ROOT — no `~` and no env-var expansion — and the body is written verbatim (a `${VAR}` in file content is never interpolated) |
 | `{static}` | non-runnable illustration (no run button) |
 

@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/Townk/ai-playbook/pkg/playbook"
 )
@@ -87,6 +88,20 @@ func Validate(pb Playbook, requireVerify bool) error {
 			case "code":
 				if strings.TrimSpace(it.Lang) == "" {
 					errs = append(errs, fmt.Sprintf("section %d content %d: code block requires a lang", si, ci))
+				}
+				// timeout= mirrors pkg/playbook/validate's timeoutFindings
+				// contract (Error) tier at submit time: a declared value must
+				// parse as a POSITIVE Go duration, on static items too (the
+				// file validator keeps the unparseable case an Error even on
+				// non-runnable blocks). The inert-placement Warning has no
+				// counterpart here: draft.Validate is accept/reject only, and
+				// Render drops every attribute but {static} on a static item.
+				if it.Timeout != "" {
+					if d, err := time.ParseDuration(it.Timeout); err != nil {
+						errs = append(errs, fmt.Sprintf("section %d content %d: unparseable timeout %q — use a Go duration like 90s, 15m, or 1h", si, ci, it.Timeout))
+					} else if d <= 0 {
+						errs = append(errs, fmt.Sprintf("section %d content %d: timeout %q is not positive — declare a generous positive ceiling instead (every block must terminate)", si, ci, it.Timeout))
+					}
 				}
 				if !it.Static {
 					runnable++
