@@ -62,6 +62,10 @@ done/stale entries. Phase work lives in the roadmap, not here.
 
 - [ ] Run-undo-quit journal clobber: a session that runs one block, undoes it, and quits finalizes `{outcome: ok, blocks: {}}` over a prior FAILED journal (list shows ✓ for a net-nothing session) — consider treating a records-empty finalize as a no-op like the never-ran case (2026-07-06)
 
+- [ ] Short-pane frame overflow amplified by header wrap: normalLines can emit more rows than m.height with a multi-row wrapped title in a short pane (40x12 + long title → 2-3 row overflow, misaligned screen-pinned hit boxes) — cap header rows or clamp against m.height (2026-07-06)
+- [ ] Edit-pill hit box goes stale across a cached-age width change: badges row renders live but edit's Col freezes at reflow (2-cell drift at a minute boundary until the next reflow) (2026-07-06)
+- [ ] Confirm-yes/no and assisted-footer Screen buttons get hint labels but never painted chips — same gap U1 closed for the header pills (2026-07-06)
+
 ## Ideas
 
 - [ ] (low priority) E2E/integration tests for the integration entry points (`launcher` entry points, `cmd` `selftest`/`mcpMain`) — spawn the real binary + drive a TUI/PTY. These render via live mux/model/TUI/driver so they're not unit-testable; coverage there is intentionally low. Would push total coverage 80%→~90% (2026-06-27)
