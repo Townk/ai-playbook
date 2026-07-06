@@ -149,8 +149,14 @@ Notes are stderr/status-line one-liners, once per session, tested verbatim.
   consistency (Tools ⇒ ToolTransport succeeds).
 - Adapter stream tests: fixture corpora per harness (happy stream, tool
   activity, truncated stream → error, garbage line → error, empty
-  reasoning dropped); pi fixtures captured from the live CLI; cursor
-  fixtures from documentation, live-gated re-verification.
+  reasoning dropped) — fixtures are the always-run baseline for all three
+  adapters. LIVE tests are conditional on the harness CLI being installed:
+  any system that has the required binary runs them, any system without it
+  skips them (one shared `requireHarness(t, bin)` helper; `t.Skip` with the
+  binary name when absent). This applies uniformly — claude, pi, and cursor
+  live tests all run wherever their CLI exists (pi fixtures are captured
+  from the live CLI on this machine; cursor fixtures from documentation
+  until the CLI is available somewhere).
 - Tier degradation: a fake BASIC harness drives the launcher — structured
   paths fall back to text with the note (once), KB fill skipped with the
   note, recall/classify/metadata unchanged; prompt folds never mention
