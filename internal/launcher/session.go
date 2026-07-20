@@ -480,6 +480,7 @@ func authorPlaybook(req capture.Request, d triage.Decision, c *cache.Cache, noCa
 		Shell:      cfg.Driver.Shell, // configured shell for RunStream's own-driver fallback
 		Driver:     sharedDrv,
 		Reengage:   reengage,
+		OriginPane: req.PaneID, // play (⏵) types into the origin shell pane
 		Activity:   cs.activity,
 		Asker:      sess.asker(cwd), // `f` proactive amend (spec §D)
 		AskBridge:  bridgeOf(sess),  // no-mux agent `ask` → in-viewer overlay
@@ -725,14 +726,15 @@ func authorPlaybookText(req capture.Request, d triage.Decision, c *cache.Cache, 
 
 	var body bytes.Buffer
 	code := ui.RunStream(stream, ui.StreamOptions{
-		Harness:   author.HarnessDisplayName(reengage.Cfg),
-		Title:     title,
-		Cwd:       cwd,
-		Shell:     shell, // configured shell for RunStream's own-driver fallback
-		Tee:       &body,
-		Driver:    sharedDrv,
-		Reengage:  reengage,
-		AskBridge: bridge, // no-mux agent `ask` → in-viewer overlay
+		Harness:    author.HarnessDisplayName(reengage.Cfg),
+		Title:      title,
+		Cwd:        cwd,
+		Shell:      shell, // configured shell for RunStream's own-driver fallback
+		Tee:        &body,
+		Driver:     sharedDrv,
+		Reengage:   reengage,
+		OriginPane: req.PaneID, // play (⏵) types into the origin shell pane
+		AskBridge:  bridge,     // no-mux agent `ask` → in-viewer overlay
 	})
 
 	if !d.Disabled && !noCache && d.CtxHash != "" && d.ReqHash != "" && body.Len() > 0 {
@@ -888,7 +890,7 @@ func reengageReady(d triage.Decision, req capture.Request, sess *session, cwd st
 	// CommitPlaybook falls back to its dataRoot/playbooks default (back-compat). cfg
 	// also selects the harness for the text-fallback Agent (finding A5c).
 	cfg, _ := config.Load()
-	orch, eng := ui.BuildOrch(sess.drv, escalateReengage(d, req, sess, cfg))
+	orch, eng := ui.BuildOrch(sess.drv, escalateReengage(d, req, sess, cfg), req.PaneID)
 	return ui.OrchReady{Orch: orch, Reeng: eng, Asker: sess.asker(cwd)}
 }
 
@@ -998,6 +1000,7 @@ func serveCachedPlaybook(d triage.Decision, req capture.Request, sessCh <-chan *
 		// blocks normally drive the session's shared driver (delivered via Ready).
 		Shell:      shell,
 		ServedBase: strippedAmendBase(body),
+		OriginPane: req.PaneID, // play (⏵) types into the origin shell pane
 		Ready:      readyCh,
 	}
 	if t, ok := cachedTime(created); ok {

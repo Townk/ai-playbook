@@ -45,6 +45,11 @@ type StreamOptions struct {
 	// caller: RunStream does NOT close it.
 	Driver   *driver.Driver
 	Reengage *reengage.Reengage // re-engagement context (regenerate/followup/finalplaybook); nil disables those kinds
+	// OriginPane is the mux pane id of the shell the request originated from
+	// (capture's ZELLIJ_PANE_ID → "terminal_<n>"). The play button (⏵) types a
+	// block's command into this pane at the prompt (no trailing CR). "" → play
+	// degrades to the clipboard with a status note. Mirrors ui.Options.OriginPane.
+	OriginPane string
 	// Activity, when non-nil, is the agent's live tool-call feed (the session bridges
 	// the tools backend's OnActivity hook to it). The model subscribes and shows the
 	// latest summary next to the "Working…" spinner during the silent authoring wait.
@@ -156,7 +161,8 @@ func RunStream(src io.Reader, opts StreamOptions) int {
 		}
 	}
 	if d != nil {
-		orch = orchestrator.New(d, &cliMux{}).WithFloat(mux.Load())
+		fl := mux.Load()
+		orch = orchestrator.New(d, newCLIMux(opts.OriginPane, fl)).WithFloat(fl)
 		// The engine is nil when no re-engagement context is wired; DriftTargetPath is
 		// injected so the engine's drift-regenerate resolves paths without importing
 		// the executor.

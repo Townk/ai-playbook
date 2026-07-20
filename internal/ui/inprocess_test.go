@@ -1,8 +1,10 @@
 package ui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -109,16 +111,53 @@ func TestInProcessRunUpdatesBlockState(t *testing.T) {
 	}
 }
 
-// copy/play go through the orchestrator + Mux and surface no resultMsg (nil msg).
+// play goes through the orchestrator + Mux: with an origin pane wired the
+// command is TYPED into it (no resultMsg — nil), and it is always recorded.
 func TestInProcessCopyPlayNoResult(t *testing.T) {
 	m := newInProcModel(t)
 	mux := m.orch.Mux.(*cliMux)
+	var typedPane, typedText string
+	mux.origin = "terminal_7"
+	mux.typeInto = func(pane, text string) error { typedPane, typedText = pane, text; return nil }
 
 	if msg := m.emitAction(Button{Kind: "play", BlockID: "p", Payload: "echo hi"})(); msg != nil {
 		t.Errorf("play msg = %v, want nil", msg)
 	}
+	if typedPane != "terminal_7" || typedText != "echo hi" {
+		t.Errorf("play must type into the origin pane, got (%q,%q)", typedPane, typedText)
+	}
 	if played := mux.Played(); len(played) != 1 || played[0] != "echo hi" {
 		t.Errorf("play not recorded → %v", played)
+	}
+}
+
+// TestCliMuxPlayDegrades pins the play degrade ladder: no origin pane → the
+// clipboard fallback runs and the returned error carries the status note; a
+// FAILED pane write falls back the same way with its own wording; a nil copyFn
+// (no clipboard seam) surfaces the note alone.
+func TestCliMuxPlayDegrades(t *testing.T) {
+	var copied []string
+	c := &cliMux{copyFn: func(s string) error { copied = append(copied, s); return nil }}
+	err := c.Play("echo hi")
+	if err == nil || !strings.Contains(err.Error(), "no origin shell pane") || !strings.Contains(err.Error(), "clipboard") {
+		t.Errorf("no-origin degrade error = %v", err)
+	}
+	if len(copied) != 1 || copied[0] != "echo hi" {
+		t.Errorf("no-origin play must copy the command, got %v", copied)
+	}
+
+	c2 := &cliMux{
+		origin:   "terminal_3",
+		typeInto: func(string, string) error { return errors.New("pane closed") },
+		copyFn:   func(string) error { return nil },
+	}
+	if err := c2.Play("ls"); err == nil || !strings.Contains(err.Error(), "typing into the origin pane failed") {
+		t.Errorf("failed-write degrade error = %v", err)
+	}
+
+	c3 := &cliMux{}
+	if err := c3.Play("ls"); err == nil || strings.Contains(err.Error(), "clipboard") {
+		t.Errorf("nil copyFn must surface the bare note, got %v", err)
 	}
 }
 

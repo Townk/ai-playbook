@@ -89,6 +89,13 @@ type Options struct {
 	// model so the agent's `ask` reaches the in-viewer overlay. nil → no in-viewer ask
 	// overlay (the mux-present float path, or no bridge created).
 	AskBridge *askbridge.Bridge
+	// OriginPane is the mux pane id of the shell the request ORIGINATED from
+	// (capture's ZELLIJ_PANE_ID → "terminal_<n>", persisted in the session
+	// doc's Origin). The play button (⏵) types the block's command into this
+	// pane, focus-independent, with no trailing CR. "" → no origin pane (off-
+	// zellij, or a viewer running in the user's own pane) — play degrades to
+	// the clipboard with a status note.
+	OriginPane string
 	// Shell is the configured shell selector (cfg.Driver.Shell). ui is config-agnostic
 	// — it receives the shell as DATA and passes it to driver.Open when it opens its
 	// OWN driver. "" preserves the zsh default (no regression); a session-supplied
@@ -156,9 +163,11 @@ type OrchReady struct {
 // the engine is wired for re-engagement (the cached replay's regenerate/wrap-up),
 // with the executor's DriftTargetPath injected as the drift-target resolver so the
 // engine never imports the orchestrator. The engine is nil when re is nil. This is
-// the SINGLE construction site: Run's sync path calls it too.
-func BuildOrch(d *driver.Driver, re *reengage.Reengage) (*orchestrator.Orchestrator, *reengage.Engine) {
-	orch := orchestrator.New(d, &cliMux{}).WithFloat(mux.Load())
+// the SINGLE construction site: Run's sync path calls it too. originPane is the
+// request's origin shell pane (Options.OriginPane) — the play button's target.
+func BuildOrch(d *driver.Driver, re *reengage.Reengage, originPane string) (*orchestrator.Orchestrator, *reengage.Engine) {
+	fl := mux.Load()
+	orch := orchestrator.New(d, newCLIMux(originPane, fl)).WithFloat(fl)
 	return orch, reengage.New(re, orch.DriftTargetPath)
 }
 
@@ -409,7 +418,7 @@ func Run(opts Options) int {
 				}
 			}
 			if d != nil {
-				orch, reeng = BuildOrch(d, opts.Reengage)
+				orch, reeng = BuildOrch(d, opts.Reengage, opts.OriginPane)
 			}
 		}
 	}

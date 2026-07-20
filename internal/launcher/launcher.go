@@ -619,6 +619,9 @@ func AnswerMain() int {
 			dbg("answerMain: request decode failed: %v", err)
 		} else {
 			opts.AnswerRegen = answerRegenFunc(req)
+			// The docked answer pane is NOT the origin — the request carries the
+			// origin pane id, so a code block's play (⏵) types into the user's shell.
+			opts.OriginPane = req.PaneID
 		}
 	}
 

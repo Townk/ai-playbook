@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The play button (⏵) now actually types the block's command into the origin
+  shell pane (focus-independent, no trailing CR — it sits at the prompt for
+  your ENTER). It had been a stage-scaffold no-op that recorded the command
+  and did nothing. Without an origin pane (off-zellij, or a viewer running in
+  your own pane) or when the pane write fails, the command is copied to the
+  clipboard instead and the status line says so.
+
 ## [1.0.0-RC1] - 2026-07-19
 
 ### Added

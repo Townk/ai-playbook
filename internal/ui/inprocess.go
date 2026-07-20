@@ -2,6 +2,7 @@ package ui
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -11,6 +12,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 	"github.com/Townk/ai-playbook/pkg/playbook"
 )
@@ -557,12 +559,36 @@ func sanitizeLogID(id string) string {
 	return string(b)
 }
 
-// cliMux is the in-process Mux: clipboard via pbcopy (darwin) and a recorded
-// no-op Play. Full type-into-origin-pane is the later mux-adapter stage; for now
-// Play just records the command so the wiring is exercised without a real pane.
+// cliMux is the in-process Mux: clipboard via pbcopy (darwin) and the play
+// action. Play stages the command into the request's ORIGIN shell pane via the
+// mux type-into seam (`zellij action write-chars --pane-id <origin>` —
+// focus-independent, no trailing CR, so it sits at the prompt awaiting the
+// user's ENTER). Without an origin pane (off-zellij, `run`/`show` in the user's
+// own pane) or on a failed write (stale pane) it degrades to the clipboard so
+// the command never vanishes, and returns a note the ui surfaces as status.
 type cliMux struct {
 	mu     sync.Mutex // guards played: Play runs on concurrent tea.Cmd goroutines
-	played []string   // commands handed to Play (recorded; see note above)
+	played []string   // commands handed to Play (recorded for tests/inspection)
+	// origin is the mux pane id of the request's origin shell (Options.
+	// OriginPane; e.g. "terminal_3"). "" → no origin pane to type into.
+	origin string
+	// typeInto is the mux write seam (mux.Mux.TypeInto). nil → no mux.
+	typeInto func(pane, text string) error
+	// copyFn is the clipboard degrade seam (c.Copy in production; a test may
+	// substitute or leave nil to observe the no-clipboard message).
+	copyFn func(text string) error
+}
+
+// newCLIMux builds the production cliMux: origin is Options.OriginPane and fl
+// the active float mux (mux.Null off-zellij — its TypeInto fails, which routes
+// Play onto the clipboard degrade).
+func newCLIMux(origin string, fl mux.Mux) *cliMux {
+	c := &cliMux{origin: origin}
+	if fl != nil {
+		c.typeInto = fl.TypeInto
+	}
+	c.copyFn = c.Copy
+	return c
 }
 
 // Copy places text on the system clipboard. On darwin it shells out to pbcopy;
@@ -585,14 +611,31 @@ func (c *cliMux) Copy(text string) error {
 	return nil
 }
 
-// Play records the command. Typing it into the user's origin pane is deferred to
-// the mux-adapter stage; recording keeps the orchestrator's play path live and
-// inspectable without a real pane.
+// Play stages cmd at the origin shell's prompt (no trailing CR — the user
+// reviews and presses ENTER). Degrades to the clipboard when there is no
+// origin pane or the pane write fails; the returned error is the user-facing
+// status note for the degrade (nil ONLY when the command reached the prompt).
 func (c *cliMux) Play(cmd string) error {
 	c.mu.Lock()
 	c.played = append(c.played, cmd)
 	c.mu.Unlock()
-	return nil
+	var terr error
+	if c.origin != "" && c.typeInto != nil {
+		if terr = c.typeInto(c.origin, cmd); terr == nil {
+			return nil
+		}
+	}
+	note := "no origin shell pane"
+	if terr != nil {
+		note = "typing into the origin pane failed"
+	}
+	if c.copyFn == nil {
+		return errors.New(note)
+	}
+	if cerr := c.copyFn(cmd); cerr != nil {
+		return fmt.Errorf("%s, and the clipboard fallback failed: %v", note, cerr)
+	}
+	return errors.New(note + " — command copied to the clipboard instead")
 }
 
 // Played returns a snapshot of the recorded Play commands, taken under the lock —
