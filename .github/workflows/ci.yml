@@ -6,12 +6,18 @@ on:
   pull_request:
     branches: [master]
 
+# One in-flight run per ref: a force-push or rapid successive pushes cancel the
+# superseded run instead of queueing behind it.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
 
 jobs:
   build-test:
-    name: build / vet / test
+    name: build / vet / test (race)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -21,10 +27,26 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false # per-job cache below (setup-go's shared key thrashes across jobs)
+
+      - name: Go caches (per-job key)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ github.job }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ github.job }}-
 
       - name: Install zsh (the shell driver and its tests spawn a zsh shell)
         run: sudo apt-get update && sudo apt-get install -y zsh
+
+      - name: Tidy check
+        # The module files must be tidy as committed (goreleaser's tidy hook was
+        # dropped in favor of this explicit gate — a release must never rewrite
+        # go.mod behind the tag's back).
+        run: go mod tidy -diff
 
       - name: Build
         run: go build ./...
@@ -35,13 +57,13 @@ jobs:
       - name: Docs freshness (man pages + completions match the climeta registry)
         run: make docs-check
 
-      - name: Test (coverage)
-        # Fast lane: no -race here — the subprocess-heavy internal/ui suite under
-        # the race detector on 2-core runners takes ~15m, too slow for per-push
-        # feedback. The race detector runs on a nightly schedule instead
-        # (.github/workflows/race.yml). -timeout 15m keeps headroom for the
-        # ui suite, which still exceeds go test's 10-min default per-package.
-        run: go test -timeout 15m -coverprofile=coverage.out ./...
+      - name: Test (race + coverage)
+        # The race detector is back on the per-push lane: the driver's
+        # no-idle-floor rework + the ui shared test driver cut the full -race
+        # suite to ~55s wall on a dev machine (the old ~15m figure predates
+        # both). -timeout 20m keeps headroom for the subprocess-heavy suites
+        # on 2-core runners.
+        run: go test -race -timeout 20m -coverprofile=coverage.out ./...
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -62,11 +84,52 @@ jobs:
         uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-          cache: true
+          cache: false # per-job cache below
+
+      - name: Go caches (per-job key)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ github.job }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ github.job }}-
 
       - name: golangci-lint
-        # Run via `make lint` (go run …golangci-lint@<ver>) so the linter is built
-        # with the repo's Go toolchain (go.mod) and can analyze newer-Go code. The
-        # prebuilt action binary is built with an older Go and errors out otherwise.
-        # Bonus: keeps CI identical to the local `make lint` gate.
+        # `make lint` runs the go.mod tool-directive pin (`go tool
+        # golangci-lint`), so the linter is built with the repo's Go toolchain
+        # and CI stays identical to the local gate.
         run: make lint
+
+  build-macos:
+    # Releases are darwin-first while CI is ubuntu — a cheap macOS build+vet
+    # catches darwin-only breakage (x/sys/unix ioctls, PTY constants) before a
+    # release does. Tests stay on ubuntu: the macOS runner minutes are 10x.
+    name: build / vet (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: false # per-job cache below
+
+      - name: Go caches (per-job key)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/Library/Caches/go-build
+          key: ${{ runner.os }}-go-${{ github.job }}-${{ hashFiles('go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-${{ github.job }}-
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...

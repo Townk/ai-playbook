@@ -2,7 +2,9 @@
 # `make check` is the pre-commit gate: it runs build, vet, lint, fmt-check and
 # test, and fails on ANY lint finding or unformatted file (mirrors CI).
 
-GOLANGCI := go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2
+# golangci-lint is pinned via go.mod's `tool` directive (go get -tool …), so the
+# version rides the module graph and dependabot instead of a Makefile literal.
+GOLANGCI := go tool golangci-lint
 
 VERSION ?= dev
 LDFLAGS := -X github.com/Townk/ai-playbook/internal/cli.Version=$(VERSION)

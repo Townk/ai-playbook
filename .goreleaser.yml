@@ -4,9 +4,8 @@ version: 2
 
 project_name: ai-playbook
 
-before:
-  hooks:
-    - go mod tidy
+# No `go mod tidy` hook: CI enforces tidiness explicitly (`go mod tidy -diff`),
+# so a release build never rewrites go.mod behind the tag's back.
 
 builds:
   - id: ai-playbook

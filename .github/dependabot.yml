@@ -1,0 +1,18 @@
+# Dependabot: weekly bumps for the Go module graph (incl. the golangci-lint
+# tool-directive pin) and the GitHub Actions used by the workflows.
+version: 2
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      go-deps:
+        patterns: ["*"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]

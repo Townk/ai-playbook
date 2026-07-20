@@ -54,6 +54,13 @@ jobs:
           VERSION="${GITHUB_REF_NAME#v}"
           awk -v ver="## [$VERSION]" 'index($0,ver)==1{f=1;next} f&&/^## \[/{exit} f{print}' CHANGELOG.md \
             | sed '/./,$!d' > "${{ runner.temp }}/release-notes.md"
+          # Guard: an empty notes file means the tag has no CHANGELOG section
+          # (typo'd version, or the release ritual skipped the rename) — fail
+          # the release instead of publishing with blank notes.
+          if [ ! -s "${{ runner.temp }}/release-notes.md" ]; then
+            echo "::error::CHANGELOG.md has no section for $VERSION — release notes would be empty"
+            exit 1
+          fi
           echo "--- release notes for $VERSION ---"
           cat "${{ runner.temp }}/release-notes.md"
 
