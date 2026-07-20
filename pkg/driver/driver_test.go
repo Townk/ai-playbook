@@ -183,8 +183,11 @@ func TestStopInterruptsInflightRun(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("Stop did not interrupt the in-flight run promptly")
 	}
-	// The shell must survive the interrupt and remain drivable.
-	if r := d.Run("print -r -- alive", 5*time.Second); r.Out != "alive" {
+	// The shell must survive the interrupt and remain drivable. The generous
+	// timeout is a flake guard for loaded CI runners (a 5s bound tripped on a
+	// release runner once); the happy path returns on the sentinel immediately,
+	// so the longer ceiling costs nothing.
+	if r := d.Run("print -r -- alive", 30*time.Second); r.Out != "alive" {
 		t.Errorf("shell should survive Stop → %+v", r)
 	}
 }
