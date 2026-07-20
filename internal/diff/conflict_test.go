@@ -144,3 +144,16 @@ func TestHasConflictMarkers(t *testing.T) {
 		t.Fatal("a plain ---- rule must not be treated as an unresolved marker")
 	}
 }
+
+// TestLabelLine covers both fence forms: a short label is dash-padded to the
+// fixed fence width, and an over-long label still gets a closing "---".
+func TestLabelLine(t *testing.T) {
+	short := labelLine(markerCurrent)
+	if len(short) != fenceWidth || !strings.HasSuffix(short, "-") {
+		t.Errorf("short label must pad to fenceWidth: %q (len %d)", short, len(short))
+	}
+	long := labelLine(strings.Repeat("x", fenceWidth+5))
+	if !strings.HasSuffix(long, "---") {
+		t.Errorf("over-long label must still close with ---: %q", long)
+	}
+}

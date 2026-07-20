@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -270,5 +271,48 @@ func TestResolveVersion(t *testing.T) {
 				t.Errorf("resolveVersion(%q, %q, %v) = %q, want %q", tc.ldflag, tc.buildVer, tc.buildOK, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestRun_DispatchAndErrors covers Run's non-help branches: no args → usage to
+// stderr + exit 2; an unknown subcommand → error + usage + exit 2; a known
+// subcommand ("version") dispatches and prints the prog-aware version line.
+func TestRun_DispatchAndErrors(t *testing.T) {
+	if code := Run([]string{"ai-playbook"}); code != 2 {
+		t.Errorf("no args: exit = %d, want 2", code)
+	}
+	if code := Run([]string{"ai-playbook", "definitely-not-a-command"}); code != 2 {
+		t.Errorf("unknown subcommand: exit = %d, want 2", code)
+	}
+	out := captureStdout(t, func() {
+		if code := Run([]string{"apb", "version"}); code != 0 {
+			t.Errorf("version: exit = %d, want 0", code)
+		}
+	})
+	if !strings.HasPrefix(out, "apb ") {
+		t.Errorf("version output must be prog-aware: %q", out)
+	}
+}
+
+// TestDirExistsAndHead covers the selftest helpers.
+func TestDirExistsAndHead(t *testing.T) {
+	if !dirExists(t.TempDir()) {
+		t.Error("dirExists must be true for a real directory")
+	}
+	if dirExists("/definitely/not/a/dir") {
+		t.Error("dirExists must be false for a missing path")
+	}
+	f := filepath.Join(t.TempDir(), "f")
+	if err := os.WriteFile(f, nil, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if dirExists(f) {
+		t.Error("dirExists must be false for a plain file")
+	}
+	if got := head("a\nb\ncdef", 3); got != "a b" {
+		t.Errorf("head = %q, want %q (newlines flattened, cut at n)", got, "a b")
+	}
+	if got := head("ab", 10); got != "ab" {
+		t.Errorf("head must not pad short strings: %q", got)
 	}
 }

@@ -2,6 +2,8 @@ package cli
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -191,5 +193,50 @@ func TestFrontMatterBlock(t *testing.T) {
 	}
 	if frontMatterBlock("no front matter\n") != "" {
 		t.Errorf("a doc without a leading fence should yield an empty block")
+	}
+}
+
+// TestAtomicWrite covers the temp-file + rename write: content lands intact,
+// an existing file is replaced, and no temp residue is left behind.
+func TestAtomicWrite(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "playbook.md")
+	if err := atomicWrite(path, []byte("v1")); err != nil {
+		t.Fatal(err)
+	}
+	if err := atomicWrite(path, []byte("v2")); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil || string(b) != "v2" {
+		t.Fatalf("content = %q err=%v, want v2", b, err)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Fatalf("temp residue left in dir: %v", entries)
+	}
+	// An unwritable directory surfaces the error instead of panicking.
+	if err := atomicWrite("/definitely/not/a/dir/x.md", []byte("v")); err == nil {
+		t.Error("atomicWrite into a missing directory must error")
+	}
+}
+
+// TestDriverEnvLookup covers both paths of the finalize env seam: a real zsh
+// driver dumps the environment (HOME resolves), and a bogus shell selector
+// degrades to the always-miss lookup with a no-op close.
+func TestDriverEnvLookup(t *testing.T) {
+	lookup, closeFn := driverEnvLookup("zsh")
+	defer closeFn()
+	if v, ok := lookup("HOME"); !ok || v == "" {
+		t.Errorf("HOME should resolve through the driver env dump, got (%q,%v)", v, ok)
+	}
+	if _, ok := lookup("DEFINITELY_NOT_SET_APB_TEST"); ok {
+		t.Error("an unset var must miss")
+	}
+
+	miss, closeMiss := driverEnvLookup("/definitely/not/a/shell")
+	defer closeMiss()
+	if _, ok := miss("HOME"); ok {
+		t.Error("a failed driver open must return the always-miss lookup")
 	}
 }

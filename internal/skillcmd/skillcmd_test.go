@@ -148,3 +148,22 @@ func TestSkill_UnknownAndMissingSubcommand(t *testing.T) {
 		})
 	}
 }
+
+// TestMain_DispatchesViaOsArgs covers the thin Main → run bridge (os.Args
+// slicing): `<prog> skill show` exits 0 through the real entrypoint.
+func TestMain_DispatchesViaOsArgs(t *testing.T) {
+	orig := os.Args
+	defer func() { os.Args = orig }()
+	os.Args = []string{"ai-playbook", "skill", "show"}
+	// Silence the embedded SKILL dump: Main writes to os.Stdout by design.
+	origOut := os.Stdout
+	devnull, err := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = devnull
+	defer func() { os.Stdout = origOut; devnull.Close() }()
+	if code := Main(); code != 0 {
+		t.Fatalf("Main() = %d, want 0", code)
+	}
+}

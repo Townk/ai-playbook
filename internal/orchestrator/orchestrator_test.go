@@ -582,3 +582,46 @@ func TestFormatTimeout(t *testing.T) {
 		}
 	}
 }
+
+// TestParseKind covers the string→Kind mapping and its unknown fallback.
+func TestParseKind(t *testing.T) {
+	cases := map[string]Kind{
+		"copy": KindCopy, "play": KindPlay, "run": KindRun, "stop": KindStop,
+		"diff": KindViewDiff, "view-diff": KindViewDiff, "apply-diff": KindApplyDiff,
+		"undo-diff": KindUndoDiff,
+		"create":    KindCreateFile, "undo-create": KindUndoCreate,
+		"regenerate": KindRegenerate, "followup": KindFollowup,
+	}
+	for s, want := range cases {
+		got, ok := ParseKind(s)
+		if !ok || got != want {
+			t.Errorf("ParseKind(%q) = (%v,%v), want (%v,true)", s, got, ok, want)
+		}
+	}
+	if _, ok := ParseKind("definitely-not-a-kind"); ok {
+		t.Error("unknown kind must not parse")
+	}
+}
+
+// TestDriftTargetPath covers the patch-target resolution: b/-prefixed relative
+// paths join the project root, absolute paths pass through, and an unparseable
+// patch errors.
+func TestDriftTargetPath(t *testing.T) {
+	dir := t.TempDir()
+	o := newTestOrchInDir(t, dir)
+	patch := "--- a/conf/app.toml\n+++ b/conf/app.toml\n@@ -1 +1 @@\n-a\n+b\n"
+	got, err := o.DriftTargetPath(patch)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := filepath.Join(dir, "conf/app.toml"); got != want {
+		t.Errorf("relative target = %q, want %q", got, want)
+	}
+	abs := "--- /etc/app.toml\n+++ /etc/app.toml\n@@ -1 +1 @@\n-a\n+b\n"
+	if got, err := o.DriftTargetPath(abs); err != nil || got != "/etc/app.toml" {
+		t.Errorf("absolute target = (%q,%v), want /etc/app.toml", got, err)
+	}
+	if _, err := o.DriftTargetPath("not a patch"); err == nil {
+		t.Error("an unparseable patch must error")
+	}
+}
