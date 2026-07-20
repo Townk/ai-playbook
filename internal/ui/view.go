@@ -522,7 +522,7 @@ func (m model) statusBar() string {
 		return m.fitStatus(keyHint("\U000F12B7", "cancel"))
 	}
 	return m.fitStatus(keyHint("\U000F1050", "action") + "  " +
-		keyHint("\U000F12B7", "close") + "  " +
+		keyHint("q", "quit") + "  " +
 		keyHint("?", "keys") + ind)
 }
 

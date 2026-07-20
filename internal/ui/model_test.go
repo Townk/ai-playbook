@@ -144,6 +144,36 @@ func TestWrapUpKeyWhileStreaming(t *testing.T) {
 
 // TestWrapUpKeyHintMode verifies that pressing "w" while in hint mode does not
 // trigger a wrap-up (hint mode consumes the key for label resolution).
+// TestEscNeverQuits pins the ESC-audit rule: ESC is cancel/dismiss everywhere
+// (overlays, transient state) and NEVER exits the app — quitting is q / Ctrl+C.
+// An armed uncommitted-draft quit guard is disarmed by ESC, not confirmed.
+func TestEscNeverQuits(t *testing.T) {
+	esc := tea.KeyPressMsg{Code: tea.KeyEscape, Text: "esc"}
+	m := newModel("T", "hi")
+	m.width, m.height = 80, 24
+	m.reflow()
+	if _, cmd := m.Update(esc); cmd != nil {
+		t.Fatalf("esc in normal mode must not produce a command (got %T)", cmd())
+	}
+	if _, cmd := m.Update(key("q")); cmd == nil {
+		t.Fatal("q must still quit")
+	}
+	// An armed quit guard: esc DISARMS the pending discard instead of quitting.
+	m.finalDraft, m.committed = true, false
+	nm, _ := m.Update(key("q")) // first quit press arms the guard
+	m2 := nm.(model)
+	if !m2.quitGuard {
+		t.Fatal("setup: the first quit press must arm the guard")
+	}
+	nm2, cmd := m2.Update(esc)
+	if cmd != nil {
+		t.Fatal("esc with the guard armed must not quit")
+	}
+	if nm2.(model).quitGuard {
+		t.Error("esc must disarm the pending discard")
+	}
+}
+
 func TestWrapUpKeyHintMode(t *testing.T) {
 	m := newModel("T", "# Playbook\n")
 	m.width, m.height = 80, 24

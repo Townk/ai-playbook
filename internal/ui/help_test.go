@@ -27,7 +27,7 @@ func TestBuildHelpLines(t *testing.T) {
 		"hint mode for keyboard-only click", "mouse clicks activate buttons",
 		"refine (note persists as a session constraint)", "wrap-up work in the playbook",
 		"generate a playbook for the solution",
-		"toggle this help", "quit/dismiss",
+		"toggle this help", "quit", "cancel/dismiss (never quits)",
 		"copy block to clipboard", "run entire block in origin shell",
 		"invalidate cache re-run prompt",
 	} {

@@ -11,9 +11,9 @@ func (m model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	m.status = ""
 	// The uncommitted-draft quit guard is a two-press intent: it only persists across
 	// a consecutive quit (to discard) or a `w` (to save, which clears it). Any OTHER
-	// key (navigation, help, …) cancels the pending discard so a later quit warns
-	// afresh rather than silently exiting.
-	if s := msg.String(); s != "q" && s != "esc" && s != "ctrl+c" && s != "w" {
+	// key (navigation, help, ESC, …) cancels the pending discard so a later quit
+	// warns afresh rather than silently exiting.
+	if s := msg.String(); s != "q" && s != "ctrl+c" && s != "w" {
 		m.quitGuard = false
 	}
 	// Diff overlay: resolve before help/hint/normal handling.
@@ -224,7 +224,14 @@ func (m model) handleKeyPress(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		m.helpYOff = 0
 		m.helpXOff = 0
 		return m, nil
-	case "q", "esc", "ctrl+c":
+	case "esc":
+		// ESC-audit: ESC is CANCEL/DISMISS everywhere — it closes the diff/help/
+		// hint/ask overlays above and cancels transient state (the top-of-handler
+		// reset already cleared the flash, status, and quit guard) — but it NEVER
+		// exits the app. Quitting is q / Ctrl+C. (The --assisted/run variable-
+		// confirm gate keeps its deliberate ESC-ends-the-run exception.)
+		return m, nil
+	case "q", "ctrl+c":
 		// Uncommitted-draft guard (spec §E): a generated/served playbook draft that
 		// has not been `w`-committed (save + cache-replace) would be LOST on quit. The
 		// first quit press warns instead of exiting; a SECOND quit press confirms the

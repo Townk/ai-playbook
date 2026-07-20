@@ -27,7 +27,8 @@ var helpSections = []helpSection{
 			{"w", "wrap-up work in the playbook"},
 			{"c", "generate a playbook for the solution"},
 			{"?", "toggle this help"},
-			{"q / 󱊷", "quit/dismiss"},
+			{"q", "quit"},
+			{"󱊷", "cancel/dismiss (never quits)"},
 		}},
 		{"Movement", []helpBind{
 			{"J / ↓", "down one line"},

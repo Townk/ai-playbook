@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- ESC no longer quits the pager: it is now consistently cancel/dismiss — it
+  closes the diff/help/hint/ask overlays and clears transient state (including
+  a pending discard warning), while quitting stays on `q` / `Ctrl+C`. The
+  status bar and help modal reflect the split. (The `--assisted`/`run`
+  variable-confirm gate keeps its deliberate ESC-ends-the-run behavior.)
 - Hint mode: hint letters now paint directly over the glyph of the button they
   activate (as the header pills already did), instead of floating on the line
   above or below the button.
