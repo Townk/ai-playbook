@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hint mode: a button that carries no hint letter (inert, or past the hint
   alphabet) no longer shows a leftover dark-red cell that read as a phantom
   hint — the letter chip itself is now the only button marking.
+- A run-undo-quit session (run a block, undo it, quit) no longer overwrites a
+  previous run's journal with `{outcome: ok, blocks: {}}` — a session that nets
+  to zero records now restores the pre-session journal (or removes the empty
+  skeleton when there was none), so `list` keeps showing the real history.
 - `ask --version` now prints the name-aware `ask <version>` form, matching the
   `ai-playbook`/`apb` version line.
 - `AI_PLAYBOOK_SCROLLBACK_LINES` (documented in the configuration reference)

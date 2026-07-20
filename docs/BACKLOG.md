@@ -58,8 +58,6 @@ done/stale entries. Phase work lives in the roadmap, not here.
 
 - [ ] Timed-out failure messages name the ceiling but not the remedy — consider a hint suffix pointing at the `timeout=` fence attr (2026-07-05)
 
-- [ ] Run-undo-quit journal clobber: a session that runs one block, undoes it, and quits finalizes `{outcome: ok, blocks: {}}` over a prior FAILED journal (list shows ✓ for a net-nothing session) — consider treating a records-empty finalize as a no-op like the never-ran case (2026-07-06)
-
 ## Ideas
 
 - [ ] (low priority) E2E/integration tests for the integration entry points (`launcher` entry points, `cmd` `selftest`/`mcpMain`) — spawn the real binary + drive a TUI/PTY. These render via live mux/model/TUI/driver so they're not unit-testable; coverage there is intentionally low. Would push total coverage 80%→~90% (2026-06-27)

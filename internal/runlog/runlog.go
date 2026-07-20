@@ -224,6 +224,12 @@ type Journal struct {
 	dirty  bool // a block recorded — this run owns the journal file now
 	warned bool
 	now    func() time.Time // seam for deterministic tests
+	// prev holds the pre-session journal file bytes (nil when none existed).
+	// A session that ends with ZERO block records — every recorded block was
+	// undone again (run-undo-quit) — restores it at Finalize, so the saves made
+	// mid-session don't leave a net-nothing run's `{blocks: {}}` (or a bogus
+	// "ok") in place of the previous run's journal.
+	prev []byte
 }
 
 // Open builds a fresh journal for the identified playbook. It does NOT write:
@@ -235,6 +241,9 @@ func Open(path, playbookPath, contentHash string) *Journal {
 		return nil
 	}
 	j := &Journal{path: path, now: time.Now}
+	if b, err := os.ReadFile(path); err == nil {
+		j.prev = b // snapshot for the net-nothing-session restore (Finalize)
+	}
 	j.run = Run{
 		PlaybookPath: playbookPath,
 		ContentHash:  contentHash,
@@ -316,14 +325,32 @@ func (j *Journal) Remove(id string) {
 // that triggered the rollback is what fails the run). When NOTHING ever
 // recorded (a view-then-quit session, a degraded render-only viewer) it is a
 // no-op — no run happened, so no journal is written and any previous run's
-// journal stays intact.
+// journal stays intact. A session whose records NETTED to zero (run-undo-quit:
+// every recorded block was undone again) restores the pre-session journal
+// instead — the mid-session saves already replaced the file on disk, and
+// finalizing would stamp `{outcome: ok, blocks: {}}` over the previous run's
+// history (`list` would show ✓ for a session that netted nothing).
 func (j *Journal) Finalize() {
 	if j == nil || !j.dirty {
+		return
+	}
+	if len(j.run.Blocks) == 0 {
+		j.restorePrev()
 		return
 	}
 	j.run.Finished = j.now()
 	j.run.Outcome = runOutcome(j.run.Blocks)
 	j.save()
+}
+
+// restorePrev puts the pre-session journal back on disk (or removes the file
+// when the session started with none), advisory like every journal write.
+func (j *Journal) restorePrev() {
+	if j.prev == nil {
+		_ = os.Remove(j.path)
+		return
+	}
+	_ = os.WriteFile(j.path, j.prev, 0o644)
 }
 
 // runOutcome derives the run-level outcome from the block records.

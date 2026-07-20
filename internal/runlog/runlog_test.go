@@ -328,6 +328,54 @@ func TestJournal_IncrementalLifecycle(t *testing.T) {
 
 // TestJournal_FinalizeOutcomePrecedence table-tests the run-level outcome
 // derivation: any failed → failed; else any stopped → stopped; else ok.
+// TestJournal_NetNothingSessionRestoresPriorJournal pins the run-undo-quit
+// clobber fix: a session that records a block and then undoes it again nets to
+// zero records — Finalize must put the pre-session journal back (the
+// mid-session saves already replaced the file), never stamp
+// `{outcome: ok, blocks: {}}` over a previous FAILED run.
+func TestJournal_NetNothingSessionRestoresPriorJournal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.json")
+	prior := Run{
+		PlaybookPath: "x.md",
+		Outcome:      OutcomeFailed,
+		Blocks:       map[string]BlockRecord{"a": {Outcome: OutcomeFailed, Exit: 1}},
+	}
+	if err := Save(path, prior); err != nil {
+		t.Fatal(err)
+	}
+	before, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	j := Open(path, "x.md", "hash")
+	j.Record("a", BlockRecord{Outcome: OutcomeOK}) // run one block…
+	j.Remove("a")                                  // …undo it…
+	j.Finalize()                                   // …and quit
+
+	after, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("journal file must still exist: %v", err)
+	}
+	if string(before) != string(after) {
+		t.Fatalf("net-nothing session must restore the prior journal:\nbefore=%s\nafter=%s", before, after)
+	}
+}
+
+// TestJournal_NetNothingSessionNoPriorRemovesFile: same net-nothing session but
+// with NO pre-session journal — the skeleton left by the mid-session saves is
+// removed, as if no run happened.
+func TestJournal_NetNothingSessionNoPriorRemovesFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "run.json")
+	j := Open(path, "x.md", "h")
+	j.Record("a", BlockRecord{Outcome: OutcomeOK})
+	j.Remove("a")
+	j.Finalize()
+	if _, err := os.Stat(path); !errors.Is(err, fs.ErrNotExist) {
+		t.Fatalf("net-nothing session with no prior journal must leave no file (err=%v)", err)
+	}
+}
+
 func TestJournal_FinalizeOutcomePrecedence(t *testing.T) {
 	tests := []struct {
 		name string
