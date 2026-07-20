@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hint mode: hint letters now paint directly over the glyph of the button they
   activate (as the header pills already did), instead of floating on the line
   above or below the button.
+- Status bar: keybinding hints now follow the chezmoi-config convention —
+  bright-white key, a space, then the label in dark grey (dropping the `key:`
+  colon form).
 
 ### Fixed
 

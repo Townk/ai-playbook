@@ -13,14 +13,28 @@ func key(s string) tea.KeyPressMsg { return tea.KeyPressMsg{Code: rune(s[0]), Te
 
 func TestStatusBarPerMode(t *testing.T) {
 	m := newModel("T", "hi")
-	if !strings.Contains(m.statusBar(), "?: keys") || !strings.Contains(m.statusBar(), "\U000F1050") {
-		t.Fatalf("normal status bar wrong: %q", strip(m.statusBar()))
+	sb := m.statusBar()
+	// chezmoi-style hints: "<key> <label>" (no colon), key part in bright
+	// white, label in dark grey.
+	if !strings.Contains(strip(sb), "? keys") || strings.Contains(strip(sb), ":") || !strings.Contains(sb, "\U000F1050") {
+		t.Fatalf("normal status bar wrong: %q", strip(sb))
+	}
+	const whiteFgParams = "38;2;255;255;255" // colWhite — the key part
+	const greyFgParams = "38;2;108;112;134"  // colOverlay0 — the label part
+	if !strings.Contains(sb, whiteFgParams) {
+		t.Fatalf("keys must render in bright white: %q", sb)
+	}
+	if !strings.Contains(sb, greyFgParams) {
+		t.Fatalf("labels must render in dark grey: %q", sb)
 	}
 	cancel := "\U000F12B7"
 	hm := m
 	hm.hintMode = true
 	if !strings.Contains(strip(hm.statusBar()), "cancel") || !strings.Contains(hm.statusBar(), cancel) {
 		t.Fatalf("hint status bar wrong: %q", strip(hm.statusBar()))
+	}
+	if !strings.Contains(hm.statusBar(), whiteFgParams) {
+		t.Fatalf("cancel key must render in bright white: %q", hm.statusBar())
 	}
 	pm := m
 	pm.helpMode = true

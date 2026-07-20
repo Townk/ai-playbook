@@ -415,17 +415,27 @@ func (m *model) badgeRowIdx() int {
 	return 1 + m.titleRows() + m.subtitleRows()
 }
 
+// keyHint renders one status-bar keybinding hint in the chezmoi-config style:
+// the key part (keys separated by a space when a binding carries modifiers) in
+// bright white, a space, then the binding label in dark grey.
+func keyHint(keys, label string) string {
+	k := lipgloss.NewStyle().Foreground(lipgloss.Color(colWhite)).Render(keys)
+	l := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).Render(label)
+	return k + " " + l
+}
+
 // statusBar is the slim, mode-aware bottom hint.
 func (m model) statusBar() string {
-	st := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
 	ind := m.constraintIndicator()
 	if m.status != "" && !m.hintMode && !m.helpMode && !m.diffMode {
 		return lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render(m.status) + ind
 	}
 	if m.hintMode || m.helpMode || m.diffMode {
-		return st.Render("\U000F12B7: cancel")
+		return keyHint("\U000F12B7", "cancel")
 	}
-	return st.Render("\U000F1050: action • \U000F12B7: close • ?: keys") + ind
+	return keyHint("\U000F1050", "action") + "  " +
+		keyHint("\U000F12B7", "close") + "  " +
+		keyHint("?", "keys") + ind
 }
 
 // constraintIndicator is the persistent status-line segment shown while any
