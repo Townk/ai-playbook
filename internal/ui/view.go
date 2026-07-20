@@ -459,9 +459,10 @@ func (m model) viewString() string {
 	}
 
 	if m.hintMode {
-		// Labels float on the line above each button (or below when the line
-		// above is scrolled off the top). Screen-fixed buttons (the cached and
-		// edit pills) are skipped here — they live in the header, not the
+		// Each label paints directly OVER the glyph of the button it activates:
+		// on the button's own line, at the glyph cell (for a powerline pill,
+		// the glyph just after the left cap). Screen-fixed buttons (the cached
+		// and edit pills) are skipped here — they live in the header, not the
 		// scrollable body; their labels are painted over the badges row in the
 		// header block below (anchored to each pill's icon column).
 		labelsByRow := map[int]map[int]string{}
@@ -469,22 +470,14 @@ func (m model) viewString() string {
 			if b.Screen {
 				continue // handled separately in the header region
 			}
-			// Labels normally float on the line ABOVE the button. But when that line
-			// already holds text at the button's column (F20: the drift warning banner
-			// sits directly above the resolve/regenerate buttons), floating there would
-			// paint the letter over that text — so drop the label onto the button's OWN
-			// line instead. When the line above is scrolled off the top, float below.
-			row := b.Line - 1
-			switch {
-			case row < m.yOff:
-				row = b.Line + 1
-			case !m.lineBlank(row):
-				row = b.Line
+			col := b.Col
+			if b.Pill {
+				col++ // skip the left cap so the letter lands on the pill's glyph
 			}
-			if labelsByRow[row] == nil {
-				labelsByRow[row] = map[int]string{}
+			if labelsByRow[b.Line] == nil {
+				labelsByRow[b.Line] = map[int]string{}
 			}
-			labelsByRow[row][b.Col] = label
+			labelsByRow[b.Line][col] = label
 		}
 		dim := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
 		lab := lipgloss.NewStyle().Bold(true).
@@ -522,9 +515,8 @@ func (m model) viewString() string {
 		}
 		if badges := m.badgesRowString(); badges != "" {
 			// The header pills' hint labels are painted directly OVER the badges row
-			// (anchored at each pill's icon column): the row above is the subtitle /
-			// title — never blank — so the F20 own-line fallback applies, exactly as
-			// for the drift buttons under their warning banner.
+			// (anchored at each pill's icon column), the same over-the-glyph overlap
+			// the body buttons get.
 			badges = padTo(badges, m.width)
 			for lbl, b := range m.hintLabels {
 				if !b.Screen {

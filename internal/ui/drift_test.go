@@ -405,6 +405,41 @@ func TestDriftHint_DoesNotClobberBanner(t *testing.T) {
 	}
 }
 
+// TestDriftHint_LabelOverlapsGlyph verifies the hint letter paints directly
+// over the pill's glyph (the cell just after the left cap) on the button's own
+// line — not floating above or below the button.
+func TestDriftHint_LabelOverlapsGlyph(t *testing.T) {
+	m := newTestModelWithDiffBlock(t, "fix")
+	m.width, m.height = 100, 40
+	m.blockStates["fix"] = blockRunState{Drifted: true}
+	m.reflow()
+
+	m2 := mustModel(m.Update(tea.KeyPressMsg{Code: tea.KeySpace}))
+	if !m2.hintMode {
+		t.Fatal("space must enter hint mode")
+	}
+	var lbl string
+	var btn Button
+	for l, b := range m2.hintLabels {
+		if b.Kind == "drift-resolve" {
+			lbl, btn = l, b
+		}
+	}
+	if lbl == "" {
+		t.Fatal("drift-resolve must carry a hint label")
+	}
+	rows := strings.Split(strip(m2.viewString()), "\n")
+	screenRow := m2.bodyTop() + btn.Line - m2.yOff
+	if screenRow < 0 || screenRow >= len(rows) {
+		t.Fatalf("button row %d out of view (%d rows)", screenRow, len(rows))
+	}
+	r := []rune(rows[screenRow])
+	at := 2 + btn.Col + 1 // 2-col left margin + left cap
+	if at >= len(r) || string(r[at]) != lbl {
+		t.Fatalf("hint letter %q must overlap the pill glyph at col %d; row=%q", lbl, at, rows[screenRow])
+	}
+}
+
 // TestDriftHint_PillInvertedFill verifies that in hint mode the drift action
 // pills keep their filled-shape look via the inverted-fill trick (muted text on
 // a solid colSurface0 fill, caps in the fill color) rather than collapsing to

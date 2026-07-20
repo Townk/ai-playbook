@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Hint mode: hint letters now paint directly over the glyph of the button they
+  activate (as the header pills already did), instead of floating on the line
+  above or below the button.
+
 ### Fixed
 
 - Hint mode: in-document action pills (drift resolve/regenerate, try-another-fix,

@@ -598,20 +598,6 @@ func (m *model) bodyTop() int {
 	return 1 + m.titleRows() + m.subtitleRows() + m.badgeRows() + 1
 }
 
-// lineBlank reports whether body line lineIdx is empty or all-whitespace (ANSI
-// stripped). Used by the hint-overlay painter (F20): a label normally floats on the
-// line above its button, but if that line carries text (e.g. the drift warning banner
-// sits directly above the resolve/regenerate buttons) floating there would paint the
-// letter INTO that running text — even landing on an inter-word space still corrupts
-// it — so the label drops onto the button's own line instead. An out-of-range index
-// is treated as blank (nothing to overwrite).
-func (m *model) lineBlank(lineIdx int) bool {
-	if lineIdx < 0 || lineIdx >= len(m.lines) {
-		return true
-	}
-	return strings.TrimSpace(strip(m.lines[lineIdx].Text)) == ""
-}
-
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// no-mux ask overlay: a pending agent ask raises the dialog; while it's open
 	// every message except a window resize (which still reaches the document so the
