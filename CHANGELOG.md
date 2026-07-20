@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-RC3] - 2026-07-20
+
 ### Added
 
 - `completion <show|install|uninstall>` and `man <install|uninstall>` — the
@@ -717,7 +719,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Original zsh shell-script implementation (ai-assist).
 
-[Unreleased]: https://github.com/Townk/ai-playbook/compare/v1.0.0-RC2...HEAD
+[Unreleased]: https://github.com/Townk/ai-playbook/compare/v1.0.0-RC3...HEAD
+[1.0.0-RC3]: https://github.com/Townk/ai-playbook/compare/v1.0.0-RC2...v1.0.0-RC3
 [1.0.0-RC2]: https://github.com/Townk/ai-playbook/compare/v1.0.0-RC1...v1.0.0-RC2
 [1.0.0-RC1]: https://github.com/Townk/ai-playbook/compare/v0.13.0...v1.0.0-RC1
 [0.13.0]: https://github.com/Townk/ai-playbook/compare/v0.12.3...v0.13.0
