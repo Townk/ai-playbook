@@ -244,3 +244,38 @@ func TestViewDiff_ScrollDown(t *testing.T) {
 		t.Fatal("pressing j in diffMode must increment diffYOff")
 	}
 }
+
+// TestDiffOverlayScrollSteps covers the Ctrl+D/U (half), Ctrl+F/B (page) and
+// L/H (half-width) step helpers plus their tiny-pane floors, and the unified
+// narrow-path fallbacks (diffUnified/diffUnifiedLines/diffUnifiedMaxWidth when
+// the geometry cache is invalid).
+func TestDiffOverlayScrollSteps(t *testing.T) {
+	m := newModel("T", "# hi\n")
+	m.width, m.height = 100, 30
+	if got, want := diffHalf(m), (m.height-4)/2; got != want {
+		t.Errorf("diffHalf = %d, want %d", got, want)
+	}
+	if got, want := diffPage(m), m.height-4; got != want {
+		t.Errorf("diffPage = %d, want %d", got, want)
+	}
+	if diffHalfW(m) < 2 {
+		t.Errorf("diffHalfW must be >1 on a wide pane: %d", diffHalfW(m))
+	}
+	// Tiny pane: every step floors at 1.
+	m.width, m.height = 5, 4
+	if diffHalf(m) != 1 || diffPage(m) != 1 || diffHalfW(m) != 1 {
+		t.Errorf("tiny pane steps = %d/%d/%d, want 1/1/1", diffHalf(m), diffPage(m), diffHalfW(m))
+	}
+	// Unified narrow-path fallbacks with an invalid geometry cache: a live
+	// render of the parsed files, and the widest line's width.
+	m.width, m.height = 100, 30
+	m.diffFiles = idiff.Parse("--- a/x\n+++ b/x\n@@ -1 +1 @@\n-old\n+new\n")
+	m.diffGeomValid = false
+	lines := m.diffUnified()
+	if len(lines) == 0 {
+		t.Fatal("diffUnified fallback must render lines")
+	}
+	if got := m.diffUnifiedMaxWidth(); got <= 0 {
+		t.Errorf("diffUnifiedMaxWidth fallback = %d, want > 0", got)
+	}
+}
