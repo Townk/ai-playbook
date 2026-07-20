@@ -31,6 +31,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hint mode: a button that carries no hint letter (inert, or past the hint
   alphabet) no longer shows a leftover dark-red cell that read as a phantom
   hint — the letter chip itself is now the only button marking.
+- The status line now truncates with an ellipsis on very narrow panes instead
+  of overflowing the row (the keybinding hints plus the constraint indicator
+  could wrap the frame).
 - Short panes no longer overflow the frame when a long title wraps to several
   rows: the wrapped title is capped to the pane's row budget (cut marked with
   an ellipsis), the subtitle yields whatever budget remains, and the frame

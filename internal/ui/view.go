@@ -512,18 +512,40 @@ func keyHint(keys, label string) string {
 	return k + " " + l
 }
 
-// statusBar is the slim, mode-aware bottom hint.
+// statusBar is the slim, mode-aware bottom hint, truncated to the pane width.
 func (m model) statusBar() string {
 	ind := m.constraintIndicator()
 	if m.status != "" && !m.hintMode && !m.helpMode && !m.diffMode {
-		return lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render(m.status) + ind
+		return m.fitStatus(lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render(m.status) + ind)
 	}
 	if m.hintMode || m.helpMode || m.diffMode {
-		return keyHint("\U000F12B7", "cancel")
+		return m.fitStatus(keyHint("\U000F12B7", "cancel"))
 	}
-	return keyHint("\U000F1050", "action") + "  " +
+	return m.fitStatus(keyHint("\U000F1050", "action") + "  " +
 		keyHint("\U000F12B7", "close") + "  " +
-		keyHint("?", "keys") + ind
+		keyHint("?", "keys") + ind)
+}
+
+// fitStatus truncates an assembled status line to the pane width minus the
+// 2-col left margin (ANSI-aware via hslice), marking the cut with an ellipsis.
+// The status row is padded but was never truncated — on very narrow panes the
+// hints + constraint indicator overflowed the row and wrapped, breaking the
+// frame height. Unsized panes (m.width <= 0) pass through untouched.
+func (m model) fitStatus(s string) string {
+	if m.width <= 0 {
+		return s
+	}
+	w := m.width - 2
+	if w < 1 {
+		w = 1
+	}
+	if lipgloss.Width(s) <= w {
+		return s
+	}
+	if w == 1 {
+		return "…"
+	}
+	return hslice(s, 0, w-1) + "…"
 }
 
 // constraintIndicator is the persistent status-line segment shown while any

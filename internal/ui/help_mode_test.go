@@ -43,6 +43,28 @@ func TestStatusBarPerMode(t *testing.T) {
 	}
 }
 
+// TestStatusBarTruncatesOnNarrowPane verifies the status line never exceeds
+// the pane's content width: on a very narrow pane the hints (+ constraint
+// indicator) are cut ANSI-aware with a trailing ellipsis instead of
+// overflowing the row and wrapping the frame.
+func TestStatusBarTruncatesOnNarrowPane(t *testing.T) {
+	m := newModel("T", "hi")
+	m.width = 20
+	m.refusals = []string{"a", "b"} // widen with the constraint indicator
+	sb := m.statusBar()
+	if w := lipgloss.Width(sb); w > m.width-2 {
+		t.Fatalf("status bar width %d exceeds pane budget %d: %q", w, m.width-2, strip(sb))
+	}
+	if !strings.HasSuffix(strip(sb), "…") {
+		t.Fatalf("truncated status bar must end with an ellipsis: %q", strip(sb))
+	}
+	// A wide pane keeps the full line untouched.
+	m.width = 120
+	if !strings.Contains(strip(m.statusBar()), "? keys") {
+		t.Fatal("wide pane must keep the full hints")
+	}
+}
+
 // TestHelpTextDims tests the visible-text dims with content-capped values.
 func TestHelpTextDims(t *testing.T) {
 	// Generous pane: content fits, no scrollbars.
