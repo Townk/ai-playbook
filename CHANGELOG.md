@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Hint mode: in-document action pills (drift resolve/regenerate, try-another-fix,
+  rollback) now grey out with the same inverted-fill treatment as code and
+  callout blocks — a muted filled pill — instead of losing their body color and
+  showing an empty center between greyed rounded caps.
+
 ## [0.13.0] - 2026-07-06
 
 ### Added

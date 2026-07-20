@@ -405,6 +405,27 @@ func TestDriftHint_DoesNotClobberBanner(t *testing.T) {
 	}
 }
 
+// TestDriftHint_PillInvertedFill verifies that in hint mode the drift action
+// pills keep their filled-shape look via the inverted-fill trick (muted text on
+// a solid colSurface0 fill, caps in the fill color) rather than collapsing to
+// greyed caps around an empty center.
+func TestDriftHint_PillInvertedFill(t *testing.T) {
+	m := newTestModelWithDiffBlock(t, "fix")
+	m.width, m.height = 100, 40 // tall enough that the drift region is in the body window
+	m.blockStates["fix"] = blockRunState{Drifted: true}
+	m.reflow()
+
+	m2 := mustModel(m.Update(tea.KeyPressMsg{Code: tea.KeySpace}))
+	if !m2.hintMode {
+		t.Fatal("space must enter hint mode")
+	}
+	got := m2.viewString()
+	const surfaceBgParams = "48;2;49;50;68" // colSurface0 #313244 — the pill body fill
+	if !strings.Contains(got, surfaceBgParams) {
+		t.Fatal("hint mode must paint the drift pills' body with the solid colSurface0 fill")
+	}
+}
+
 // driftedConfContent is the on-disk (drifted) target content used by the resolve-
 // manually temp-file tests: it has `timeout = 99` where the patch expected `= 30`.
 const driftedConfContent = "[server]\nhost = localhost\nport = 8080\ntimeout = 99\nmax_connections = 100\n"

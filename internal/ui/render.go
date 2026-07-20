@@ -982,6 +982,7 @@ func (r *renderer) code(n ast.Node) {
 			Kind:    "drift-resolve",
 			Payload: src,
 			BlockID: blk.ID,
+			Pill:    true,
 		})
 		// drift-regen: the pill starts after resolve pill + space + sep + space.
 		regenCol := indentW + lipgloss.Width(resolvePill) + 1 + lipgloss.Width(glyphSep) + 1
@@ -992,6 +993,7 @@ func (r *renderer) code(n ast.Node) {
 			Kind:    "drift-regen",
 			Payload: src,
 			BlockID: blk.ID,
+			Pill:    true,
 		})
 	}
 
@@ -1129,7 +1131,7 @@ func (r *renderer) runRegion(blk Block, st blockRunState) {
 		r.lines = append(r.lines, Line{Text: indentStr + summary, Wide: false, Code: true})
 		r.buttons = append(r.buttons, Button{Line: summaryLineIdx, Col: toggleCol, Width: 2, Kind: "toggle", BlockID: id})
 		if extraCol >= 0 {
-			r.buttons = append(r.buttons, Button{Line: summaryLineIdx, Col: extraCol, Width: extraWidth, Kind: extraKind, Payload: blk.Payload, BlockID: id})
+			r.buttons = append(r.buttons, Button{Line: summaryLineIdx, Col: extraCol, Width: extraWidth, Kind: extraKind, Payload: blk.Payload, BlockID: id, Pill: true})
 		}
 		// While a rollback chain triggered by this failure is running, show a spinner
 		// under the failure so the automatic undo has a stated cause.

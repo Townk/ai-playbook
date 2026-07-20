@@ -18,6 +18,11 @@ type Button struct {
 	Payload string
 	BlockID string
 	Screen  bool
+	// Pill marks a powerline-pill button (cap + body + cap, actionPill). Hint
+	// mode renders its whole span with the inverted greyed fill (hintCodeRow
+	// pillSpans) instead of the dark-red glyph cell, and anchors the hint label
+	// over the glyph just after the left cap (Col+1).
+	Pill bool
 }
 
 // hintAlphabet is the ordered set of single-char labels used by assignHintLabels.
