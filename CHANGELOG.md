@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.0-RC1] - 2026-07-19
+
 ### Added
 
 - Homebrew tap: releases now generate and publish a formula to
@@ -680,7 +682,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Original zsh shell-script implementation (ai-assist).
 
-[Unreleased]: https://github.com/Townk/ai-playbook/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/Townk/ai-playbook/compare/v1.0.0-RC1...HEAD
+[1.0.0-RC1]: https://github.com/Townk/ai-playbook/compare/v0.13.0...v1.0.0-RC1
 [0.13.0]: https://github.com/Townk/ai-playbook/compare/v0.12.3...v0.13.0
 [0.12.3]: https://github.com/Townk/ai-playbook/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/Townk/ai-playbook/compare/v0.12.1...v0.12.2
