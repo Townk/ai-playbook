@@ -71,3 +71,7 @@ jobs:
           args: release --clean --release-notes=${{ runner.temp }}/release-notes.md
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Homebrew tap publish (see .goreleaser.yml brews): a PAT with push
+          # access to Townk/homebrew-tap. Unset/empty → the formula is only
+          # generated into dist/ (skip_upload self-arms), never a failure.
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}

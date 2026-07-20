@@ -78,6 +78,43 @@ archives:
 checksum:
   name_template: "checksums.txt"
 
+# Homebrew tap: on release, a formula is generated from the archives and pushed
+# to Townk/homebrew-tap (Formula/ai-playbook.rb) → `brew install
+# townk/tap/ai-playbook`.
+#
+# Deliberately `brews` (a formula), not the newer `homebrew_casks` goreleaser
+# nudges toward: casks are macOS-only, while this formula serves the linux
+# archives to Homebrew-on-Linux too. Revisit only if goreleaser removes brews.
+#
+# Publishing is SELF-ARMING: release.yml always exports
+# HOMEBREW_TAP_TOKEN (a PAT with push access to the tap repo); while the secret
+# is unset/empty the formula is only generated into dist/ (skip_upload), so a
+# release never fails on a missing tap. Create the tap repo + secret to arm it.
+brews:
+  - name: ai-playbook
+    ids: [ai-playbook]
+    repository:
+      owner: Townk
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    homepage: https://github.com/Townk/ai-playbook
+    description: "Terminal-native AI assistant that turns live shell context into runnable, reusable playbooks"
+    license: Apache-2.0
+    skip_upload: "{{ if .Env.HOMEBREW_TAP_TOKEN }}false{{ else }}true{{ end }}"
+    commit_author:
+      name: goreleaser-bot
+      email: bot@goreleaser.com
+    install: |
+      bin.install "ai-playbook"
+      bin.install "apb"
+      bin.install "ask"
+      man1.install Dir["docs/man/*.1"]
+      zsh_completion.install "completions/_ai-playbook"
+      zsh_completion.install "completions/_ask"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/ai-playbook version")
+
 changelog:
   sort: asc
   use: github
