@@ -31,6 +31,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hint mode: a button that carries no hint letter (inert, or past the hint
   alphabet) no longer shows a leftover dark-red cell that read as a phantom
   hint — the letter chip itself is now the only button marking.
+- `ask --version` now prints the name-aware `ask <version>` form, matching the
+  `ai-playbook`/`apb` version line.
+- `AI_PLAYBOOK_SCROLLBACK_LINES` (documented in the configuration reference)
+  is now actually honored as the scrollback-capture cap; it was previously
+  read nowhere.
+- A `submit_playbook` schema failure now renders as `validation error: <msg>`
+  on the claude harness — the wording the tool description promises and the
+  one pi's embedded extension already used (the dedicated branch was dead
+  behind the generic error guard).
 - The status line now truncates with an ellipsis on very narrow panes instead
   of overflowing the row (the keybinding hints plus the constraint indicator
   could wrap the frame).

@@ -113,9 +113,12 @@ func forward(socketPath string, call tools.Call) (*mcp.CallToolResult, error) {
 
 // renderResult turns a backend Result into the text an LLM tool-caller reads.
 // For `run` it surfaces exit/stdout/stderr; for `remember` a saved/failed line;
-// for `ask` the answer or the unavailable sentinel.
+// for `ask` the answer or the unavailable sentinel. `submit_playbook` errors
+// are excluded from the generic guard so they render as "validation error:
+// <msg>" — the wording the tool description promises and the one pi's embedded
+// extension uses, keeping the two FULL harnesses aligned.
 func renderResult(tool string, res tools.Result) string {
-	if res.Error != "" && tool != "ask" {
+	if res.Error != "" && tool != "ask" && tool != "submit_playbook" {
 		return "error: " + res.Error
 	}
 	switch tool {

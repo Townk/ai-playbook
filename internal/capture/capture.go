@@ -18,8 +18,21 @@ import (
 	"github.com/Townk/ai-playbook/internal/mux"
 )
 
-// defaultScrollbackLines mirrors AI_PLAYBOOK_SCROLLBACK_LINES (default 200).
+// defaultScrollbackLines is the scrollback cap when neither Options.ScrollbackMax
+// nor AI_PLAYBOOK_SCROLLBACK_LINES sets one.
 const defaultScrollbackLines = 200
+
+// envScrollbackLines resolves the scrollback cap from AI_PLAYBOOK_SCROLLBACK_LINES
+// (see docs/configuration.md). Unset, invalid, or non-positive values fall back
+// to defaultScrollbackLines.
+func envScrollbackLines() int {
+	if v := os.Getenv("AI_PLAYBOOK_SCROLLBACK_LINES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return defaultScrollbackLines
+}
 
 // Project is the {name, branch} pair the request carries.
 type Project struct {
@@ -61,7 +74,7 @@ type Options struct {
 	Mux           mux.Mux     // screen dump source (injected; fake in tests)
 	Atuin         AtuinSource // last-command source (injected; fake in tests)
 	PaneID        string      // mux pane id (e.g. "terminal_3"); from the caller/env
-	ScrollbackMax int         // cap; 0 → defaultScrollbackLines
+	ScrollbackMax int         // cap; 0 → $AI_PLAYBOOK_SCROLLBACK_LINES, else 200
 	GitToplevelFn func(dir string) (string, bool)
 	UserRequest   string // optional pre-filled request
 }
@@ -116,7 +129,7 @@ func Capture(opts Options) Request {
 	if r.Kind == "error" && opts.Mux != nil && r.Command != "" {
 		max := opts.ScrollbackMax
 		if max <= 0 {
-			max = defaultScrollbackLines
+			max = envScrollbackLines()
 		}
 		dump, err := opts.Mux.DumpScreen(opts.PaneID)
 		if err == nil {

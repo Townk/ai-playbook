@@ -75,7 +75,8 @@ func Run(args []string) int {
 		usage(os.Stdout)
 		return exitOK
 	case "-v", "--version":
-		fmt.Println(version())
+		// Name-aware "<prog> <version>", matching ai-playbook/apb's version line.
+		fmt.Println("ask " + version())
 		return exitOK
 	case "confirm":
 		return runConfirmCmd(args[2:])

@@ -13,7 +13,6 @@ done/stale entries. Phase work lives in the roadmap, not here.
 ## Bugs
 
 - [ ] Global knowledge.md concurrent-remember read-modify-write can lose a fact across sessions (unlocked; the compaction race guard narrows only compaction) — consider O_APPEND-safe append or file locking (2026-07-05)
-- [ ] `internal/mcpserver` `validation error:` render branch is dead code — the top `res.Error` guard fires first on a `submit_playbook` schema failure, so claude renders `error: <msg>` while pi's extension renders `validation error: <msg>` — a cosmetic wording divergence between the two FULL harnesses; fix the dead branch to align them (2026-07-06)
 
 ## Tasks
 
@@ -35,7 +34,6 @@ done/stale entries. Phase work lives in the roadmap, not here.
 - [ ] Unify the two cell-width engines: app code measures with mattn/go-runewidth while the charm v2 stack renders with clipperhouse/displaywidth — EA/emoji width disagreements can misalign frames (2026-07-04)
 - [ ] Test hygiene: retire coverage_boost_test.go's symbol-pinning tests into behavioral per-file tests; add factories for the 124 copy-pasted `defaultTheme(), "default"` constructor calls; share the duplicated collectMsgs helper (2026-07-04)
 - [ ] BASIC-tier residual (ADR-0012): FollowupPrompt's BASE text teaches the `run` tool unconditionally — under a BASIC harness the sentence should gate on tools wiring (left byte-identical in H1; only the folds gate today) (2026-07-06)
-- [ ] `ask --version` prints a bare `v0.9.0` while `ai-playbook`/`apb` print name-aware `<prog> <version>` — align ask's version line with its siblings (2026-07-04)
 
 - [ ] Finish the `pkg/` promotion (ADR-0009 step 5, last piece): `pkg/runner`←orchestrator — the executor holds a `mux.Mux` (edit/float pane spawning; mux→config→cache) and calls `diff.Parse` (diff→theme); needs design (a narrowed executor-owned pane-spawn interface, or a public mux) rather than a mechanical cut. `internal/autorun`→`pkg/runner/auto` waits on the same (imports orchestrator + cache) (2026-07-04); note ui.Options also embeds reengage/askbridge/orchestrator types — the same seam inventory for any future ui/runner promotion
 
@@ -58,11 +56,9 @@ done/stale entries. Phase work lives in the roadmap, not here.
 
 - [ ] The structured draft's top-level verify Step can't declare `timeout=` (per-code-item only) — a long-running verify gets only the 10m default; add the field if a real case appears (2026-07-05)
 
-- [ ] `AI_PLAYBOOK_SCROLLBACK_LINES` is documented in docs/configuration.md but read nowhere (only a const comment mirrors it) — wire it in internal/capture or drop the row (2026-07-05)
 - [ ] Timed-out failure messages name the ceiling but not the remedy — consider a hint suffix pointing at the `timeout=` fence attr (2026-07-05)
 
 - [ ] Run-undo-quit journal clobber: a session that runs one block, undoes it, and quits finalizes `{outcome: ok, blocks: {}}` over a prior FAILED journal (list shows ✓ for a net-nothing session) — consider treating a records-empty finalize as a no-op like the never-ran case (2026-07-06)
-
 
 ## Ideas
 

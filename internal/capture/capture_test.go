@@ -358,6 +358,28 @@ func TestCapture_ExplicitScrollbackMax(t *testing.T) {
 	}
 }
 
+// TestCapture_EnvScrollbackLines verifies AI_PLAYBOOK_SCROLLBACK_LINES supplies
+// the cap when Options.ScrollbackMax is unset (the documented behavior in
+// docs/configuration.md), and that invalid values fall back to the default.
+func TestCapture_EnvScrollbackLines(t *testing.T) {
+	t.Setenv("AI_PLAYBOOK_SCROLLBACK_LINES", "2")
+	dump := "$ make\nout1\nout2\nout3\n"
+	r := Capture(Options{
+		Mux:           &fakeMux{screen: dump},
+		Atuin:         fakeAtuin{lc: LastCommand{Command: "make", Exit: "1", Dir: "/work/proj"}},
+		GitToplevelFn: noGit,
+	})
+	if want := "out1\nout2"; r.Scrollback != want {
+		t.Fatalf("scrollback = %q, want %q (env cap 2)", r.Scrollback, want)
+	}
+	for _, bad := range []string{"", "abc", "0", "-3"} {
+		t.Setenv("AI_PLAYBOOK_SCROLLBACK_LINES", bad)
+		if got := envScrollbackLines(); got != defaultScrollbackLines {
+			t.Errorf("envScrollbackLines with %q = %d, want default %d", bad, got, defaultScrollbackLines)
+		}
+	}
+}
+
 // ── SliceScrollback extras ───────────────────────────────────────────────────
 
 func TestSliceScrollback_AnchorWithCap(t *testing.T) {

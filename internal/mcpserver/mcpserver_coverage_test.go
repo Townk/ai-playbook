@@ -45,6 +45,18 @@ func TestRenderResult_RememberError(t *testing.T) {
 	}
 }
 
+// TestRenderResult_SubmitPlaybookValidationError pins that a submit_playbook
+// schema failure renders as "validation error: <msg>" — the wording the tool
+// description promises and the one pi's embedded extension uses — instead of
+// being swallowed by the generic "error:" guard (formerly a dead branch).
+func TestRenderResult_SubmitPlaybookValidationError(t *testing.T) {
+	got := renderResult("submit_playbook", tools.Result{Error: "steps[0]: missing code"})
+	want := "validation error: steps[0]: missing code"
+	if got != want {
+		t.Errorf("renderResult (submit_playbook) = %q, want %q", got, want)
+	}
+}
+
 // TestRenderResult_RunWithStderr covers the stderr branch inside the "run"
 // case (res.Err != "" while res.Out == "").
 func TestRenderResult_RunWithStderr(t *testing.T) {

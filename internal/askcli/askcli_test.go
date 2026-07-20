@@ -488,7 +488,8 @@ func TestVersion(t *testing.T) {
 	defer func() { Version = origVer }()
 	for _, flag := range []string{"--version", "-v"} {
 		code, out, _ := runAsk(flag)
-		if code != 0 || strings.TrimSpace(out) != "v9.9.9" {
+		// Name-aware, matching the ai-playbook/apb "<prog> <version>" form.
+		if code != 0 || strings.TrimSpace(out) != "ask v9.9.9" {
 			t.Errorf("%s: code=%d out=%q", flag, code, out)
 		}
 	}
