@@ -202,6 +202,24 @@ func TestTypeInto_EmptyPaneFallsBackToFocused(t *testing.T) {
 	}
 }
 
+// TestTypeInto_TmuxTemplate covers a tmux-style user template: with a pane id
+// the `-t` target resolves; with an empty pane the `-t {pane}` pair is stripped
+// (never a malformed `send-keys -t ”`), matching the zellij-form stripping.
+func TestTypeInto_TmuxTemplate(t *testing.T) {
+	cfg := config.Default()
+	cfg.Mux.TypeIntoPane = "tmux send-keys -t {pane} -l {text}"
+	tr := FromConfig(cfg).(*templated)
+	assertArgv(t, tr.typeIntoArgv("%5", "git log"),
+		[]string{"tmux", "send-keys", "-t", "%5", "-l", "git log"})
+	got := tr.typeIntoArgv("", "git log")
+	assertArgv(t, got, []string{"tmux", "send-keys", "-l", "git log"})
+	for _, a := range got {
+		if a == "-t" || a == "" {
+			t.Fatalf("empty pane must not leave a dangling -t: %q", got)
+		}
+	}
+}
+
 // SpawnFloat with no command errors (no malformed spawn).
 func TestSpawnFloat_NeedsCommand(t *testing.T) {
 	m := FromConfig(config.Default())

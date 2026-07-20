@@ -62,15 +62,12 @@ func SessionMain() int {
 		// The launcher handed the file off to us; we own its removal now.
 		os.Remove(requestPath)
 	} else {
-		// Standalone: capture in-process (no launcher handoff).
-		paneID := ""
-		if p := os.Getenv("ZELLIJ_PANE_ID"); p != "" {
-			paneID = "terminal_" + p
-		}
+		// Standalone: capture in-process (no launcher handoff). The pane id
+		// resolves through the configured [mux] pane-id template (originPane).
 		req = capture.Capture(capture.Options{
 			Mux:         m,
 			Atuin:       capture.NewAtuin(),
-			PaneID:      paneID,
+			PaneID:      originPane(),
 			UserRequest: os.Getenv("AI_PLAYBOOK_USER_REQUEST"),
 		})
 	}

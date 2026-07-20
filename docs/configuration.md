@@ -73,6 +73,7 @@ selector — `backend = "zellij"` — that mirrors `[driver] shell` and
 | Key       | Default     | Meaning |
 |-----------|-------------|---------|
 | `backend` | `""` (off)  | The named multiplexer preset to enable. `""` = off (inline UX). `"zellij"` = the built-in zellij preset (the command templates below). Any other value requires full per-command template overrides. |
+| `pane-id` | `terminal_{ZELLIJ_PANE_ID}` | The **origin-pane identity** template: how the pane id of the shell a request originates from is derived from that shell's environment. Each `{VAR}` expands to the env var's value; if **any** referenced var is unset the id resolves to `""` (no origin pane — capture falls back to the focused pane, and the play button degrades to the clipboard with a status note). The resolved id feeds `dump-screen` and `type-into-pane` via their `{pane}` placeholder. tmux users set `pane-id = "{TMUX_PANE}"` (tmux `%`-ids are used verbatim; zellij needs the `terminal_` prefix on its numeric env id). |
 
 When the mux is enabled, each action is driven by a command **template** (tier-2,
 for fine-grained control). Each value is a template string; the binary token-splits
@@ -121,6 +122,8 @@ shell = "bash"   # pin bash; omit (or "") to auto-honor $SHELL
 backend = "zellij"   # opt in to the multiplexer (off by default)
 # tier-2: override a single action only if you are not on the default zellij setup
 dump-screen = "tmux capture-pane -p {panearg}"
+# origin-pane identity for a tmux setup ({VAR} expands from the origin shell's env)
+# pane-id = "{TMUX_PANE}"
 
 [kb]
 budget = 4096   # per-file byte budget before wrap-up compaction kicks in

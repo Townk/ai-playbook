@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/BurntSushi/toml"
@@ -38,6 +39,42 @@ type Mux struct {
 	OpenDockedPane   string `toml:"open-docked-pane"`
 	DumpScreen       string `toml:"dump-screen"`
 	TypeIntoPane     string `toml:"type-into-pane"`
+	// PaneID is the ORIGIN-PANE IDENTITY template: how the pane id of the shell
+	// a request originates from is derived from that shell's environment. Each
+	// {VAR} token expands to the env var's value (OriginPane). The resolved id
+	// feeds dump-screen targeting and type-into-pane (the play button / staged
+	// commands) via their {pane} placeholder. The default is the zellij
+	// contract — "terminal_{ZELLIJ_PANE_ID}" (zellij's CLI wants the terminal_
+	// prefix on the bare numeric env id); a tmux user sets
+	// pane-id = "{TMUX_PANE}" (tmux's %-id is used verbatim).
+	PaneID string `toml:"pane-id"`
+}
+
+// paneIDVar matches one {ENV_NAME} token in the [mux] pane-id template.
+var paneIDVar = regexp.MustCompile(`\{([A-Za-z_][A-Za-z0-9_]*)\}`)
+
+// OriginPane resolves the [mux] pane-id template against the current process
+// environment: each {VAR} expands to os.Getenv("VAR"). It returns "" — no
+// identifiable origin pane — when the template is empty or ANY referenced
+// variable is unset/empty, so a half-expanded id (e.g. "terminal_") can never
+// escape into a pane target. Callers treat "" as "no origin pane" and degrade
+// (focused-pane capture; play falls back to the clipboard with a status note).
+func (m Mux) OriginPane() string {
+	if m.PaneID == "" {
+		return ""
+	}
+	missing := false
+	out := paneIDVar.ReplaceAllStringFunc(m.PaneID, func(tok string) string {
+		v := os.Getenv(tok[1 : len(tok)-1])
+		if v == "" {
+			missing = true
+		}
+		return v
+	})
+	if missing {
+		return ""
+	}
+	return out
 }
 
 // Driver holds the executing-shell configuration for ai-playbook's shell driver.
@@ -141,6 +178,8 @@ func Default() *Config {
 			// drops the "--pane-id {pane}" pair when pane is empty (off-zellij/inline),
 			// falling back to a focused write.
 			TypeIntoPane: "zellij action write-chars --pane-id {pane} {text}",
+			// The zellij origin-pane identity contract (see Mux.PaneID / OriginPane).
+			PaneID: "terminal_{ZELLIJ_PANE_ID}",
 		},
 		// The [agent] value defaults are ALL empty here on purpose (ADR-0012):
 		// harness "" selects the compiled-in default harness (claude), and the
@@ -220,6 +259,7 @@ func loadFrom(base *Config, path string, data []byte) (*Config, error) {
 	mergeStr(&base.Mux.OpenDockedPane, user.Mux.OpenDockedPane)
 	mergeStr(&base.Mux.DumpScreen, user.Mux.DumpScreen)
 	mergeStr(&base.Mux.TypeIntoPane, user.Mux.TypeIntoPane)
+	mergeStr(&base.Mux.PaneID, user.Mux.PaneID)
 	mergeStr(&base.Agent.Harness, user.Agent.Harness)
 	mergeStr(&base.Agent.Model, user.Agent.Model)
 	mergeStr(&base.Agent.TriageModel, user.Agent.TriageModel)

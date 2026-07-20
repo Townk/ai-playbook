@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `[mux] pane-id` — the origin-pane identity template (default
+  `terminal_{ZELLIJ_PANE_ID}`, the previous hardcoded zellij contract). Each
+  `{VAR}` expands from the origin shell's environment, so tmux users can set
+  `pane-id = "{TMUX_PANE}"` and get focus-independent scrollback capture and
+  play-button command staging with their own `[mux]` command templates. If any
+  referenced variable is unset the id resolves to empty and the existing
+  degrades apply (focused-pane capture; play falls back to the clipboard). The
+  empty-pane flag stripping in `type-into-pane` now also covers tmux's
+  `-t {pane}` form.
+
 ### Fixed
 
 - The play button (⏵) now actually types the block's command into the origin

@@ -59,16 +59,13 @@ func CreateMain() int {
 	}
 
 	m := mux.Load()
-	paneID := ""
-	if p := os.Getenv("ZELLIJ_PANE_ID"); p != "" {
-		paneID = "terminal_" + p
-	}
 	// Build the capture the same standalone way SessionMain does, with the prompt
-	// as the user request.
+	// as the user request; the pane id resolves through the configured [mux]
+	// pane-id template (originPane).
 	req := captureFn(capture.Options{
 		Mux:         m,
 		Atuin:       capture.NewAtuin(),
-		PaneID:      paneID,
+		PaneID:      originPane(),
 		UserRequest: prompt,
 	})
 	return createPlaybook(req, m)

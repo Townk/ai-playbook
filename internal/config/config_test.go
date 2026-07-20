@@ -376,3 +376,51 @@ func TestKB_AbsentKeepsDefaults(t *testing.T) {
 		t.Fatalf("KB.Dir should keep default: %q", cfg.KB.Dir)
 	}
 }
+
+// TestMuxOriginPane covers the [mux] pane-id template resolution: the default
+// zellij contract, a tmux-style verbatim var, the all-or-nothing rule (any
+// referenced var unset → "" — a half-expanded "terminal_" must never escape),
+// and the empty-template off switch.
+func TestMuxOriginPane(t *testing.T) {
+	t.Setenv("ZELLIJ_PANE_ID", "3")
+	if got := Default().Mux.OriginPane(); got != "terminal_3" {
+		t.Errorf("default template = %q, want terminal_3", got)
+	}
+
+	tmux := Mux{PaneID: "{TMUX_PANE}"}
+	t.Setenv("TMUX_PANE", "%5")
+	if got := tmux.OriginPane(); got != "%5" {
+		t.Errorf("tmux template = %q, want %%5 verbatim", got)
+	}
+
+	t.Setenv("ZELLIJ_PANE_ID", "")
+	if got := Default().Mux.OriginPane(); got != "" {
+		t.Errorf("unset var must resolve to \"\" (no half-expanded id), got %q", got)
+	}
+	if got := (Mux{}).OriginPane(); got != "" {
+		t.Errorf("empty template must resolve to \"\", got %q", got)
+	}
+	// A literal template (no vars) passes through untouched.
+	if got := (Mux{PaneID: "pane-7"}).OriginPane(); got != "pane-7" {
+		t.Errorf("literal template = %q, want pane-7", got)
+	}
+}
+
+// TestMuxPaneIDMerge pins the merge rule: a user-set pane-id overrides the
+// default; an unset one keeps the zellij contract.
+func TestMuxPaneIDMerge(t *testing.T) {
+	base, err := loadFrom(Default(), "test.toml", []byte("[mux]\npane-id = \"{TMUX_PANE}\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base.Mux.PaneID != "{TMUX_PANE}" {
+		t.Errorf("user pane-id must win, got %q", base.Mux.PaneID)
+	}
+	base2, err := loadFrom(Default(), "test.toml", []byte("[mux]\nbackend = \"zellij\"\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if base2.Mux.PaneID != "terminal_{ZELLIJ_PANE_ID}" {
+		t.Errorf("unset pane-id must keep the default, got %q", base2.Mux.PaneID)
+	}
+}

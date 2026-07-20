@@ -229,8 +229,10 @@ func (t *templated) TypeInto(pane, text string) error {
 }
 
 // typeIntoArgv resolves the type-into-pane template to argv. When pane is empty,
-// the pane-id flag+placeholder pair (long and short forms) is stripped so the
-// resolved argv has no dangling, valueless `--pane-id` — a focused write.
+// the pane-id flag+placeholder pair is stripped so the resolved argv has no
+// dangling, valueless pane flag — a focused write. The strip list covers the
+// zellij forms (`--pane-id`, `-p`) and tmux's `-t` (a user template like
+// `tmux send-keys -t {pane} -l {text}` must not become `send-keys -t ”`).
 func (t *templated) typeIntoArgv(pane, text string) []string {
 	tpl := t.tpl.TypeIntoPane
 	if pane == "" {
@@ -238,6 +240,8 @@ func (t *templated) typeIntoArgv(pane, text string) []string {
 			"--pane-id {pane}", "",
 			"--pane-id={pane}", "",
 			"-p {pane}", "",
+			"-t {pane}", "",
+			"-t={pane}", "",
 		).Replace(tpl)
 	}
 	return t.tpl.Substitute(tpl, config.Subst{Pane: pane, Text: text})

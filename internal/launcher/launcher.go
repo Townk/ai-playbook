@@ -63,11 +63,9 @@ func Assist() int {
 		cliRequest = os.Getenv("AI_PLAYBOOK_USER_REQUEST")
 	}
 
-	// pane id from env (mirrors the shell's ZELLIJ_PANE_ID → terminal_<id>).
-	paneID := ""
-	if p := os.Getenv("ZELLIJ_PANE_ID"); p != "" {
-		paneID = "terminal_" + p
-	}
+	// Origin-pane identity via the configured [mux] pane-id template
+	// (default "terminal_{ZELLIJ_PANE_ID}"; tmux users set "{TMUX_PANE}").
+	paneID := originPane()
 
 	m := mux.Load()
 
@@ -308,6 +306,20 @@ func routeKind(m mux.Mux, selfExe string, req capture.Request, kind, content, ti
 	default: // escalate (incl. empty/unknown kind) — the session writes the playbook entry
 		return spawnSession(m, selfExe, req, title)
 	}
+}
+
+// originPane resolves the origin shell's mux pane id via the configured
+// [mux] pane-id template (config.Mux.OriginPane) — the SINGLE source of pane
+// identity for capture. "" (template empty, or a referenced env var unset)
+// means "no identifiable origin pane"; consumers degrade (focused-pane
+// capture, play → clipboard). A config-load failure falls back to the default
+// profile, preserving the zellij contract.
+func originPane() string {
+	cfg, err := config.Load()
+	if err != nil {
+		cfg = config.Default()
+	}
+	return cfg.Mux.OriginPane()
 }
 
 // closeFloat tears the thinking float down BEFORE routing: it writes <out>.done
