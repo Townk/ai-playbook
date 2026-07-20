@@ -12,6 +12,8 @@ done/stale entries. Phase work lives in the roadmap, not here.
 
 ## Bugs
 
+- [ ] Play button (⏵) never types the command into the origin pane: every interactive viewer wires the orchestrator with ui's `cliMux`, whose `Play` is still the stage-scaffold no-op (records to a slice, returns nil — `internal/ui/inprocess.go`), so the click flashes success and nothing reaches the prompt; the working focus-independent path exists (`mux.TypeInto(req.PaneID, …)` — launcher routeKind KindCommand) but the origin PaneID (captured from ZELLIJ_PANE_ID, persisted in the session doc's Origin) is never threaded into the viewer — wire cliMux.Play → mux.TypeInto with the origin pane, degrade to focused-write/clipboard+status off-zellij (2026-07-19)
+
 ## Tasks
 
 - [ ] cursor FULL builtin-containment depends on cursor honoring `failClosed:true` preToolUse hooks (fail-closed on crash/garbage), proven live against cursor-agent 2026.07.01-777f564 — RE-PROVE on a cursor-agent upgrade (run `go test ./internal/author -run TestCursorLive_ToolHookBlocksBuiltins`); if a future version regresses failClosed, the `cmd.Dir=<ToolDir>` scratch cwd is the structural backstop (2026-07-06)
