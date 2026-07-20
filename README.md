@@ -71,10 +71,23 @@ go install github.com/Townk/ai-playbook/cmd/ask@latest
 
 ### Shell completion & man pages
 
-The Homebrew formula installs both automatically — the steps below are only
-needed for the `go install` / prebuilt-archive routes.
+The Homebrew formula installs both automatically. On any other route, the
+binary can install its own — rendered at runtime from the same registry the
+help text comes from, so they always match the installed version:
 
-Every release archive also ships a zsh completion script, `_ai-playbook`
+```sh
+ai-playbook completion install   # _ai-playbook + _ask → ~/.local/share/zsh/site-functions
+ai-playbook man install          # all man pages      → ~/.local/share/man/man1
+```
+
+Both take `--to <dir>` / `--force`, have matching `uninstall` subcommands
+(idempotent — safe as package-manager hooks), and `completion show` prints the
+script for piping. Make sure the completion directory is on your `fpath`
+before `compinit`; the man default is found via the standard PATH-derived
+manpath.
+
+Alternatively, the release archives ship the same files. Each archive has a
+zsh completion script, `_ai-playbook`
 (subcommands, flags, and dynamic completion of your saved playbook slugs for
 `run`/`show`/`edit`/`validate`/`env`) plus `_ask` for the `ask` binary. Copy
 them into a directory on your `fpath` and let `compinit` pick them up:
@@ -161,6 +174,9 @@ env    [<slug> | --file <path>]        print declared env as --with-env JSON
 
 kb     <show|edit|search|list>         browse/edit/search the knowledge base
                                        (see "Knowledge base" below)
+
+completion <show|install|uninstall>    print or (un)install the zsh completions
+man        <install|uninstall>         (un)install the man pages
 
 skill  <show|install>                  print or install the playbook-authoring
        [--to <dir>] [--force]          skill (see "Authoring quality" below)

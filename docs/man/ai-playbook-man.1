@@ -1,0 +1,38 @@
+.TH AI-PLAYBOOK-MAN 1 "" "ai-playbook" "User Commands"
+.SH NAME
+ai\-playbook\-man \- Install or remove the man pages
+.SH SYNOPSIS
+\fBai\-playbook\fR man <install|uninstall> [\-\-to <dir>] [\-\-force]
+.SH DESCRIPTION
+man serves the manual pages rendered at RUNTIME from the same command
+registry this help text comes from, so the installed pages always match
+the running binary. Meant for `go install` users — the release archives
+and the Homebrew formula already ship/install them.
+.PP
+man install [\-\-to <dir>] [\-\-force]
+    Write the ai\-playbook overview page, one page per command, and ask's
+    page into <dir>, creating it as needed. Default <dir>:
+    $XDG_DATA_HOME/man/man1 (~/.local/share/man/man1), which `man` finds
+    via the standard PATH\-derived manpath on most systems. Existing files
+    are never overwritten without \-\-force.
+.PP
+man uninstall [\-\-to <dir>]
+    Remove exactly the pages install writes; already\-absent pages are
+    skipped (idempotent — safe as a package post\-uninstall hook).
+.SH OPTIONS
+.TP
+\fB\-\-to\fR \fI<dir>\fR
+target directory instead of $XDG_DATA_HOME/man/man1 (install/uninstall)
+.TP
+\fB\-\-force\fR
+overwrite already\-installed man pages (install)
+.SH EXAMPLES
+.nf
+ai\-playbook man install
+.fi
+.PP
+.nf
+ai\-playbook man uninstall
+.fi
+.SH "SEE ALSO"
+\fBai\-playbook\fR(1)

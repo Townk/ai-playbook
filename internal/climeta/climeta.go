@@ -227,6 +227,64 @@ var Commands = []Command{
 		},
 	},
 	{
+		Name:     "completion",
+		Summary:  "Print or install the zsh completion scripts",
+		Synopsis: "completion <show|install|uninstall> [--to <dir>] [--force]",
+		Long: "completion serves the zsh completion scripts rendered at RUNTIME from the\n" +
+			"same command registry this help text comes from, so the installed\n" +
+			"completions always match the running binary. Meant for `go install` users —\n" +
+			"the release archives and the Homebrew formula already ship/install them.\n\n" +
+			"completion show\n" +
+			"    Print the _ai-playbook completion script to stdout (pipe it anywhere).\n\n" +
+			"completion install [--to <dir>] [--force]\n" +
+			"    Write _ai-playbook (covers ai-playbook and apb) and _ask into <dir>,\n" +
+			"    creating it as needed. Default <dir>: $XDG_DATA_HOME/zsh/site-functions\n" +
+			"    (~/.local/share/zsh/site-functions) — add it to your fpath before\n" +
+			"    compinit. Existing files are never overwritten without --force.\n\n" +
+			"completion uninstall [--to <dir>]\n" +
+			"    Remove exactly the files install writes; already-absent files are\n" +
+			"    skipped (idempotent — safe as a package post-uninstall hook).",
+		Args:        "<show|install|uninstall>",
+		Subcommands: []string{"show", "install", "uninstall"},
+		Flags: []Flag{
+			{Name: "to", Placeholder: "<dir>", Desc: "target directory instead of $XDG_DATA_HOME/zsh/site-functions (install/uninstall)"},
+			{Name: "force", Bool: true, Desc: "overwrite already-installed completion files (install)"},
+		},
+		Examples: []string{
+			"ai-playbook completion show",
+			"ai-playbook completion install",
+			"ai-playbook completion install --to ~/.zsh/completions --force",
+		},
+	},
+	{
+		Name:     "man",
+		Summary:  "Install or remove the man pages",
+		Synopsis: "man <install|uninstall> [--to <dir>] [--force]",
+		Long: "man serves the manual pages rendered at RUNTIME from the same command\n" +
+			"registry this help text comes from, so the installed pages always match\n" +
+			"the running binary. Meant for `go install` users — the release archives\n" +
+			"and the Homebrew formula already ship/install them.\n\n" +
+			"man install [--to <dir>] [--force]\n" +
+			"    Write the ai-playbook overview page, one page per command, and ask's\n" +
+			"    page into <dir>, creating it as needed. Default <dir>:\n" +
+			"    $XDG_DATA_HOME/man/man1 (~/.local/share/man/man1), which `man` finds\n" +
+			"    via the standard PATH-derived manpath on most systems. Existing files\n" +
+			"    are never overwritten without --force.\n\n" +
+			"man uninstall [--to <dir>]\n" +
+			"    Remove exactly the pages install writes; already-absent pages are\n" +
+			"    skipped (idempotent — safe as a package post-uninstall hook).",
+		Args:        "<install|uninstall>",
+		Subcommands: []string{"install", "uninstall"},
+		Flags: []Flag{
+			{Name: "to", Placeholder: "<dir>", Desc: "target directory instead of $XDG_DATA_HOME/man/man1 (install/uninstall)"},
+			{Name: "force", Bool: true, Desc: "overwrite already-installed man pages (install)"},
+		},
+		Examples: []string{
+			"ai-playbook man install",
+			"ai-playbook man uninstall",
+		},
+	},
+	{
 		Name:     "run",
 		Summary:  "Run a playbook (interactive, headless, or guided)",
 		Synopsis: "run [<slug>] [--playbook <slug>] [--file <path>] [--assisted] [--auto] [--auto-rollback] [--retry] [--with-env <json>] [--junit <path>]",

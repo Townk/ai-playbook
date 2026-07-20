@@ -27,6 +27,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/climeta"
 	diffpkg "github.com/Townk/ai-playbook/internal/diff"
+	"github.com/Townk/ai-playbook/internal/docscmd"
 	"github.com/Townk/ai-playbook/internal/launcher"
 	"github.com/Townk/ai-playbook/internal/mcpserver"
 	"github.com/Townk/ai-playbook/internal/skillcmd"
@@ -88,6 +89,8 @@ var dispatch = map[string]func(prog string) int{
 	"edit":         func(string) int { return launcher.EditMain() },
 	"kb":           func(string) int { return launcher.KBMain() },
 	"skill":        func(string) int { return skillcmd.Main() },
+	"completion":   func(string) int { return docscmd.CompletionMain() },
+	"man":          func(string) int { return docscmd.ManMain() },
 	"session":      func(string) int { return launcher.SessionMain() },
 	// RunMain owns config loading + the configured-shell hand-off and resolves
 	// the --playbook/--file/bare argument before rendering via ui.Run.

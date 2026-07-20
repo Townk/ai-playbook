@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `completion <show|install|uninstall>` and `man <install|uninstall>` — the
+  binary now installs its own zsh completions and man pages, rendered at
+  runtime from the same command registry the help text uses (so the docs
+  always match the installed version). Defaults:
+  `$XDG_DATA_HOME/zsh/site-functions` and `$XDG_DATA_HOME/man/man1`, with
+  `--to <dir>`/`--force` overrides; uninstall is idempotent, making both
+  verbs safe as package-manager post-(un)install hooks. Closes the docs gap
+  for `go install` users (the archives and Homebrew formula already shipped
+  them).
+
 ## [1.0.0-RC2] - 2026-07-20
 
 ### Added

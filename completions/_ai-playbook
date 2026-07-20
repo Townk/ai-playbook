@@ -18,6 +18,8 @@ _ai-playbook_commands() {
     'edit:Open a saved playbook in $EDITOR'
     'kb:Browse, search, and edit the two-set knowledge base'
     'skill:Print or install the playbook-authoring skill'
+    'completion:Print or install the zsh completion scripts'
+    'man:Install or remove the man pages'
     'run:Run a playbook (interactive, headless, or guided)'
     'validate:Check a playbook'\''s structure and (optionally) get an AI review'
     'env:Print a playbook'\''s declared env vars, resolved and redacted'
@@ -75,6 +77,20 @@ _ai-playbook_cmd_skill() {
     '1:subcommand:(show install)' \
     '--to[install under this skills directory instead of ~/.claude/skills (install)]:dir:' \
     '--force[overwrite an already-installed SKILL.md (install)]'
+}
+
+_ai-playbook_cmd_completion() {
+  _arguments \
+    '1:subcommand:(show install uninstall)' \
+    '--to[target directory instead of $XDG_DATA_HOME/zsh/site-functions (install/uninstall)]:dir:' \
+    '--force[overwrite already-installed completion files (install)]'
+}
+
+_ai-playbook_cmd_man() {
+  _arguments \
+    '1:subcommand:(install uninstall)' \
+    '--to[target directory instead of $XDG_DATA_HOME/man/man1 (install/uninstall)]:dir:' \
+    '--force[overwrite already-installed man pages (install)]'
 }
 
 _ai-playbook_cmd_run() {
@@ -143,6 +159,12 @@ _ai-playbook() {
           ;;
         skill)
           _ai-playbook_cmd_skill
+          ;;
+        completion)
+          _ai-playbook_cmd_completion
+          ;;
+        man)
+          _ai-playbook_cmd_man
           ;;
         run)
           _ai-playbook_cmd_run

@@ -1,0 +1,44 @@
+.TH AI-PLAYBOOK-COMPLETION 1 "" "ai-playbook" "User Commands"
+.SH NAME
+ai\-playbook\-completion \- Print or install the zsh completion scripts
+.SH SYNOPSIS
+\fBai\-playbook\fR completion <show|install|uninstall> [\-\-to <dir>] [\-\-force]
+.SH DESCRIPTION
+completion serves the zsh completion scripts rendered at RUNTIME from the
+same command registry this help text comes from, so the installed
+completions always match the running binary. Meant for `go install` users —
+the release archives and the Homebrew formula already ship/install them.
+.PP
+completion show
+    Print the _ai\-playbook completion script to stdout (pipe it anywhere).
+.PP
+completion install [\-\-to <dir>] [\-\-force]
+    Write _ai\-playbook (covers ai\-playbook and apb) and _ask into <dir>,
+    creating it as needed. Default <dir>: $XDG_DATA_HOME/zsh/site\-functions
+    (~/.local/share/zsh/site\-functions) — add it to your fpath before
+    compinit. Existing files are never overwritten without \-\-force.
+.PP
+completion uninstall [\-\-to <dir>]
+    Remove exactly the files install writes; already\-absent files are
+    skipped (idempotent — safe as a package post\-uninstall hook).
+.SH OPTIONS
+.TP
+\fB\-\-to\fR \fI<dir>\fR
+target directory instead of $XDG_DATA_HOME/zsh/site\-functions (install/uninstall)
+.TP
+\fB\-\-force\fR
+overwrite already\-installed completion files (install)
+.SH EXAMPLES
+.nf
+ai\-playbook completion show
+.fi
+.PP
+.nf
+ai\-playbook completion install
+.fi
+.PP
+.nf
+ai\-playbook completion install \-\-to ~/.zsh/completions \-\-force
+.fi
+.SH "SEE ALSO"
+\fBai\-playbook\fR(1)
