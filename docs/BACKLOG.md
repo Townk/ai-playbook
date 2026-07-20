@@ -66,7 +66,6 @@ done/stale entries. Phase work lives in the roadmap, not here.
 
 - [ ] Short-pane frame overflow amplified by header wrap: normalLines can emit more rows than m.height with a multi-row wrapped title in a short pane (40x12 + long title → 2-3 row overflow, misaligned screen-pinned hit boxes) — cap header rows or clamp against m.height (2026-07-06)
 - [ ] Edit-pill hit box goes stale across a cached-age width change: badges row renders live but edit's Col freezes at reflow (2-cell drift at a minute boundary until the next reflow) (2026-07-06)
-- [ ] Assisted-footer Screen buttons get hint letters (Space deliberately falls through the footer to the hint leader) but hint mode never paints their chips nor renders the footer rows, and the invisible buttons still consume hint-alphabet letters — same gap U1 closed for the header pills. (Confirm-yes/no is NOT affected: the confirm captures Space as "activate focused button", so hint mode can't start while it is shown) (2026-07-19)
 
 ## Ideas
 

@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hint mode: a button that carries no hint letter (inert, or past the hint
   alphabet) no longer shows a leftover dark-red cell that read as a phantom
   hint — the letter chip itself is now the only button marking.
+- Hint mode: the assisted (GUIDED) footer now stays on screen — context line
+  dimmed, buttons greyed to the muted fill with their hint letters painted over
+  them — instead of vanishing while its buttons kept invisible hint letters
+  (which also silently consumed letters from the hint alphabet). The frame also
+  keeps its exact height with a footer or the verify-success confirm active.
 
 ## [0.13.0] - 2026-07-06
 

@@ -261,6 +261,16 @@ func (m model) assistedFooterContextRowString() string {
 // verify-success confirm row still shares it.
 func (m model) assistedFooterButtonLabel(label, kind, accent string, focused bool) string {
 	st := lipgloss.NewStyle().Padding(0, confirmButtonPad)
+	if m.hintMode {
+		// Hint mode greys the screen: footer buttons take the muted fill (like
+		// the pills' inverted treatment) so the overlapping letter chips are the
+		// only color. The focus highlight is suppressed while dimmed — hint
+		// letters, not focus, select a button in this mode. Same geometry.
+		return st.
+			Foreground(lipgloss.Color(colSubtext)).
+			Background(lipgloss.Color(colSurface0)).
+			Render(label)
+	}
 	if m.flashKey == "assist:"+kind {
 		return st.Foreground(lipgloss.Color(colFlashOn)).Bold(true).Render(label)
 	}

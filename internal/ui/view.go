@@ -488,10 +488,11 @@ func (m model) viewString() string {
 	if m.hintMode {
 		// Each label paints directly OVER the glyph of the button it activates:
 		// on the button's own line, at the glyph cell (for a powerline pill,
-		// the glyph just after the left cap). Screen-fixed buttons (the cached
-		// and edit pills) are skipped here — they live in the header, not the
-		// scrollable body; their labels are painted over the badges row in the
-		// header block below (anchored to each pill's icon column).
+		// the glyph just after the left cap). Screen-fixed buttons are skipped
+		// here — they live outside the scrollable body: the header pills'
+		// labels are painted over the badges row below (anchored to each
+		// pill's icon column), and the GUIDED footer's over its buttons row in
+		// the bottom block.
 		labelsByRow := map[int]map[int]string{}
 		for label, b := range m.hintLabels {
 			if b.Screen {
@@ -565,7 +566,46 @@ func (m model) viewString() string {
 			base = overlayLabels(base, labelsByRow[idx], lab)
 			sb.WriteString("  " + base + vscrollCell(i, pos, size) + "\n")
 		}
-		sb.WriteString("\n")
+		// The bottom block mirrors normalLines' shape so the frame keeps its
+		// m.height discipline in hint mode too: the confirm / GUIDED footer
+		// occupies its reserved rows (body() already shrank for them), dimmed
+		// like the rest of the screen; otherwise the single bottom pad.
+		if m.confirmResolved {
+			// Unreachable via the Space leader (the confirm captures Space), but
+			// the confirm can appear asynchronously while hint mode is up — keep
+			// the frame intact and dim it; its buttons carry no hint letters.
+			sb.WriteString("\n")
+			for _, q := range m.confirmQuestionRows() {
+				sb.WriteString("  " + dim.Render(strip(q)) + "\n")
+			}
+			sb.WriteString("\n")
+			sb.WriteString("  " + dim.Render(strip(m.confirmButtonsRowString())) + "\n")
+			sb.WriteString("\n")
+		} else if m.assistedFooterActive() {
+			// The GUIDED footer stays visible in hint mode: context line dimmed,
+			// buttons greyed to the muted fill (assistedFooterButtonLabel's hint
+			// branch), and each button's hint letter chipped over its first label
+			// cell — the buttons ARE hintable (Space falls through the footer to
+			// the hint leader), so they must show their letters like every other
+			// button.
+			rows := m.assistedFooterRows()
+			var ctx, btns string
+			if len(rows) == 2 {
+				ctx, btns = rows[0], rows[1]
+			}
+			for lbl, b := range m.hintLabels {
+				if b.Screen && b.BlockID == "assist" {
+					btns = spliceOver(btns, lab.Render(lbl), b.Col+confirmButtonPad)
+				}
+			}
+			sb.WriteString("\n")
+			sb.WriteString("  " + dim.Render(strip(ctx)) + "\n")
+			sb.WriteString("\n")
+			sb.WriteString("  " + btns + "\n")
+			sb.WriteString("\n")
+		} else {
+			sb.WriteString("\n")
+		}
 		sb.WriteString("  " + m.statusBar())
 	} else if m.helpMode {
 		// The modal is an overlay: render the live document, then composite the

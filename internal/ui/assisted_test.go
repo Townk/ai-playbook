@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/Townk/ai-playbook/internal/autorun"
 	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
@@ -144,6 +145,60 @@ func TestAssisted_RunActivatesReadyBlock(t *testing.T) {
 	}
 	if m2.assistedFooter != "" {
 		t.Error("footer must hide while the step runs")
+	}
+}
+
+// TestAssistedFooterHintChips verifies hint mode keeps the GUIDED footer on
+// screen (the frame stays m.height tall), greys its buttons to the muted fill,
+// and paints each footer button's hint letter over its first label cell — the
+// buttons are hintable (Space falls through the footer to the leader), so they
+// must show their letters instead of vanishing and silently consuming them.
+func TestAssistedFooterHintChips(t *testing.T) {
+	m := newModel("T", "```bash {id=a}\ntrue\n```\n")
+	m.width, m.height = 80, 24
+	m.assisted = true
+	m.reflow()
+	m = m.startAssisted()
+	if m.assistedFooter != "step" {
+		t.Fatalf("setup: expected a step footer, got %q", m.assistedFooter)
+	}
+	nm, _ := m.Update(key(" "))
+	m2 := nm.(model)
+	if !m2.hintMode {
+		t.Fatal("space must enter hint mode")
+	}
+	out := m2.viewString()
+	if h := lipgloss.Height(out); h != m2.height {
+		t.Fatalf("hint view height %d != %d with the footer active", h, m2.height)
+	}
+	rawRows := strings.Split(out, "\n")
+	btnRow := rawRows[m2.height-3]
+	const surfaceBg = "48;2;49;50;68"    // colSurface0 — the muted button fill
+	const overlayBg = "48;2;127;132;156" // colOverlay1 — the step footer's focus accent
+	if !strings.Contains(btnRow, surfaceBg) {
+		t.Fatalf("footer buttons must grey to the muted fill in hint mode: %q", btnRow)
+	}
+	if strings.Contains(btnRow, overlayBg) {
+		t.Fatalf("footer focus highlight must be suppressed in hint mode: %q", btnRow)
+	}
+	plain := []rune(strip(btnRow))
+	chips := 0
+	for lbl, b := range m2.hintLabels {
+		if !b.Screen || b.BlockID != "assist" {
+			continue
+		}
+		chips++
+		at := 2 + b.Col + confirmButtonPad // 2-col margin + button col + label pad
+		if at >= len(plain) || string(plain[at]) != lbl {
+			t.Errorf("chip %q must overlay the button's first label cell at col %d: %q", lbl, at, strip(btnRow))
+		}
+	}
+	if chips == 0 {
+		t.Fatal("footer buttons must carry hint labels")
+	}
+	// The context line stays visible (dimmed) above the buttons.
+	if !strings.Contains(strip(out), "Step 1/1") {
+		t.Fatal("the footer context line must stay visible in hint mode")
 	}
 }
 
