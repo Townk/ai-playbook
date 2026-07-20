@@ -59,6 +59,18 @@ func TestResolveRunArgs_Matrix(t *testing.T) {
 	}
 }
 
+// TestResolveRunArgs_JUnitFlag covers the --junit wiring: it threads the path
+// through (with --auto) and is a usage error without --auto, like --with-env.
+func TestResolveRunArgs_JUnitFlag(t *testing.T) {
+	ra, err := resolveRunArgs([]string{"--auto", "--junit", "out/report.xml", "--file", "x.md"})
+	if err != nil || ra.JUnitPath != "out/report.xml" {
+		t.Fatalf("--auto --junit: %+v err=%v", ra, err)
+	}
+	if _, err := resolveRunArgs([]string{"--junit", "out/report.xml", "--file", "x.md"}); err == nil {
+		t.Error("--junit without --auto must error")
+	}
+}
+
 // TestResolveRunArgs_AutoFlags covers the --auto / --no-auto-rollback flag
 // wiring: --auto sets Mode; --no-auto-rollback without --auto is a usage
 // error; --auto combined with --auto-rollback is a usage error (the two

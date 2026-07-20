@@ -37,6 +37,9 @@ type RunConfig struct {
 	Shell                     string // driver.Options.Shell selector
 	Slug                      string
 	AutoRollback              bool
+	// JUnitPath, when non-empty, writes the run's results as a JUnit-XML
+	// report to this path in addition to the JSON run log (`--junit <path>`).
+	JUnitPath string
 	// Env carries extra name→value pairs exported to the driver's env, appended
 	// after the declared/overridden EnvVars so they win by the same last-wins
 	// semantics resolveEnv relies on for an override. Distinct from EnvVars: no
@@ -413,6 +416,7 @@ func Run(rc RunConfig) int {
 		LogDir:       cache.DefaultRoot(),
 		Stamp:        now(),
 		Slug:         rc.Slug,
+		JUnitPath:    rc.JUnitPath,
 		Journal:      journal,
 		Preseed:      rc.RetrySeed,
 	}, runner)

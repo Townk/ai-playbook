@@ -2,7 +2,7 @@
 .SH NAME
 ai\-playbook\-run \- Run a playbook (interactive, headless, or guided)
 .SH SYNOPSIS
-\fBai\-playbook\fR run [<slug>] [\-\-playbook <slug>] [\-\-file <path>] [\-\-assisted] [\-\-auto] [\-\-auto\-rollback] [\-\-retry] [\-\-with\-env <json>]
+\fBai\-playbook\fR run [<slug>] [\-\-playbook <slug>] [\-\-file <path>] [\-\-assisted] [\-\-auto] [\-\-auto\-rollback] [\-\-retry] [\-\-with\-env <json>] [\-\-junit <path>]
 .SH DESCRIPTION
 run accepts a single playbook source, expressed one of three ways: a bare
 positional <slug> (implied \-\-playbook), \-\-playbook <slug> (resolved through
@@ -14,7 +14,7 @@ are mutually exclusive with each other. \-\-auto\-rollback is the default\-viewe
 opt\-in and is mutually exclusive with \-\-auto (auto mode rolls back by default;
 use \-\-no\-auto\-rollback to opt out) and with \-\-assisted (assisted mode owns
 post\-failure flow via its own manual "Roll back" button). \-\-no\-auto\-rollback
-and \-\-with\-env are only valid with \-\-auto.
+, \-\-with\-env, and \-\-junit are only valid with \-\-auto.
 .PP
 \-\-retry resumes the LAST FAILED run from the playbook's run journal: blocks
 that succeeded are pre\-seeded as done ("done — previous run") and execution
@@ -48,6 +48,9 @@ resume the last failed run from its journal: blocks that succeeded are pre\-seed
 .TP
 \fB\-\-with\-env\fR \fI<json>\fR
 with \-\-auto, supply env var values as inline JSON or a JSON file path
+.TP
+\fB\-\-junit\fR \fI<path>\fR
+with \-\-auto, additionally write the run results as a JUnit\-XML report to this path (CI test\-reporter ingestion)
 .SH EXAMPLES
 .nf
 ai\-playbook run deploy\-staging
@@ -63,6 +66,10 @@ ai\-playbook run deploy\-staging \-\-auto \-\-with\-env '{"REGION":"us\-east\-1"
 .PP
 .nf
 ai\-playbook run deploy\-staging \-\-auto \-\-retry
+.fi
+.PP
+.nf
+ai\-playbook run deploy\-staging \-\-auto \-\-junit reports/deploy.xml
 .fi
 .SH "SEE ALSO"
 \fBai\-playbook\fR(1)

@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestWriteRunLog_WritesJSON(t *testing.T) {
@@ -54,5 +55,42 @@ func TestSummarize_TimedOutRow(t *testing.T) {
 	}
 	if !strings.Contains(out, "(exit 1)") {
 		t.Errorf("plain failure row changed:\n%s", out)
+	}
+}
+
+// TestWriteJUnit pins the JUnit-XML report shape: one testsuite named after
+// the slug, a plain pass for ok, <failure> for failed (message carries exit /
+// timeout, body the command + output path), <skipped> for the non-failure
+// terminal statuses, and the suite counters/time derived from the results.
+func TestWriteJUnit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "reports", "run.xml")
+	results := []StepResult{
+		{ID: "install", Command: "make install", Status: StatusOK, Exit: 0, Duration: 1500 * time.Millisecond},
+		{ID: "verify", Command: "make verify", Status: StatusFailed, Exit: 2, OutputPath: "/tmp/verify.log", Duration: 250 * time.Millisecond},
+		{ID: "hang", Command: "sleep 99", Status: StatusFailed, Exit: 1, TimedOutAfter: "10s"},
+		{ID: "cleanup", Command: "rm -f x", Status: StatusSkipped},
+	}
+	if err := WriteJUnit(path, "deploy-staging", "20260719T120000Z", results); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := string(b)
+	for _, want := range []string{
+		`<testsuite name="deploy-staging" tests="4" failures="2" skipped="1"`,
+		`timestamp="2026-07-19T12:00:00Z"`,
+		`<testcase name="install" classname="deploy-staging" time="1.500"`,
+		`<failure message="exit 2">make verify&#xA;output: /tmp/verify.log</failure>`,
+		`<failure message="timed out after 10s (exit 1)">`,
+		`<skipped message="skipped">`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("junit report missing %q:\n%s", want, got)
+		}
+	}
+	if !strings.HasPrefix(got, "<?xml") {
+		t.Error("report must start with the XML header")
 	}
 }

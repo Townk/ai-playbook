@@ -87,7 +87,8 @@ _ai-playbook_cmd_run() {
     '--no-auto-rollback[with --auto, do not roll back applied steps on a failure]' \
     '--assisted[run GUIDED fullscreen\: step-by-step confirmation in the same viewer/driver pane]' \
     '--retry[resume the last failed run from its journal\: blocks that succeeded are pre-seeded; execution resumes at the first failed/unrun block]' \
-    '--with-env[with --auto, supply env var values as inline JSON or a JSON file path]:json:'
+    '--with-env[with --auto, supply env var values as inline JSON or a JSON file path]:json:' \
+    '--junit[with --auto, additionally write the run results as a JUnit-XML report to this path (CI test-reporter ingestion)]:path:'
 }
 
 _ai-playbook_cmd_validate() {

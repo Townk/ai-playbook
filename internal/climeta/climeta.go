@@ -229,7 +229,7 @@ var Commands = []Command{
 	{
 		Name:     "run",
 		Summary:  "Run a playbook (interactive, headless, or guided)",
-		Synopsis: "run [<slug>] [--playbook <slug>] [--file <path>] [--assisted] [--auto] [--auto-rollback] [--retry] [--with-env <json>]",
+		Synopsis: "run [<slug>] [--playbook <slug>] [--file <path>] [--assisted] [--auto] [--auto-rollback] [--retry] [--with-env <json>] [--junit <path>]",
 		Long: "run accepts a single playbook source, expressed one of three ways: a bare\n" +
 			"positional <slug> (implied --playbook), --playbook <slug> (resolved through\n" +
 			"the store), or --file <path> (a raw markdown file rendered as-is). Exactly\n" +
@@ -239,7 +239,7 @@ var Commands = []Command{
 			"opt-in and is mutually exclusive with --auto (auto mode rolls back by default;\n" +
 			"use --no-auto-rollback to opt out) and with --assisted (assisted mode owns\n" +
 			"post-failure flow via its own manual \"Roll back\" button). --no-auto-rollback\n" +
-			"and --with-env are only valid with --auto.\n\n" +
+			", --with-env, and --junit are only valid with --auto.\n\n" +
 			"--retry resumes the LAST FAILED run from the playbook's run journal: blocks\n" +
 			"that succeeded are pre-seeded as done (\"done — previous run\") and execution\n" +
 			"resumes at the first failed/unrun block. It composes with every mode. A retry\n" +
@@ -258,12 +258,14 @@ var Commands = []Command{
 			{Name: "assisted", Bool: true, Desc: "run GUIDED fullscreen: step-by-step confirmation in the same viewer/driver pane"},
 			{Name: "retry", Bool: true, Desc: "resume the last failed run from its journal: blocks that succeeded are pre-seeded; execution resumes at the first failed/unrun block"},
 			{Name: "with-env", Placeholder: "<json>", Desc: "with --auto, supply env var values as inline JSON or a JSON file path"},
+			{Name: "junit", Placeholder: "<path>", Desc: "with --auto, additionally write the run results as a JUnit-XML report to this path (CI test-reporter ingestion)"},
 		},
 		Examples: []string{
 			"ai-playbook run deploy-staging",
 			"ai-playbook run --file ./scratch.md --assisted",
 			"ai-playbook run deploy-staging --auto --with-env '{\"REGION\":\"us-east-1\"}'",
 			"ai-playbook run deploy-staging --auto --retry",
+			"ai-playbook run deploy-staging --auto --junit reports/deploy.xml",
 		},
 	},
 	{

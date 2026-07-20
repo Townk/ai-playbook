@@ -456,6 +456,7 @@ func autoRun(ra runArgs) int {
 			Slug:                slug,
 			AutoRollback:        !ra.NoAutoRollback,
 			EnvOverrides:        ra.EnvOverrides,
+			JUnitPath:           ra.JUnitPath,
 			JournalPath:         jPath,
 			JournalPlaybookPath: jPlaybook,
 			JournalContentHash:  jHash,
@@ -489,6 +490,7 @@ func autoRun(ra runArgs) int {
 		AutoRollback:              !ra.NoAutoRollback,
 		SuppressUndeclaredWarning: true,
 		Out:                       os.Stdout,
+		JUnitPath:                 ra.JUnitPath, // the PARENT run's report; dep runs stay unreported like their journals
 		JournalPath:               jPath,
 		JournalPlaybookPath:       jPlaybook,
 		JournalContentHash:        jHash,
@@ -653,6 +655,7 @@ type runArgs struct {
 	NoAutoRollback bool              // --no-auto-rollback (valid only with --auto)
 	Retry          bool              // --retry: resume the last failed run from its journal (composes with every mode)
 	EnvOverrides   map[string]string // --with-env values (valid only with --auto)
+	JUnitPath      string            // --junit report path (valid only with --auto)
 }
 
 // parseWithEnv resolves a --with-env flag value into a name→value map. A value
@@ -700,7 +703,7 @@ func parseWithEnv(raw string) (map[string]string, error) {
 func resolveRunArgs(args []string) (runArgs, error) {
 	fs := flag.NewFlagSet("run", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
-	var withEnv string
+	var withEnv, junitPath string
 	var auto, autoMode, noAutoRollback, assisted, retry bool
 	fs.BoolVar(&auto, "auto-rollback", false, "on a step failure, automatically roll back applied steps (else a manual button)")
 	fs.BoolVar(&autoMode, "auto", false, "run headless: execute every block in order with no viewer/driver pane")
@@ -708,6 +711,7 @@ func resolveRunArgs(args []string) (runArgs, error) {
 	fs.BoolVar(&assisted, "assisted", false, "run GUIDED fullscreen: step-by-step confirmation in the same viewer/driver pane")
 	fs.BoolVar(&retry, "retry", false, "resume the last failed run from its journal: blocks that succeeded are pre-seeded; execution resumes at the first failed/unrun block")
 	fs.StringVar(&withEnv, "with-env", "", "with --auto, supply env var values as inline JSON or a JSON file path")
+	fs.StringVar(&junitPath, "junit", "", "with --auto, additionally write the run results as a JUnit-XML report to this path (CI test-reporter ingestion)")
 	kind, value, serr := resolveSource(fs, args, "run", true)
 	if serr != nil {
 		return runArgs{}, serr
@@ -728,8 +732,11 @@ func resolveRunArgs(args []string) (runArgs, error) {
 	if withEnv != "" && !autoMode {
 		return runArgs{}, fmt.Errorf("--with-env is only valid with --auto")
 	}
+	if junitPath != "" && !autoMode {
+		return runArgs{}, fmt.Errorf("--junit is only valid with --auto")
+	}
 
-	ra := runArgs{Kind: kind, Value: value, AutoRollback: auto, NoAutoRollback: noAutoRollback, Retry: retry}
+	ra := runArgs{Kind: kind, Value: value, AutoRollback: auto, NoAutoRollback: noAutoRollback, Retry: retry, JUnitPath: junitPath}
 	switch {
 	case autoMode:
 		ra.Mode = modeAuto

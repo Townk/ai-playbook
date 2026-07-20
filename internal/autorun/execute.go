@@ -33,6 +33,10 @@ type Config struct {
 	LogDir       string // cache.DefaultRoot(); "" skips the log file
 	Stamp        string // timestamp for the log filename
 	Slug         string
+	// JUnitPath, when non-empty, additionally writes the run's results as a
+	// JUnit-XML report to this path (CI test-reporter ingestion). Advisory
+	// like the JSON run log: a write failure prints a note, never fails the run.
+	JUnitPath string
 	// Journal, when non-nil, receives every step result (incl. rollback
 	// re-records) and the run finalize — the durable per-playbook run journal
 	// (internal/runlog). nil = journaling off. Journal writes are advisory:
@@ -164,6 +168,11 @@ func Execute(cfg Config, r StepRunner) int {
 	cfg.Journal.Finalize()
 	if cfg.LogDir != "" {
 		_, _ = WriteRunLog(cfg.LogDir, cfg.Stamp, cfg.Slug, results)
+	}
+	if cfg.JUnitPath != "" {
+		if err := WriteJUnit(cfg.JUnitPath, cfg.Slug, cfg.Stamp, results); err != nil {
+			fmt.Fprintf(cfg.Out, "junit report failed: %v\n", err)
+		}
 	}
 	fmt.Fprintln(cfg.Out)
 	fmt.Fprint(cfg.Out, Summarize(results))

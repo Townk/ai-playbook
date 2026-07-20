@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `run --auto --junit <path>` writes the run's results as a JUnit-XML report
+  (one testsuite per run, one testcase per step; failures carry the exit code
+  or timeout and the step's command/output path) for CI test-reporter
+  ingestion, alongside the existing text summary and JSON run log.
+
 ### Changed
 
 - ESC no longer quits the pager: it is now consistently cancel/dismiss — it
