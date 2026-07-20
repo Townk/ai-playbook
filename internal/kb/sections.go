@@ -3,7 +3,6 @@ package kb
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 )
 
@@ -74,45 +73,46 @@ func Append(root, projectRoot string, kind Kind, topic, fact string) error {
 	if global {
 		path = GlobalPath(root)
 	}
-	raw, _ := os.ReadFile(path) // missing/unreadable → empty doc
-	content := string(raw)
-	d := parseDoc(content)
+	// The whole read-modify-write runs under the file's flock so a concurrent
+	// session's remember can never interleave and get silently dropped.
+	return WithFileLock(path, func() error {
+		raw, _ := os.ReadFile(path) // missing/unreadable → empty doc
+		content := string(raw)
+		d := parseDoc(content)
 
-	// Lazy migration: the first sectioned write to a legacy project file folds
-	// its flat content under ## Environment before the new write is applied.
-	// Non-bullet legacy content is preserved verbatim in order, but blank-line
-	// structure is not (parseDoc drops blanks; render re-emits canonical spacing).
-	if !global && len(d.sections) == 0 && strings.TrimSpace(content) != "" {
-		d.sections = []*docSection{{heading: secEnvironment, lines: d.preamble}}
-		d.preamble = nil
-	}
-
-	// Meta line: write-if-absent, not literally write-once — a subsequent write
-	// re-adds it when the user has hand-deleted it (self-healing), and an
-	// existing meta line is never rewritten. Never on the global file.
-	if !global && d.meta == "" {
-		d.meta = metaPrefix + projectRoot + metaSuffix
-	}
-
-	sec := d.ensureSection(heading)
-	target := &sec.lines
-	if kind == KindTopic {
-		target = &sec.ensureSub(topic).lines
-	}
-
-	// Write-dedup, scoped to the target section/subsection.
-	norm := normalizeFact(stored)
-	for _, ln := range *target {
-		if b, ok := bulletText(ln); ok && normalizeFact(b) == norm {
-			return nil
+		// Lazy migration: the first sectioned write to a legacy project file folds
+		// its flat content under ## Environment before the new write is applied.
+		// Non-bullet legacy content is preserved verbatim in order, but blank-line
+		// structure is not (parseDoc drops blanks; render re-emits canonical spacing).
+		if !global && len(d.sections) == 0 && strings.TrimSpace(content) != "" {
+			d.sections = []*docSection{{heading: secEnvironment, lines: d.preamble}}
+			d.preamble = nil
 		}
-	}
-	*target = append(*target, "- "+stored)
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		return err
-	}
-	return os.WriteFile(path, []byte(d.render()), 0o644)
+		// Meta line: write-if-absent, not literally write-once — a subsequent write
+		// re-adds it when the user has hand-deleted it (self-healing), and an
+		// existing meta line is never rewritten. Never on the global file.
+		if !global && d.meta == "" {
+			d.meta = metaPrefix + projectRoot + metaSuffix
+		}
+
+		sec := d.ensureSection(heading)
+		target := &sec.lines
+		if kind == KindTopic {
+			target = &sec.ensureSub(topic).lines
+		}
+
+		// Write-dedup, scoped to the target section/subsection.
+		norm := normalizeFact(stored)
+		for _, ln := range *target {
+			if b, ok := bulletText(ln); ok && normalizeFact(b) == norm {
+				return nil
+			}
+		}
+		*target = append(*target, "- "+stored)
+
+		return os.WriteFile(path, []byte(d.render()), 0o644)
+	})
 }
 
 // route validates the kind/topic/projectRoot contract and returns whether the

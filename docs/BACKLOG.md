@@ -12,8 +12,6 @@ done/stale entries. Phase work lives in the roadmap, not here.
 
 ## Bugs
 
-- [ ] Global knowledge.md concurrent-remember read-modify-write can lose a fact across sessions (unlocked; the compaction race guard narrows only compaction) — consider O_APPEND-safe append or file locking (2026-07-05)
-
 ## Tasks
 
 - [ ] cursor FULL builtin-containment depends on cursor honoring `failClosed:true` preToolUse hooks (fail-closed on crash/garbage), proven live against cursor-agent 2026.07.01-777f564 — RE-PROVE on a cursor-agent upgrade (run `go test ./internal/author -run TestCursorLive_ToolHookBlocksBuiltins`); if a future version regresses failClosed, the `cmd.Dir=<ToolDir>` scratch cwd is the structural backstop (2026-07-06)

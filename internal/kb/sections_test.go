@@ -1,9 +1,12 @@
 package kb
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -376,5 +379,32 @@ func writeLegacy(t *testing.T, root, projectRoot, content string) {
 	}
 	if err := os.WriteFile(p, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestAppend_ConcurrentWritersLoseNothing pins the flock serialization of
+// Append's read-modify-write: N concurrent writers (each its own lock-file
+// descriptor, exactly like N separate sessions) must all land — before the
+// lock, interleaved ReadFile→WriteFile pairs silently dropped facts.
+func TestAppend_ConcurrentWritersLoseNothing(t *testing.T) {
+	root := t.TempDir()
+	const n = 16
+	var wg sync.WaitGroup
+	for i := 0; i < n; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			if err := Append(root, "", KindUser, "", fmt.Sprintf("concurrent fact number %d", i)); err != nil {
+				t.Errorf("append %d: %v", i, err)
+			}
+		}(i)
+	}
+	wg.Wait()
+	got := readFile(t, GlobalPath(root))
+	for i := 0; i < n; i++ {
+		want := "- concurrent fact number " + strconv.Itoa(i)
+		if !strings.Contains(got, want) {
+			t.Errorf("fact %d lost in concurrent append:\n%s", i, got)
+		}
 	}
 }

@@ -126,27 +126,34 @@ func compactFile(cfg *config.Config, path string, budget int) {
 	// Cross-session race guard: the result was derived from `raw`, read up to a
 	// full call-timeout earlier — a concurrent session's `remember` (especially on
 	// the shared GLOBAL file) may have landed in that window, and replacing now
-	// would clobber its fact into neither the result nor the .bak. Re-read
-	// immediately before the replace and ABORT if the file changed (no replace,
-	// no .bak); the next over-budget wrap-up simply compacts the fresh content.
-	cur, err := os.ReadFile(path)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "ai-playbook: re-read failed for %s during compaction (%v); skipped (file left unchanged)\n", path, err)
-		return
-	}
-	if !bytes.Equal(cur, raw) {
-		fmt.Fprintf(os.Stderr, "ai-playbook: kb changed during compaction — skipped %s (file left unchanged)\n", path)
-		return
-	}
+	// would clobber its fact into neither the result nor the .bak. Re-read and
+	// replace under the SAME flock kb.Append writes under (kb.WithFileLock), and
+	// ABORT if the file changed (no replace, no .bak); the next over-budget
+	// wrap-up simply compacts the fresh content. The lock closes the last
+	// remaining window — a remember landing between the re-read and the replace.
+	if err := kb.WithFileLock(path, func() error {
+		cur, err := os.ReadFile(path)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "ai-playbook: re-read failed for %s during compaction (%v); skipped (file left unchanged)\n", path, err)
+			return nil
+		}
+		if !bytes.Equal(cur, raw) {
+			fmt.Fprintf(os.Stderr, "ai-playbook: kb changed during compaction — skipped %s (file left unchanged)\n", path)
+			return nil
+		}
 
-	// .bak BEFORE replace: preserve the prior content so a bad compaction is always
-	// recoverable (one level, overwritten each compaction).
-	if err := os.WriteFile(path+".bak", raw, 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "ai-playbook: knowledge compaction backup failed for %s (%v); file left unchanged\n", path, err)
-		return
-	}
-	if err := os.WriteFile(path, []byte(result), 0o644); err != nil {
-		fmt.Fprintf(os.Stderr, "ai-playbook: knowledge compaction write failed for %s (%v)\n", path, err)
+		// .bak BEFORE replace: preserve the prior content so a bad compaction is
+		// always recoverable (one level, overwritten each compaction).
+		if err := os.WriteFile(path+".bak", raw, 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "ai-playbook: knowledge compaction backup failed for %s (%v); file left unchanged\n", path, err)
+			return nil
+		}
+		if err := os.WriteFile(path, []byte(result), 0o644); err != nil {
+			fmt.Fprintf(os.Stderr, "ai-playbook: knowledge compaction write failed for %s (%v)\n", path, err)
+		}
+		return nil
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "ai-playbook: kb lock failed for %s during compaction (%v); skipped (file left unchanged)\n", path, err)
 	}
 }
 

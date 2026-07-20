@@ -31,6 +31,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hint mode: a button that carries no hint letter (inert, or past the hint
   alphabet) no longer shows a leftover dark-red cell that read as a phantom
   hint — the letter chip itself is now the only button marking.
+- Concurrent `remember` calls from different sessions can no longer lose a
+  fact: knowledge-file writes now serialize under an exclusive file lock
+  (flock on a `.lock` sidecar), and knowledge compaction replaces the file
+  under the same lock — closing the last clobber window its re-read guard
+  left open.
 - A run-undo-quit session (run a block, undo it, quit) no longer overwrites a
   previous run's journal with `{outcome: ok, blocks: {}}` — a session that nets
   to zero records now restores the pre-session journal (or removes the empty
