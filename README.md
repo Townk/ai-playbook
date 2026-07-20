@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Townk/ai-playbook/actions/workflows/ci.yml/badge.svg)](https://github.com/Townk/ai-playbook/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/Townk/ai-playbook/branch/master/graph/badge.svg)](https://codecov.io/gh/Townk/ai-playbook)
-[![Go Report Card](https://goreportcard.com/badge/github.com/Townk/ai-playbook)](https://goreportcard.com/report/github.com/Townk/ai-playbook)
+[![Go Reference](https://pkg.go.dev/badge/github.com/Townk/ai-playbook.svg)](https://pkg.go.dev/github.com/Townk/ai-playbook)
 [![Latest release](https://img.shields.io/github/v/release/Townk/ai-playbook)](https://github.com/Townk/ai-playbook/releases)
 [![License](https://img.shields.io/github/license/Townk/ai-playbook)](LICENSE)
 
@@ -22,6 +22,17 @@ dependencies, safely executable (assisted / unattended + rollback), and lint-abl
 via `validate`.
 
 ## Install
+
+### Homebrew (macOS & Linux)
+
+```sh
+brew install townk/tap/ai-playbook
+```
+
+One step installs all three binaries (`ai-playbook`, its short alias `apb`,
+and `ask`) together with their man pages and zsh completions.
+
+### Go toolchain / prebuilt binaries
 
 Install the latest binary with the Go toolchain:
 
@@ -59,6 +70,9 @@ go install github.com/Townk/ai-playbook/cmd/ask@latest
 ```
 
 ### Shell completion & man pages
+
+The Homebrew formula installs both automatically — the steps below are only
+needed for the `go install` / prebuilt-archive routes.
 
 Every release archive also ships a zsh completion script, `_ai-playbook`
 (subcommands, flags, and dynamic completion of your saved playbook slugs for
@@ -101,9 +115,10 @@ it never talks to a model API directly. Three harnesses ship, selected with
   drafting, agent `run`/`ask` tools, and knowledge capture.
 - **`pi`** — the pi coding agent, FULL tier via an embedded pi extension that
   carries the same tools.
-- **`cursor`** — Cursor's CLI agent, BASIC tier today: read-only ask-mode text
-  authoring (degradations are noted visibly, once per session); promotion to
-  FULL is tracked.
+- **`cursor`** — Cursor's CLI agent, FULL tier: the same structured drafting,
+  tools, and knowledge capture, carried by a config-root redirect that isolates
+  ai-playbook's MCP tools, with an allowlist hook + scratch working directory
+  containing cursor's builtin tools (both live-verified).
 
 Per-harness defaults (model, triage model, thinking, binary) are documented in
 the [configuration reference](docs/configuration.md).
@@ -133,7 +148,8 @@ run    [[--playbook] <slug>            execute a playbook
        [--retry]
        [--assisted
        | --auto [--no-auto-rollback]
-                [--with-env <json|file>]]
+                [--with-env <json|file>]
+                [--junit <path>]]
 
 edit   <slug>                          open the playbook in $EDITOR
 
@@ -157,8 +173,10 @@ Run modes (mutually exclusive): the default is an interactive pager (free-form),
 For project-bound playbooks, `--auto --with-env '{…}'` (or a path to a JSON file)
 supplies declared `env:` values on the CLI, and `env <slug>` scaffolds that JSON
 from a playbook's declaration — resolving current values and leaving secrets
-empty. A playbook may also declare `depends_on: [slug, …]`: its transitive
-dependencies run headless, in topological order, before it.
+empty. `--auto --junit <path>` additionally writes the run's results as a
+JUnit-XML report for CI test-reporter ingestion. A playbook may also declare
+`depends_on: [slug, …]`: its transitive dependencies run headless, in
+topological order, before it.
 
 ### The run journal & resuming a failed run (`--retry`)
 

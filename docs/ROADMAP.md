@@ -70,11 +70,28 @@ schema), a production-grade executor, and CI we trust. Milestones:
   harness that lacks a schema-enforcing tool loop, and conformance + conditional
   live tests per adapter.
 - **v1.0 — the complete product.** Phase 6 + Phase 5 + multi-harness shipped,
-  plus the hardening/trust batch distributed across the ride: shared-test-
-  driver speedup (retires the race lane), CI hardening (macOS job, cache
-  keys, dependabot, tidy-diff, release-notes guard), coverage ~90%,
-  width-engine unification, Homebrew tap. Explicitly post-1.0: Windows/no-PTY
-  portability, GNU info pages, kitty graphics.
+  plus the hardening/trust batch distributed across the ride — DELIVERED
+  (2026-07-19/20) with **v1.0.0-RC1** cut 2026-07-19:
+  - CI hardening: `-race` folded back onto the per-push lane (the nightly
+    race.yml retired — the full `-race` suite measures ~55s wall after the
+    driver's no-idle-floor rework, which also made the planned shared-test-
+    driver refactor unnecessary), per-job caches, golangci-lint via the go.mod
+    `tool` directive, tidy gate, release-notes guard, macOS build job,
+    dependabot, concurrency groups.
+  - Width-engine unification: all app measurement moved to
+    clipperhouse/displaywidth (the charm v2 renderer's engine).
+  - Homebrew tap: `brew install townk/tap/ai-playbook` (formula published by
+    goreleaser on release; live since RC1).
+  - Coverage: measured 84.7% total — the residual to the ~90% aspiration is
+    the integration entry-point surface (see BACKLOG Ideas: E2E/PTY tests),
+    not unit-testable code.
+  - Plus a fit-and-finish sweep: hint-mode polish, ESC-audit (ESC never
+    quits), streaming-failure surfacing (A5a-full), `run --auto --junit`,
+    the run-journal clobber fix, knowledge-file locking, and the play-button
+    origin-pane fix with the `[mux] pane-id` identity template (RC2 pending).
+
+  Explicitly post-1.0: Windows/no-PTY portability, GNU info pages, kitty
+  graphics.
 
 
 ## Command surface (target)
