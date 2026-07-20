@@ -8,15 +8,20 @@ import (
 )
 
 // streamEventsMsg carries one chunk's worth of parsed events from the reader
-// command; eof signals the input stream closed.
+// command; eof signals the input stream closed. err carries the NON-EOF failure
+// that ended the stream, when there was one — the agentstream fan-out closes its
+// pipe with the producer's wait error (truncation, timeout kill, non-zero exit),
+// and that must surface in the ui instead of reading as a clean finish (A5a-full).
 type streamEventsMsg struct {
 	events []streamEvent
 	eof    bool
+	err    error
 }
 
 // readStream returns a command that reads the next chunk from r, feeds it through
 // the parser, and reports the resulting events. eof is set on any read error
 // (including io.EOF); the caller stops re-issuing the command once eof is seen.
+// A non-EOF read error rides along in err.
 func readStream(r io.Reader, p *streamParser) tea.Cmd {
 	br, ok := r.(*bufio.Reader)
 	if !ok {
@@ -26,7 +31,11 @@ func readStream(r io.Reader, p *streamParser) tea.Cmd {
 		buf := make([]byte, 4096)
 		n, err := br.Read(buf)
 		events := p.feed(buf[:n])
-		return streamEventsMsg{events: events, eof: err != nil}
+		msg := streamEventsMsg{events: events, eof: err != nil}
+		if err != nil && err != io.EOF {
+			msg.err = err
+		}
+		return msg
 	}
 }
 

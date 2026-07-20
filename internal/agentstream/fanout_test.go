@@ -1,7 +1,9 @@
 package agentstream
 
 import (
+	"errors"
 	"io"
+	"strings"
 	"testing"
 	"time"
 )
@@ -167,5 +169,47 @@ func TestFanOut_NoFinalFallback(t *testing.T) {
 	}
 	if fo.Body() != "partial stream" {
 		t.Errorf("body = %q, want the accumulated deltas (no-Final fallback)", fo.Body())
+	}
+}
+
+// TestFanOut_CloseFnErrorReachesReader pins the A5a-full contract: when the
+// producer's wait (closeFn) reports a failure — stream truncation, timeout
+// kill, non-zero exit — the doc pipe is closed WITH that error, so a consumer
+// reading to completion sees the failure instead of a clean EOF. The body
+// written before the error is still fully readable.
+func TestFanOut_CloseFnErrorReachesReader(t *testing.T) {
+	events := make(chan Event)
+	wantErr := errors.New("harness exited 1: stream truncated")
+	reader, activity, fan := FanOut(events, func() error { return wantErr }, 4)
+	go func() {
+		events <- Event{Kind: Final, Text: "partial playbook"}
+		close(events)
+	}()
+	go drainActivity(activity)
+
+	body, err := io.ReadAll(reader)
+	if string(body) != "partial playbook" {
+		t.Fatalf("partial body must still be readable, got %q", body)
+	}
+	if err == nil || !strings.Contains(err.Error(), "stream truncated") {
+		t.Fatalf("reader must surface closeFn's error, got %v", err)
+	}
+	if fan.Body() != "partial playbook" {
+		t.Fatalf("fan body = %q", fan.Body())
+	}
+}
+
+// TestFanOut_CleanCloseStaysEOF: a nil closeFn error keeps the clean-EOF contract.
+func TestFanOut_CleanCloseStaysEOF(t *testing.T) {
+	events := make(chan Event)
+	reader, activity, _ := FanOut(events, func() error { return nil }, 4)
+	go func() {
+		events <- Event{Kind: Final, Text: "done"}
+		close(events)
+	}()
+	go drainActivity(activity)
+	body, err := io.ReadAll(reader)
+	if err != nil || string(body) != "done" {
+		t.Fatalf("clean close must stay EOF: body=%q err=%v", body, err)
 	}
 }

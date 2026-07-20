@@ -24,11 +24,13 @@ import (
 //   - Reasoning    → sent to the activity channel (the live model reasoning).
 //   - ToolActivity → sent to the activity channel (the tool summary).
 //
-// On the event channel closing: the playbook pipe is closed (EOF to the reader),
-// the activity channel is closed (signals the ui to stop subscribing), and closeFn
-// is called to reap the harness process. The pump runs in a goroutine and never
-// blocks the harness — activity sends are best-effort (drop-if-full) so a slow ui
-// can't stall the pipe writes.
+// On the event channel closing: the body is written to the playbook pipe, closeFn
+// is called to reap the harness process AND observe its outcome, then the pipe is
+// closed — WITH closeFn's error when it failed (stream truncation, timeout kill,
+// non-zero exit), so the reader sees the failure instead of a clean EOF — and the
+// activity channel is closed (signals the ui to stop subscribing). The pump runs
+// in a goroutine and never blocks the harness — activity sends are best-effort
+// (drop-if-full) so a slow ui can't stall the pipe writes.
 //
 // The returned reader is consumed by the ui; (*Fan).Body() yields the accumulated
 // cache body and is valid after the reader hits EOF.
@@ -94,11 +96,22 @@ func FanOut(events <-chan Event, closeFn func() error, activityBuf int) (io.Read
 		f.body.Reset()
 		f.body.WriteString(body)
 
-		_ = pw.Close()
-		close(activity)
+		// A5a-full: surface the harness outcome on the READER. closeFn (the
+		// producer's wait) reports a strict-adapter stream truncation, a
+		// timeout kill, or a non-zero exit; discarding it made a truncated
+		// authoring stream indistinguishable from success (A5b-strict only
+		// protected triage). The body is written first, so a consumer still
+		// renders the partial text before hitting the error on the final Read.
+		var werr error
 		if closeFn != nil {
-			_ = closeFn()
+			werr = closeFn()
 		}
+		if werr != nil {
+			_ = pw.CloseWithError(werr)
+		} else {
+			_ = pw.Close()
+		}
+		close(activity)
 	}()
 
 	return pr, activity, f

@@ -595,12 +595,20 @@ func buildReengageEvents(req capture.Request, sess *session) reengage.EventsFunc
 		// tool would be unavailable).
 		sys, user := reengagePrompts(req, kind, base, change, constraints, cfg, len(toolArgv) > 0)
 
-		events, wait, err := author.RunHarnessEvents(sys, user, author.AuthorOptions{
+		aopts := author.AuthorOptions{
 			Cfg:        cfg,
 			ToolArgv:   toolArgv,
 			ToolDir:    toolDir,
 			Structured: reengageStructured(kind) && !textOnly,
-		})
+		}
+		if kind == reengage.KindReengageDriftRegen {
+			// Bounded (A5a-full): drift regen is a single-shot no-tools call
+			// behind a viewer button — a stalled harness must not hang it. The
+			// interactive kinds (followup/regenerate/wrap-up) stay unbounded:
+			// long tool-using author sessions are expected there.
+			aopts.Timeout = author.DriftRegenTimeout
+		}
+		events, wait, err := author.RunHarnessEvents(sys, user, aopts)
 		if err != nil {
 			removeTransport()
 			return nil, nil, err

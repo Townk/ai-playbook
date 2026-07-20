@@ -164,6 +164,18 @@ func (m model) handleStreamEvents(msg streamEventsMsg) (tea.Model, tea.Cmd) {
 		m.flushRender() // render whatever's pending immediately
 		m.streaming = false
 		m.thinking = false
+		// A5a-full: a non-EOF stream failure (agent process failed, timed out, or
+		// its stream was truncated mid-answer — the fan-out closes the pipe with
+		// the producer's wait error) must not read as a clean finish. Surface it
+		// in the document (like the re-engage error note) and on the status line;
+		// whatever partial content arrived stays visible above it.
+		if msg.err != nil {
+			dbg("stream ended with error: %v", msg.err)
+			m.md += fmt.Sprintf("\n\n_stream error: %v_\n", msg.err)
+			m.status = "agent stream failed — partial content shown"
+			m.reflow()
+			return m, nil
+		}
 		// Confirm what the agent actually produced: 0 runnable blocks at EOF means
 		// it narrated/applied instead of WRITING {id=fix}/{id=verify} blocks (a
 		// prompt-compliance gap), vs blocks>0 not visible (a render gap).

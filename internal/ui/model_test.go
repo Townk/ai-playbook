@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -144,6 +145,31 @@ func TestWrapUpKeyWhileStreaming(t *testing.T) {
 
 // TestWrapUpKeyHintMode verifies that pressing "w" while in hint mode does not
 // trigger a wrap-up (hint mode consumes the key for label resolution).
+// TestStreamErrorSurfaces pins the A5a-full ui contract: a stream that ends
+// with a non-EOF error (the fan-out closed its pipe with the producer's wait
+// error) must not read as a clean finish — the error renders in the document
+// and on the status line, with any partial content kept above it.
+func TestStreamErrorSurfaces(t *testing.T) {
+	m := newModel("T", "partial content so far")
+	m.width, m.height = 80, 24
+	m.streaming = true
+	m.reflow()
+	nm, _ := m.Update(streamEventsMsg{eof: true, err: errors.New("harness exited 1")})
+	m2 := nm.(model)
+	if m2.streaming {
+		t.Error("eof must end streaming")
+	}
+	if !strings.Contains(m2.md, "stream error: harness exited 1") {
+		t.Fatalf("the stream error must render in the document, got:\n%s", m2.md)
+	}
+	if !strings.Contains(m2.md, "partial content so far") {
+		t.Error("partial content must be kept above the error note")
+	}
+	if !strings.Contains(m2.status, "stream failed") {
+		t.Errorf("status must note the failure, got %q", m2.status)
+	}
+}
+
 // TestEscNeverQuits pins the ESC-audit rule: ESC is cancel/dismiss everywhere
 // (overlays, transient state) and NEVER exits the app — quitting is q / Ctrl+C.
 // An armed uncommitted-draft quit guard is disarmed by ESC, not confirmed.

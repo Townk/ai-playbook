@@ -36,6 +36,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hint mode: a button that carries no hint letter (inert, or past the hint
   alphabet) no longer shows a leftover dark-red cell that read as a phantom
   hint — the letter chip itself is now the only button marking.
+- A failed or truncated agent stream no longer reads as a clean finish: the
+  authoring fan-out now propagates the harness's exit/truncation/timeout error
+  to the viewer, which renders a `stream error: …` note under any partial
+  content instead of silently presenting it as the final document. The
+  drift-regenerate call is also now bounded (5 min) so a stalled harness can't
+  hang the drift button; long interactive authoring sessions stay unbounded by
+  design.
 - Concurrent `remember` calls from different sessions can no longer lose a
   fact: knowledge-file writes now serialize under an exclusive file lock
   (flock on a `.lock` sidecar), and knowledge compaction replaces the file

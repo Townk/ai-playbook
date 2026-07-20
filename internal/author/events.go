@@ -19,14 +19,22 @@ import (
 // owned harness: those two calls gate every request and are meant to complete in
 // a few seconds, so a hung/stalled harness process must not block the caller
 // indefinitely (A5a). 60s is generous headroom over the ~2-3s these calls
-// normally take. The full streaming authoring path (AuthorEvents /
-// RunHarnessEvents for the capable session) intentionally leaves
-// AuthorOptions.Timeout at its zero value (no bound) — long author sessions are
-// expected, and full agentstream/interactive-session cancellation is a separate,
-// backlogged item (A5a-full: see docs/BACKLOG.md). A caller may override this
-// per call via AuthorOptions.Timeout (the classify/metadata call sites do; tests
-// use it to force a short deadline).
+// normally take. The interactive streaming authoring kinds (initial authoring,
+// followup/regenerate/wrap-up) intentionally leave AuthorOptions.Timeout at its
+// zero value (no bound) — long tool-using author sessions are expected; their
+// FAILURES surface instead (A5a-full): the agentstream fan-out propagates the
+// producer's wait error (truncation, timeout kill, non-zero exit) to the doc
+// reader, so the ui renders the failure rather than a silent clean finish. The
+// single-shot drift-regenerate call is bounded by DriftRegenTimeout. A caller
+// may override per call via AuthorOptions.Timeout (the classify/metadata call
+// sites do; tests use it to force a short deadline).
 const defaultCallTimeout = 60 * time.Second
+
+// DriftRegenTimeout bounds the single-shot drift-regenerate call: a no-tools,
+// diff-only invocation gated behind a viewer button, so a stalled harness must
+// not hang the drift action forever (A5a-full). Generous headroom over the
+// seconds-to-a-minute the call normally takes on large files.
+const DriftRegenTimeout = 5 * time.Minute
 
 // AuthorOptions tunes AuthorEvents. Cfg supplies the harness selection + value
 // prefs ([agent]); ToolArgv, when set, wires the tools backend into the owned

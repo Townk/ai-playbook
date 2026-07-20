@@ -39,7 +39,9 @@ func driftRegenReengage(projectRoot string) *reengage.Reengage {
 			}
 			cfg, _ := config.Load()
 			sys, user := driftRegenPrompts(base, change, constraints, projectRoot, cfg)
-			return author.RunHarnessEvents(sys, user, author.AuthorOptions{Cfg: cfg})
+			// Bounded (A5a-full): a single-shot no-tools call behind a viewer
+			// button — a stalled harness must not hang the drift action.
+			return author.RunHarnessEvents(sys, user, author.AuthorOptions{Cfg: cfg, Timeout: author.DriftRegenTimeout})
 		},
 	}
 }
