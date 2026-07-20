@@ -274,6 +274,41 @@ func TestEditButtonMouseClickDispatches(t *testing.T) {
 	}
 }
 
+// TestEditPillHitBoxTracksCachedAgeWidth verifies the click hit-test follows
+// the LIVE badges row: the cached pill's age string can change width between
+// reflows ("just now" → "5m ago"), shifting the drawn edit pill, and the mouse
+// path re-derives the header buttons' geometry before hit-testing so the click
+// lands on what is on screen — not on the reflow-frozen columns.
+func TestEditPillHitBoxTracksCachedAgeWidth(t *testing.T) {
+	m := newModel("T", "# File-backed\n")
+	m.width, m.height = 100, 24
+	m.sourcePath = "/store/x.md"
+	m.asker = nil // no-mux → ExecProcess editor path
+	m.isCached = true
+	m.cachedAt = time.Now() // renders as "just now" (8 cells)
+	m.reflow()
+
+	stale := buttonForBlock(m.buttons, "edit", "edit")
+	if stale == nil {
+		t.Fatal("file-backed playbook must register an edit button")
+	}
+	// The age rolls over WITHOUT a reflow: "5m ago" is 2 cells narrower than
+	// "just now", so the drawn edit pill shifts left of the frozen Col.
+	m.cachedAt = time.Now().Add(-5 * time.Minute)
+	liveCol := titleTextCol - 2 + lipgloss.Width(m.cachedBadge())
+	if liveCol == stale.Col {
+		t.Fatalf("setup: the age change must shift the edit pill (stale=%d live=%d)", stale.Col, liveCol)
+	}
+	m2i, cmd := m.Update(tea.MouseClickMsg{Button: tea.MouseLeft, X: 2 + liveCol, Y: stale.Line})
+	m2 := m2i.(model)
+	if cmd == nil {
+		t.Fatal("a click at the live edit position must dispatch the edit action")
+	}
+	if m2.flashKey != "edit:edit" {
+		t.Errorf("flashKey = %q, want edit:edit", m2.flashKey)
+	}
+}
+
 // TestEditHintChipRendered verifies hint mode paints a chip over the edit pill
 // on the badges row (the gap this round closes: the label was assigned but
 // never rendered for the Screen-fixed edit button).

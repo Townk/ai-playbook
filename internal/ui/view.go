@@ -402,6 +402,25 @@ func (m model) editBadgeScreenCol() int {
 	return titleTextCol + lipgloss.Width(m.cachedBadge()) + 1
 }
 
+// refreshHeaderButtons re-registers the screen-fixed header buttons (the cached
+// reload pill and [edit]) with geometry computed from the CURRENT badge strings.
+// The badges row is rendered live on every View, so the cached pill's
+// relativeAge can change width between reflows (e.g. "just now" → "1m ago"),
+// leaving the reflow-frozen Cols up to 2 cells off the drawn pills. The mouse
+// path calls this just before hit-testing so clicks land on what is on screen.
+func (m *model) refreshHeaderButtons() {
+	kept := m.buttons[:0]
+	for _, b := range m.buttons {
+		if b.Screen && (b.Kind == "regenerate" || b.Kind == "edit") {
+			continue
+		}
+		kept = append(kept, b)
+	}
+	m.buttons = kept
+	m.appendCachedButton()
+	m.appendEditButton()
+}
+
 // badgesRowString returns the shared badges row shown directly BELOW the
 // subtitle (or the title when there is no subtitle): the cached pill then the
 // edit pill, left-grouped with a single-space gap (each badge helper carries

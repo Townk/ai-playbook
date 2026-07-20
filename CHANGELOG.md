@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hint mode: a button that carries no hint letter (inert, or past the hint
   alphabet) no longer shows a leftover dark-red cell that read as a phantom
   hint — the letter chip itself is now the only button marking.
+- The [edit] pill's click target no longer drifts off the drawn pill when the
+  cached badge's age label changes width between repaints (e.g. "just now" →
+  "5m ago") — the mouse path now re-derives the header buttons' geometry from
+  the live badges row before hit-testing.
 - Hint mode: the assisted (GUIDED) footer now stays on screen — context line
   dimmed, buttons greyed to the muted fill with their hint letters painted over
   them — instead of vanishing while its buttons kept invisible hint letters

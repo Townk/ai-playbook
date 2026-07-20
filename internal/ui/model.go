@@ -675,6 +675,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.flashKey = ""
 		m.status = ""
 		if msg.Button == tea.MouseLeft {
+			// The badges row renders live each View, so the cached pill's age
+			// string can change width between reflows — refresh the header
+			// buttons' geometry before hit-testing (F: edit-pill stale hit box).
+			m.refreshHeaderButtons()
 			if b, ok := buttonAt(m.buttons, msg.X, msg.Y, m.yOff, m.bodyTop()); ok {
 				// Async startup: the shell isn't open yet — the shell-action buttons are
 				// dimmed and INERT (no flash, no dispatch). Copy stays live (not gated).
