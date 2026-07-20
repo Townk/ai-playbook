@@ -340,6 +340,32 @@ func TestHeaderPillsGreyedInHintMode(t *testing.T) {
 	}
 }
 
+// TestTitleGreyedInHintMode verifies hint mode dims the header title (and the
+// "a step failed" cue) to the muted overlay tone — with the pills also greyed,
+// nothing in the header keeps color besides the hint letters.
+func TestTitleGreyedInHintMode(t *testing.T) {
+	m := newModel("My Playbook", "# My Playbook\n\nbody\n")
+	m.width, m.height = 100, 24
+	m.blockStates["b"] = blockRunState{Status: "failed"} // arms the ⚠ cue
+	m.reflow()
+
+	const mauveFg = "38;2;203;166;247"   // colMauve — the normal title color
+	const redFg = "38;2;243;139;168"     // colRed — the normal cue color
+	const overlayFg = "38;2;108;112;134" // colOverlay0 — the dimmed tone
+	normal := strings.Join(m.titleLines(), "\n")
+	if !strings.Contains(normal, mauveFg) || !strings.Contains(normal, redFg) {
+		t.Fatalf("normal mode must keep the mauve title and red cue: %q", normal)
+	}
+	m.hintMode = true
+	dimmed := strings.Join(m.titleLines(), "\n")
+	if strings.Contains(dimmed, mauveFg) || strings.Contains(dimmed, redFg) {
+		t.Fatalf("hint mode must grey the title and cue: %q", dimmed)
+	}
+	if !strings.Contains(dimmed, overlayFg) {
+		t.Fatalf("hint-mode title must use the muted overlay tone: %q", dimmed)
+	}
+}
+
 // TestTitleWrapsAt80Cells verifies a long title wraps at 80 display cells with
 // continuation lines aligned under the title's first text character (col 6,
 // after the "  ▓▓▓ " prefix), even in a wider pane.

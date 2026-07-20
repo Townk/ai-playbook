@@ -25,6 +25,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hint mode: the header pills (cached badge and [edit]) now grey out with the
   same inverted fill as the body pills instead of keeping their full peach/green
   color while the rest of the screen dims.
+- Hint mode: the document title (and the "a step failed" cue) now dim to the
+  muted overlay tone with the rest of the screen — only the hint letters keep
+  color.
 
 ## [0.13.0] - 2026-07-06
 

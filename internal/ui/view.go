@@ -134,7 +134,13 @@ func (m model) titleLines() []string {
 	if avail < 1 {
 		avail = 1
 	}
-	styled := lipgloss.NewStyle().Foreground(lipgloss.Color(colMauve)).Bold(true)
+	titleCol, cueCol := colMauve, colRed
+	if m.hintMode {
+		// Hint mode greys the screen: the title (and the failure cue) dim to the
+		// same muted tone as the body prose, so only the hint letters carry color.
+		titleCol, cueCol = colOverlay0, colOverlay0
+	}
+	styled := lipgloss.NewStyle().Foreground(lipgloss.Color(titleCol)).Bold(true)
 	wrapped := wrapWithHardBreak(m.headerLabel(), avail)
 	rows := make([]string, 0, len(wrapped))
 	for i, ln := range wrapped {
@@ -148,7 +154,7 @@ func (m model) titleLines() []string {
 		// Failure cue: a prior step failed, so a later health-check (e.g. Verify)
 		// is not presented as if all is well.
 		const cueText = "⚠ a step failed"
-		cue := lipgloss.NewStyle().Foreground(lipgloss.Color(colRed)).Render(cueText)
+		cue := lipgloss.NewStyle().Foreground(lipgloss.Color(cueCol)).Render(cueText)
 		last := len(rows) - 1
 		if lipgloss.Width(rows[last])+2+lipgloss.Width(cueText) <= limit {
 			rows[last] += "  " + cue
