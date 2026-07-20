@@ -18,7 +18,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/charmbracelet/colorprofile"
-	"github.com/mattn/go-runewidth"
+	"github.com/clipperhouse/displaywidth"
 
 	"github.com/Townk/ai-playbook/pkg/dialog/theme"
 )
@@ -405,10 +405,10 @@ func truncateToWidth(s string, w int) string {
 	if w <= 0 {
 		return ""
 	}
-	if runewidth.StringWidth(s) <= w {
+	if displaywidth.String(s) <= w {
 		return s
 	}
-	return runewidth.Truncate(s, w, "…")
+	return displaywidth.TruncateString(s, w, "…")
 }
 
 func (m model) View() tea.View {

@@ -3,7 +3,7 @@ package ui
 import (
 	"strings"
 
-	"github.com/mattn/go-runewidth"
+	"github.com/clipperhouse/displaywidth"
 
 	"charm.land/lipgloss/v2"
 )
@@ -96,8 +96,8 @@ func activityLineStr(summary string, width int) string {
 		return ""
 	}
 	s := activityGlyph + " " + summary
-	if width > 0 && runewidth.StringWidth(s) > width {
-		s = runewidth.Truncate(s, width, "…")
+	if width > 0 && displaywidth.String(s) > width {
+		s = displaywidth.TruncateString(s, width, "…")
 	}
 	return lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).Render(s)
 }

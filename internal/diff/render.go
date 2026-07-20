@@ -6,7 +6,7 @@ import (
 	"strings"
 
 	"charm.land/lipgloss/v2"
-	"github.com/mattn/go-runewidth"
+	"github.com/clipperhouse/displaywidth"
 
 	"github.com/Townk/ai-playbook/pkg/dialog/theme"
 )
@@ -162,7 +162,7 @@ func renderSideBySide(files []FileDiff, width int, highlightFn func(string, stri
 // colWidth with bg-painted spaces so the whole column is filled. Foreground
 // syntax colours are untouched — only the background is forced.
 func paintCell(text, bg, lang string, colWidth int, highlightFn func(string, string) string) string {
-	trunc := runewidth.Truncate(text, colWidth, "")
+	trunc := displaywidth.TruncateString(text, colWidth, "")
 	hl := highlightFn(trunc, lang)
 	// Re-assert the bg after every reset the highlighter emits.
 	hl = strings.ReplaceAll(hl, "\x1b[0m", "\x1b[0m"+bg)
@@ -350,13 +350,13 @@ func dropCols(s string, n int) string {
 		if col >= n {
 			return s[i:]
 		}
-		col += runewidth.RuneWidth(r)
+		col += displaywidth.Rune(r)
 	}
 	return ""
 }
 
-// tabStop is the fixed column width tabs expand to (A6b). `runewidth.Truncate`/
-// `RuneWidth` and `lipgloss.Width` all count '\t' as zero-width, but a real
+// tabStop is the fixed column width tabs expand to (A6b). `displaywidth.TruncateString`/
+// `Rune` and `lipgloss.Width` all count '\t' as zero-width, but a real
 // terminal advances the cursor to the next tab-stop column — left unexpanded, a
 // tab-indented (e.g. Go) patch overflows its cell (the "│" divider drifts
 // off-column) and dropCols mis-windows on horizontal scroll (its column count
@@ -393,7 +393,7 @@ func expandTabs(s string) string {
 			continue
 		}
 		sb.WriteRune(r)
-		col += runewidth.RuneWidth(r)
+		col += displaywidth.Rune(r)
 	}
 	return sb.String()
 }

@@ -20,6 +20,12 @@ import (
 // lipgloss widths match the terminal. It mirrors the first two lines of
 // input.Main and MUST run before any lipgloss call (render/measure). Exported
 // so `ask` applies the identical accounting `ai-playbook input` relies on.
+//
+// Width-engine note: our OWN measurement/truncation now uses
+// clipperhouse/displaywidth (the engine the charm v2 renderer counts cells
+// with; EastAsianWidth=false is its default). This knob remains for the charm
+// libraries' INTERNAL go-runewidth usage (bubbles/lipgloss layout), pinning
+// both engines to the same narrow accounting.
 func NarrowRuneWidth() {
 	os.Setenv("RUNEWIDTH_EASTASIAN", "0")
 	runewidth.DefaultCondition.EastAsianWidth = false

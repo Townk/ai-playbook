@@ -25,7 +25,6 @@ done/stale entries. Phase work lives in the roadmap, not here.
 - [ ] `assignIDs` in internal/playbook advertises a phantom `b<N>` auto-id scheme that can never fire (buildBlock assigns `auto-<n>` first) — wire it as the single id rule or drop it and its tests (2026-07-04)
 - [ ] retry: consider demoting/blocking rollback of pre-seeded blocks whose undo payloads reference `$APB_` vars — a retry-session rollback runs the undo with the rolled-back run's value-passing vars empty (spec Semantics notes the edge; R2 review finding 4) (2026-07-05)
 - [ ] climeta guardrails: make the flag drift guard two-way and cover `create --template`; replace the finalize magic-string with an explicit Documented field so man and zsh generators agree (2026-07-04)
-- [ ] Unify the two cell-width engines: app code measures with mattn/go-runewidth while the charm v2 stack renders with clipperhouse/displaywidth — EA/emoji width disagreements can misalign frames (2026-07-04)
 - [ ] Test hygiene: retire coverage_boost_test.go's symbol-pinning tests into behavioral per-file tests; add factories for the 124 copy-pasted `defaultTheme(), "default"` constructor calls; share the duplicated collectMsgs helper (2026-07-04)
 - [ ] BASIC-tier residual (ADR-0012): FollowupPrompt's BASE text teaches the `run` tool unconditionally — under a BASIC harness the sentence should gate on tools wiring (left byte-identical in H1; only the folds gate today) (2026-07-06)
 

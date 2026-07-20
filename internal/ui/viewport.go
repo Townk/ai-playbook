@@ -2,7 +2,7 @@ package ui
 
 import (
 	"charm.land/lipgloss/v2"
-	"github.com/mattn/go-runewidth"
+	"github.com/clipperhouse/displaywidth"
 )
 
 // Window returns exactly height visible rows starting at yOffset.
@@ -62,7 +62,7 @@ func hslice(s string, start, width int) string {
 
 		// Decode a UTF-8 rune manually.
 		r, size := decodeRune(s, i)
-		w := runewidth.RuneWidth(r)
+		w := displaywidth.Rune(r)
 
 		if col+w > start && col < end {
 			// At least partially inside the window — emit the rune.
