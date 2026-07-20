@@ -31,6 +31,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hint mode: a button that carries no hint letter (inert, or past the hint
   alphabet) no longer shows a leftover dark-red cell that read as a phantom
   hint — the letter chip itself is now the only button marking.
+- Short panes no longer overflow the frame when a long title wraps to several
+  rows: the wrapped title is capped to the pane's row budget (cut marked with
+  an ellipsis), the subtitle yields whatever budget remains, and the frame
+  keeps its exact height — so screen-pinned click targets stay aligned.
 - The [edit] pill's click target no longer drifts off the drawn pill when the
   cached badge's age label changes width between repaints (e.g. "just now" →
   "5m ago") — the mouse path now re-derives the header buttons' geometry from

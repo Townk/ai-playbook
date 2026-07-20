@@ -255,6 +255,42 @@ func TestCachedReloadButtonHitTest(t *testing.T) {
 	}
 }
 
+// TestShortPaneHeaderClamped verifies the frame keeps its exact m.height in a
+// short pane with a long wrapped title + subtitle + badges row: the header row
+// budget caps the title (ellipsis-marked) and the subtitle yields the rest, so
+// normalLines never overflows and screen-pinned hit boxes stay aligned.
+func TestShortPaneHeaderClamped(t *testing.T) {
+	long := strings.TrimSpace(strings.Repeat("very long playbook title words ", 8))
+	m := newModel(long, "# H\n\nbody paragraph\n")
+	m.width, m.height = 40, 12
+	m.subtitle = strings.TrimSpace(strings.Repeat("descriptive caption words ", 10))
+	m.sourcePath = "/store/x.md" // badges row present too
+	m.reflow()
+
+	if got := len(m.normalLines()); got != m.height {
+		t.Fatalf("normalLines emitted %d rows, want exactly %d", got, m.height)
+	}
+	joined := strings.Join(m.titleLines(), "\n")
+	if !strings.Contains(joined, "…") {
+		t.Fatalf("capped title must be ellipsis-marked:\n%s", strip(joined))
+	}
+	// Hint mode keeps the same discipline.
+	m.hintMode = true
+	if h := lipgloss.Height(m.viewString()); h != m.height {
+		t.Fatalf("hint view height %d != %d in a short pane", h, m.height)
+	}
+	// Degenerate panes never overflow either (backstop).
+	for _, hgt := range []int{3, 4, 5, 6} {
+		md := m
+		md.hintMode = false
+		md.height = hgt
+		md.reflow()
+		if got := len(md.normalLines()); got > hgt {
+			t.Errorf("height %d: normalLines emitted %d rows", hgt, got)
+		}
+	}
+}
+
 // TestCachedRegenHintLabelRendered verifies that in hint mode the regenerate
 // button's hint label is painted directly OVER the badges row (anchored at the
 // reload glyph's column) — the row above is the title/subtitle, never blank,

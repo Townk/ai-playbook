@@ -122,12 +122,41 @@ func (m model) headerLabel() string {
 	return "ai-playbook — " + m.harness
 }
 
+// headerRowBudget is the maximum number of rows the wrapped title + subtitle
+// may occupy together in a short pane: everything outside the header — the
+// leading blank, top-pad, at least one body row, the bottom pad, and the
+// status bar (5 rows) — plus the badges row must always fit within m.height,
+// or the frame overflows and the screen-pinned hit boxes misalign. Unsized
+// panes (m.height <= 0 — tests/startup) get no cap. Always >= 1.
+func (m model) headerRowBudget() int {
+	if m.height <= 0 {
+		return 1 << 30
+	}
+	b := m.height - 5 - m.badgeRows()
+	if b < 1 {
+		b = 1
+	}
+	return b
+}
+
+// truncCells cuts s (plain text, no ANSI) to at most w display cells.
+func truncCells(s string, w int) string {
+	r := []rune(s)
+	for len(r) > 0 && lipgloss.Width(string(r)) > w {
+		r = r[:len(r)-1]
+	}
+	return string(r)
+}
+
 // titleLines returns the styled header rows: "  ▓▓▓ <title>" word-wrapped at
 // headerLimit cells (display width via lipgloss.Width, word boundaries via
 // wrapWithHardBreak), continuation lines aligned under the title's first text
 // character (titleTextCol). When a step failed, the playbook-level "⚠ a step
 // failed" cue flows after the title text — appended to the last title line
-// when it fits within the limit, else on its own aligned continuation row.
+// when it fits within the limit, else on its own aligned continuation row
+// (dropped when the row budget is exhausted). In a short pane the wrapped
+// title is capped at headerRowBudget rows, the cut marked with an ellipsis, so
+// the frame never overflows m.height (F: short-pane frame overflow).
 func (m model) titleLines() []string {
 	limit := m.headerLimit()
 	avail := limit - titleTextCol
@@ -142,6 +171,15 @@ func (m model) titleLines() []string {
 	}
 	styled := lipgloss.NewStyle().Foreground(lipgloss.Color(titleCol)).Bold(true)
 	wrapped := wrapWithHardBreak(m.headerLabel(), avail)
+	budget := m.headerRowBudget()
+	if len(wrapped) > budget {
+		wrapped = wrapped[:budget]
+		last := wrapped[budget-1]
+		if lipgloss.Width(last)+1 > avail {
+			last = truncCells(last, avail-1)
+		}
+		wrapped[budget-1] = last + "…"
+	}
 	rows := make([]string, 0, len(wrapped))
 	for i, ln := range wrapped {
 		if i == 0 {
@@ -158,7 +196,7 @@ func (m model) titleLines() []string {
 		last := len(rows) - 1
 		if lipgloss.Width(rows[last])+2+lipgloss.Width(cueText) <= limit {
 			rows[last] += "  " + cue
-		} else {
+		} else if len(rows) < budget {
 			rows = append(rows, strings.Repeat(" ", titleTextCol)+cue)
 		}
 	}
@@ -198,6 +236,20 @@ func (m model) subtitleRowStrings() []string {
 	}
 	st := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
 	wrapped := wrapWithHardBreak(m.subtitle, avail)
+	// Short-pane cap: the subtitle yields to the title — it gets whatever of
+	// the shared headerRowBudget the title left over (possibly nothing; the
+	// description is a droppable caption), the cut marked with an ellipsis.
+	if left := m.headerRowBudget() - m.titleRows(); len(wrapped) > left {
+		if left <= 0 {
+			return nil
+		}
+		wrapped = wrapped[:left]
+		last := wrapped[left-1]
+		if lipgloss.Width(last)+1 > avail {
+			last = truncCells(last, avail-1)
+		}
+		wrapped[left-1] = last + "…"
+	}
 	rows := make([]string, 0, len(wrapped))
 	for _, ln := range wrapped {
 		rows = append(rows, strings.Repeat(" ", titleTextCol)+st.Render(ln))
@@ -819,6 +871,14 @@ func (m model) normalLines() []string {
 		out = append(out, pad("")) // bottom pad
 	}
 	out = append(out, pad("  "+m.statusBar())) // status bar
+	// Degenerate-pane backstop: the header budget keeps normal short panes
+	// exact, but a pane too short for even the minimal frame (≲6 rows) can
+	// still overflow — drop the excess above the status bar so the frame never
+	// exceeds m.height and screen-pinned hit boxes stay aligned.
+	if m.height > 0 && len(out) > m.height {
+		status := out[len(out)-1]
+		out = append(out[:m.height-1], status)
+	}
 	return out
 }
 
