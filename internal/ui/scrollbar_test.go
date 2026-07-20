@@ -77,7 +77,7 @@ func TestPadTo(t *testing.T) {
 
 func TestHintCodeRow(t *testing.T) {
 	row := "\x1b[38;2;1;2;3mhi\x1b[0m"
-	got := hintCodeRow(row, 6, nil, nil)
+	got := hintCodeRow(row, 6, nil)
 	if lipgloss.Width(got) != 6 {
 		t.Fatalf("width = %d, want 6", lipgloss.Width(got))
 	}
@@ -92,22 +92,23 @@ func TestHintCodeRow(t *testing.T) {
 	}
 	// Border glyphs (▂ / 🮂) keep their normal color and get NO bg fill, so a
 	// pure border row (the bottom bar) is unchanged.
-	bar := hintCodeRow(strings.Repeat("\U0001FB82", 6), 6, nil, nil)
+	bar := hintCodeRow(strings.Repeat("\U0001FB82", 6), 6, nil)
 	if strings.Contains(bar, codeBgParams) {
 		t.Fatal("border glyphs must not get the code-bg fill")
 	}
 	if strip(bar) != strings.Repeat("\U0001FB82", 6) {
 		t.Fatalf("border row strip = %q", strip(bar))
 	}
-	// A button column gets the hint-label dark-red background (#3a1212).
-	btn := hintCodeRow("ab>cd", 6, map[int]bool{2: true}, nil)
-	if !strings.Contains(btn, "48;2;58;18;18") {
-		t.Fatal("button cell must get the dark-red label background")
+	// No per-cell button treatment: the overlapping label chip is the only
+	// dark-red marking, so a plain content row must never carry the label bg
+	// (a letter-less button would otherwise read as a phantom hint).
+	if strings.Contains(got, "48;2;58;18;18") {
+		t.Fatal("content rows must not carry the dark-red label background")
 	}
 	// A pill span keeps its filled shape via the inverted trick: the body cells
 	// get the solid colSurface0 fill (#313244) and the cap cells take that fill
 	// color as their foreground over the row's code bg — never an empty center.
-	pill := hintCodeRow("\U0000E0B6\U000F0450 go\U0000E0B4x", 8, nil, [][2]int{{0, 6}})
+	pill := hintCodeRow("\U0000E0B6\U000F0450 go\U0000E0B4x", 8, [][2]int{{0, 6}})
 	const surfaceBgParams = "48;2;49;50;68" // colSurface0 #313244
 	const surfaceFgParams = "38;2;49;50;68"
 	if !strings.Contains(pill, surfaceBgParams) {

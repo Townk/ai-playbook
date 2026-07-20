@@ -511,24 +511,16 @@ func (m model) viewString() string {
 			Foreground(lipgloss.Color(colHintLabelFg)).
 			Background(lipgloss.Color(colHintLabelBg))
 
-		// Button glyph columns per tab line — given the hint-label dark-red bg —
-		// and pill-button spans per line — re-rendered with the inverted greyed
+		// Pill-button spans per line — re-rendered with the inverted greyed
 		// fill so a pill keeps its filled shape (hintCodeRow pillSpans). Only
-		// body buttons (not Screen-fixed) are tracked for code-row highlighting.
-		buttonColsByRow := map[int]map[int]bool{}
+		// body pills (not Screen-fixed) are tracked; glyph buttons need no
+		// per-cell treatment — their overlapping label chip marks them.
 		pillSpansByRow := map[int][][2]int{}
 		for _, b := range m.buttons {
-			if b.Screen {
+			if b.Screen || !b.Pill {
 				continue
 			}
-			if b.Pill {
-				pillSpansByRow[b.Line] = append(pillSpansByRow[b.Line], [2]int{b.Col, b.Width})
-				continue
-			}
-			if buttonColsByRow[b.Line] == nil {
-				buttonColsByRow[b.Line] = map[int]bool{}
-			}
-			buttonColsByRow[b.Line][b.Col] = true
+			pillSpansByRow[b.Line] = append(pillSpansByRow[b.Line], [2]int{b.Col, b.Width})
 		}
 
 		rows := Window(m.lines, m.xOff, m.yOff, cw, m.body())
@@ -564,7 +556,7 @@ func (m model) viewString() string {
 			row = m.spinRow(idx, row) // advance any run spinner at View time (B1c)
 			var base string
 			if idx >= 0 && idx < len(m.lines) && m.lines[idx].Code {
-				base = hintCodeRow(row, cw, buttonColsByRow[idx], pillSpansByRow[idx]) // fill + button cells + inverted pills
+				base = hintCodeRow(row, cw, pillSpansByRow[idx]) // fill + inverted pills
 			} else if idx >= 0 && idx < len(m.lines) && m.lines[idx].Callout {
 				base = hintCalloutRow(row, cw) // dimmed but keeps the framed-block look
 			} else {

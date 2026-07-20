@@ -136,7 +136,12 @@ func padTo(s string, w int) string {
 // callout fills use: the cap cells take the pill fill (colSurface0) as their
 // foreground over the row's code-bg fill, and the body is muted text on that
 // solid colSurface0 fill — instead of collapsing to an empty-centered outline.
-func hintCodeRow(row string, width int, buttonCols map[int]bool, pillSpans [][2]int) string {
+//
+// Button glyph cells get NO special treatment here: the overlapping hint label
+// chip (dark-red bg, bright letter) painted by overlayLabels marks each
+// activatable button on its own, and a letter-less button (inert, or past the
+// hint alphabet) must read as plain dimmed content, not as a phantom hint.
+func hintCodeRow(row string, width int, pillSpans [][2]int) string {
 	plain := []rune(strip(row))
 	for len(plain) < width {
 		plain = append(plain, ' ')
@@ -147,16 +152,12 @@ func hintCodeRow(row string, width int, buttonCols map[int]bool, pillSpans [][2]
 	const (
 		kBorder = iota
 		kContent
-		kButton
 		kPillCap
 		kPillBody
 	)
 	styles := map[int]lipgloss.Style{
-		kBorder:  lipgloss.NewStyle().Foreground(lipgloss.Color(colCodeBg)),
-		kContent: lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Background(lipgloss.Color(colCodeBg)),
-		// Button glyph cells get the hint label's dark-red background so each
-		// button visually connects to its overlapping label.
-		kButton:   lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Background(lipgloss.Color(colHintLabelBg)),
+		kBorder:   lipgloss.NewStyle().Foreground(lipgloss.Color(colCodeBg)),
+		kContent:  lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Background(lipgloss.Color(colCodeBg)),
 		kPillCap:  lipgloss.NewStyle().Foreground(lipgloss.Color(colSurface0)).Background(lipgloss.Color(colCodeBg)),
 		kPillBody: lipgloss.NewStyle().Foreground(lipgloss.Color(colSubtext)).Background(lipgloss.Color(colSurface0)),
 	}
@@ -168,9 +169,6 @@ func hintCodeRow(row string, width int, buttonCols map[int]bool, pillSpans [][2]
 				}
 				return kPillBody
 			}
-		}
-		if buttonCols[i] {
-			return kButton
 		}
 		if plain[i] == '▂' || plain[i] == '\U0001FB82' {
 			return kBorder

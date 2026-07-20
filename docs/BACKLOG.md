@@ -13,7 +13,6 @@ done/stale entries. Phase work lives in the roadmap, not here.
 ## Bugs
 
 - [ ] Global knowledge.md concurrent-remember read-modify-write can lose a fact across sessions (unlocked; the compaction race guard narrows only compaction) — consider O_APPEND-safe append or file locking (2026-07-05)
-- [ ] Hint mode's dark-red kButton cell outlived its purpose: letters now overlap the glyph, so the cell is fully covered on every LABELED button and shows only on letter-less ones (F19-inert buttons — view.go's buttonColsByRow has no buttonInert filter — or buttons past the 19-letter alphabet), reading as a phantom hint; filter inert buttons out or drop the kButton treatment entirely (2026-07-19)
 - [ ] `internal/mcpserver` `validation error:` render branch is dead code — the top `res.Error` guard fires first on a `submit_playbook` schema failure, so claude renders `error: <msg>` while pi's extension renders `validation error: <msg>` — a cosmetic wording divergence between the two FULL harnesses; fix the dead branch to align them (2026-07-06)
 
 ## Tasks

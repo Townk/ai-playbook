@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Hint mode: the document title (and the "a step failed" cue) now dim to the
   muted overlay tone with the rest of the screen — only the hint letters keep
   color.
+- Hint mode: a button that carries no hint letter (inert, or past the hint
+  alphabet) no longer shows a leftover dark-red cell that read as a phantom
+  hint — the letter chip itself is now the only button marking.
 
 ## [0.13.0] - 2026-07-06
 
