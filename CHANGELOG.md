@@ -22,6 +22,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   rollback) now grey out with the same inverted-fill treatment as code and
   callout blocks — a muted filled pill — instead of losing their body color and
   showing an empty center between greyed rounded caps.
+- Hint mode: the header pills (cached badge and [edit]) now grey out with the
+  same inverted fill as the body pills instead of keeping their full peach/green
+  color while the rest of the screen dims.
 
 ## [0.13.0] - 2026-07-06
 

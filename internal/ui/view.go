@@ -260,6 +260,13 @@ func (m model) cachedBadge() string {
 	if m.flashKey == "cached:regenerate" {
 		capFg, bodyBg, bodyFg, bold = colFlashOn, colFlashOn, colBase, true
 	}
+	if m.hintMode {
+		// Hint mode greys the screen: the header pills join it with the same
+		// inverted-fill treatment the body pills get — muted text on the solid
+		// colSurface0 fill, caps in the fill color. Same geometry, so the hint
+		// label anchors and hit boxes stay put.
+		capFg, bodyBg, bodyFg, bold = colSurface0, colSurface0, colSubtext, false
+	}
 	capStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(capFg))
 	bodyStyle := lipgloss.NewStyle().
 		Foreground(lipgloss.Color(bodyFg)).
@@ -340,6 +347,10 @@ func (m model) editBadge() string {
 	capFg, bodyBg, bodyFg, bold := colGreen, colGreen, colBase, false
 	if m.flashKey == "edit:edit" {
 		capFg, bodyBg, bodyFg, bold = colFlashOn, colFlashOn, colBase, true
+	}
+	if m.hintMode {
+		// Same inverted greyed fill as cachedBadge in hint mode (see there).
+		capFg, bodyBg, bodyFg, bold = colSurface0, colSurface0, colSubtext, false
 	}
 	capStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(capFg))
 	bodyStyle := lipgloss.NewStyle().

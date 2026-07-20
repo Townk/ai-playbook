@@ -304,6 +304,42 @@ func TestEditHintChipRendered(t *testing.T) {
 	}
 }
 
+// TestHeaderPillsGreyedInHintMode verifies hint mode renders the header pills
+// (cached + edit) with the inverted greyed fill — muted text on the solid
+// colSurface0 fill, caps in the fill color — instead of their normal
+// peach/green bodies, joining the greyed-out screen like the body pills.
+func TestHeaderPillsGreyedInHintMode(t *testing.T) {
+	m := newModel("T", "# File-backed\n")
+	m.width, m.height = 100, 24
+	m.sourcePath = "/store/x.md"
+	m.isCached = true
+	m.cachedAt = time.Now()
+	m.reflow()
+
+	const surfaceBg = "48;2;49;50;68"  // colSurface0 #313244 as background
+	const greenBg = "48;2;166;227;161" // colGreen #a6e3a1 as background
+	// Normal mode keeps the accent bodies.
+	if !strings.Contains(m.editBadge(), greenBg) || !strings.Contains(m.cachedBadge(), peachBg) {
+		t.Fatal("pills must keep their accent colors outside hint mode")
+	}
+	m.hintMode = true
+	edit := m.editBadge()
+	if !strings.Contains(edit, surfaceBg) || strings.Contains(edit, greenBg) {
+		t.Fatalf("edit pill must grey out with the inverted fill in hint mode: %q", edit)
+	}
+	cached := m.cachedBadge()
+	if !strings.Contains(cached, surfaceBg) || strings.Contains(cached, peachBg) {
+		t.Fatalf("cached pill must grey out with the inverted fill in hint mode: %q", cached)
+	}
+	// Same geometry dimmed and not: hit boxes and label anchors stay put.
+	m2 := m
+	m2.hintMode = false
+	if lipgloss.Width(m.editBadge()) != lipgloss.Width(m2.editBadge()) ||
+		lipgloss.Width(m.cachedBadge()) != lipgloss.Width(m2.cachedBadge()) {
+		t.Fatal("greyed pills must keep the exact geometry of the colored ones")
+	}
+}
+
 // TestTitleWrapsAt80Cells verifies a long title wraps at 80 display cells with
 // continuation lines aligned under the title's first text character (col 6,
 // after the "  ▓▓▓ " prefix), even in a wider pane.
