@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Dialog hint bars now put a space between modifier and key glyphs
+  (`󰘶 󰌑 newline`, previously `󰘶󰌑`), matching the status-bar hint style
+  used everywhere else in the TUI.
+
 ## [1.0.0-RC3] - 2026-07-20
 
 ### Added

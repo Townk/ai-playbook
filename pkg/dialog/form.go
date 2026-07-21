@@ -279,12 +279,11 @@ func (m formModel) tabRow(frameBG string) string {
 // hint returns the keyboard hint line for the form.
 func (m formModel) hint() string {
 	key, word := hintKW(m.theme, hintFrameBG)
-	seg := func(k, w string) string { return key.Render(k) + word.Render(" "+w) }
 	sep := word.Render(" · ")
 	return strings.Join([]string{
-		seg("⇄", "field"),
-		seg("↵", "next"),
-		seg("󱊷", "dismiss"),
+		KeyHint(key, word, "field", "⇄"),
+		KeyHint(key, word, "next", "↵"),
+		KeyHint(key, word, "dismiss", "󱊷"),
 	}, sep)
 }
 

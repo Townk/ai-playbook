@@ -185,15 +185,14 @@ func (f *confirmField) initCmd() tea.Cmd { return nil }
 // hint returns the accelerator hint string for this field.
 func (f *confirmField) hint(bg string) string {
 	key, word := hintKW(f.theme, bg)
-	seg := func(k, w string) string { return key.Render(k) + word.Render(" "+w) }
 	sep := word.Render(" · ")
 	segs := []string{
-		seg("󱊷", "dismiss"),
-		seg(string(f.affKey), strings.ToLower(f.affirmative)),
-		seg(string(f.negKey), strings.ToLower(f.negative)),
+		KeyHint(key, word, "dismiss", "󱊷"),
+		KeyHint(key, word, strings.ToLower(f.affirmative), string(f.affKey)),
+		KeyHint(key, word, strings.ToLower(f.negative), string(f.negKey)),
 	}
 	if f.tertiary != "" && f.terKey != 0 {
-		segs = append(segs, seg(string(f.terKey), strings.ToLower(f.tertiary)))
+		segs = append(segs, KeyHint(key, word, strings.ToLower(f.tertiary), string(f.terKey)))
 	}
 	return strings.Join(segs, sep)
 }

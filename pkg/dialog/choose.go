@@ -27,19 +27,18 @@ func newChooseModel(theme Theme, variant, title, prompt string, options []string
 // rows is kept for API compatibility but is no longer used.
 func chooseHint(t Theme, rows int, multi bool, bg string) string {
 	keyStyle, mutedStyle := hintKW(t, bg)
-	seg := func(k, w string) string { return keyStyle.Render(k) + mutedStyle.Render(w) }
 	sep := mutedStyle.Render(" · ")
 
 	// Move segment: ↑↓ / jk move
-	move := seg("↑↓", "") + mutedStyle.Render("/") + seg("jk", " move")
+	move := keyStyle.Render("↑↓") + mutedStyle.Render("/") + KeyHint(keyStyle, mutedStyle, "move", "jk")
 
 	segs := []string{move}
 
 	if multi {
-		segs = append(segs, seg("space", " toggle"))
+		segs = append(segs, KeyHint(keyStyle, mutedStyle, "toggle", "space"))
 	}
 
-	segs = append(segs, seg("↵", " ok"), seg("󱊷", " dismiss"))
+	segs = append(segs, KeyHint(keyStyle, mutedStyle, "ok", "↵"), KeyHint(keyStyle, mutedStyle, "dismiss", "󱊷"))
 	return strings.Join(segs, sep)
 }
 

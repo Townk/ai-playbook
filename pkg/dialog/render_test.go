@@ -41,8 +41,8 @@ func TestRenderLayout(t *testing.T) {
 	if !strings.Contains(plain, "󰌑 submit") || !strings.Contains(plain, "󱊷 cancel") {
 		t.Fatalf("hint line wrong:\n%s", plain)
 	}
-	if !strings.Contains(plain, "󰘶󰌑 newline") {
-		t.Fatal("text hint must offer newline")
+	if !strings.Contains(plain, "󰘶 󰌑 newline") {
+		t.Fatal("text hint must offer newline with a space between modifier and key")
 	}
 }
 

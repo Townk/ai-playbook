@@ -234,12 +234,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 func (m model) hint(bg string) string {
 	key, word := hintKW(m.theme, bg)
-	seg := func(k, w string) string { return key.Render(k) + word.Render(" "+w) }
 	sep := word.Render(" · ")
 	if m.singleLine {
-		return strings.Join([]string{seg("󰌑", "submit"), seg("󱊷", "cancel")}, sep)
+		return strings.Join([]string{KeyHint(key, word, "submit", "󰌑"), KeyHint(key, word, "cancel", "󱊷")}, sep)
 	}
-	return strings.Join([]string{seg("󰌑", "submit"), seg("󰘶󰌑", "newline"), seg("󱊷", "cancel")}, sep)
+	return strings.Join([]string{
+		KeyHint(key, word, "submit", "󰌑"),
+		KeyHint(key, word, "newline", "󰘶", "󰌑"),
+		KeyHint(key, word, "cancel", "󱊷"),
+	}, sep)
 }
 
 func (m model) render() string {

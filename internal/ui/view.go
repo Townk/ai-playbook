@@ -9,6 +9,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/Townk/ai-playbook/pkg/dialog"
 	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 
@@ -504,12 +505,13 @@ func (m *model) badgeRowIdx() int {
 }
 
 // keyHint renders one status-bar keybinding hint in the chezmoi-config style:
-// the key part (keys separated by a space when a binding carries modifiers) in
-// bright white, a space, then the binding label in dark grey.
-func keyHint(keys, label string) string {
-	k := lipgloss.NewStyle().Foreground(lipgloss.Color(colWhite)).Render(keys)
-	l := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0)).Render(label)
-	return k + " " + l
+// the key part in bright white, a space, then the binding label in dark grey.
+// Composition (including the space between a chord's modifier and key glyphs)
+// is delegated to dialog.KeyHint, the single home of the hint convention.
+func keyHint(label string, keys ...string) string {
+	k := lipgloss.NewStyle().Foreground(lipgloss.Color(colWhite))
+	l := lipgloss.NewStyle().Foreground(lipgloss.Color(colOverlay0))
+	return dialog.KeyHint(k, l, label, keys...)
 }
 
 // statusBar is the slim, mode-aware bottom hint, truncated to the pane width.
@@ -519,11 +521,11 @@ func (m model) statusBar() string {
 		return m.fitStatus(lipgloss.NewStyle().Foreground(lipgloss.Color(colPeach)).Render(m.status) + ind)
 	}
 	if m.hintMode || m.helpMode || m.diffMode {
-		return m.fitStatus(keyHint("\U000F12B7", "cancel"))
+		return m.fitStatus(keyHint("cancel", "\U000F12B7"))
 	}
-	return m.fitStatus(keyHint("\U000F1050", "action") + "  " +
-		keyHint("q", "quit") + "  " +
-		keyHint("?", "keys") + ind)
+	return m.fitStatus(keyHint("action", "\U000F1050") + "  " +
+		keyHint("quit", "q") + "  " +
+		keyHint("keys", "?") + ind)
 }
 
 // fitStatus truncates an assembled status line to the pane width minus the
