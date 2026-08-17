@@ -38,41 +38,36 @@ func TestCompletionShow_PrintsRegistryRender(t *testing.T) {
 	}
 }
 
-func TestCompletionInstall_WritesBothFiles(t *testing.T) {
+func TestCompletionInstall_WritesTheFile(t *testing.T) {
 	dir := t.TempDir()
 	code, out, errb := runC(t, "install", "--to", dir)
 	if code != 0 {
 		t.Fatalf("exit = %d stderr=%s", code, errb)
 	}
-	for _, f := range []string{"_ai-playbook", "_ask"} {
-		b, err := os.ReadFile(filepath.Join(dir, f))
-		if err != nil || len(b) == 0 {
-			t.Errorf("%s not installed: %v", f, err)
-		}
+	// _ai-playbook only: _ask retired with the troupe consolidation.
+	b, err := os.ReadFile(filepath.Join(dir, "_ai-playbook"))
+	if err != nil || len(b) == 0 {
+		t.Errorf("_ai-playbook not installed: %v", err)
 	}
-	if !strings.Contains(out, "installed 2 completion file(s)") {
+	if !strings.Contains(out, "installed 1 completion file(s)") {
 		t.Errorf("summary = %q", out)
 	}
 }
 
 func TestCompletionInstall_RefusesExistingWithoutForce(t *testing.T) {
 	dir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(dir, "_ask"), []byte("mine"), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "_ai-playbook"), []byte("mine"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	code, _, errb := runC(t, "install", "--to", dir)
 	if code != 1 || !strings.Contains(errb, "already exists") {
 		t.Fatalf("exit=%d stderr=%q, want refusal", code, errb)
 	}
-	// The refusal must be all-or-nothing: the OTHER file must not be written.
-	if _, err := os.Stat(filepath.Join(dir, "_ai-playbook")); err == nil {
-		t.Error("refusal must not half-install")
-	}
 	// --force overwrites.
 	if code, _, _ := runC(t, "install", "--to", dir, "--force"); code != 0 {
 		t.Fatalf("--force exit = %d", code)
 	}
-	if b, _ := os.ReadFile(filepath.Join(dir, "_ask")); string(b) == "mine" {
+	if b, _ := os.ReadFile(filepath.Join(dir, "_ai-playbook")); string(b) == "mine" {
 		t.Error("--force must overwrite the existing file")
 	}
 }
@@ -83,7 +78,7 @@ func TestCompletionUninstall_RemovesAndIsIdempotent(t *testing.T) {
 		t.Fatal("setup install failed")
 	}
 	code, out, _ := runC(t, "uninstall", "--to", dir)
-	if code != 0 || !strings.Contains(out, "removed 2") {
+	if code != 0 || !strings.Contains(out, "removed 1") {
 		t.Fatalf("exit=%d out=%q", code, out)
 	}
 	entries, _ := os.ReadDir(dir)
@@ -103,13 +98,14 @@ func TestManInstall_WritesEveryPage(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("exit = %d stderr=%s", code, errb)
 	}
-	// The overview, ask's page, and one page per documented command.
-	want := 2 + len(climeta.DocumentedCommands())
+	// The overview plus one page per documented command (ask.1 retired
+	// with the troupe consolidation).
+	want := 1 + len(climeta.DocumentedCommands())
 	entries, _ := os.ReadDir(dir)
 	if len(entries) != want {
 		t.Fatalf("installed %d pages, want %d", len(entries), want)
 	}
-	for _, f := range []string{"ai-playbook.1", "ask.1", "ai-playbook-run.1"} {
+	for _, f := range []string{"ai-playbook.1", "ai-playbook-run.1"} {
 		if _, err := os.Stat(filepath.Join(dir, f)); err != nil {
 			t.Errorf("missing %s", f)
 		}

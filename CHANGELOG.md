@@ -5,7 +5,16 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.0.0-RC4] - 2026-08-17
+
+### Removed
+
+- `cmd/ask` and its docs (`docs/man/ask.1`, `completions/_ask`, the
+  goreleaser build/archive/brew entries): the standalone dialog binary is
+  superseded by [`troupe`](https://github.com/Townk/troupe) — the same
+  verbs and flags (the widgets now live there and this repo imports
+  them), `TROUPE_*` env resolved first, `ASK_*` still honored. RC3's
+  deprecation notice was the one-release warning.
 
 ### Changed
 

@@ -1,20 +1,17 @@
-// Command docgen generates the man pages and zsh completions for both CLIs
-// this repo ships:
-//
-//   - ai-playbook, from the internal/climeta registry: docs/man/ai-playbook.1
-//     (the overview page) plus one docs/man/ai-playbook-<cmd>.1 per
-//     climeta.DocumentedCommands entry, and completions/_ai-playbook.
-//   - ask, from the internal/askcli registry (a separate, parallel table —
-//     ask is not an ai-playbook subcommand): a single docs/man/ask.1 page and
-//     completions/_ask.
+// Command docgen generates the man pages and zsh completions for the CLI
+// this repo ships: ai-playbook, from the internal/climeta registry —
+// docs/man/ai-playbook.1 (the overview page) plus one
+// docs/man/ai-playbook-<cmd>.1 per climeta.DocumentedCommands entry, and
+// completions/_ai-playbook. (The standalone `ask` dialog binary and its
+// docs retired with the troupe consolidation — `troupe` ships its own.)
 //
 // It takes an optional man-page output-directory argument (default:
 // "docs/man", relative to the current working directory — run it from the
 // repo root, or via `make docs`); completion scripts are always written to
 // "completions/", relative to the current working directory. Output is
 // deterministic: re-running docgen against unchanged registries never
-// changes the generated files (see internal/climeta/man.go,
-// internal/climeta/zsh.go, internal/askcli/man.go, and internal/askcli/zsh.go).
+// changes the generated files (see internal/climeta/man.go and
+// internal/climeta/zsh.go).
 package main
 
 import (
@@ -22,7 +19,6 @@ import (
 	"os"
 	"path/filepath"
 
-	"github.com/Townk/ai-playbook/internal/askcli"
 	"github.com/Townk/ai-playbook/internal/climeta"
 )
 
@@ -54,14 +50,7 @@ func run(outDir string) error {
 		}
 	}
 
-	if err := writePage(outDir, "ask.1", askcli.Man()); err != nil {
-		return err
-	}
-
 	if err := writeCompletion("_ai-playbook", climeta.Zsh()); err != nil {
-		return err
-	}
-	if err := writeCompletion("_ask", askcli.Zsh()); err != nil {
 		return err
 	}
 

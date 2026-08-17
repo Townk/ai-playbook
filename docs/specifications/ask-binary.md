@@ -1,7 +1,13 @@
 # `ask` — the standalone dialog binary
 
-_Status: approved 2026-07-04 (design settled in review with the project owner;
-recorded as ADR-0009's interaction-toolkit surface, migration step 3)._
+_Status: RETIRED 2026-08-17 (troupe consolidation). The binary this spec
+describes was extracted into [troupe](https://github.com/Townk/troupe) —
+same verbs and flags, `TROUPE_*` env first with `ASK_*` honored — and
+`cmd/ask` was removed after one deprecated release. Kept as the historical
+design record; ADR-0009's single-repo clause is superseded by troupe's
+ADR-0001. Originally: approved 2026-07-04 (design settled in review with
+the project owner; recorded as ADR-0009's interaction-toolkit surface,
+migration step 3)._
 
 ## Problem
 

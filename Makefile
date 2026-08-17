@@ -8,7 +8,6 @@ GOLANGCI := go tool golangci-lint
 
 VERSION ?= dev
 LDFLAGS := -X github.com/Townk/ai-playbook/internal/cli.Version=$(VERSION)
-ASK_LDFLAGS := -X github.com/Townk/ai-playbook/internal/askcli.Version=$(VERSION)
 
 .PHONY: build build-release vet test lint fmt-check check docs docs-check
 
@@ -21,12 +20,11 @@ build:
 build-release:
 	go build -ldflags '$(LDFLAGS)' -o bin/ai-playbook ./cmd/ai-playbook
 	go build -ldflags '$(LDFLAGS)' -o bin/apb ./cmd/apb
-	go build -ldflags '$(ASK_LDFLAGS)' -o bin/ask ./cmd/ask
 
 docs:
 	go run ./cmd/docgen
 
-# docs-check verifies docs/man/*.1 and completions/_ai-playbook + _ask are up to date
+# docs-check verifies docs/man/*.1 and completions/_ai-playbook are up to date
 # with the climeta registry they're generated from (docgen is idempotent, so a
 # clean re-run must produce no diff). Catches registry edits that forgot `make
 # docs`.

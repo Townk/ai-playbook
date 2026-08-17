@@ -1,9 +1,10 @@
 // Package docscmd implements the `completion` and `man` verbs: self-serve
 // installation of the zsh completions and man pages for users who installed
 // via `go install` (which ships neither). Content is rendered at RUNTIME from
-// the same registries docgen generates the release artifacts from (climeta for
-// ai-playbook/apb, askcli for ask), so the installed docs always match the
-// running binary — no embedded copies to go stale.
+// the same registry docgen generates the release artifacts from (climeta for
+// ai-playbook/apb), so the installed docs always match the running binary —
+// no embedded copies to go stale. (The `ask` binary's docs retired with the
+// troupe consolidation.)
 //
 // Both verbs mirror the `skill` verb's shape: <show|install|uninstall> with
 // `--to <dir>` / `--force`. Install refuses to overwrite existing files
@@ -20,7 +21,6 @@ import (
 	"path/filepath"
 	"sort"
 
-	"github.com/Townk/ai-playbook/internal/askcli"
 	"github.com/Townk/ai-playbook/internal/climeta"
 )
 
@@ -49,23 +49,21 @@ func dataHome() (string, error) {
 	return filepath.Join(home, ".local", "share"), nil
 }
 
-// completionFiles renders the completion scripts from the live registries:
-// _ai-playbook covers both the ai-playbook and apb spellings, _ask the ask
-// binary — the same two files the release archives ship.
+// completionFiles renders the completion scripts from the live registry:
+// _ai-playbook covers both the ai-playbook and apb spellings — the same
+// file the release archives ship.
 func completionFiles() map[string]string {
 	return map[string]string{
 		"_ai-playbook": climeta.Zsh(),
-		"_ask":         askcli.Zsh(),
 	}
 }
 
-// manFiles renders every man page from the live registries: the ai-playbook
-// overview, one page per documented command, and ask's single page — the same
-// set the release archives ship.
+// manFiles renders every man page from the live registry: the ai-playbook
+// overview plus one page per documented command — the same set the release
+// archives ship.
 func manFiles() map[string]string {
 	files := map[string]string{
 		"ai-playbook.1": climeta.ManOverview(),
-		"ask.1":         askcli.Man(),
 	}
 	for _, cmd := range climeta.DocumentedCommands() {
 		files[fmt.Sprintf("ai-playbook-%s.1", cmd.Name)] = climeta.Man(cmd)
