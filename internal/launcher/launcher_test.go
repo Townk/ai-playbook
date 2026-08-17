@@ -14,7 +14,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/cache"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/mux"
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 )
 
 // isolateCache points the cache at a throwaway temp root (AI_PLAYBOOK_DATA_DIR)

@@ -5,7 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 )
 
 // followupAnnouncements are the agent-voice narration lines inserted above each

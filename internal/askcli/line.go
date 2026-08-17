@@ -3,7 +3,7 @@ package askcli
 import (
 	"fmt"
 
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 )
 
 func runLineCmd(args []string) int {

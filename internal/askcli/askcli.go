@@ -20,7 +20,7 @@ import (
 	"runtime/debug"
 	"strings"
 
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 )
 
 // Version is the binary's version string. It defaults to "dev" for local

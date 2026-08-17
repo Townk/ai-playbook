@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The dialog widgets and theme now come from `github.com/Townk/troupe`
+  (v0.2.0): `pkg/dialog` and `pkg/dialog/theme` are deleted and every
+  import points at `troupe/dialog` + `troupe/theme` — the troupe
+  consolidation (troupe ADR-0001 supersedes ADR-0009's single-repo
+  clause; ai-playbook is now a troupe dependent, and the extraction
+  round-trips: troupe's copies carried this repo's pending hint-chord
+  spacing fix plus the frameless/gauge additions). `ai-playbook input`
+  keeps its verbs and behavior — it is the same code, imported.
+
+### Deprecated
+
+- `cmd/ask`: the standalone dialog binary is superseded by `troupe`
+  (same verbs and flags; `TROUPE_*` env resolved first, `ASK_*` still
+  honored). It now prints a deprecation notice when stderr is not a
+  tty (a tty-bound notice would smear the dialog frame) and will be
+  removed in the release after next.
+
 ### Fixed
 
 - Dialog hint bars now put a space between modifier and key glyphs

@@ -8,7 +8,7 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/clipperhouse/displaywidth"
 
-	"github.com/Townk/ai-playbook/pkg/dialog/theme"
+	"github.com/Townk/troupe/theme"
 )
 
 const minSideBySide = 80

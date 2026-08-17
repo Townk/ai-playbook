@@ -7,7 +7,7 @@ import (
 	"io"
 	"os"
 
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 )
 
 // jsonFormField is the public JSON form-spec field shape (an array of these).

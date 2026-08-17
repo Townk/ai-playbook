@@ -7,7 +7,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/Townk/ai-playbook/internal/askbridge"
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 )
 
 // askOpenMsg delivers one pending agent ask to the model (produced by recvAskCmd

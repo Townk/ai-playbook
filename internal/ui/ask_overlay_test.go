@@ -7,7 +7,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/Townk/ai-playbook/internal/askbridge"
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 )
 
 func TestAskOverlay_OpensAndRespondsOnSubmit(t *testing.T) {

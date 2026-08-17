@@ -31,7 +31,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/launcher"
 	"github.com/Townk/ai-playbook/internal/mcpserver"
 	"github.com/Townk/ai-playbook/internal/skillcmd"
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 	"github.com/Townk/ai-playbook/pkg/driver"
 )
 

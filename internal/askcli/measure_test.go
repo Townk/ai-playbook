@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 )
 
 // TestMeasureParityConfirm asserts that `ask confirm --measure` reports the same

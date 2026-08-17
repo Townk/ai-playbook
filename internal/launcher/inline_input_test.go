@@ -8,7 +8,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/author"
 	"github.com/Townk/ai-playbook/internal/capture"
 	"github.com/Townk/ai-playbook/internal/mux"
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 )
 
 func TestExplicitProgress_ClassifiesAndRoutes(t *testing.T) {

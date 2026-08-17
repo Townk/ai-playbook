@@ -5,7 +5,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 )
 
 // envName maps a theme flag name to its ASK_* environment fallback:

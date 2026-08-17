@@ -24,7 +24,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/triage"
 	"github.com/Townk/ai-playbook/internal/ui"
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 )
 
 // troubleshoot is the LAUNCHER: it runs transiently in the user's ORIGIN pane

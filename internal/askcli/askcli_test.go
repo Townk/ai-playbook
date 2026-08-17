@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 )
 
 // capture redirects os.Stdout/os.Stderr around fn and returns its exit code plus

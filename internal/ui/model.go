@@ -14,7 +14,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/orchestrator"
 	"github.com/Townk/ai-playbook/internal/reengage"
 	"github.com/Townk/ai-playbook/internal/runlog"
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 	"github.com/Townk/ai-playbook/pkg/playbook/frontmatter"
 )
 

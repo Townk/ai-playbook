@@ -3,7 +3,7 @@ package ui
 import (
 	"github.com/alecthomas/chroma/v2"
 
-	"github.com/Townk/ai-playbook/pkg/dialog/theme"
+	"github.com/Townk/troupe/theme"
 )
 
 // Shared Catppuccin Mocha palette — aliased from pkg/dialog/theme so every

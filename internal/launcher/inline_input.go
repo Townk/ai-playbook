@@ -14,7 +14,7 @@ import (
 	"github.com/Townk/ai-playbook/internal/config"
 	"github.com/Townk/ai-playbook/internal/mux"
 	"github.com/Townk/ai-playbook/internal/ui"
-	"github.com/Townk/ai-playbook/pkg/dialog"
+	"github.com/Townk/troupe/dialog"
 )
 
 // routeInlineSessionFn / viewProseFn are the escalate / answer seams (tests
